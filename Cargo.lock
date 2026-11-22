@@ -2863,6 +2863,14 @@ name = "t3-code-ls-client-text"
 version = "0.1.0"
 
 [[package]]
+name = "t3-code-ls-client-text-web"
+version = "0.1.0"
+dependencies = [
+ "t3-code-ls-client-text",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "t3-code-ls-core"
 version = "0.1.0"
 dependencies = [

@@ -51,6 +51,7 @@ node_modules/
 .pnpm-store/
 
 /target/
+/apps/web/public/client-text-wasm/
 .lust-cache/
 .lust-daemon-*.sock
 __pycache__/

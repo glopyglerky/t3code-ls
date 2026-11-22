@@ -1,0 +1,61 @@
+name: Rust composer browser proof
+
+on:
+  push:
+    branches: ["candidate/t3code-ls-t01-offsets-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  composer-offsets:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      GIT_TERMINAL_PROMPT: "0"
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+      WASM_BINDGEN_VERSION: "0.2.130"
+      WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install the pinned compiler package
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/composer-toolchain"
+      - name: Build the browser binding with the packaged Wasm sysroot
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/composer-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/composer-target"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
+            --release --locked --target wasm32-unknown-unknown -p t3-code-ls-client-text-web
+          archive="wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive.tar.gz" \
+            "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$WASM_BINDGEN_VERSION/$archive.tar.gz"
+          printf '%s  %s\n' "$WASM_BINDGEN_SHA256" "$RUNNER_TEMP/$archive.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$archive.tar.gz" -O "$archive/wasm-bindgen" > "$RUNNER_TEMP/wasm-bindgen"
+          chmod u+x "$RUNNER_TEMP/wasm-bindgen"
+          "$RUNNER_TEMP/wasm-bindgen" --target web --out-name composer_offsets \
+            --out-dir apps/web/public/client-text-wasm \
+            "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/t3_code_ls_client_text_web.wasm"
+          sha256sum apps/web/public/client-text-wasm/composer_offsets.js \
+            apps/web/public/client-text-wasm/composer_offsets_bg.wasm
+      - name: Install the locked web testing dependencies
+        run: |
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+      - name: Exercise the composer with the retained offset mapper
+        working-directory: apps/web
+        run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/ComposerPromptEditorTiptap.input.browser.test.tsx
+      - name: Exercise the real composer with Rust offset mapping
+        env:
+          VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
+        working-directory: apps/web
+        run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/ComposerPromptEditorTiptap.input.browser.test.tsx

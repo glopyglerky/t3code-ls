@@ -12,12 +12,13 @@ import type { Editor } from "@tiptap/core";
 import { redoDepth, undoDepth } from "@tiptap/pm/history";
 import { NodeSelection } from "@tiptap/pm/state";
 import { createElement, createRef, useEffect, useState } from "react";
-import { describe, expect, it, vi } from "vite-plus/test";
+import { beforeAll, describe, expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
 import { act, fakeTimers, render } from "../../test/render";
 
 import { flatToMarkdown, pmToFlat, serializeEditorDoc } from "~/composer-rich-text-doc";
+import { initializeComposerOffsets } from "~/composer-native-offsets";
 import { isMacPlatform } from "~/lib/utils";
 import { registerCommands } from "~/shortcuts/dispatcher";
 import {
@@ -41,6 +42,8 @@ vi.mock(import("../state/server"), async (original) => {
     ),
   };
 });
+
+beforeAll(initializeComposerOffsets);
 
 const babysit: ServerProviderSkill = {
   name: "babysit",
@@ -376,6 +379,9 @@ it.each([false, true])(
       editor.view.dom.dispatchEvent(new CompositionEvent("compositionend", { data: "ö" }));
     });
     expect(serializeEditorDoc(editor.state.doc).value).toBe("ö");
+    if (import.meta.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust") {
+      expect(performance.getEntriesByName("t3-composer-rust-offsets")).toHaveLength(1);
+    }
   },
 );
 

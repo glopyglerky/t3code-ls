@@ -1794,8 +1794,17 @@
           "blob": "5a036e34611ed5a72c7eb463a4a4e819ae1c2863"
         }
       ],
-      "rust_paths": ["packages/client-runtime/rust/src/lib.rs"],
-      "adapter_paths": [],
+      "rust_paths": [
+        "packages/client-runtime/rust/src/lib.rs",
+        "packages/client-runtime/rust/web/src/lib.rs"
+      ],
+      "adapter_paths": [
+        ".github/workflows/composer-offsets.yml",
+        "apps/web/src/composer-native-offsets.ts",
+        "apps/web/src/components/ComposerPromptEditorTiptap.input.browser.test.tsx",
+        "apps/web/src/main.tsx",
+        "apps/web/src/vite-env.d.ts"
+      ],
       "platform_routes": [
         {
           "targets": ["browser"],
@@ -1807,8 +1816,8 @@
       ],
       "acceptance_tests": ["packages/client-runtime/rust/tests/offsets.rs"],
       "retired_paths": [],
-      "notes": "T01 and J37. Dependency-free no_std candidate for the browser composer's numeric rich-document offset mapping. Browser compilation, the real editor adapter and input performance still require qualification.",
-      "rust_crates": ["packages/client-runtime/rust"]
+      "notes": "T01 and J37. Dependency-free no_std core and opt-in WebAssembly adapter for the browser composer's numeric rich-document offsets. The existing editor owns DOM composition. Browser qualification and performance evidence remain required.",
+      "rust_crates": ["packages/client-runtime/rust", "packages/client-runtime/rust/web"]
     }
   ],
   "backend_selection": "Select before execution. Compatible Linux GNU x86_64 defaults to Rust; other hosts use the retained upstream implementation. Explicit per-component native overrides fail visibly. T3_CODE_LS_IMPLEMENTATION=upstream provides a controlled original baseline. No retry through another implementation."
