@@ -1,0 +1,800 @@
+{
+  "revision": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "scope": "Semantic family map of current upstream server persistence. Storage object names reflect runtime use; legacy/external objects are labeled, and this is not an executed final sqlite_schema.",
+  "families": [
+    {
+      "id": "sqlite_runtime",
+      "sources": [
+        {
+          "path": "apps/server/src/persistence/Sqlite.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Sqlite.ts"
+        },
+        {
+          "path": "apps/server/src/persistence/DatabaseStorage.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/DatabaseStorage.ts"
+        }
+      ],
+      "storage_objects": [
+        "sqlite_stat1",
+        "sqlite_schema"
+      ],
+      "operation_families": [
+        "connection policy",
+        "size and freelist accounting",
+        "incremental reclaim",
+        "low-space handling"
+      ],
+      "required_semantics": [
+        "WAL/NORMAL durability baseline; checkpoint_fullfsync; busy_timeout 5000; foreign_keys ON",
+        "Separate reader and writer workers; no synchronous I/O on main request path"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "same durability and end-to-end boundary for comparator",
+        "typed native operation batching can remove worker-message/SQL/result decoding overhead"
+      ]
+    },
+    {
+      "id": "events_and_command_receipts",
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/EventSink.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/EventSink.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/EventStore.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/EventStore.ts"
+        },
+        {
+          "path": "apps/server/src/persistence/OrchestrationEventStore.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/OrchestrationEventStore.ts"
+        },
+        {
+          "path": "apps/server/src/persistence/OrchestrationCommandReceipts.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/OrchestrationCommandReceipts.ts"
+        }
+      ],
+      "storage_objects": [
+        "orchestration_events",
+        "orchestration_command_receipts",
+        "orchestration_v2_projection_metadata"
+      ],
+      "operation_families": [
+        "append ordered events",
+        "stream version checking",
+        "command deduplication and result receipt",
+        "event replay",
+        "projection sequence high water"
+      ],
+      "required_semantics": [
+        "One transaction spans reservation/events/projections/outbox/result receipt",
+        "Publish only after commit",
+        "Nested savepoint per provider snapshot in a shared batch; local failure must roll back its indexes and staged publications"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "one typed atomic domain commit",
+        "global sequence and stream-version indexes",
+        "transaction-local overlay/checkpoint for nested rollback"
+      ]
+    },
+    {
+      "id": "entity_projections",
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/ProjectionStore.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProjectionStore.ts"
+        }
+      ],
+      "storage_objects": [
+        "orchestration_v2_projection_threads",
+        "orchestration_v2_projection_runs",
+        "orchestration_v2_projection_run_attempts",
+        "orchestration_v2_projection_turn_items",
+        "orchestration_v2_projection_messages",
+        "orchestration_v2_projection_provider_threads",
+        "orchestration_v2_projection_provider_turns",
+        "orchestration_v2_projection_provider_sessions",
+        "orchestration_v2_projection_provider_session_bindings",
+        "orchestration_v2_projection_subagents",
+        "orchestration_v2_projection_runtime_requests",
+        "orchestration_v2_projection_nodes",
+        "orchestration_v2_projection_plans",
+        "orchestration_v2_projection_context_handoffs",
+        "orchestration_v2_projection_context_transfers",
+        "orchestration_v2_projection_checkpoints",
+        "orchestration_v2_projection_checkpoint_scopes",
+        "orchestration_v2_projection_turn_item_counts",
+        "orchestration_v2_projection_thread_item_counts"
+      ],
+      "operation_families": [
+        "event projection",
+        "live/cohort entity lookup",
+        "window snapshot",
+        "thread/run lifecycle",
+        "fork-aware lookup",
+        "checkpoint retention",
+        "shell and background eligibility"
+      ],
+      "required_semantics": [
+        "Projection updates and derived counts are atomic with events",
+        "Projections are authoritative after retained events are pruned",
+        "Preserve status visibility, attempts, active/latest state, and parent/fork cutoffs"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "typed compact headers separated from large message/tool payloads",
+        "covering indexes for exact domain predicates",
+        "materialize only still-derived facts; current counts and bounded snapshot reads already exist"
+      ]
+    },
+    {
+      "id": "history_order_and_find",
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/ProjectionStore.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProjectionStore.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/TurnItemPositionStore.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/TurnItemPositionStore.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/ThreadFind.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadFind.ts"
+        }
+      ],
+      "storage_objects": [
+        "orchestration_v2_turn_item_positions",
+        "orchestration_v2_projection_turn_items",
+        "orchestration_v2_projection_runs",
+        "orchestration_v2_projection_run_attempts",
+        "orchestration_v2_projection_threads"
+      ],
+      "operation_families": [
+        "allocate stable ordinal",
+        "local cursor page",
+        "visible rank/count",
+        "target entry jump",
+        "stale/folded cursor fallback",
+        "fork ancestry history",
+        "attachment owner lookup",
+        "in-thread search"
+      ],
+      "required_semantics": [
+        "Order is ordinal then item ID; run ordinal ranges use stride 1000000",
+        "A missed steer may move to a different run range; pending items keep submission order",
+        "Visibility and folding are not a single immutable boolean",
+        "Snapshot and all ancestors must share coherent committed sequence"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "counted order tree/blocks rather than assuming ordered KV supports rank/select",
+        "versioned ancestry spans and explicit dependency revisions",
+        "attachment reverse index and normalized search-to-source anchors"
+      ]
+    },
+    {
+      "id": "effect_outbox",
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/EffectOutbox.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/EffectOutbox.ts"
+        }
+      ],
+      "storage_objects": [
+        "orchestration_v2_effect_outbox",
+        "orchestration_v2_projection_runs"
+      ],
+      "operation_families": [
+        "enqueue idempotently",
+        "claim earliest eligible effect",
+        "thread serialization",
+        "lease-guarded completion/retry/failure",
+        "cancel and wake waiters",
+        "process-loss reconciliation",
+        "bounded prune"
+      ],
+      "required_semantics": [
+        "Atomic conditional claim; only lease owner can settle running row",
+        "Prior running/pending work constrains later work on same thread",
+        "Title-generation concurrency cap and restart continuation rules",
+        "Process-bound effects cancel after loss; only classified replay-safe effects requeue"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "ordered eligible queues plus per-thread predecessor state",
+        "do not replace with a generic FIFO or unguarded delete/pop"
+      ]
+    },
+    {
+      "id": "shell_stream_activity",
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/ShellStream.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ShellStream.ts"
+        },
+        {
+          "path": "apps/server/src/background/KeepAwake.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/background/KeepAwake.ts"
+        }
+      ],
+      "storage_objects": [
+        "orchestration_v2_projection_runs"
+      ],
+      "operation_families": [
+        "initial shell snapshot",
+        "older settled shell page",
+        "sequence-based subscriber updates",
+        "active-work detection"
+      ],
+      "required_semantics": [
+        "Publish committed projection sequence",
+        "Stock already has materialized counts and active/background indexes",
+        "Subscriber shell snapshots need consistent project/thread components"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "compact shell records and snapshot-stable reads",
+        "avoid rescanning or decoding unchanged payloads"
+      ]
+    },
+    {
+      "id": "global_message_search",
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/ThreadSearch.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadSearch.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/messageSearchIndex.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/messageSearchIndex.ts"
+        }
+      ],
+      "storage_objects": [
+        "orchestration_v2_message_search",
+        "orchestration_v2_projection_messages",
+        "orchestration_v2_projection_threads",
+        "orchestration_v2_projection_runs",
+        "projection_projects"
+      ],
+      "operation_families": [
+        "search normalized message text and titles",
+        "trigram candidate retrieval",
+        "short-word/non-ASCII fallback",
+        "eligible-thread filtering",
+        "snippet creation",
+        "index rebuild"
+      ],
+      "required_semantics": [
+        "Contentless-delete FTS5 trigram index is maintained transactionally by insert/update/delete triggers",
+        "Only settled eligible user/assistant messages; exclude placeholders/generated notices/subagent threads",
+        "Readable citation/link labels and apostrophe folding are part of matching contract",
+        "Candidate budget 10000, hit budget 2000, fallback scan budget 20000; newest rowid first",
+        "Rebuild after rowid-changing maintenance; clear/refill atomic"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "native transactional postings with identical normalization/filter/order/limits",
+        "retain SQLite search until behavioral parity if native tokenizer is incomplete"
+      ]
+    },
+    {
+      "id": "projects",
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/ProjectStore.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProjectStore.ts"
+        }
+      ],
+      "storage_objects": [
+        "projection_projects"
+      ],
+      "operation_families": [
+        "get/list project shells",
+        "create/update metadata",
+        "archive/delete state",
+        "tracked folders and pin fields"
+      ],
+      "required_semantics": [
+        "Project state commits with project events",
+        "Stable creation/project-ID ordering"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "small typed project records and ordered shell index"
+      ]
+    },
+    {
+      "id": "provider_runtime_and_usage",
+      "sources": [
+        {
+          "path": "apps/server/src/persistence/ProviderSessionRuntime.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/ProviderSessionRuntime.ts"
+        },
+        {
+          "path": "apps/server/src/provider/AcpRegistrySessions.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/AcpRegistrySessions.ts"
+        },
+        {
+          "path": "apps/server/src/provider/ProviderOrchestrationAdapterInfrastructure.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/ProviderOrchestrationAdapterInfrastructure.ts"
+        },
+        {
+          "path": "apps/server/src/provider/ProviderInstanceRegistryHydration.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/ProviderInstanceRegistryHydration.ts"
+        },
+        {
+          "path": "apps/server/src/usage/CodexUsageHistory.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/usage/CodexUsageHistory.ts"
+        }
+      ],
+      "storage_objects": [
+        "provider_session_runtime",
+        "orchestration_v2_projection_provider_threads",
+        "orchestration_v2_projection_provider_turns",
+        "orchestration_v2_projection_run_attempts",
+        "orchestration_v2_projection_threads",
+        "orchestration_events"
+      ],
+      "operation_families": [
+        "session resume/runtime state",
+        "imported transcript source append/dedupe",
+        "native-session owner lookup",
+        "legacy short ID collision lookup",
+        "usage/model attribution"
+      ],
+      "required_semantics": [
+        "Imported source update preserves unrelated runtime fields and has explicit null semantics",
+        "Native owner excludes deleted threads and chooses latest updated match",
+        "Usage can depend on first running run.updated event matching attempt"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "provider-instance/native-session covering owner index",
+        "persist exact first-running model-selection fact",
+        "typed imported-source set plus preserved opaque runtime payload"
+      ]
+    },
+    {
+      "id": "authentication",
+      "sources": [
+        {
+          "path": "apps/server/src/persistence/AuthConnectDevices.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/AuthConnectDevices.ts"
+        },
+        {
+          "path": "apps/server/src/persistence/AuthPairingLinks.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/AuthPairingLinks.ts"
+        },
+        {
+          "path": "apps/server/src/persistence/AuthSessions.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/AuthSessions.ts"
+        }
+      ],
+      "storage_objects": [
+        "auth_connect_devices",
+        "auth_pairing_links",
+        "auth_sessions"
+      ],
+      "operation_families": [
+        "trust/revoke device",
+        "create/consume/revoke pairing link",
+        "create/replace/revoke/extend session",
+        "active and pending lists",
+        "proof-key revocation"
+      ],
+      "required_semantics": [
+        "Pairing consume is single conditional update with expiry, revoked/consumed state, scope and trust/proof predicates",
+        "Replacing active session revokes and inserts atomically",
+        "Expired-but-currently-connected session listing semantics are intentional",
+        "Revocation decisions cannot rely on stale eventually consistent cache"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "small typed auth records and expiry/proof/subject indexes",
+        "preserve all atomic predicates and one-time consumption"
+      ]
+    },
+    {
+      "id": "peer_links",
+      "sources": [
+        {
+          "path": "apps/server/src/peer/PeerLinks.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/peer/PeerLinks.ts"
+        }
+      ],
+      "storage_objects": [
+        "peer_environment_links"
+      ],
+      "operation_families": [
+        "link/list/reachability state",
+        "monotonic expiry refresh",
+        "unlink and fence"
+      ],
+      "required_semantics": [
+        "DB holds secret reference, token lives in separate secret store",
+        "New token stored before DB upsert; failure compensation; old secret removed afterward",
+        "Unlink removes persisted reference then secret/network effects",
+        "Legacy unfenced links expire at linked_at"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "typed environment key and expiry index",
+        "retain secret-store and network compensation protocol"
+      ]
+    },
+    {
+      "id": "scheduled_tasks_and_webhooks",
+      "sources": [
+        {
+          "path": "apps/server/src/scheduledTasks/ScheduledTaskService.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/scheduledTasks/ScheduledTaskService.ts"
+        },
+        {
+          "path": "apps/server/src/scheduledTasks/webhookDedupe.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/scheduledTasks/webhookDedupe.ts"
+        }
+      ],
+      "storage_objects": [
+        "scheduled_tasks",
+        "scheduled_task_webhook_deliveries",
+        "scheduled_task_webhook_pending",
+        "scheduled_task_webhook_replay_keys",
+        "scheduled_task_webhook_relay_deliveries"
+      ],
+      "operation_families": [
+        "task CRUD/enable/move/runNow",
+        "due scheduling",
+        "webhook token rotation",
+        "replay/relay dedupe",
+        "pending coalescence",
+        "dispatch/recovery",
+        "delivery diagnostics and retention"
+      ],
+      "required_semantics": [
+        "Compare generation/created_at to prevent same-ID recreate races",
+        "Settings writes preserve run-state columns and concurrent schedule/token changes",
+        "Dispatch rereads current task and cannot resurrect paused/deleted work",
+        "markRunning and pending transition atomic",
+        "Persisted per-task due_at,rowid order; independent tasks can progress",
+        "Distinguish pending/dispatching/running and unknown accepted-send recovery",
+        "Replay keys can be released only for classified failure-before-send"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "due/status/task/generation indexes in one transaction",
+        "explicit state-machine commands rather than generic KV overwrites"
+      ]
+    },
+    {
+      "id": "issue_pr_relations",
+      "sources": [
+        {
+          "path": "apps/server/src/issue/linkedThreads.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/issue/linkedThreads.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/ThreadIssueService.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadIssueService.ts"
+        },
+        {
+          "path": "apps/server/src/pullRequest/linkedThreads.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/pullRequest/linkedThreads.ts"
+        },
+        {
+          "path": "apps/server/src/persistence/IssueTrackerBindings.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/IssueTrackerBindings.ts"
+        },
+        {
+          "path": "apps/server/src/persistence/PullRequestFilesViewed.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/PullRequestFilesViewed.ts"
+        },
+        {
+          "path": "apps/server/src/persistence/PullRequestReviewGuides.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/PullRequestReviewGuides.ts"
+        }
+      ],
+      "storage_objects": [
+        "orchestration_v2_projection_threads",
+        "issue_tracker_bindings",
+        "pull_request_files_viewed",
+        "pull_request_review_guides"
+      ],
+      "operation_families": [
+        "find linked issue/PR threads",
+        "project tracker binding",
+        "set/unset/list viewed file revisions",
+        "cache review guide"
+      ],
+      "required_semantics": [
+        "Normalize issue tracker/host/project and PR host/repository identity as current code does",
+        "Exclude deleted/sidechat/dismissed links as applicable",
+        "Viewed-file compound key includes provider/host/repo/PR/viewer/path; batch updates atomic"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "normalized transactional issue-to-thread and PR-to-thread reverse indexes",
+        "small typed compound-key stores for review metadata"
+      ]
+    },
+    {
+      "id": "mcp_model_context",
+      "sources": [
+        {
+          "path": "apps/server/src/mcpApps/McpAppModelContext.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcpApps/McpAppModelContext.ts"
+        }
+      ],
+      "storage_objects": [
+        "mcp_app_model_context",
+        "orchestration_v2_projection_turn_items",
+        "orchestration_v2_projection_runs"
+      ],
+      "operation_families": [
+        "upsert/delete per-item notes",
+        "ordered thread context lookup"
+      ],
+      "required_semantics": [
+        "Empty note deletes",
+        "Exclude local rolled-back run context but retain inherited copied context from other thread",
+        "Order updated date then item ID"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "typed thread/item key and visibility-aware ordered context index"
+      ]
+    },
+    {
+      "id": "workspace_metadata",
+      "sources": [
+        {
+          "path": "apps/server/src/workspace/KnownWorkspaces.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/workspace/KnownWorkspaces.ts"
+        },
+        {
+          "path": "apps/server/src/workspace/TaskFolderStore.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/workspace/TaskFolderStore.ts"
+        }
+      ],
+      "storage_objects": [
+        "task_folders",
+        "orchestration_v2_projection_threads"
+      ],
+      "operation_families": [
+        "list referenced worktree paths",
+        "upsert/delete task root",
+        "real-root alias and longest-containing-root lookup"
+      ],
+      "required_semantics": [
+        "Path containment and realpath aliases must match current platform behavior",
+        "Known worktrees exclude deleted threads",
+        "Task-folder update intentionally preserves fields outside requested change"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "reverse path ownership index",
+        "root/real-root lookup with normalized ancestor candidates"
+      ]
+    },
+    {
+      "id": "settings",
+      "sources": [
+        {
+          "path": "apps/server/src/serverSettings.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/serverSettings.ts"
+        }
+      ],
+      "storage_objects": [
+        "projection_projects",
+        "projection_thread_sessions",
+        "provider_session_runtime"
+      ],
+      "operation_families": [
+        "atomic JSON settings read/write",
+        "legacy provider/project settings migration"
+      ],
+      "required_semantics": [
+        "Current settings live in atomic JSON files, not primary SQLite",
+        "Write semaphore, generation cache and secret rollback must survive refactor",
+        "SQL is legacy migration input"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "keep file compatibility boundary unless intentionally redesigned"
+      ]
+    },
+    {
+      "id": "migrations_and_legacy",
+      "sources": [
+        {
+          "path": "apps/server/src/persistence/Migrations.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations.ts"
+        },
+        {
+          "path": "apps/server/src/persistence/databaseMigrationHead.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/databaseMigrationHead.ts"
+        },
+        {
+          "path": "apps/server/src/persistence/initializeV2Database.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/initializeV2Database.ts"
+        },
+        {
+          "path": "apps/server/src/persistence/reconcileV2PreviewMigration.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/reconcileV2PreviewMigration.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/legacy/LegacyV1ThreadImporter.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/legacy/LegacyV1ThreadImporter.ts"
+        }
+      ],
+      "storage_objects": [
+        "effect_sql_migrations",
+        "orchestration_v2_legacy_imports",
+        "projection_threads",
+        "projection_thread_messages",
+        "projection_thread_pull_requests",
+        "orchestration_events",
+        "orchestration_v2_projection_threads",
+        "orchestration_v2_turn_item_positions"
+      ],
+      "operation_families": [
+        "ordered migration history",
+        "preview version reconciliation",
+        "initial v1 snapshot copy",
+        "lazy transcript import",
+        "shell reconciliation"
+      ],
+      "required_semantics": [
+        "107 registered numbered migrations; some helper source files expand them",
+        "Initialize with VACUUM INTO temporary copy, publish complete copy without overwriting winner",
+        "Lazy import requires legacy tables and per-thread serialization/import markers",
+        "Preview migration ID repair preserves import progress"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "explicit importer from existing SQLite including preserved lazy legacy data",
+        "versioned native schema and restart-safe import checkpoints"
+      ]
+    },
+    {
+      "id": "retention_reclaim_cleanup",
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/ProjectionMaintenance.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProjectionMaintenance.ts"
+        },
+        {
+          "path": "apps/server/src/persistence/DatabaseMaintenance.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/DatabaseMaintenance.ts"
+        },
+        {
+          "path": "apps/server/src/persistence/DatabaseStorage.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/DatabaseStorage.ts"
+        },
+        {
+          "path": "apps/server/src/storageCleanup.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/storageCleanup.ts"
+        }
+      ],
+      "storage_objects": [
+        "orchestration_events",
+        "orchestration_command_receipts",
+        "orchestration_v2_projection_metadata",
+        "orchestration_v2_legacy_imports",
+        "orchestration_v2_projection_threads",
+        "orchestration_v2_projection_checkpoint_scopes",
+        "orchestration_v2_projection_provider_sessions",
+        "orchestration_v2_effect_outbox",
+        "scheduled_tasks",
+        "projection_projects"
+      ],
+      "operation_families": [
+        "bounded event pruning",
+        "pruned-through sequence",
+        "incremental reclaim",
+        "offline VACUUM/rebuild search",
+        "retained checkpoint/worktree analysis",
+        "legacy DB maintenance"
+      ],
+      "required_semantics": [
+        "Retain newest stream events, thread.created, prompt anchors, live usage facts",
+        "After pruning, projections are authoritative and old clients resnapshot",
+        "Cleanup protects scheduled/live/queued references and recursive fork checkpoint ancestry",
+        "Storage maintenance uses owner/exclusive coordination and must not invalidate FTS rowids"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "generation-safe native retention and compaction budgets",
+        "coherent live snapshot/export API",
+        "explicit filesystem ownership/reference indexes"
+      ]
+    },
+    {
+      "id": "ownership_backup_and_launch",
+      "sources": [
+        {
+          "path": "apps/server/src/serverOwnership.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/serverOwnership.ts"
+        },
+        {
+          "path": "apps/server/src/serviceLauncher.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/serviceLauncher.ts"
+        }
+      ],
+      "storage_objects": [
+        "separate server-owner.sqlite SQLite lock file"
+      ],
+      "operation_families": [
+        "cross-process owner lock",
+        "lock inode replacement detection",
+        "online/offline upgrade backup",
+        "restore/restart coordination"
+      ],
+      "required_semantics": [
+        "Exclusive SQLite transaction lock releases on process death; never unlink lock file",
+        "Online backup pins WAL through read BEGIN, copies main, stops server, copies/syncs WAL, omits shm, publishes atomically",
+        "Preserve old good backup during restart/trial and account for disk headroom"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "equivalent OS crash-released owner lock",
+        "single Rust service owns Fjall; CLI routes through domain IPC",
+        "new engine-specific snapshot/restore protocol must be complete before replacing launcher path"
+      ]
+    },
+    {
+      "id": "external_provider_sqlite",
+      "sources": [
+        {
+          "path": "apps/server/src/project/AgentSessionScanner.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/project/AgentSessionScanner.ts"
+        },
+        {
+          "path": "apps/server/src/provider/Drivers/antigravityUsageReader.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/Drivers/antigravityUsageReader.ts"
+        },
+        {
+          "path": "apps/server/src/provider/acp/AntigravityChildWork.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/acp/AntigravityChildWork.ts"
+        },
+        {
+          "path": "apps/server/src/provider/acp/AntigravitySessionFiles.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/acp/AntigravitySessionFiles.ts"
+        },
+        {
+          "path": "apps/server/src/provider/acp/AntigravityTurnOutcome.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/acp/AntigravityTurnOutcome.ts"
+        }
+      ],
+      "storage_objects": [
+        "external Codex threads",
+        "external Codex project_roots",
+        "external Antigravity gen_metadata",
+        "external Antigravity steps",
+        "external Antigravity trajectory_metadata_blob"
+      ],
+      "operation_families": [
+        "read external session metadata/transcripts",
+        "usage/child-work/ownership/terminal outcome extraction"
+      ],
+      "required_semantics": [
+        "These SQLite databases are provider-owned interoperability formats",
+        "Read-only, bounded queries and busy handling remain required after T3 primary-store replacement"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "retain narrow SQLite compatibility reader"
+      ]
+    },
+    {
+      "id": "routing_and_errors",
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/http.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/http.ts"
+        },
+        {
+          "path": "apps/server/src/ws.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/ws.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/UserFacingErrors.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/UserFacingErrors.ts"
+        }
+      ],
+      "storage_objects": [],
+      "operation_families": [
+        "provide SqlClient dependencies",
+        "route domain requests",
+        "translate database failures"
+      ],
+      "required_semantics": [
+        "These lexical candidates are not additional data stores"
+      ],
+      "native_design_opportunities_or_boundaries": [
+        "replace dependency boundary with domain client and preserve errors"
+      ]
+    }
+  ]
+}

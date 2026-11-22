@@ -1,0 +1,158 @@
+[
+  {
+    "repo": "DioxusLabs/dioxus",
+    "sha": "0a7242a2a72b08975584bf8ecb05076a5ee0b9c7",
+    "date": "2026-11-22T00:02:35Z",
+    "tree": "df0ab41474038d76ae7c2f1557629c4806699c58"
+  },
+  {
+    "repo": "DioxusLabs/blitz",
+    "sha": "165d698c31d00b9614664dddfbb865ff030948b3",
+    "date": "2026-11-22T13:05:58Z",
+    "tree": "cc09cb7c3be48dc036bb7fe4a22b9a253498842a"
+  },
+  {
+    "repo": "zed-industries/zed",
+    "sha": "f126950f9d3b62666f97437ae5d4ccac2272c4db",
+    "tree": "aed88afdcbab838762c0d1cc67301cb675b9dfa1",
+    "date": "2026-11-22T20:21:18Z"
+  },
+  {
+    "repo": "lapce/floem",
+    "sha": "1351ffb162faeb8be983f1301d718a0d5fb59c27",
+    "date": "2026-09-24T01:50:48Z",
+    "tree": "321e681046159ad6cefb78a1d6aa614ea8512715"
+  },
+  {
+    "repo": "iced-rs/iced",
+    "sha": "98bd48fe011efc0ec5819fee0fa7673a7169ff11",
+    "date": "2026-11-19T12:06:00Z",
+    "tree": "368774feb727c6e262806bc2c537c26cafddcf20"
+  },
+  {
+    "repo": "emilk/egui",
+    "sha": "d33dec58efd165add27acb9cddaf7e457eb5e64f",
+    "date": "2026-11-20T13:52:23Z",
+    "tree": "5dc8921cc5c3dc62a7210a603c0c78ae54672415"
+  },
+  {
+    "repo": "slint-ui/slint",
+    "sha": "7148ace57a7595ba3479f0f0d971c4ca1959e2a4",
+    "date": "2026-11-21T14:42:46Z",
+    "tree": "adaff416c0f8b96b9daa461c73b88d6123ebf9ef"
+  },
+  {
+    "repo": "GitoxideLabs/gitoxide",
+    "sha": "732cc157a1481fe9180fa30d926ad2dcf0a8d5d6",
+    "date": "2026-11-22T16:47:34Z",
+    "tree": "a074fd4497c81b66222460bd185768b85e974137"
+  },
+  {
+    "repo": "alacritty/alacritty",
+    "sha": "791efff6d74c66bee390c259e322626ca93aadb6",
+    "date": "2026-11-18T15:50:57Z",
+    "tree": "be05d1e1b393573db6be94c702e17e1959f93869"
+  },
+  {
+    "repo": "wezterm/wezterm",
+    "sha": "ee6f3044d09f83f21a32aead8dac2bc2a32e7fcb",
+    "date": "2026-11-20T23:24:03Z",
+    "tree": "b24339df343347923db5ec886f2bd24a1ab3b2d3"
+  },
+  {
+    "repo": "BurntSushi/ripgrep",
+    "sha": "b674410666d5aa3fd66c9d4683791ae811fe4fae",
+    "date": "2026-11-22T18:39:17Z",
+    "tree": "ed80e5db5c163ef99440ab5b94b64ce09fef00ec"
+  },
+  {
+    "repo": "notify-rs/notify",
+    "sha": "7edda71990a9c7f05c3e5e64cf873e1f0652d858",
+    "date": "2026-11-21T02:50:05Z",
+    "tree": "29cd266038fe77d0f5a5eda128cc628c43f84b9e"
+  },
+  {
+    "repo": "pulldown-cmark/pulldown-cmark",
+    "sha": "584c92bc4d1d400fca52d9bf6eb27ebd685bcff5",
+    "date": "2026-11-16T16:00:47Z",
+    "tree": "db72ea3ca7358caeda38d4d8384f71deb184acce"
+  },
+  {
+    "repo": "tree-sitter/tree-sitter",
+    "sha": "32594ac6e0532a31bcca7fcd043c34ff5e5e007a",
+    "date": "2026-11-21T09:45:53Z",
+    "tree": "51a113e2f809e165bfe1c475184e03afb1dca660"
+  },
+  {
+    "repo": "cessen/ropey",
+    "sha": "1992665990964e5eee68a42a1aed2bd7abcfda87",
+    "date": "2026-09-09T09:02:59Z",
+    "tree": "0b582d7f9bd4ca5e65f98b159946a256ddbaa422"
+  },
+  {
+    "repo": "DioxusLabs/taffy",
+    "sha": "1abd8eeaf6059336a7026c31e0f1b769d2f04a3a",
+    "date": "2026-11-13T11:48:07Z",
+    "tree": "389560b8e7106023a81bc23a33f1dd43b9fa6639"
+  },
+  {
+    "repo": "linebender/parley",
+    "sha": "cb702f2441be241ede571950e7ba4feb21bcdcb6",
+    "date": "2026-11-22T05:07:38Z",
+    "tree": "bdb8ef736cf1c0c8526818a3de4b41b7cdfca369"
+  },
+  {
+    "repo": "lapce/lapce",
+    "sha": "9e8317c84e9540ac0b09689dd9f9d4fafe44ac00",
+    "date": "2026-11-18T13:40:26Z",
+    "tree": "6879616ddd70c21e42e4408e8c5843b87730dd0b"
+  },
+  {
+    "repo": "AccessKit/accesskit",
+    "sha": "0977e030f2c162d52ec844335a5ea454b2cb4326",
+    "date": "2026-11-22T16:41:17Z",
+    "tree": "f19f307a7e564ea8c0c4bb4e6429b8a2364ec720"
+  },
+  {
+    "repo": "kivikakk/comrak",
+    "sha": "4c6462f3dbb46b870cc75d329e30e59ecb8a3883",
+    "date": "2026-11-22T00:30:12Z",
+    "tree": "f7d68cf889816aa653ed9a38b94f6532c00dc118"
+  },
+  {
+    "repo": "pascalkuthe/imara-diff",
+    "sha": "f02e46a737c43c0d9c65a42e5e08046bd10fd739",
+    "date": "2026-06-21T16:10:29Z",
+    "tree": "b0367fd3d11e35662c83e544c39ba4ec83793e13"
+  },
+  {
+    "repo": "helix-editor/nucleo",
+    "sha": "8c16d47cdfa9607d3e44df5f81c635c6f43c65ee",
+    "date": "2026-06-22T15:06:35Z",
+    "tree": "a116d148178995062d6ac63f5be8a3942935957f"
+  },
+  {
+    "repo": "trishume/syntect",
+    "sha": "4efbec173db6ea83caaf7a34994cb7e4d038a13e",
+    "date": "2026-10-31T03:32:11Z",
+    "tree": "e421946d7bbc413b94f052e2de9abd458c79a0f0"
+  },
+  {
+    "repo": "madsmtm/objc2",
+    "sha": "b98d2a3e0f7b7adf83cf12c16e834752f16b0b51",
+    "date": "2026-11-21T21:20:31Z",
+    "tree": "04d5cd631c5869501f07ba5a6c9246e79dbf3abd"
+  },
+  {
+    "repo": "rust-mobile/android-activity",
+    "sha": "b4ddf059b77be12cdb955d394e65a92e7568d936",
+    "date": "2026-03-24T00:57:48Z",
+    "tree": "799282e4cc152355f785c6cdcbfa7051ba5cf52a"
+  },
+  {
+    "repo": "kirawi/mdtext",
+    "sha": "dcf95a5819d01387fc70b23832c6e86129aeae5a",
+    "date": "2026-10-10T18:26:40Z",
+    "tree": "fd3e6cc14eab6d8809f641eb8ff5f4ffad6c33a0"
+  }
+]

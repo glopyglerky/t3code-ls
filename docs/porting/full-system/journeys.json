@@ -1,0 +1,1005 @@
+{
+  "schema_version": 1,
+  "document_kind": "static_journey_requirements_and_mapping",
+  "live_implementation_state_owner": "port-map.json",
+  "baseline": {
+    "repository": "pingdotgg/t3code",
+    "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f"
+  },
+  "source_matrices": {
+    "database_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+    "client_matrix": "research/clients/performance-acceptance-extension.md",
+    "server_families": "research/server/capability-map.json",
+    "client_families": "research/clients/capability-map.json"
+  },
+  "release_gate_work_package_id": "T16",
+  "journeys": [
+    {
+      "id": 1,
+      "name": "Start a new desktop/server install",
+      "conditions": "Empty store, create schema/identity, first client attachment",
+      "acceptance": "Time to server readiness and usable UI; correct initial identity/credentials; include native process/startup overhead",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T02",
+        "T05",
+        "T14"
+      ],
+      "lead_work_package_id": "T02",
+      "journey_id": "J01",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 2,
+      "name": "Reopen a mature workspace",
+      "conditions": "Large existing store, cold/warm OS cache, thousands of sidebar rows, many envs",
+      "acceptance": "Time to cached first paint, authoritative shell and selected thread; bound CPU/RSS, distinguish background warming",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T04",
+        "T11",
+        "T14"
+      ],
+      "lead_work_package_id": "T04",
+      "journey_id": "J02",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 3,
+      "name": "Resume a long current conversation",
+      "conditions": "Long message/work-log history, large payloads, pending provider state",
+      "acceptance": "Time to newest meaningful content and interactive composer, stable ordering/cursors, no eager full-history decode",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T02",
+        "T04"
+      ],
+      "lead_work_package_id": "T02",
+      "journey_id": "J03",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 4,
+      "name": "Scroll backward, jump and find within a thread",
+      "conditions": "Deep pages, sparse cursors, deleted/retried items, concurrent new messages",
+      "acceptance": "p95 page/jump latency and bytes decoded; no duplicates, missing boundaries or inconsistent snapshot",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T04",
+        "T03"
+      ],
+      "lead_work_package_id": "T04",
+      "journey_id": "J04",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 5,
+      "name": "Global/thread search",
+      "conditions": "Prefix/phrase/substrings as supported, accents/Unicode, exact identifiers, punctuation, many hits, long bodies",
+      "acceptance": "Match/rank/snippet parity and p95 latency; measure index freshness after edits/deletes and rebuild visibility",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T04"
+      ],
+      "lead_work_package_id": "T04",
+      "journey_id": "J05",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 6,
+      "name": "Send one message and stream a response",
+      "conditions": "Short and very long answers; tool events; normal and burst stream cadence",
+      "acceptance": "Submit-to-durable-accept, first visible response, UI frame budget, disk/CPU per completed turn; correct event/projection/receipt/outbox visibility",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T02",
+        "T03"
+      ],
+      "lead_work_package_id": "T02",
+      "journey_id": "J06",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 7,
+      "name": "Run several agents concurrently",
+      "conditions": "Multiple threads/projects/providers; readers and writes mixed",
+      "acceptance": "Tail latency and fairness, throughput at saturation, cancellation cost; no writer starvation or unbounded backlog",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T02",
+        "T08",
+        "T09"
+      ],
+      "lead_work_package_id": "T02",
+      "journey_id": "J07",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 8,
+      "name": "Retry after disconnect or ambiguous response",
+      "conditions": "Disconnect before/after durable acceptance, duplicate commands, reconnect with stale cursor",
+      "acceptance": "Exactly intended command effect via receipts/idempotency; replay/reconcile time and bytes, no lost accepted work",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T02",
+        "T03",
+        "T10"
+      ],
+      "lead_work_package_id": "T02",
+      "journey_id": "J08",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 9,
+      "name": "Switch provider, resume or fork",
+      "conditions": "Original provider state exists/missing; moved workspace; retry/steer; handoff context",
+      "acceptance": "Resume latency and context/history parity; preserve Cursor storage workspace and provider native IDs",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T08",
+        "T06",
+        "T04"
+      ],
+      "lead_work_package_id": "T08",
+      "journey_id": "J09",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 10,
+      "name": "Sidebar/project/thread management",
+      "conditions": "Visit/pin/archive/snooze/rename/delete/restore, 1k–100k realistic rows, burst updates",
+      "acceptance": "Time to consistent sidebar/UI update and durable mutation; exact rank/tie handling, bounded modified records",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T04"
+      ],
+      "lead_work_package_id": "T04",
+      "journey_id": "J10",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 11,
+      "name": "Approve work, execute outbox effects, schedule tasks",
+      "conditions": "Pending approval/rejection, timed/recurring task, webhook-induced work, restart during effect",
+      "acceptance": "Acknowledgment-to-effect latency; correct claims/retries/receipt retention and no accidental duplicate external action",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T09",
+        "T08"
+      ],
+      "lead_work_package_id": "T09",
+      "journey_id": "J11",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 12,
+      "name": "PR/issue workflows and VCS",
+      "conditions": "Open list, fetch per-PR stats, switch branch/worktree, mark viewed, save review guide",
+      "acceptance": "Time to usable content; cache-hit/miss split, invalidate linked-worktree refs, retain viewed/review state",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T06"
+      ],
+      "lead_work_package_id": "T06",
+      "journey_id": "J12",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 13,
+      "name": "CLI while server is running",
+      "conditions": "Auth/pair/connect/project/thread/status and diagnostics parallel with UI",
+      "acceptance": "End-to-end CLI latency and contention; owner RPC identity/auth/permissions equivalent; no accidental second writer",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T14",
+        "T02"
+      ],
+      "lead_work_package_id": "T14",
+      "journey_id": "J13",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 14,
+      "name": "CLI with server stopped",
+      "conditions": "Inspect/doctor/migrate/isolated seed, concurrent launcher attempt",
+      "acceptance": "Lease acquisition and useful completion time; refuse conflicting owner and preserve targeted home; release on crash",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T14",
+        "T05"
+      ],
+      "lead_work_package_id": "T14",
+      "journey_id": "J14",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 15,
+      "name": "Offline mobile startup and reconnect",
+      "conditions": "Airplane mode, previously cached shell/thread/config, stale schema, removed env",
+      "acceptance": "Time to useful offline view; no old-environment leakage, correct discarded cache behavior and reconnect convergence",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T12",
+        "T10"
+      ],
+      "lead_work_package_id": "T12",
+      "journey_id": "J15",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 16,
+      "name": "Mobile draft/outbox durability",
+      "conditions": "Type text, attach images, queue several sends, app update/background/kill mid-write",
+      "acceptance": "Draft/message recovery and flush latency; partial file corruption isolated, attachment references preserved, no premature cleanup",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T12",
+        "T02"
+      ],
+      "lead_work_package_id": "T12",
+      "journey_id": "J16",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 17,
+      "name": "Mobile database failure and recovery",
+      "conditions": "SQLite unavailable, preferences SecureStore fallback newer/older, failed fallback deletion",
+      "acceptance": "Preferences retained and reconciled; startup latency/error behavior; caches may miss without losing settings or drafts",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T12"
+      ],
+      "lead_work_package_id": "T12",
+      "journey_id": "J17",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 18,
+      "name": "Browser cache quota and connection churn",
+      "conditions": "IDB denied/full/blocked/closed/versionchange, huge thread snapshot, many PR stats",
+      "acceptance": "Responsive UI and actionable fallback; stale oversized snapshot removed; pruning bounds and retry behavior",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T11"
+      ],
+      "lead_work_package_id": "T11",
+      "journey_id": "J18",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 19,
+      "name": "Multi-tab browser editing and trust changes",
+      "conditions": "Two tabs editing distinct/same drafts; stale build tab; revoke routing grant; history visit",
+      "acceptance": "Cross-tab convergence and write cost; stale unrelated saves cannot restore revoked trust or erase unrelated draft edits",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T11",
+        "T10"
+      ],
+      "lead_work_package_id": "T11",
+      "journey_id": "J19",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 20,
+      "name": "Desktop credential/catalog migration",
+      "conditions": "Secure storage unavailable, legacy envs, unreadable encrypted catalog",
+      "acceptance": "Unlock/read/write/startup latency; no silent plaintext downgrade, preserved quarantine/recovery copy",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T14",
+        "T10"
+      ],
+      "lead_work_package_id": "T14",
+      "journey_id": "J20",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 21,
+      "name": "Provider usage dashboard",
+      "conditions": "OpenCode multi-GiB SQLite with giant JSON rows, warm unchanged DB, small append, live WAL; Antigravity sessions",
+      "acceptance": "Time to usable usage summary, event-loop delay/RSS, bounded row/body decode, correct fork/compaction/account semantics",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T08",
+        "T15"
+      ],
+      "lead_work_package_id": "T08",
+      "journey_id": "J21",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 22,
+      "name": "Import provider projects/history",
+      "conditions": "Codex state_5.sqlite plus transcript files; Claude/other files; screenshot-heavy GiB input; partial legacy imports",
+      "acceptance": "Discovery/first-thread/full import time, bounded memory, repeat import idempotency and ownership checks",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T08"
+      ],
+      "lead_work_package_id": "T08",
+      "journey_id": "J22",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 23,
+      "name": "Inspect SQLite attachment or import browser cookies",
+      "conditions": "Bounded/untrusted file preview; running Chromium/Firefox with live WAL; encrypted cookies",
+      "acceptance": "Time to first table/page or import result; readonly source, viewer limits, correct cookie scope and no provider format mutation",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T13",
+        "T08"
+      ],
+      "lead_work_package_id": "T13",
+      "journey_id": "J23",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 24,
+      "name": "First native migration or older-version upgrade",
+      "conditions": "Tiny/large DB, low disk space, legacy collision, interruption after each completed stage",
+      "acceptance": "Time to usable app, progress and peak disk use; source preserved, resumable work, atomic publication of coherent native generation",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T05",
+        "T14"
+      ],
+      "lead_work_package_id": "T05",
+      "journey_id": "J24",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 25,
+      "name": "Service update succeeds",
+      "conditions": "Clone-capable and copy-only filesystems, symlinked DB, active reads/writes",
+      "acceptance": "Total interruption and time to ready; coherent backup/checkpoint and candidate readiness; do not overwrite original trial backup",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T05",
+        "T14"
+      ],
+      "lead_work_package_id": "T05",
+      "journey_id": "J25",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 26,
+      "name": "Failed update/rollback/restart",
+      "conditions": "Candidate fails after schema mutation; launcher dies during backup/restore; missing target runtime",
+      "acceptance": "Time to recovered usable prior version; marker/manifest prevents partial restore; separate failed-trial rollback from post-commit downgrade",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T05",
+        "T14"
+      ],
+      "lead_work_package_id": "T05",
+      "journey_id": "J26",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 27,
+      "name": "Long-running retention/compaction",
+      "conditions": "Days of append/delete/retry churn with historical usage and concurrent chat/search",
+      "acceptance": "Foreground p95/p99 during maintenance, write amplification, growth/reclamation; preserve required history and bound disk/CPU duty",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T15",
+        "T04"
+      ],
+      "lead_work_package_id": "T15",
+      "journey_id": "J27",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 28,
+      "name": "Doctor/rebuild/repair/backup-restore",
+      "conditions": "Rebuild search, reclaim, export/checkpoint, restore at another location; low disk/read-only/corrupt input",
+      "acceptance": "Completion/progress, downtime, peak extra disk; preserve authoritative data, IDs, references and documented recovery guarantees",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T05",
+        "T15"
+      ],
+      "lead_work_package_id": "T05",
+      "journey_id": "J28",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 29,
+      "name": "Environment removal and attachment cleanup",
+      "conditions": "Offline env, pending uploads/outbox/drafts/incoming shares, partial cleanup failure",
+      "acceptance": "Correct retained/deleted owned data, independent cleanup completion; no cross-env deletion or dangling live references",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T15",
+        "T12",
+        "T11",
+        "T13",
+        "T10"
+      ],
+      "lead_work_package_id": "T15",
+      "journey_id": "J29",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 30,
+      "name": "Remote relay identity/notification path",
+      "conditions": "Concurrent DPoP consume, account switch, token revocation, managed endpoint generations, duplicate delivery job",
+      "acceptance": "Auth/delivery tail latency under concurrency; one successful replay claim, correct revocation/claim/identity semantics",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T10",
+        "T12"
+      ],
+      "lead_work_package_id": "T10",
+      "journey_id": "J30",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 31,
+      "name": "Offline webhook hold and wake",
+      "conditions": "Burst under caps, duplicate delivery, unreachable/busy host, alarm retry, 24-hour expiry",
+      "acceptance": "Durable hold ack latency, wake-to-delivery, bounded backlog; preserve IDs for ambiguous retry and conditional cap enforcement",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T09",
+        "T10"
+      ],
+      "lead_work_package_id": "T09",
+      "journey_id": "J31",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 32,
+      "name": "Task-cache developer/CI path",
+      "conditions": "Hit/miss/cold restore, competing generations, quota exhaustion, interrupted upload/GC, telemetry retry",
+      "acceptance": "Time to restored task outputs and full command result, R2/D1 work; atomic publication, policy/auth preserved, no duplicate savings",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T15"
+      ],
+      "lead_work_package_id": "T15",
+      "journey_id": "J32",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 33,
+      "name": "End-to-end representative working day",
+      "conditions": "Startup → several concurrent coding turns → search/history/PR → offline/reconnect → close/reopen, with background maintenance",
+      "acceptance": "Weighted user time, worst-tail interactions, CPU/RSS/storage/energy; no isolated win that makes dominant workflows worse",
+      "source_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+      "work_package_ids": [
+        "T16"
+      ],
+      "lead_work_package_id": "T16",
+      "journey_id": "J33",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 34,
+      "name": "Discover and install",
+      "conditions": "Open localized home/download pages on mobile and desktop; stable/nightly release selection, API unavailable, reduced motion, keyboard-only and no app runtime.",
+      "acceptance": "Time to readable useful content and correct download action; correct OS/architecture/store, locale/SEO links and graceful release lookup fallback. Measure total transfer and main-thread work, not just WASM render time.",
+      "client_capability_ids": [
+        "C01",
+        "C02",
+        "C30"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T14",
+        "T11"
+      ],
+      "lead_work_package_id": "T14",
+      "journey_id": "J34",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 35,
+      "name": "First native desktop launch",
+      "conditions": "Clean profile and migrated mature profile; local or remote-only mode; provider installed/missing; authenticated/unpaired; preview not yet opened.",
+      "acceptance": "Launch-to-window, launch-to-interactive composer, authoritative workspace ready; process count, peak/retained RSS and startup CPU. Keep cached paint separate from usable authenticated state.",
+      "client_capability_ids": [
+        "C02",
+        "C03",
+        "C04",
+        "C26"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T14",
+        "T02",
+        "T10"
+      ],
+      "lead_work_package_id": "T14",
+      "journey_id": "J35",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 36,
+      "name": "First browser session",
+      "conditions": "Hosted app, local server and guest link; browser cache cold/warm; slow CPU/network; auth callback and deep link.",
+      "acceptance": "Time to useful and interactive page, asset bytes, parse/compile work, pairing/account correctness, route restoration. A native desktop result cannot substitute for web acceptance.",
+      "client_capability_ids": [
+        "C03",
+        "C04",
+        "C28"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T11",
+        "T10"
+      ],
+      "lead_work_package_id": "T11",
+      "journey_id": "J36",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 37,
+      "name": "Type and compose under load",
+      "conditions": "Several streaming threads; 120k-character draft where supported; CJK marked text, emoji/combining marks, mixed direction, rich chips and suggestions.",
+      "acceptance": "Key/composition-to-paint p50/p95/p99 and longest stall; caret, selection, exact Markdown source, undo and accessibility parity. No accidental send during composition.",
+      "client_capability_ids": [
+        "C06",
+        "C07",
+        "C23"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T01",
+        "T02",
+        "T03"
+      ],
+      "lead_work_package_id": "T01",
+      "journey_id": "J37",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 38,
+      "name": "Rich paste and file drop",
+      "conditions": "Small/large text, multi-image paste, custom-reference MIME, cross-environment thread reference, native folder drop, app share/camera input.",
+      "acceptance": "Time to editable/visible result and retained bytes; preserve source/context identity, upload progress, size limits and folder-versus-file semantics. Typing must remain responsive.",
+      "client_capability_ids": [
+        "C07",
+        "C14",
+        "C26"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T13",
+        "T12"
+      ],
+      "lead_work_package_id": "T13",
+      "journey_id": "J38",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 39,
+      "name": "Stream and scroll a long conversation",
+      "conditions": "Long code, math, tables, Mermaid, citations, huge single messages, growing last block, history folded/unfolded; user reads old messages while new data arrives.",
+      "acceptance": "Arrival-to-visible text, frame-time tails, scroll-anchor error, CPU and allocations; no forced follow-end, duplicated rows, incorrect source offsets or stale selection.",
+      "client_capability_ids": [
+        "C06",
+        "C08",
+        "C23"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T03",
+        "T04"
+      ],
+      "lead_work_package_id": "T03",
+      "journey_id": "J39",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 40,
+      "name": "Switch and return to work",
+      "conditions": "Many threads/environments, draft-to-thread transition, modal/settings overlays, native navigation back, reconnect with a catch-up burst.",
+      "acceptance": "Time to stable visible destination and interactive editor; preserve draft, selection, scroll, route and focus; bounded mount/layout/update counts. Do not step through obsolete catch-up states.",
+      "client_capability_ids": [
+        "C04",
+        "C05",
+        "C06",
+        "C21"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T04",
+        "T11",
+        "T12"
+      ],
+      "lead_work_package_id": "T04",
+      "journey_id": "J40",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 41,
+      "name": "Review a large diff",
+      "conditions": "Many small files, a giant file/line, Unicode/tabs, split/unified view, expand/collapse, file filter, find and comment while changes arrive.",
+      "acceptance": "First useful viewport, scroll/jump/search latency, frame tails and memory; line/anchor correctness, viewed state and cancellation. Preserve existing worker and native-layout advantages.",
+      "client_capability_ids": [
+        "C09",
+        "C10",
+        "C11"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T06"
+      ],
+      "lead_work_package_id": "T06",
+      "journey_id": "J41",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 42,
+      "name": "Edit and save a file",
+      "conditions": "Large file, rapid changes, save echoed from server, external change, grant revoked, remote environment or readonly external file.",
+      "acceptance": "Edit-to-paint and save-to-confirmation; no editor reset on an echo, correct conflict/readonly outcome, retained unsaved edits and stable selection.",
+      "client_capability_ids": [
+        "C09",
+        "C20"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T06"
+      ],
+      "lead_work_package_id": "T06",
+      "journey_id": "J42",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 43,
+      "name": "Run Git and worktree actions",
+      "conditions": "Create/switch isolated task, multi-repo project, branch picker, commit/review, external editor, status changes while view remains open.",
+      "acceptance": "Click-to-usable status and operation completion, process count and filesystem work; same safety, worktree ownership and error/confirmation behavior. Measure warm unchanged refs separately.",
+      "client_capability_ids": [
+        "C10",
+        "C20"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T06"
+      ],
+      "lead_work_package_id": "T06",
+      "journey_id": "J43",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 44,
+      "name": "Complete PR/issue review",
+      "conditions": "Cached and uncached list, intent prefetch, comments/review drafts, labels/reactions, guide and checks, offline return; each supported host capability.",
+      "acceptance": "Time to usable content and immediate mutation feedback, authoritative completion and rollback; correct host/account routing and no duplicate uncertain action.",
+      "client_capability_ids": [
+        "C11",
+        "C21"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T06"
+      ],
+      "lead_work_package_id": "T06",
+      "journey_id": "J44",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 45,
+      "name": "Interactive terminal during contention",
+      "conditions": "PTY output bursts, full-screen app, large retained history, chat/diff/media activity, keyboard/mouse/IME, resize/DPI, selection/copy.",
+      "acceptance": "Input-to-echo and output-to-pixels p50/p95/p99, frames/CPU/RSS and protocol correctness. Preserve terminal mode, query reply routing and alternative screen behavior.",
+      "client_capability_ids": [
+        "C12",
+        "C13"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T07"
+      ],
+      "lead_work_package_id": "T07",
+      "journey_id": "J45",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 46,
+      "name": "Reconnect and recover terminal",
+      "conditions": "Slow link, missing/stopped terminal, server restart, disconnect inside multibyte/control sequence, partial native write rejection.",
+      "acceptance": "Attach-to-correct-screen, bytes, recovery time and replay count; exact bounded output/order and no spinning retry, corrupted parser state or unintended shell restart.",
+      "client_capability_ids": [
+        "C12",
+        "C13"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T07",
+        "T10"
+      ],
+      "lead_work_package_id": "T07",
+      "journey_id": "J46",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 47,
+      "name": "Open and search media/documents",
+      "conditions": "PDF many pages/large text, images/HEIC/TIFF where supported, audio/video, archives, CSV/TSV, Office and SQLite attachment.",
+      "acceptance": "Time to first page/frame/table and first search hit, decode CPU/peak RSS; bounded fetch/cache, format limits, cancellation and correct readonly source behavior. Total scan completion is separate.",
+      "client_capability_ids": [
+        "C14"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T13"
+      ],
+      "lead_work_package_id": "T13",
+      "journey_id": "J47",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 48,
+      "name": "Dictate into an existing draft",
+      "conditions": "On-device and selected environment/cloud paths; microphone denial/loss, app background, concurrent editing, cancel/cleanup and failed destination.",
+      "acceptance": "Capture-start and stop-to-editable-transcript latency, energy, draft preservation and explicit destination/consent. No automatic send or silent fallback host.",
+      "client_capability_ids": [
+        "C15",
+        "C07"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T13",
+        "T12"
+      ],
+      "lead_work_package_id": "T13",
+      "journey_id": "J48",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 49,
+      "name": "Capture and attach SnapShot",
+      "conditions": "Global shortcut from another app, permission allowed/denied, capture cancellation, several workspaces, text/image capture paths.",
+      "acceptance": "Shortcut-to-overlay, capture-to-ready-context and focus restoration; correct target workspace, privacy and clipboard semantics. Detailed native capture parity needs separate validation.",
+      "client_capability_ids": [
+        "C16",
+        "C26"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T13",
+        "T14"
+      ],
+      "lead_work_package_id": "T13",
+      "journey_id": "J49",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 50,
+      "name": "Use browser preview",
+      "conditions": "Local and remote environments, streamed tab and local remote-loopback rendering, mobile WebView, take/release control, file picker/download/popups, network loss.",
+      "acceptance": "Input-to-visible-page response, frame latency/bitrate, CPU/RSS/energy; exact origin/tunnel/storage and ownership behavior. Only intended visible streams run; browser engine startup is included.",
+      "client_capability_ids": [
+        "C18",
+        "C20"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T13",
+        "T10"
+      ],
+      "lead_work_package_id": "T13",
+      "journey_id": "J50",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 51,
+      "name": "Use an HTML reply or MCP App",
+      "conditions": "Scripted chart/form, theme change, resize/fullscreen, tool invocation requiring approval, message posting, navigation and malicious/untrusted resource attempts.",
+      "acceptance": "Time to interactive widget and tool round trip; sandbox, scoped app bridge, user-gesture rules and state lifecycle. Static screenshots or disabled scripting do not satisfy parity.",
+      "client_capability_ids": [
+        "C17"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T13",
+        "T09"
+      ],
+      "lead_work_package_id": "T13",
+      "journey_id": "J51",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 52,
+      "name": "Control a simulator or device",
+      "conditions": "iOS/Android supported devices; discover/setup, stream touch/keyboard, screenshot/recording, visible/background/PIP, agent permission denied.",
+      "acceptance": "Discovery-to-useful-preview and input-to-frame; steady CPU/energy/bitrate, correct visible-session and permission ownership. Closing preview must have the same device-lifetime effect.",
+      "client_capability_ids": [
+        "C19"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T13"
+      ],
+      "lead_work_package_id": "T13",
+      "journey_id": "J52",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 53,
+      "name": "Use mobile offline and rotate/fold",
+      "conditions": "Restart offline with cached work, queued drafts/files, phone/tablet/fold, keyboard attach/detach, orientation, low-memory recreation.",
+      "acceptance": "Time to useful offline screen, navigation/scroll stability, retained drafts and convergence on reconnect. Measure native allocations and retained invisible views.",
+      "client_capability_ids": [
+        "C05",
+        "C21"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T12"
+      ],
+      "lead_work_package_id": "T12",
+      "journey_id": "J53",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 54,
+      "name": "Receive background activity and return",
+      "conditions": "Push completion/failure/approval, foreground silence, notification tap, widget/live activity update, account signout/removal, OS process death.",
+      "acceptance": "Delivery-to-visible alert and tap-to-correct-thread, energy/background network; correct permissions, account scope, widget expiry and no live connection requirement added.",
+      "client_capability_ids": [
+        "C22",
+        "C03"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T12",
+        "T10"
+      ],
+      "lead_work_package_id": "T12",
+      "journey_id": "J54",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 55,
+      "name": "Navigate with accessibility tools",
+      "conditions": "Keyboard-only F6/Shift-F6, browser modifier variant, roving lists, dialogs/palette/model picker; VoiceOver/TalkBack/native screen readers, reduced motion and text scaling.",
+      "acceptance": "Correct focus order/return, labels/actions/selection and shortcuts without interception conflicts; interaction latency and readable layout. Rendering speed cannot excuse missing semantics.",
+      "client_capability_ids": [
+        "C23",
+        "C05"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T01",
+        "T11",
+        "T12",
+        "T13",
+        "T16"
+      ],
+      "lead_work_package_id": "T01",
+      "journey_id": "J55",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 56,
+      "name": "Change locale, theme and settings",
+      "conditions": "Large settings/provider lists, appearance/locale changes, theme import, policy-locked choices, reconnect or server settings update while editor open.",
+      "acceptance": "Visible change and interactive latency, stable forms/caches, correct scoped settings and locks. Font shaping, contrast and native theme consistency remain acceptance requirements.",
+      "client_capability_ids": [
+        "C24",
+        "C23"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T04",
+        "T11",
+        "T12",
+        "T14"
+      ],
+      "lead_work_package_id": "T04",
+      "journey_id": "J56",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 57,
+      "name": "Automate through CLI",
+      "conditions": "Piped stdin '-', JSON/token-only output, --wait success/failure/needs-input, slow provider, TTY/non-TTY/NO_COLOR, SSH device login, interrupted command.",
+      "acceptance": "Process-start-to-result and running-server RPC latency, valid uncontaminated stdout, documented exit statuses and progress on correct stream. Capture child/signal behavior before reproducing it.",
+      "client_capability_ids": [
+        "C25",
+        "C03"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T14"
+      ],
+      "lead_work_package_id": "T14",
+      "journey_id": "J57",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 58,
+      "name": "Install/update/uninstall every owned package",
+      "conditions": "Supported desktop OS/architecture, standalone CLI, WSL, package-manager ownership, mobile store/test builds; interrupted download, signature/checksum error, unrelated existing t3 command.",
+      "acceptance": "Verified install/update-to-ready, download/extract bytes, downtime and recovery; preserve state/credentials, launcher ownership, platform signing, safe rollback and documented uninstall scope.",
+      "client_capability_ids": [
+        "C02",
+        "C26",
+        "C27"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T14",
+        "T05",
+        "T12"
+      ],
+      "lead_work_package_id": "T14",
+      "journey_id": "J58",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 59,
+      "name": "Return from auth or a shared link",
+      "conditions": "Desktop/browser/mobile OAuth and passkey callbacks, CLI headless device flow, thread/guest links, expired/revoked link, unknown environment.",
+      "acceptance": "Time to authorized correct destination, no trust/confused-host regression, recoverable errors, no duplicate onboarding or lost queued draft. Separate external IdP latency from T3-owned overhead.",
+      "client_capability_ids": [
+        "C03",
+        "C04",
+        "C28"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T10",
+        "T11",
+        "T12",
+        "T14"
+      ],
+      "lead_work_package_id": "T10",
+      "journey_id": "J59",
+      "release_gate_work_package_id": "T16"
+    },
+    {
+      "id": 60,
+      "name": "Complete a cross-device working day",
+      "conditions": "Discover/install → link host → code/terminal/PR → move to phone offline → receive approval → reconnect → preview/voice → update/reopen, with large aged state.",
+      "acceptance": "Weighted task completion, worst-tail interaction, total CPU/RSS/network/storage/energy and recovery. Report every journey separately; aggregate improvement cannot hide a broken capability.",
+      "client_capability_ids": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17",
+        "C18",
+        "C19",
+        "C20",
+        "C21",
+        "C22",
+        "C23",
+        "C24",
+        "C25",
+        "C26",
+        "C27",
+        "C28",
+        "C29",
+        "C30"
+      ],
+      "source_matrix": "research/clients/performance-acceptance-extension.md",
+      "work_package_ids": [
+        "T16"
+      ],
+      "lead_work_package_id": "T16",
+      "journey_id": "J60",
+      "release_gate_work_package_id": "T16"
+    }
+  ],
+  "requirements_precedence": "The complete full-system architecture and acceptance plan control scope, implementation sequence and performance thresholds. Original journey rows, adverse conditions and behavioral requirements are preserved; historical appendix prescriptions do not override the full-system plan."
+}

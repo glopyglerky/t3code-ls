@@ -10,11 +10,16 @@ receipt too.
 `domain_owner` names the eventual application or package domain. Recovery keeps
 the current crates in place so source movement does not obscure behavior changes.
 
-The recovered decision and process ports are marked `integrated`. This means the
-restored application contains their production calls. It does not certify that
-the recovered application or any target build passed its new acceptance gates.
-The standalone native API, redb backend and Iroh transport remain `candidate`.
-No entry in the initial map authorizes source retirement.
+The decision, process and native persistence ports have production integration
+recorded in the map. The selected native persistence route uses omdb; its existing
+port ID remains `redb-persistence`. Integration does not establish current
+application or platform acceptance. The standalone native API and Iroh transport
+remain component candidates. Consult the map for current states and receipts;
+historical reports do not authorize source retirement.
+
+[The full-system implementation guide](full-system/README.md) defines the remaining
+Rust product, work-package dependencies and end-to-end acceptance. Its prospective
+requirements do not replace the map's implementation and platform records.
 
 ## States
 
@@ -187,3 +192,4 @@ implementation or explicit removal review. A missing map is reported as
 unavailable; a map or port review naming a different integrated revision fails.
 The command leaves the checkout, integration lock and qualification untouched.
 `--fetch` only obtains missing immutable Git objects for the comparison.
+

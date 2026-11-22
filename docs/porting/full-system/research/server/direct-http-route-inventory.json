@@ -1,0 +1,184 @@
+{
+  "revision": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "method": "git grep HttpRouter.add followed by lexical first two arguments; excludes tests. Typed HttpApi endpoints are inventoried separately. Supplemented with ServerBrowserStream router.add and MCP SDK registration. Includes separate CLI OAuth callback listener; count is registration inventory, not active public endpoint count. Supplemented with ServerBrowserStream router.add and MCP SDK registration. Includes separate CLI OAuth callback listener; count is registration inventory, not active public endpoint count.",
+  "routes": [
+    {
+      "path": "apps/server/src/cloud/CliTokenManager.ts",
+      "line": 517,
+      "method_expression": "\"GET\"",
+      "route_expression": "\"/callback\"",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/cloud/CliTokenManager.ts"
+    },
+    {
+      "path": "apps/server/src/device/DeviceHubProxy.ts",
+      "line": 262,
+      "method_expression": "\"*\"",
+      "route_expression": "`${DeviceService.DEVICE_HUB_ROUTE_PREFIX}/*`",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/device/DeviceHubProxy.ts"
+    },
+    {
+      "path": "apps/server/src/guest/http.ts",
+      "line": 108,
+      "method_expression": "\"POST\"",
+      "route_expression": "`${GUEST_ROUTE_PREFIX}/redeem`",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/guest/http.ts"
+    },
+    {
+      "path": "apps/server/src/guest/http.ts",
+      "line": 181,
+      "method_expression": "\"POST\"",
+      "route_expression": "`${GUEST_ROUTE_PREFIX}/messages`",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/guest/http.ts"
+    },
+    {
+      "path": "apps/server/src/guest/http.ts",
+      "line": 203,
+      "method_expression": "\"GET\"",
+      "route_expression": "`${GUEST_ROUTE_PREFIX}/stream`",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/guest/http.ts"
+    },
+    {
+      "path": "apps/server/src/guest/http.ts",
+      "line": 216,
+      "method_expression": "\"GET\"",
+      "route_expression": "`${GUEST_ROUTE_PREFIX}/session`",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/guest/http.ts"
+    },
+    {
+      "path": "apps/server/src/guest/http.ts",
+      "line": 232,
+      "method_expression": "\"GET\"",
+      "route_expression": "GUEST_RENDER_ROUTE",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/guest/http.ts"
+    },
+    {
+      "path": "apps/server/src/guest/http.ts",
+      "line": 250,
+      "method_expression": "\"GET\"",
+      "route_expression": "GUEST_ITEM_ROUTE",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/guest/http.ts"
+    },
+    {
+      "path": "apps/server/src/guest/http.ts",
+      "line": 269,
+      "method_expression": "\"GET\"",
+      "route_expression": "GUEST_HISTORY_ROUTE",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/guest/http.ts"
+    },
+    {
+      "path": "apps/server/src/guest/http.ts",
+      "line": 291,
+      "method_expression": "\"GET\"",
+      "route_expression": "GUEST_COMMAND_OUTPUT_ROUTE",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/guest/http.ts"
+    },
+    {
+      "path": "apps/server/src/guest/http.ts",
+      "line": 307,
+      "method_expression": "\"GET\"",
+      "route_expression": "GUEST_ATTACHMENT_ROUTE",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/guest/http.ts"
+    },
+    {
+      "path": "apps/server/src/guest/http.ts",
+      "line": 337,
+      "method_expression": "\"GET\"",
+      "route_expression": "GUEST_MEDIA_ROUTE",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/guest/http.ts"
+    },
+    {
+      "path": "apps/server/src/http.ts",
+      "line": 365,
+      "method_expression": "\"POST\"",
+      "route_expression": "OTLP_TRACES_PROXY_PATH",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/http.ts"
+    },
+    {
+      "path": "apps/server/src/http.ts",
+      "line": 446,
+      "method_expression": "\"GET\"",
+      "route_expression": "`${ASSET_ROUTE_PREFIX}/*`",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/http.ts"
+    },
+    {
+      "path": "apps/server/src/http.ts",
+      "line": 505,
+      "method_expression": "\"POST\"",
+      "route_expression": "`${ATTACHMENT_UPLOAD_ROUTE_PREFIX}/*`",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/http.ts"
+    },
+    {
+      "path": "apps/server/src/http.ts",
+      "line": 777,
+      "method_expression": "\"GET\"",
+      "route_expression": "\"*\"",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/http.ts"
+    },
+    {
+      "path": "apps/server/src/peer/linkThreadHttp.ts",
+      "line": 96,
+      "method_expression": "\"GET\"",
+      "route_expression": "PEER_LINK_THREAD_STREAM_ROUTE",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/peer/linkThreadHttp.ts"
+    },
+    {
+      "path": "apps/server/src/peer/linkThreadHttp.ts",
+      "line": 121,
+      "method_expression": "\"GET\"",
+      "route_expression": "PEER_LINK_THREAD_HISTORY_ROUTE",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/peer/linkThreadHttp.ts"
+    },
+    {
+      "path": "apps/server/src/peer/linkThreadHttp.ts",
+      "line": 141,
+      "method_expression": "\"GET\"",
+      "route_expression": "PEER_LINK_THREAD_ITEM_ROUTE",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/peer/linkThreadHttp.ts"
+    },
+    {
+      "path": "apps/server/src/preview/PreviewTunnel.ts",
+      "line": 217,
+      "method_expression": "\"GET\"",
+      "route_expression": "PREVIEW_TUNNEL_ROUTE",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/preview/PreviewTunnel.ts"
+    },
+    {
+      "path": "apps/server/src/speech/stream.ts",
+      "line": 96,
+      "method_expression": "\"GET\"",
+      "route_expression": "SPEECH_STREAM_PATH",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/speech/stream.ts"
+    },
+    {
+      "path": "apps/server/src/ws.ts",
+      "line": 3712,
+      "method_expression": "\"GET\"",
+      "route_expression": "\"/ws\"",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/ws.ts"
+    },
+    {
+      "path": "apps/server/src/preview/ServerBrowserStream.ts",
+      "line": 309,
+      "method_expression": "GET",
+      "route_expression": "/api/preview-stream/*",
+      "registration": "router.add",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/preview/ServerBrowserStream.ts#L309"
+    },
+    {
+      "path": "apps/server/src/preview/ServerBrowserStream.ts",
+      "line": 310,
+      "method_expression": "POST",
+      "route_expression": "/api/preview-stream/upload",
+      "registration": "router.add",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/preview/ServerBrowserStream.ts#L310"
+    },
+    {
+      "path": "apps/server/src/mcp/McpHttpServer.ts",
+      "line": 1376,
+      "method_expression": "MCP Streamable HTTP",
+      "route_expression": "/mcp",
+      "registration": "McpServer.layerHttp",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/McpHttpServer.ts#L1376"
+    }
+  ]
+}

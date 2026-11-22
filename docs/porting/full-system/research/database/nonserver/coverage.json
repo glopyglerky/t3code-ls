@@ -1,0 +1,656 @@
+{
+  "repository": "pingdotgg/t3code",
+  "revision": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "tree": "af9112ce82be93109079ca7b7a89f7182455eca5",
+  "method": "Immutable git ls-tree, git grep, git show from pinned source; no live user database opened, no checkout changes, no builds/tests/benchmarks.",
+  "limitations": [
+    "Filename discovery is not semantic review.",
+    "A broad lifecycle grep includes import statements and is a navigation aid only, not a lifecycle component count.",
+    "Provider SDK-internal schema is not audited.",
+    "Negative search for OPFS/Prisma/state.vscdb applies to searched product paths and patterns at this revision."
+  ],
+  "source_files": [
+    {
+      "path": "apps/mobile/src/persistence/mobile-database.ts",
+      "blob_sha": "8c07d44f703d0ca7ba68578d4c6f300522a6b82f",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/persistence/mobile-database.ts",
+      "source_retrieved": true,
+      "lines": 362,
+      "review": "full_file_read"
+    },
+    {
+      "path": "apps/mobile/src/persistence/mobile-storage.ts",
+      "blob_sha": "23fe82c52e48080a3363c210df11b941a908f7de",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/persistence/mobile-storage.ts",
+      "source_retrieved": true,
+      "lines": 202,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/mobile/src/persistence/mobile-preferences.ts",
+      "blob_sha": "71d095b0b4fb59c10e503ca428577dd2d6e872ae",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/persistence/mobile-preferences.ts",
+      "source_retrieved": true,
+      "lines": 642,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/mobile/src/persistence/mobile-secure-storage.ts",
+      "blob_sha": "ea889f39740b9576e1bd666c97467fcfb543e42e",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/persistence/mobile-secure-storage.ts",
+      "source_retrieved": true,
+      "lines": 53,
+      "review": "full_file_read"
+    },
+    {
+      "path": "apps/mobile/src/persistence/layer.ts",
+      "blob_sha": "c64adc015471ba3c580ccfb4f6ec982c09432ec0",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/persistence/layer.ts",
+      "source_retrieved": true,
+      "lines": 19,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "apps/mobile/src/connection/storage.ts",
+      "blob_sha": "91a6ac71919da61acffffd480d7e35843fe82752",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/connection/storage.ts",
+      "source_retrieved": true,
+      "lines": 170,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/mobile/src/connection/migration.ts",
+      "blob_sha": "0ae950aa22a99d8548237cb008abf665470d81fb",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/connection/migration.ts",
+      "source_retrieved": true,
+      "lines": 114,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "apps/mobile/src/state/thread-outbox-storage.ts",
+      "blob_sha": "6b8ef8389e53606aa9dbf025e694247a7fc64f9c",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/state/thread-outbox-storage.ts",
+      "source_retrieved": true,
+      "lines": 149,
+      "review": "full_file_read"
+    },
+    {
+      "path": "apps/mobile/src/lib/projectFaviconDatabaseCache.ts",
+      "blob_sha": "f31700af567b8894f910b405af2bc047185985af",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/lib/projectFaviconDatabaseCache.ts",
+      "source_retrieved": true,
+      "lines": 103,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "apps/web/src/clientPersistenceStorage.ts",
+      "blob_sha": "5e3c97649fd065fd0bec72bc9b94b20eef884b0a",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/clientPersistenceStorage.ts",
+      "source_retrieved": true,
+      "lines": 41,
+      "review": "full_file_read"
+    },
+    {
+      "path": "apps/web/src/connection/storage.ts",
+      "blob_sha": "b56ec9a18db3290db62537a61eae447fd4086730",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/connection/storage.ts",
+      "source_retrieved": true,
+      "lines": 1150,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/web/src/browserHistoryStore.ts",
+      "blob_sha": "c6088b2abfca73e507461a6e77641fbe71daffbb",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/browserHistoryStore.ts",
+      "source_retrieved": true,
+      "lines": 763,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/web/src/cloud/dpop.ts",
+      "blob_sha": "2b83106d4ce2449b24c6e5491f78bab4cd98369b",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/cloud/dpop.ts",
+      "source_retrieved": true,
+      "lines": 168,
+      "review": "full_file_read"
+    },
+    {
+      "path": "apps/web/src/assets/projectFaviconCache.ts",
+      "blob_sha": "4f4b71034c4e8f6884ff2eb3df07678909fd716e",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/assets/projectFaviconCache.ts",
+      "source_retrieved": true,
+      "lines": 85,
+      "review": "full_file_read"
+    },
+    {
+      "path": "apps/web/src/components/chat/composerImagePersistence.ts",
+      "blob_sha": "4f99ddc1b8b48c3b5f08d6d0073ada6ced72bcfe",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/components/chat/composerImagePersistence.ts",
+      "source_retrieved": true,
+      "lines": 34,
+      "review": "full_file_read"
+    },
+    {
+      "path": "packages/client-runtime/src/platform/persistence.ts",
+      "blob_sha": "6476b80221225df7c6dcf8b21bc0bedb38bf04b4",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/client-runtime/src/platform/persistence.ts",
+      "source_retrieved": true,
+      "lines": 158,
+      "review": "full_file_read"
+    },
+    {
+      "path": "packages/client-runtime/src/platform/storageDocument.ts",
+      "blob_sha": "1af8e0e3d67aa62254d9da92d62deb2aa08c00a2",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/client-runtime/src/platform/storageDocument.ts",
+      "source_retrieved": true,
+      "lines": 218,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "packages/client-runtime/src/state/cachePersistence.ts",
+      "blob_sha": "c9da5fbc8c02090669fc1e7d5b8bda3530a7458e",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/client-runtime/src/state/cachePersistence.ts",
+      "source_retrieved": true,
+      "lines": 19,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "packages/client-runtime/src/state/queryPersistence.ts",
+      "blob_sha": "cbab9e02b104b05f5526ae5b7b3fec9949e9de38",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/client-runtime/src/state/queryPersistence.ts",
+      "source_retrieved": true,
+      "lines": 50,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "packages/client-runtime/src/state/pullRequestStatsPersistence.ts",
+      "blob_sha": "75cba63031a2f22a7fd77543a6796474838d6308",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/client-runtime/src/state/pullRequestStatsPersistence.ts",
+      "source_retrieved": true,
+      "lines": 49,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "apps/desktop/src/app/DesktopConnectionCatalogStore.ts",
+      "blob_sha": "5db49e5f9504cac421f35e67e73f17b58d3b2a2c",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/desktop/src/app/DesktopConnectionCatalogStore.ts",
+      "source_retrieved": true,
+      "lines": 543,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/desktop/src/backend/DesktopHomeOwner.ts",
+      "blob_sha": "7fc833a3fc104c258ad0a5183b91677a842316b3",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/desktop/src/backend/DesktopHomeOwner.ts",
+      "source_retrieved": true,
+      "lines": 138,
+      "review": "full_file_read"
+    },
+    {
+      "path": "apps/desktop/src/preview/BrowserImport/CookieDatabase.ts",
+      "blob_sha": "6c708e6023df2459928f403799f1378c0a458d6a",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/desktop/src/preview/BrowserImport/CookieDatabase.ts",
+      "source_retrieved": true,
+      "lines": 61,
+      "review": "full_file_read"
+    },
+    {
+      "path": "apps/desktop/src/preview/BrowserImport/ChromiumCookies.ts",
+      "blob_sha": "91cbfa03aac7dacfcde9f2292449dc4cffed21bc",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/desktop/src/preview/BrowserImport/ChromiumCookies.ts",
+      "source_retrieved": true,
+      "lines": 318,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/desktop/src/preview/BrowserImport/FirefoxCookies.ts",
+      "blob_sha": "a5fddb14d22dfefdf38c2fd007a0a51834b5c84c",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/desktop/src/preview/BrowserImport/FirefoxCookies.ts",
+      "source_retrieved": true,
+      "lines": 114,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "infra/relay/src/db.ts",
+      "blob_sha": "52133544d4641083b89e60585f6dd34dd1c52581",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/relay/src/db.ts",
+      "source_retrieved": true,
+      "lines": 86,
+      "review": "full_file_read"
+    },
+    {
+      "path": "infra/relay/src/dbConfig.ts",
+      "blob_sha": "9f6416aedceac42b20bc3594fb5ec912afeb8e4c",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/relay/src/dbConfig.ts",
+      "source_retrieved": true,
+      "lines": 6,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "infra/relay/src/persistence/schema.ts",
+      "blob_sha": "50f96500f0fbfcb4d28f57bf0bb0d65d83c5ecb4",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/relay/src/persistence/schema.ts",
+      "source_retrieved": true,
+      "lines": 203,
+      "review": "full_file_read"
+    },
+    {
+      "path": "infra/relay/src/hooks/HookInboxStore.ts",
+      "blob_sha": "dad6d0dcf6e84663d628be8ed156ec2c5234bfdc",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/relay/src/hooks/HookInboxStore.ts",
+      "source_retrieved": true,
+      "lines": 352,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "infra/relay/src/hooks/HookInboxObject.ts",
+      "blob_sha": "6a2abebff794addd155784546ab3a5581023c0fa",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/relay/src/hooks/HookInboxObject.ts",
+      "source_retrieved": true,
+      "lines": 135,
+      "review": "full_file_read"
+    },
+    {
+      "path": "infra/relay/src/auth/DpopProofs.ts",
+      "blob_sha": "538410356b605809ec8861efc6befa33dad5d993",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/relay/src/auth/DpopProofs.ts",
+      "source_retrieved": true,
+      "lines": 183,
+      "review": "full_file_read"
+    },
+    {
+      "path": "infra/relay/src/agentActivity/AgentActivityRows.ts",
+      "blob_sha": "0faf5b9da358e2ff054d3e2b86842f96962dc761",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/relay/src/agentActivity/AgentActivityRows.ts",
+      "source_retrieved": true,
+      "lines": 288,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "infra/relay/src/agentActivity/DeliveryAttempts.ts",
+      "blob_sha": "0a90c0fecfe2b16a63ce48d8ddb3ed312c1cb3cf",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/relay/src/agentActivity/DeliveryAttempts.ts",
+      "source_retrieved": true,
+      "lines": 270,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "infra/relay/src/environments/EnvironmentLinks.ts",
+      "blob_sha": "877e50f4f259acf37c1552cc5d4b691f3eb77e86",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/relay/src/environments/EnvironmentLinks.ts",
+      "source_retrieved": true,
+      "lines": 539,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "infra/relay/src/environments/ManagedEndpointAllocations.ts",
+      "blob_sha": "918c410e3517645a9a319b818c58743ad59c9aa1",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/relay/src/environments/ManagedEndpointAllocations.ts",
+      "source_retrieved": true,
+      "lines": 641,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "infra/relay/migrations/postgres/20261118203809_relay_write_churn/migration.sql",
+      "blob_sha": "353e78fb96b1f5653e44378e0b9d958040073378",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/relay/migrations/postgres/20261118203809_relay_write_churn/migration.sql",
+      "source_retrieved": true,
+      "lines": 7,
+      "review": "full_file_read"
+    },
+    {
+      "path": "infra/task-cache/README.md",
+      "blob_sha": "8e5e18d7d48ab98f50f59870b6b0ede8283c8939",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/task-cache/README.md",
+      "source_retrieved": true,
+      "lines": 82,
+      "review": "full_file_read"
+    },
+    {
+      "path": "infra/task-cache/src/resources.ts",
+      "blob_sha": "4d3d12cf00499b8109c1af2789e740f59456f227",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/task-cache/src/resources.ts",
+      "source_retrieved": true,
+      "lines": 63,
+      "review": "full_file_read"
+    },
+    {
+      "path": "infra/task-cache/src/Cache.ts",
+      "blob_sha": "77d18078b61bc3cf24c86be30cbce2e8d26a0361",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/task-cache/src/Cache.ts",
+      "source_retrieved": true,
+      "lines": 243,
+      "review": "full_file_read"
+    },
+    {
+      "path": "infra/task-cache/src/Cleanup.ts",
+      "blob_sha": "5d6e48ca03664ce12d5eb0aee440c866cd166602",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/task-cache/src/Cleanup.ts",
+      "source_retrieved": true,
+      "lines": 14,
+      "review": "full_file_read"
+    },
+    {
+      "path": "infra/task-cache/src/Savings.ts",
+      "blob_sha": "64723e851c45fa4fd37f0f993b1263c342ebbc45",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/task-cache/src/Savings.ts",
+      "source_retrieved": true,
+      "lines": 141,
+      "review": "full_file_read"
+    },
+    {
+      "path": "infra/task-cache/src/protocolTypes.ts",
+      "blob_sha": "d3ec7e328c971f35c021770449b1fa673f829c3c",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/task-cache/src/protocolTypes.ts",
+      "source_retrieved": true,
+      "lines": 15,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "apps/server/src/persistence/DatabaseStorage.ts",
+      "blob_sha": "9df5bf7ede03b4fae68601644109dff682e14eec",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/DatabaseStorage.ts",
+      "source_retrieved": true,
+      "lines": 248,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/server/src/persistence/DatabaseMaintenance.ts",
+      "blob_sha": "bdb1c459f6e94f63369ecff477674750bd71adfb",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/DatabaseMaintenance.ts",
+      "source_retrieved": true,
+      "lines": 422,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/server/src/persistence/initializeV2Database.ts",
+      "blob_sha": "1a9f4bac55543a351b14336e566aae9c4956c0ba",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/initializeV2Database.ts",
+      "source_retrieved": true,
+      "lines": 107,
+      "review": "full_file_read"
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations.ts",
+      "blob_sha": "2b767af21f52f1e76aea36e93374e2de94c37af3",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations.ts",
+      "source_retrieved": true,
+      "lines": 379,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/server/src/cli/doctor.ts",
+      "blob_sha": "60af29ac41e7bdaf652e3700273e7d78da65a709",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/cli/doctor.ts",
+      "source_retrieved": true,
+      "lines": 219,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/server/scripts/t3-sqlite-state.ts",
+      "blob_sha": "a9d8255469ef6a64f3edf7af38f73b57556f8cd9",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/scripts/t3-sqlite-state.ts",
+      "source_retrieved": true,
+      "lines": 287,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "docs/user/thread-migration.md",
+      "blob_sha": "b9da85f03bd57ce1af484653eee8861cada70b67",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/thread-migration.md",
+      "source_retrieved": true,
+      "lines": 75,
+      "review": "full_file_read"
+    },
+    {
+      "path": "packages/provider-opencode/src/server/usage.ts",
+      "blob_sha": "9878742ce882ea7b36e94e1ee8a6b04304f2d8f4",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-opencode/src/server/usage.ts",
+      "source_retrieved": true,
+      "lines": 519,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "packages/provider-opencode/src/server/usageLimits.ts",
+      "blob_sha": "03488e515a79f15fdec9b9c45503b42395d33333",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-opencode/src/server/usageLimits.ts",
+      "source_retrieved": true,
+      "lines": 199,
+      "review": "full_file_read"
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravitySessionFiles.ts",
+      "blob_sha": "f59d785754d44d779bcdc5dab5926ae24061b112",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/acp/AntigravitySessionFiles.ts",
+      "source_retrieved": true,
+      "lines": 202,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravityChildWork.ts",
+      "blob_sha": "aa0932cf0f41a1659839999fa3b675be82466cc2",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/acp/AntigravityChildWork.ts",
+      "source_retrieved": true,
+      "lines": 823,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravityTurnOutcome.ts",
+      "blob_sha": "32eee40f008aeca495927a12a09b74c4c1e650a6",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/acp/AntigravityTurnOutcome.ts",
+      "source_retrieved": true,
+      "lines": 269,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/CodexHomeLayout.ts",
+      "blob_sha": "d8a7270ab71309dc248cf7b94e3ab4795a77cee1",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/Drivers/CodexHomeLayout.ts",
+      "source_retrieved": true,
+      "lines": 469,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "packages/provider-cursor/src/server/sdk.ts",
+      "blob_sha": "4350dd95a357606bf014355f7ca9f2f29b9d6564",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/sdk.ts",
+      "source_retrieved": true,
+      "lines": 71,
+      "review": "full_file_read"
+    },
+    {
+      "path": "apps/mobile/src/connection/catalog-store.ts",
+      "blob_sha": "b45da00cbc85ff655f6785186ec89a350df3dfec",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/connection/catalog-store.ts",
+      "source_retrieved": true,
+      "lines": 133,
+      "review": "full_file_read"
+    },
+    {
+      "path": "apps/mobile/src/connection/environment-cache-store.ts",
+      "blob_sha": "3be6c3d302801510e01fcce859f386e15efda5b1",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/connection/environment-cache-store.ts",
+      "source_retrieved": true,
+      "lines": 266,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "apps/mobile/src/connection/environment-owned-data-cleanup.ts",
+      "blob_sha": "28c6cda29a4d33a63b8cfe1b434ce40e7f03ed93",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/connection/environment-owned-data-cleanup.ts",
+      "source_retrieved": true,
+      "lines": 49,
+      "review": "full_file_read"
+    },
+    {
+      "path": "apps/mobile/src/connection/pull-request-cache-store.ts",
+      "blob_sha": "3eab93296e1403d0b9f27e9587f92313b2228950",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/connection/pull-request-cache-store.ts",
+      "source_retrieved": true,
+      "lines": 23,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "apps/web/src/composerDraftStore.ts",
+      "blob_sha": "07eca76db05f3bacf8b747c9e6cab2a55dd7ee39",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/composerDraftStore.ts",
+      "source_retrieved": true,
+      "lines": 4934,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/web/src/threadOutboxStore.ts",
+      "blob_sha": null,
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/threadOutboxStore.ts",
+      "source_retrieved": false,
+      "lines": 1,
+      "review": "path_absent",
+      "notes": "fatal: path 'apps/web/src/threadOutboxStore.ts' does not exist in '28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f'\n"
+    },
+    {
+      "path": "apps/web/src/threadOutboxPersistence.ts",
+      "blob_sha": null,
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/threadOutboxPersistence.ts",
+      "source_retrieved": false,
+      "lines": 1,
+      "review": "path_absent",
+      "notes": "fatal: path 'apps/web/src/threadOutboxPersistence.ts' does not exist in '28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f'\n"
+    },
+    {
+      "path": "apps/server/src/project/AgentSessionScanner.ts",
+      "blob_sha": "9bd4b5cebd2763be4a915d414207ef9b2f17e6de",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/project/AgentSessionScanner.ts",
+      "source_retrieved": true,
+      "lines": 2332,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/antigravityUsageReader.ts",
+      "blob_sha": "5dff65928ad24c630f27980c798d8a718b431710",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/Drivers/antigravityUsageReader.ts",
+      "source_retrieved": true,
+      "lines": 596,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "packages/provider-cursor/src/server/CursorSdk.ts",
+      "blob_sha": "71eb9d28ff0761aad396940689566ecd88f66590",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/CursorSdk.ts",
+      "source_retrieved": true,
+      "lines": 168,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "packages/provider-cursor/src/server/CursorAgentSdk.ts",
+      "blob_sha": "81b8208a5dda857238c42f37ce6824b2efb1d20a",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/CursorAgentSdk.ts",
+      "source_retrieved": true,
+      "lines": 1180,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "packages/provider-cursor/src/server/textGeneration.ts",
+      "blob_sha": "f0709d884bbd0ec537615e6ed439550f4db34ab6",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/textGeneration.ts",
+      "source_retrieved": true,
+      "lines": 356,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "infra/task-cache/vendor/vite-plus-remote-cache-cloudflare/src/database.ts",
+      "blob_sha": "a46dc43e547400cc6ccb41d56574d032cf60753b",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/task-cache/vendor/vite-plus-remote-cache-cloudflare/src/database.ts",
+      "source_retrieved": true,
+      "lines": 292,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "infra/task-cache/vendor/vite-plus-remote-cache-cloudflare/migrations/0001_cache.sql",
+      "blob_sha": "31f73fa03b583147272849ae06226f9c91283e46",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/task-cache/vendor/vite-plus-remote-cache-cloudflare/migrations/0001_cache.sql",
+      "source_retrieved": true,
+      "lines": 161,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "infra/task-cache/vendor/vite-plus-remote-cache-cloudflare/migrations/0002_pull_requests.sql",
+      "blob_sha": "86418a27878387b632a0b3e288c2fb9d5391a0ca",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/task-cache/vendor/vite-plus-remote-cache-cloudflare/migrations/0002_pull_requests.sql",
+      "source_retrieved": true,
+      "lines": 13,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "infra/task-cache/migrations/savings/0001_savings.sql",
+      "blob_sha": "48701f45542fc2e9778d7192f26c77bee80034ac",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/task-cache/migrations/savings/0001_savings.sql",
+      "source_retrieved": true,
+      "lines": 17,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "infra/task-cache/migrations/savings/0002_unspecified_tier.sql",
+      "blob_sha": "9f3bf5e69143e1571159763184ed5b88e8398fe7",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/task-cache/migrations/savings/0002_unspecified_tier.sql",
+      "source_retrieved": true,
+      "lines": 3,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "infra/task-cache/migrations/savings/0003_remove_setup_probes.sql",
+      "blob_sha": "2bd529ebbbb17af8336b1219a729adb9ec8e164c",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/infra/task-cache/migrations/savings/0003_remove_setup_probes.sql",
+      "source_retrieved": true,
+      "lines": 5,
+      "review": "retrieved_not_semantically_reviewed"
+    },
+    {
+      "path": "apps/server/src/serverOwnership.ts",
+      "blob_sha": "20bb46a45e66e6a26efa52410c97e84d5217a843",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/serverOwnership.ts",
+      "source_retrieved": true,
+      "lines": 311,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/server/src/serviceLauncher.ts",
+      "blob_sha": "8dcd7886fce51283ce86aaf33993ddeeb3f4183a",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/serviceLauncher.ts",
+      "source_retrieved": true,
+      "lines": 1657,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "packages/ssh/src/tunnel.ts",
+      "blob_sha": "af3b814fcd13f576448f4c137a507c03f8b58f0b",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/ssh/src/tunnel.ts",
+      "source_retrieved": true,
+      "lines": 2281,
+      "review": "selected_sections_and_call_sites"
+    },
+    {
+      "path": "apps/web/src/components/files/binaryPreview.worker.ts",
+      "blob_sha": "4c67d2826976f7daf765486f7761c72fd7b5ef6f",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/components/files/binaryPreview.worker.ts",
+      "source_retrieved": true,
+      "lines": 264,
+      "review": "full_file_read"
+    },
+    {
+      "path": "apps/server/src/usage/CodexUsageHistory.ts",
+      "blob_sha": "b032c9b1a0be0de0ec52a61fa328d8a63058452d",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/usage/CodexUsageHistory.ts",
+      "source_retrieved": true,
+      "lines": 121,
+      "review": "full_file_read"
+    },
+    {
+      "path": "apps/mobile/src/state/use-composer-drafts.ts",
+      "blob_sha": "10d8fd7a4f2718802250ec37d6fe1dfcd08c82b2",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/state/use-composer-drafts.ts",
+      "source_retrieved": true,
+      "lines": 2251,
+      "review": "selected_sections_and_call_sites"
+    }
+  ]
+}

@@ -1,0 +1,551 @@
+{
+  "revision": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "status": "Research requirements, not implemented parity or measured speedups",
+  "coverage": "Capability families based on selected source/doc review. Individual handlers and every UI state are not exhaustively reviewed.",
+  "families": [
+    {
+      "id": "C01",
+      "name": "Product discovery and download",
+      "upstream_user_outcome": "Localized static marketing home/download pages, platform/store routing, stable/nightly releases, legal/security pages, SEO/unfurl metadata, install entrypoints.",
+      "rust_requirement": "Rust-generated static HTML and CSS with progressive interactive controls. Preserve links, locale routes, metadata and useful no-app-runtime content.",
+      "sources": [
+        {
+          "path": "apps/marketing/src/pages/[...locale]/index.astro",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/marketing/src/pages/[...locale]/index.astro"
+        },
+        {
+          "path": "apps/marketing/src/pages/[...locale]/download.astro",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/marketing/src/pages/[...locale]/download.astro"
+        },
+        {
+          "path": "apps/marketing/src/layouts/Layout.astro",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/marketing/src/layouts/Layout.astro"
+        }
+      ]
+    },
+    {
+      "id": "C02",
+      "name": "Install and first launch",
+      "upstream_user_outcome": "Desktop packages and package managers; self-contained CLI archives; browser-only use; phone links to host; provider setup can follow first launch.",
+      "rust_requirement": "Rust launchers and platform packages, archive verification, collision-safe PATH integration, first-run setup and diagnosis. Preserve existing installation ownership.",
+      "sources": [
+        {
+          "path": "docs/user/install.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/install.md"
+        },
+        {
+          "path": "scripts/install.sh",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/scripts/install.sh"
+        },
+        {
+          "path": "scripts/install.ps1",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/scripts/install.ps1"
+        }
+      ]
+    },
+    {
+      "id": "C03",
+      "name": "Connection and account onboarding",
+      "upstream_user_outcome": "Local pairing, hosted Connect, device approval/headless OAuth, provider account setup, guest route, resume links and environment catalog selection.",
+      "rust_requirement": "Shared Rust auth/navigation state machines plus browser and OS credential/callback adapters. Do not collapse distinct trust scopes or host-specific credentials.",
+      "sources": [
+        {
+          "path": "apps/web/src/routes/pair.tsx",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/routes/pair.tsx"
+        },
+        {
+          "path": "apps/web/src/routes/connect.tsx",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/routes/connect.tsx"
+        },
+        {
+          "path": "apps/web/src/routes/welcome.tsx",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/routes/welcome.tsx"
+        },
+        {
+          "path": "docs/operations/connect-setup.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/operations/connect-setup.md"
+        }
+      ]
+    },
+    {
+      "id": "C04",
+      "name": "Workspace navigation",
+      "upstream_user_outcome": "Projects, drafts, threads, linked threads, multiple environments, settings and modal overlays; preserve active view state and route/deep-link identity.",
+      "rust_requirement": "Shared typed navigation model, separate DOM/native navigators, stable IDs, history/back behavior, focus restoration and cached views.",
+      "sources": [
+        {
+          "path": "apps/web/src/routes/_chat.tsx",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/routes/_chat.tsx"
+        },
+        {
+          "path": "apps/mobile/src/Stack.tsx",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/Stack.tsx"
+        },
+        {
+          "path": "apps/mobile/src/lib/rootNavigation.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/lib/rootNavigation.ts"
+        }
+      ]
+    },
+    {
+      "id": "C05",
+      "name": "Responsive workspace",
+      "upstream_user_outcome": "Desktop panes and windows; phone, tablet and fold/adaptive mobile layouts; touch, hardware keyboard, safe areas and OS back behavior.",
+      "rust_requirement": "Native window/layout/gesture adapters and responsive web layout. Retain selections, draft and scroll anchors through resize, folds, rotation and process recreation.",
+      "sources": [
+        {
+          "path": "apps/mobile/src/features/layout/AdaptiveWorkspaceLayout.tsx",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/features/layout/AdaptiveWorkspaceLayout.tsx"
+        },
+        {
+          "path": "apps/mobile/app.config.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/app.config.ts"
+        }
+      ]
+    },
+    {
+      "id": "C06",
+      "name": "Streaming conversation",
+      "upstream_user_outcome": "Messages, tool/work-log events, collapsible history, code, citations, find, jump, minimap and follow-end behavior.",
+      "rust_requirement": "Incremental shared conversation projection, visible-item virtualization, block-level Markdown cache, native/DOM renderers and semantic accessibility tree.",
+      "sources": [
+        {
+          "path": "apps/web/src/components/chat/MessagesTimeline.tsx",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/components/chat/MessagesTimeline.tsx"
+        },
+        {
+          "path": "apps/web/src/components/ChatMarkdown.tsx",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/components/ChatMarkdown.tsx"
+        }
+      ]
+    },
+    {
+      "id": "C07",
+      "name": "Rich composer",
+      "upstream_user_outcome": "Exact Markdown editing, chips, file and thread context, model/skill commands, source-offset selection, rich clipboard, undo/redo, IME and large-paste attachments.",
+      "rust_requirement": "Rust document model with explicit byte/UTF-16/grapheme conversions and platform text input adapters. A basic multiline editor does not cover this contract.",
+      "sources": [
+        {
+          "path": "docs/user/composer.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/composer.md"
+        },
+        {
+          "path": "apps/web/src/components/ComposerPromptEditorTiptap.tsx",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/components/ComposerPromptEditorTiptap.tsx"
+        },
+        {
+          "path": "apps/mobile/modules/t3-composer-editor/ios/T3ComposerEditorView.swift",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/modules/t3-composer-editor/ios/T3ComposerEditorView.swift"
+        }
+      ]
+    },
+    {
+      "id": "C08",
+      "name": "Send, queue, steer and rewind",
+      "upstream_user_outcome": "Provider-dependent queue/steer, edits to queued work, pause/resume, remembered prompts, stashes, quote comments, rewind and safety around checkpoint restore.",
+      "rust_requirement": "Typed intent/receipt and local-draft/outbox state machines with equivalent provider capability gating and cancellation semantics.",
+      "sources": [
+        {
+          "path": "docs/user/composer.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/composer.md"
+        }
+      ]
+    },
+    {
+      "id": "C09",
+      "name": "Files, code editing and diff review",
+      "upstream_user_outcome": "Workspace tree, file navigation/edit/save, line references, syntax highlighting, split/unified diffs, collapsed/viewed files, review comments and scroll restoration.",
+      "rust_requirement": "Rust text/diff/search core, incremental edits, worker scheduling and visible-row rendering. Keep external-file read-only policy and pending-edit reconciliation.",
+      "sources": [
+        {
+          "path": "apps/web/src/components/files/FilePreviewPanel.tsx",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/components/files/FilePreviewPanel.tsx"
+        },
+        {
+          "path": "apps/web/src/components/DiffWorkerPoolProvider.tsx",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/components/DiffWorkerPoolProvider.tsx"
+        },
+        {
+          "path": "apps/mobile/modules/t3-review-diff/ios/T3ReviewDiffView.swift",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/modules/t3-review-diff/ios/T3ReviewDiffView.swift"
+        }
+      ]
+    },
+    {
+      "id": "C10",
+      "name": "Git and worktrees",
+      "upstream_user_outcome": "Branches, changes, commit/review/merge actions, isolated tasks, multi-repository projects and external editor integration.",
+      "rust_requirement": "Shared Rust Git operation contracts and host adapters; preserve operation ownership, branch/worktree references, remote links and exact confirmation/error outcomes.",
+      "sources": [
+        {
+          "path": "docs/user/source-control.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/source-control.md"
+        },
+        {
+          "path": "docs/user/multi-repo-projects.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/multi-repo-projects.md"
+        }
+      ]
+    },
+    {
+      "id": "C11",
+      "name": "PR and issue workflows",
+      "upstream_user_outcome": "PR/MR discussion, review drafts/threads/guides, checks/actions, viewed state, labels/reviewers/reactions, stacks and issues with host-specific capability differences.",
+      "rust_requirement": "Shared Rust query/mutation/cache core, optimistic UI with reconciliation, host adapters and offline cached detail. Preserve host/account routing and action ambiguity behavior.",
+      "sources": [
+        {
+          "path": "docs/user/source-control.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/source-control.md"
+        },
+        {
+          "path": "apps/mobile/src/Stack.tsx",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/Stack.tsx"
+        }
+      ]
+    },
+    {
+      "id": "C12",
+      "name": "Terminal state and rendering",
+      "upstream_user_outcome": "Ghostty VT state, scrollback, alternate screens, selection/copy/links, IME, mouse/focus protocols, resize, shell launch and reconnect.",
+      "rust_requirement": "Native and WASM terminal core plus platform input and renderer adapters; preserve parser/replay state and unsupported-protocol behavior. Benchmark against current Ghostty, not an assumed JS terminal.",
+      "sources": [
+        {
+          "path": "apps/web/src/terminal/ghostty/README.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/terminal/ghostty/README.md"
+        },
+        {
+          "path": "apps/web/src/terminal/ghostty/surface.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/terminal/ghostty/surface.ts"
+        },
+        {
+          "path": "packages/contracts/src/terminal.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/terminal.ts"
+        },
+        {
+          "path": "docs/user/terminal.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/terminal.md"
+        }
+      ]
+    },
+    {
+      "id": "C13",
+      "name": "Terminal transport and lifecycle",
+      "upstream_user_outcome": "Bounded attach history, streaming output, stopped terminal resume, transient disconnects, binary/control data, server query replies, ordered native writes.",
+      "rust_requirement": "Sequence-aware bounded buffers and flow control. Apply a cursor only after native rendering accepts the write, handle partial-write failure through bounded reset/replay.",
+      "sources": [
+        {
+          "path": "packages/client-runtime/src/state/terminalOutput.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/client-runtime/src/state/terminalOutput.ts"
+        },
+        {
+          "path": "packages/client-runtime/src/state/terminalSession.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/client-runtime/src/state/terminalSession.ts"
+        },
+        {
+          "path": "apps/mobile/src/features/terminal/terminalOutputWriter.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/features/terminal/terminalOutputWriter.ts"
+        }
+      ]
+    },
+    {
+      "id": "C14",
+      "name": "Attachments and media",
+      "upstream_user_outcome": "Images, camera/share input, files, large pasted text, audio/video, PDF, tables, archives, supported Office formats and SQLite viewer.",
+      "rust_requirement": "Rust media/document pipeline where practical, OS decoders/viewers and browser components where required, bounded bytes/caches, cancellation and source-owned access grants.",
+      "sources": [
+        {
+          "path": "docs/user/composer.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/composer.md"
+        },
+        {
+          "path": "apps/web/src/components/files/FilePreviewPanel.tsx",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/components/files/FilePreviewPanel.tsx"
+        }
+      ]
+    },
+    {
+      "id": "C15",
+      "name": "Voice",
+      "upstream_user_outcome": "Draft dictation and annotation; selected on-device/environment/cloud destination, permissions, review before send, captured selection, cleanup and cancellation.",
+      "rust_requirement": "Rust capture/session core plus Apple/Android/audio/model/provider adapters. Preserve explicit destination selection and concurrent-draft protection.",
+      "sources": [
+        {
+          "path": "docs/user/voice-input.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/voice-input.md"
+        },
+        {
+          "path": "packages/contracts/src/speech.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/speech.ts"
+        }
+      ]
+    },
+    {
+      "id": "C16",
+      "name": "SnapShot",
+      "upstream_user_outcome": "OS screen capture and permissions, global shortcut routing, capture animation/selection, clipboard/context attachment and suppressed shortcuts.",
+      "rust_requirement": "Native capture/permission/window/shortcut adapters; preserve target workspace and attachment ownership. Detailed capture implementation remains an audit gap.",
+      "sources": [
+        {
+          "path": "docs/user/snap-shot.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/snap-shot.md"
+        },
+        {
+          "path": "packages/contracts/src/ipc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/ipc.ts"
+        }
+      ]
+    },
+    {
+      "id": "C17",
+      "name": "Interactive HTML and MCP Apps",
+      "upstream_user_outcome": "Self-contained scripted HTML replies on all clients, theme/fullscreen/zoom, embedded attachments, MCP app tool calls and thread messages with existing approval scope.",
+      "rust_requirement": "Keep a real browser sandbox and app bridge, implemented from Rust-owned host logic. Native drawing alone cannot execute these user capabilities.",
+      "sources": [
+        {
+          "path": "docs/user/html-renders.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/html-renders.md"
+        }
+      ]
+    },
+    {
+      "id": "C18",
+      "name": "Browser preview",
+      "upstream_user_outcome": "Environment-owned browser tabs, local desktop rendering of remote-loopback sites, streamed remote tabs, mobile local WebView, user/agent control, popups/files/clipboard/annotations.",
+      "rust_requirement": "Browser-engine/OS-WebView host, per-environment storage and tunnel routing, visible-tab stream scheduling, input ownership and security boundaries.",
+      "sources": [
+        {
+          "path": "docs/user/remote-access.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/remote-access.md"
+        },
+        {
+          "path": "packages/contracts/src/ipc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/ipc.ts"
+        },
+        {
+          "path": "apps/desktop/src/preview/DesktopBrowserHost.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/desktop/src/preview/DesktopBrowserHost.ts"
+        }
+      ]
+    },
+    {
+      "id": "C19",
+      "name": "Device preview",
+      "upstream_user_outcome": "iOS simulator/Android device discovery and streamed interaction, setup/download, screenshot/recording, picture in picture and agent access gating.",
+      "rust_requirement": "Rust orchestration plus device SDK/codec/OS UI adapters, exact visible-session lifetime and input/permission behavior.",
+      "sources": [
+        {
+          "path": "docs/user/devices.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/devices.md"
+        },
+        {
+          "path": "packages/contracts/src/device.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/device.ts"
+        }
+      ]
+    },
+    {
+      "id": "C20",
+      "name": "Remote environment operations",
+      "upstream_user_outcome": "SSH setup and credentials, Tailscale/LAN, WSL runtime and path handling, linked environment grants, external editors, provider management on correct host.",
+      "rust_requirement": "Rust host services and platform adapters with preserved host ownership, access choices, callback/shell quoting and failure behavior.",
+      "sources": [
+        {
+          "path": "docs/user/remote-access.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/remote-access.md"
+        },
+        {
+          "path": "packages/contracts/src/ipc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/ipc.ts"
+        },
+        {
+          "path": "docs/user/install.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/install.md"
+        }
+      ]
+    },
+    {
+      "id": "C21",
+      "name": "Offline and local persistence",
+      "upstream_user_outcome": "Mobile cached shell/history/PR data, drafts/outbox/attachment files, browser IDB/localStorage, encrypted catalogs and client trust changes.",
+      "rust_requirement": "Shared Rust schemas/state transitions, distinct platform durable stores and key management; migrate existing state atomically and preserve offline edits, not just server records.",
+      "sources": [
+        {
+          "path": "docs/user/composer.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/composer.md"
+        },
+        {
+          "path": "docs/user/source-control.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/source-control.md"
+        }
+      ]
+    },
+    {
+      "id": "C22",
+      "name": "Notifications and background activity",
+      "upstream_user_outcome": "Push completion/failure/approval alerts, quiet foreground behavior, thread deep links, iOS Live Activities/widgets and Android ongoing/live status.",
+      "rust_requirement": "Native APNs/FCM/system-extension/background adapters with account/environment scoping. Background restrictions and widget lifecycles are product requirements.",
+      "sources": [
+        {
+          "path": "docs/user/mobile-notifications.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/mobile-notifications.md"
+        },
+        {
+          "path": "apps/mobile/app.config.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/app.config.ts"
+        }
+      ]
+    },
+    {
+      "id": "C23",
+      "name": "Accessibility and text input",
+      "upstream_user_outcome": "Logical F6 focus cycling, roving keyboard navigation, shortcut precedence, context menus, screen-reader chip actions, reduced motion, CJK and mixed Unicode.",
+      "rust_requirement": "DOM semantics for web plus native accessibility/text APIs for every native renderer. Preserve selection/caret/IME/focus, not merely visual parity.",
+      "sources": [
+        {
+          "path": "docs/user/keyboard-focus.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/keyboard-focus.md"
+        },
+        {
+          "path": "docs/user/keybindings.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/keybindings.md"
+        },
+        {
+          "path": "apps/mobile/modules/t3-composer-editor/ios/T3ComposerEditorView.swift",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/modules/t3-composer-editor/ios/T3ComposerEditorView.swift"
+        }
+      ]
+    },
+    {
+      "id": "C24",
+      "name": "Preferences, policy and diagnostics",
+      "upstream_user_outcome": "Extensive per-client/per-environment settings, provider accounts, theme/language/keybindings, permissions, storage tools, diagnostics and managed policy.",
+      "rust_requirement": "Typed configuration ownership and policy locks, locale catalogs, migration, recoverable settings forms and privacy-aware diagnostics. Each settings route remains in acceptance scope.",
+      "sources": [
+        {
+          "path": "apps/web/src/routes/__root.tsx",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/routes/__root.tsx"
+        },
+        {
+          "path": "apps/mobile/src/Stack.tsx",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/Stack.tsx"
+        },
+        {
+          "path": "packages/contracts/src/ipc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/ipc.ts"
+        }
+      ]
+    },
+    {
+      "id": "C25",
+      "name": "CLI human and machine interface",
+      "upstream_user_outcome": "Default/start/serve, project/thread control, pair/auth, environment, browser setup, service/update/install/uninstall, connect/up/status, doctor/theme/trace/policy/triage and private helpers.",
+      "rust_requirement": "Rust argument parsing and services with stable command names, JSON/stdout/stderr, stdin, TTY/color, exit and hidden-helper protocols.",
+      "sources": [
+        {
+          "path": "apps/server/src/cli/thread.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/cli/thread.ts"
+        },
+        {
+          "path": "apps/server/src/cli/sshHelper.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/cli/sshHelper.ts"
+        },
+        {
+          "path": "apps/server/src/cli/updateProgress.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/cli/updateProgress.ts"
+        }
+      ]
+    },
+    {
+      "id": "C26",
+      "name": "Desktop shell integration",
+      "upstream_user_outcome": "Native folders/files/context menus, external URLs, file drag, system permissions, native encrypted credentials, window activation, PATH and WSL integration.",
+      "rust_requirement": "Rust desktop host replaces Electron glue while retaining platform-specific behaviors. Windows, Wayland/X11 and macOS need separate acceptance.",
+      "sources": [
+        {
+          "path": "packages/contracts/src/ipc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/ipc.ts"
+        },
+        {
+          "path": "docs/user/install.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/install.md"
+        }
+      ]
+    },
+    {
+      "id": "C27",
+      "name": "Updates and crash recovery",
+      "upstream_user_outcome": "Desktop/CLI release channels and update rollback; mobile compatible OTA, safe reload after durable drafts/outbox, background timing and restart diagnostics.",
+      "rust_requirement": "Rust updater/launcher with coherent owned-state backup and rollback plus native mobile packaging/update design. Native binary replacement cannot simply inherit JS OTA semantics.",
+      "sources": [
+        {
+          "path": "docs/user/updating.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/updating.md"
+        },
+        {
+          "path": "docs/operations/release.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/operations/release.md"
+        },
+        {
+          "path": "apps/mobile/src/features/updates/app-updates.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/features/updates/app-updates.ts"
+        },
+        {
+          "path": "apps/desktop/src/updates/updateMachine.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/desktop/src/updates/updateMachine.ts"
+        }
+      ]
+    },
+    {
+      "id": "C28",
+      "name": "Guest collaboration",
+      "upstream_user_outcome": "Time-limited guest browser links, recent read-only history, guest requests awaiting owner dispatch, attachment limits, revoke/archive/unlink termination.",
+      "rust_requirement": "Rust authorization/guest state plus web guest UI, request delivery and owner controls. Retain scoping and explicit owner approval.",
+      "sources": [
+        {
+          "path": "docs/user/guest-links.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/guest-links.md"
+        }
+      ]
+    },
+    {
+      "id": "C29",
+      "name": "Compatibility and external formats",
+      "upstream_user_outcome": "Provider-native SQLite/transcripts, external SDK state, arbitrary user websites and HTML/JS apps, OS protocols, legacy install/runtime state.",
+      "rust_requirement": "Rust-owned implementations use documented adapters. Preserve external formats and permissions; a Rust product does not authorize rewriting provider-owned databases or the browser engine.",
+      "sources": [
+        {
+          "path": "docs/user/browser-import.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/browser-import.md"
+        },
+        {
+          "path": "docs/user/install.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/install.md"
+        }
+      ]
+    },
+    {
+      "id": "C30",
+      "name": "Documentation and support",
+      "upstream_user_outcome": "User setup/action docs, provider and remote troubleshooting, operational deployment/signing/release runbooks, legal/security routes and schema/document discovery.",
+      "rust_requirement": "Preserve and update docs alongside behavior. Documentation and generated HTML are deliverables; deleting them is not a language migration.",
+      "sources": [
+        {
+          "path": "docs/user/install.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/install.md"
+        },
+        {
+          "path": "docs/operations/connect-setup.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/operations/connect-setup.md"
+        },
+        {
+          "path": "docs/operations/release.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/operations/release.md"
+        },
+        {
+          "path": "apps/marketing/src/layouts/Layout.astro",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/marketing/src/layouts/Layout.astro"
+        }
+      ]
+    }
+  ]
+}

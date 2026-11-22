@@ -1,0 +1,150 @@
+{
+  "revision": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "status": "Selected presence checks at pinned revision; not full implementation review",
+  "checks": [
+    {
+      "path": "apps/desktop/src/ipc/methods/window.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "c6ad0bef18c81e631649debef5decc21b57ced1e",
+      "matches": [
+        {
+          "line": 440,
+          "text": "const REMOTE_EDITOR_PROBE_CONCURRENCY = 8;"
+        },
+        {
+          "line": 442,
+          "text": "export const probeRemoteEditors = DesktopIpc.makeIpcMethod({"
+        },
+        {
+          "line": 446,
+          "text": "  handler: Effect.fn(\"desktop.ipc.window.probeRemoteEditors\")(function* () {"
+        },
+        {
+          "line": 456,
+          "text": "      { concurrency: REMOTE_EDITOR_PROBE_CONCURRENCY },"
+        }
+      ],
+      "exit": 0
+    },
+    {
+      "path": "apps/web/src/components/files/PdfViewer.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "31faf628fbeb91bece5af85ef95946d2df31f6ce",
+      "matches": [
+        {
+          "line": 86,
+          "text": "    let cancelled = false;"
+        },
+        {
+          "line": 97,
+          "text": "      if (cancelled || !canvas.current || !text.current) {"
+        },
+        {
+          "line": 127,
+          "text": "        if (cancelled || !canvas.current) return;"
+        },
+        {
+          "line": 154,
+          "text": "        if (!cancelled) setLinks(found);"
+        },
+        {
+          "line": 160,
+          "text": "      if (!cancelled)"
+        },
+        {
+          "line": 164,
+          "text": "      cancelled = true;"
+        },
+        {
+          "line": 408,
+          "text": "  const firstMatch = matches[0];"
+        },
+        {
+          "line": 411,
+          "text": "    if (firstMatch !== undefined) jumpToPage(firstMatch);"
+        },
+        {
+          "line": 412,
+          "text": "  }, [firstMatch]);"
+        },
+        {
+          "line": 420,
+          "text": "    let cancelled = false;"
+        },
+        {
+          "line": 435,
+          "text": "          if (cancelled) return;"
+        },
+        {
+          "line": 445,
+          "text": "          // Pages up to the first hit are measured, so its jump lands before the scan finishes."
+        },
+        {
+          "line": 447,
+          "text": "          setMatches([index]);"
+        },
+        {
+          "line": 449,
+          "text": "        if (cancelled) return;"
+        },
+        {
+          "line": 454,
+          "text": "          if (!cancelled)"
+        },
+        {
+          "line": 458,
+          "text": "          if (!cancelled) setFinding(false);"
+        },
+        {
+          "line": 462,
+          "text": "      cancelled = true;"
+        }
+      ],
+      "exit": 0
+    },
+    {
+      "path": "packages/client-runtime/src/state/serverConfigProjection.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "5c04a704c2a5be4e5e810c4f1827f2ab582b3d58",
+      "matches": [
+        {
+          "line": 74,
+          "text": "function withHeldProviderCatalogs("
+        },
+        {
+          "line": 80,
+          "text": "    if (provider.catalogDigest === undefined || provider.loadedCatalogDigest !== undefined) {"
+        },
+        {
+          "line": 112,
+          "text": "        providers: withHeldProviderCatalogs("
+        },
+        {
+          "line": 137,
+          "text": "    case \"providerStatusDeltas\":"
+        },
+        {
+          "line": 147,
+          "text": "            providers: reuseUnchanged(previous, withHeldProviderCatalogs(previous, providers)),"
+        }
+      ],
+      "exit": 0
+    },
+    {
+      "path": "packages/client-runtime/src/state/terminal.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "572c116a4b7e3393ca1678fef10d130a594950d1",
+      "matches": [
+        {
+          "line": 2,
+          "text": "  DEFAULT_MAX_TERMINAL_BUFFER_BYTES,"
+        },
+        {
+          "line": 100,
+          "text": "            maxHistoryBytes: DEFAULT_MAX_TERMINAL_BUFFER_BYTES,"
+        }
+      ],
+      "exit": 0
+    }
+  ]
+}

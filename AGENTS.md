@@ -7,6 +7,14 @@ code, including TypeScript, JavaScript, HTML, CSS and platform code, until its
 replacement runs in the real application and passes the affected platform gates.
 Never delete a capability to increase the Rust percentage.
 
+For full-system Rust implementation, start with
+[the implementation guide](docs/porting/full-system/README.md). It maps the complete
+product to dependency-ordered work, production owners, upstream comparisons and
+end-to-end acceptance. Keep actual port/platform status in port-map.json and
+revision/qualification identity in the existing lock and receipt records. The
+research candidates and static work packages do not establish implementation or
+acceptance.
+
 The production application lives in apps/, packages/, native/ and infra/ alongside
 the root Cargo workspace and temporary pnpm workspace. Keep unported files at their
 upstream paths. Place new Rust in its owning application or package. Existing crates/
@@ -116,3 +124,4 @@ or add speculative attribution comments. Carry this rule into worker handoffs.
 - Own generated output through completion/failure/cancellation. Retain source/history, a current deliverable, one useful rollback and concise hashes/logs. Remove disposable targets, dependencies and staging after checking actual processes, descriptors, mounts and Cargo locks; record available-space change. Do not clean another owner's scope.
 - Do not resume unrelated work, schedules or agents to perform housekeeping. Preserve source revisions, first failures, receipts and rollback boundaries.
 - Do not publish, deploy, rename repositories, rewrite history or change visibility/license unless the user has authorized that exact scope. Do not send messages to others without authorization.
+

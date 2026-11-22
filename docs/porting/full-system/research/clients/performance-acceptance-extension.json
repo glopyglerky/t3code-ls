@@ -1,0 +1,195 @@
+{
+  "revision": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "status": "Proposed, not measured",
+  "journeys": [
+    {
+      "id": 34,
+      "name": "Discover and install",
+      "conditions": "Open localized home/download pages on mobile and desktop; stable/nightly release selection, API unavailable, reduced motion, keyboard-only and no app runtime.",
+      "acceptance": "Time to readable useful content and correct download action; correct OS/architecture/store, locale/SEO links and graceful release lookup fallback. Measure total transfer and main-thread work, not just WASM render time.",
+      "capabilities": "C01 C02 C30"
+    },
+    {
+      "id": 35,
+      "name": "First native desktop launch",
+      "conditions": "Clean profile and migrated mature profile; local or remote-only mode; provider installed/missing; authenticated/unpaired; preview not yet opened.",
+      "acceptance": "Launch-to-window, launch-to-interactive composer, authoritative workspace ready; process count, peak/retained RSS and startup CPU. Keep cached paint separate from usable authenticated state.",
+      "capabilities": "C02 C03 C04 C26"
+    },
+    {
+      "id": 36,
+      "name": "First browser session",
+      "conditions": "Hosted app, local server and guest link; browser cache cold/warm; slow CPU/network; auth callback and deep link.",
+      "acceptance": "Time to useful and interactive page, asset bytes, parse/compile work, pairing/account correctness, route restoration. A native desktop result cannot substitute for web acceptance.",
+      "capabilities": "C03 C04 C28"
+    },
+    {
+      "id": 37,
+      "name": "Type and compose under load",
+      "conditions": "Several streaming threads; 120k-character draft where supported; CJK marked text, emoji/combining marks, mixed direction, rich chips and suggestions.",
+      "acceptance": "Key/composition-to-paint p50/p95/p99 and longest stall; caret, selection, exact Markdown source, undo and accessibility parity. No accidental send during composition.",
+      "capabilities": "C06 C07 C23"
+    },
+    {
+      "id": 38,
+      "name": "Rich paste and file drop",
+      "conditions": "Small/large text, multi-image paste, custom-reference MIME, cross-environment thread reference, native folder drop, app share/camera input.",
+      "acceptance": "Time to editable/visible result and retained bytes; preserve source/context identity, upload progress, size limits and folder-versus-file semantics. Typing must remain responsive.",
+      "capabilities": "C07 C14 C26"
+    },
+    {
+      "id": 39,
+      "name": "Stream and scroll a long conversation",
+      "conditions": "Long code, math, tables, Mermaid, citations, huge single messages, growing last block, history folded/unfolded; user reads old messages while new data arrives.",
+      "acceptance": "Arrival-to-visible text, frame-time tails, scroll-anchor error, CPU and allocations; no forced follow-end, duplicated rows, incorrect source offsets or stale selection.",
+      "capabilities": "C06 C08 C23"
+    },
+    {
+      "id": 40,
+      "name": "Switch and return to work",
+      "conditions": "Many threads/environments, draft-to-thread transition, modal/settings overlays, native navigation back, reconnect with a catch-up burst.",
+      "acceptance": "Time to stable visible destination and interactive editor; preserve draft, selection, scroll, route and focus; bounded mount/layout/update counts. Do not step through obsolete catch-up states.",
+      "capabilities": "C04 C05 C06 C21"
+    },
+    {
+      "id": 41,
+      "name": "Review a large diff",
+      "conditions": "Many small files, a giant file/line, Unicode/tabs, split/unified view, expand/collapse, file filter, find and comment while changes arrive.",
+      "acceptance": "First useful viewport, scroll/jump/search latency, frame tails and memory; line/anchor correctness, viewed state and cancellation. Preserve existing worker and native-layout advantages.",
+      "capabilities": "C09 C10 C11"
+    },
+    {
+      "id": 42,
+      "name": "Edit and save a file",
+      "conditions": "Large file, rapid changes, save echoed from server, external change, grant revoked, remote environment or readonly external file.",
+      "acceptance": "Edit-to-paint and save-to-confirmation; no editor reset on an echo, correct conflict/readonly outcome, retained unsaved edits and stable selection.",
+      "capabilities": "C09 C20"
+    },
+    {
+      "id": 43,
+      "name": "Run Git and worktree actions",
+      "conditions": "Create/switch isolated task, multi-repo project, branch picker, commit/review, external editor, status changes while view remains open.",
+      "acceptance": "Click-to-usable status and operation completion, process count and filesystem work; same safety, worktree ownership and error/confirmation behavior. Measure warm unchanged refs separately.",
+      "capabilities": "C10 C20"
+    },
+    {
+      "id": 44,
+      "name": "Complete PR/issue review",
+      "conditions": "Cached and uncached list, intent prefetch, comments/review drafts, labels/reactions, guide and checks, offline return; each supported host capability.",
+      "acceptance": "Time to usable content and immediate mutation feedback, authoritative completion and rollback; correct host/account routing and no duplicate uncertain action.",
+      "capabilities": "C11 C21"
+    },
+    {
+      "id": 45,
+      "name": "Interactive terminal during contention",
+      "conditions": "PTY output bursts, full-screen app, large retained history, chat/diff/media activity, keyboard/mouse/IME, resize/DPI, selection/copy.",
+      "acceptance": "Input-to-echo and output-to-pixels p50/p95/p99, frames/CPU/RSS and protocol correctness. Preserve terminal mode, query reply routing and alternative screen behavior.",
+      "capabilities": "C12 C13"
+    },
+    {
+      "id": 46,
+      "name": "Reconnect and recover terminal",
+      "conditions": "Slow link, missing/stopped terminal, server restart, disconnect inside multibyte/control sequence, partial native write rejection.",
+      "acceptance": "Attach-to-correct-screen, bytes, recovery time and replay count; exact bounded output/order and no spinning retry, corrupted parser state or unintended shell restart.",
+      "capabilities": "C12 C13"
+    },
+    {
+      "id": 47,
+      "name": "Open and search media/documents",
+      "conditions": "PDF many pages/large text, images/HEIC/TIFF where supported, audio/video, archives, CSV/TSV, Office and SQLite attachment.",
+      "acceptance": "Time to first page/frame/table and first search hit, decode CPU/peak RSS; bounded fetch/cache, format limits, cancellation and correct readonly source behavior. Total scan completion is separate.",
+      "capabilities": "C14"
+    },
+    {
+      "id": 48,
+      "name": "Dictate into an existing draft",
+      "conditions": "On-device and selected environment/cloud paths; microphone denial/loss, app background, concurrent editing, cancel/cleanup and failed destination.",
+      "acceptance": "Capture-start and stop-to-editable-transcript latency, energy, draft preservation and explicit destination/consent. No automatic send or silent fallback host.",
+      "capabilities": "C15 C07"
+    },
+    {
+      "id": 49,
+      "name": "Capture and attach SnapShot",
+      "conditions": "Global shortcut from another app, permission allowed/denied, capture cancellation, several workspaces, text/image capture paths.",
+      "acceptance": "Shortcut-to-overlay, capture-to-ready-context and focus restoration; correct target workspace, privacy and clipboard semantics. Detailed native capture parity needs separate validation.",
+      "capabilities": "C16 C26"
+    },
+    {
+      "id": 50,
+      "name": "Use browser preview",
+      "conditions": "Local and remote environments, streamed tab and local remote-loopback rendering, mobile WebView, take/release control, file picker/download/popups, network loss.",
+      "acceptance": "Input-to-visible-page response, frame latency/bitrate, CPU/RSS/energy; exact origin/tunnel/storage and ownership behavior. Only intended visible streams run; browser engine startup is included.",
+      "capabilities": "C18 C20"
+    },
+    {
+      "id": 51,
+      "name": "Use an HTML reply or MCP App",
+      "conditions": "Scripted chart/form, theme change, resize/fullscreen, tool invocation requiring approval, message posting, navigation and malicious/untrusted resource attempts.",
+      "acceptance": "Time to interactive widget and tool round trip; sandbox, scoped app bridge, user-gesture rules and state lifecycle. Static screenshots or disabled scripting do not satisfy parity.",
+      "capabilities": "C17"
+    },
+    {
+      "id": 52,
+      "name": "Control a simulator or device",
+      "conditions": "iOS/Android supported devices; discover/setup, stream touch/keyboard, screenshot/recording, visible/background/PIP, agent permission denied.",
+      "acceptance": "Discovery-to-useful-preview and input-to-frame; steady CPU/energy/bitrate, correct visible-session and permission ownership. Closing preview must have the same device-lifetime effect.",
+      "capabilities": "C19"
+    },
+    {
+      "id": 53,
+      "name": "Use mobile offline and rotate/fold",
+      "conditions": "Restart offline with cached work, queued drafts/files, phone/tablet/fold, keyboard attach/detach, orientation, low-memory recreation.",
+      "acceptance": "Time to useful offline screen, navigation/scroll stability, retained drafts and convergence on reconnect. Measure native allocations and retained invisible views.",
+      "capabilities": "C05 C21"
+    },
+    {
+      "id": 54,
+      "name": "Receive background activity and return",
+      "conditions": "Push completion/failure/approval, foreground silence, notification tap, widget/live activity update, account signout/removal, OS process death.",
+      "acceptance": "Delivery-to-visible alert and tap-to-correct-thread, energy/background network; correct permissions, account scope, widget expiry and no live connection requirement added.",
+      "capabilities": "C22 C03"
+    },
+    {
+      "id": 55,
+      "name": "Navigate with accessibility tools",
+      "conditions": "Keyboard-only F6/Shift-F6, browser modifier variant, roving lists, dialogs/palette/model picker; VoiceOver/TalkBack/native screen readers, reduced motion and text scaling.",
+      "acceptance": "Correct focus order/return, labels/actions/selection and shortcuts without interception conflicts; interaction latency and readable layout. Rendering speed cannot excuse missing semantics.",
+      "capabilities": "C23 C05"
+    },
+    {
+      "id": 56,
+      "name": "Change locale, theme and settings",
+      "conditions": "Large settings/provider lists, appearance/locale changes, theme import, policy-locked choices, reconnect or server settings update while editor open.",
+      "acceptance": "Visible change and interactive latency, stable forms/caches, correct scoped settings and locks. Font shaping, contrast and native theme consistency remain acceptance requirements.",
+      "capabilities": "C24 C23"
+    },
+    {
+      "id": 57,
+      "name": "Automate through CLI",
+      "conditions": "Piped stdin '-', JSON/token-only output, --wait success/failure/needs-input, slow provider, TTY/non-TTY/NO_COLOR, SSH device login, interrupted command.",
+      "acceptance": "Process-start-to-result and running-server RPC latency, valid uncontaminated stdout, documented exit statuses and progress on correct stream. Capture child/signal behavior before reproducing it.",
+      "capabilities": "C25 C03"
+    },
+    {
+      "id": 58,
+      "name": "Install/update/uninstall every owned package",
+      "conditions": "Supported desktop OS/architecture, standalone CLI, WSL, package-manager ownership, mobile store/test builds; interrupted download, signature/checksum error, unrelated existing t3 command.",
+      "acceptance": "Verified install/update-to-ready, download/extract bytes, downtime and recovery; preserve state/credentials, launcher ownership, platform signing, safe rollback and documented uninstall scope.",
+      "capabilities": "C02 C26 C27"
+    },
+    {
+      "id": 59,
+      "name": "Return from auth or a shared link",
+      "conditions": "Desktop/browser/mobile OAuth and passkey callbacks, CLI headless device flow, thread/guest links, expired/revoked link, unknown environment.",
+      "acceptance": "Time to authorized correct destination, no trust/confused-host regression, recoverable errors, no duplicate onboarding or lost queued draft. Separate external IdP latency from T3-owned overhead.",
+      "capabilities": "C03 C04 C28"
+    },
+    {
+      "id": 60,
+      "name": "Complete a cross-device working day",
+      "conditions": "Discover/install → link host → code/terminal/PR → move to phone offline → receive approval → reconnect → preview/voice → update/reopen, with large aged state.",
+      "acceptance": "Weighted task completion, worst-tail interaction, total CPU/RSS/network/storage/energy and recovery. Report every journey separately; aggregate improvement cannot hide a broken capability.",
+      "capabilities": "All"
+    }
+  ]
+}

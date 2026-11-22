@@ -1,0 +1,2080 @@
+{
+  "revision": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "migration_files": [
+    {
+      "path": "apps/server/src/persistence/Migrations/001_OrchestrationEvents.ts",
+      "git_blob_sha": "b547dc1bc627c7a325fb8cf432156274b4f1a15a",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/001_OrchestrationEvents.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE TABLE IF NOT EXISTS orchestration_events (\n      sequence INTEGER PRIMARY KEY AUTOINCREMENT,\n      event_id TEXT NOT NULL UNIQUE,\n      aggregate_kind TEXT NOT NULL,\n      stream_id TEXT NOT NULL,\n      stream_version INTEGER NOT NULL,\n      event_type TEXT NOT NULL,\n      occurred_at TEXT NOT NULL,\n      command_id TEXT,\n      causation_event_id TEXT,\n      correlation_id TEXT,\n      actor_kind TEXT NOT NULL,\n      payload_json TEXT NOT NULL,\n      metadata_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 26,
+          "sql_template": "CREATE UNIQUE INDEX IF NOT EXISTS idx_orch_events_stream_version\n    ON orchestration_events(aggregate_kind, stream_id, stream_version)"
+        },
+        {
+          "line": 31,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_orch_events_stream_sequence\n    ON orchestration_events(aggregate_kind, stream_id, sequence)"
+        },
+        {
+          "line": 36,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_orch_events_command_id\n    ON orchestration_events(command_id)"
+        },
+        {
+          "line": 41,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_orch_events_correlation_id\n    ON orchestration_events(correlation_id)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/002_OrchestrationCommandReceipts.ts",
+      "git_blob_sha": "4e545d5e6606618759016bc91c12d8c0315ed3d6",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/002_OrchestrationCommandReceipts.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE TABLE IF NOT EXISTS orchestration_command_receipts (\n      command_id TEXT PRIMARY KEY,\n      aggregate_kind TEXT NOT NULL,\n      aggregate_id TEXT NOT NULL,\n      accepted_at TEXT NOT NULL,\n      result_sequence INTEGER NOT NULL,\n      status TEXT NOT NULL,\n      error TEXT\n    )"
+        },
+        {
+          "line": 20,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_orch_command_receipts_aggregate\n    ON orchestration_command_receipts(aggregate_kind, aggregate_id)"
+        },
+        {
+          "line": 25,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_orch_command_receipts_sequence\n    ON orchestration_command_receipts(result_sequence)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/003_CheckpointDiffBlobs.ts",
+      "git_blob_sha": "0f9078a3f68253bc40bd4a5d8e625792d6861bdd",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/003_CheckpointDiffBlobs.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE TABLE IF NOT EXISTS checkpoint_diff_blobs (\n      thread_id TEXT NOT NULL,\n      from_turn_count INTEGER NOT NULL,\n      to_turn_count INTEGER NOT NULL,\n      diff TEXT NOT NULL,\n      created_at TEXT NOT NULL,\n      UNIQUE (thread_id, from_turn_count, to_turn_count)\n    )"
+        },
+        {
+          "line": 19,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_checkpoint_diff_blobs_thread_to_turn\n    ON checkpoint_diff_blobs(thread_id, to_turn_count)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/004_ProviderSessionRuntime.ts",
+      "git_blob_sha": "9aebc2a4e71be6b2bfdd7d46d3c5ea37d9501c82",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/004_ProviderSessionRuntime.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE TABLE IF NOT EXISTS provider_session_runtime (\n      thread_id TEXT PRIMARY KEY,\n      provider_name TEXT NOT NULL,\n      adapter_key TEXT NOT NULL,\n      runtime_mode TEXT NOT NULL DEFAULT 'full-access',\n      status TEXT NOT NULL,\n      last_seen_at TEXT NOT NULL,\n      resume_cursor_json TEXT,\n      runtime_payload_json TEXT\n    )"
+        },
+        {
+          "line": 21,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_provider_session_runtime_status\n    ON provider_session_runtime(status)"
+        },
+        {
+          "line": 26,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_provider_session_runtime_provider\n    ON provider_session_runtime(provider_name)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/005_Projections.ts",
+      "git_blob_sha": "7c27ba44a4967e9322d3b86ace1040189eefe762",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/005_Projections.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE TABLE IF NOT EXISTS projection_projects (\n      project_id TEXT PRIMARY KEY,\n      title TEXT NOT NULL,\n      workspace_root TEXT NOT NULL,\n      default_model TEXT,\n      scripts_json TEXT NOT NULL,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      deleted_at TEXT\n    )"
+        },
+        {
+          "line": 21,
+          "sql_template": "CREATE TABLE IF NOT EXISTS projection_threads (\n      thread_id TEXT PRIMARY KEY,\n      project_id TEXT NOT NULL,\n      title TEXT NOT NULL,\n      model TEXT NOT NULL,\n      branch TEXT,\n      worktree_path TEXT,\n      latest_turn_id TEXT,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      deleted_at TEXT\n    )"
+        },
+        {
+          "line": 36,
+          "sql_template": "CREATE TABLE IF NOT EXISTS projection_thread_messages (\n      message_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      turn_id TEXT,\n      role TEXT NOT NULL,\n      text TEXT NOT NULL,\n      is_streaming INTEGER NOT NULL,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 49,
+          "sql_template": "CREATE TABLE IF NOT EXISTS projection_thread_activities (\n      activity_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      turn_id TEXT,\n      tone TEXT NOT NULL,\n      kind TEXT NOT NULL,\n      summary TEXT NOT NULL,\n      payload_json TEXT NOT NULL,\n      created_at TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 62,
+          "sql_template": "CREATE TABLE IF NOT EXISTS projection_thread_sessions (\n      thread_id TEXT PRIMARY KEY,\n      status TEXT NOT NULL,\n      provider_name TEXT,\n      provider_session_id TEXT,\n      provider_thread_id TEXT,\n      active_turn_id TEXT,\n      last_error TEXT,\n      updated_at TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 75,
+          "sql_template": "CREATE TABLE IF NOT EXISTS projection_turns (\n      row_id INTEGER PRIMARY KEY AUTOINCREMENT,\n      thread_id TEXT NOT NULL,\n      turn_id TEXT,\n      pending_message_id TEXT,\n      assistant_message_id TEXT,\n      state TEXT NOT NULL,\n      requested_at TEXT NOT NULL,\n      started_at TEXT,\n      completed_at TEXT,\n      checkpoint_turn_count INTEGER,\n      checkpoint_ref TEXT,\n      checkpoint_status TEXT,\n      checkpoint_files_json TEXT NOT NULL,\n      UNIQUE (thread_id, turn_id),\n      UNIQUE (thread_id, checkpoint_turn_count)\n    )"
+        },
+        {
+          "line": 95,
+          "sql_template": "CREATE TABLE IF NOT EXISTS projection_pending_approvals (\n      request_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      turn_id TEXT,\n      status TEXT NOT NULL,\n      decision TEXT,\n      created_at TEXT NOT NULL,\n      resolved_at TEXT\n    )"
+        },
+        {
+          "line": 107,
+          "sql_template": "CREATE TABLE IF NOT EXISTS projection_state (\n      projector TEXT PRIMARY KEY,\n      last_applied_sequence INTEGER NOT NULL,\n      updated_at TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 115,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_projects_updated_at\n    ON projection_projects(updated_at)"
+        },
+        {
+          "line": 120,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_threads_project_id\n    ON projection_threads(project_id)"
+        },
+        {
+          "line": 125,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_thread_messages_thread_created\n    ON projection_thread_messages(thread_id, created_at)"
+        },
+        {
+          "line": 130,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_thread_activities_thread_created\n    ON projection_thread_activities(thread_id, created_at)"
+        },
+        {
+          "line": 135,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_thread_sessions_provider_session\n    ON projection_thread_sessions(provider_session_id)"
+        },
+        {
+          "line": 140,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_turns_thread_requested\n    ON projection_turns(thread_id, requested_at)"
+        },
+        {
+          "line": 145,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_turns_thread_checkpoint_completed\n    ON projection_turns(thread_id, checkpoint_turn_count, completed_at)"
+        },
+        {
+          "line": 150,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_pending_approvals_thread_status\n    ON projection_pending_approvals(thread_id, status)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/006_ProjectionThreadSessionRuntimeModeColumns.ts",
+      "git_blob_sha": "9198198872da51ff3a57092897f28950264298fd",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/006_ProjectionThreadSessionRuntimeModeColumns.ts",
+      "ddl": [
+        {
+          "line": 10,
+          "sql_template": "ALTER TABLE projection_thread_sessions\n      ADD COLUMN runtime_mode TEXT NOT NULL DEFAULT 'full-access'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/007_ProjectionThreadMessageAttachments.ts",
+      "git_blob_sha": "679259bfdf72ebfea1c99c48aec4924edf620bdf",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/007_ProjectionThreadMessageAttachments.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "ALTER TABLE projection_thread_messages\n    ADD COLUMN attachments_json TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/008_ProjectionThreadActivitySequence.ts",
+      "git_blob_sha": "299a7fb82f086e4b8417842cc111c78cd5571a46",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/008_ProjectionThreadActivitySequence.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "ALTER TABLE projection_thread_activities\n    ADD COLUMN sequence INTEGER"
+        },
+        {
+          "line": 13,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_thread_activities_thread_sequence\n    ON projection_thread_activities(thread_id, sequence)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/009_ProviderSessionRuntimeMode.ts",
+      "git_blob_sha": "82aa5df871b8f3452d4677d4c841b862fbbd1d30",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/009_ProviderSessionRuntimeMode.ts",
+      "ddl": []
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/010_ProjectionThreadsRuntimeMode.ts",
+      "git_blob_sha": "a0c2c72f1f846d7b96001f4ce9cbec9f9ecbb2da",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/010_ProjectionThreadsRuntimeMode.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "ALTER TABLE projection_threads\n    ADD COLUMN runtime_mode TEXT NOT NULL DEFAULT 'full-access'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/011_OrchestrationThreadCreatedRuntimeMode.ts",
+      "git_blob_sha": "8387e32f52c217ca4e01017979693c0cf6b4d00a",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/011_OrchestrationThreadCreatedRuntimeMode.ts",
+      "ddl": []
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/012_ProjectionThreadsInteractionMode.ts",
+      "git_blob_sha": "1a49be029b964814de8e8595f0125130d01f6fd6",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/012_ProjectionThreadsInteractionMode.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "ALTER TABLE projection_threads\n    ADD COLUMN interaction_mode TEXT NOT NULL DEFAULT 'default'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/013_ProjectionThreadProposedPlans.ts",
+      "git_blob_sha": "53e25d44b699205cf9b8f7da7f78cf3e9dd53f86",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/013_ProjectionThreadProposedPlans.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE TABLE IF NOT EXISTS projection_thread_proposed_plans (\n      plan_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      turn_id TEXT,\n      plan_markdown TEXT NOT NULL,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 19,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_thread_proposed_plans_thread_created\n    ON projection_thread_proposed_plans(thread_id, created_at)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/014_ProjectionThreadProposedPlanImplementation.ts",
+      "git_blob_sha": "15869b613cbd9d74b0b40f3642cfabd5d0918a1f",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/014_ProjectionThreadProposedPlanImplementation.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "ALTER TABLE projection_thread_proposed_plans\n    ADD COLUMN implemented_at TEXT"
+        },
+        {
+          "line": 13,
+          "sql_template": "ALTER TABLE projection_thread_proposed_plans\n    ADD COLUMN implementation_thread_id TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/015_ProjectionTurnsSourceProposedPlan.ts",
+      "git_blob_sha": "5c9a39d0c56f55d45274332d6659c9a1ad404eeb",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/015_ProjectionTurnsSourceProposedPlan.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "ALTER TABLE projection_turns\n    ADD COLUMN source_proposed_plan_thread_id TEXT"
+        },
+        {
+          "line": 13,
+          "sql_template": "ALTER TABLE projection_turns\n    ADD COLUMN source_proposed_plan_id TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/016_CanonicalizeModelSelections.ts",
+      "git_blob_sha": "f7057be22147973009a61c6881881bef0a0e5f64",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/016_CanonicalizeModelSelections.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "ALTER TABLE projection_projects\n    ADD COLUMN default_model_selection_json TEXT"
+        },
+        {
+          "line": 30,
+          "sql_template": "ALTER TABLE projection_threads\n    ADD COLUMN model_selection_json TEXT"
+        },
+        {
+          "line": 57,
+          "sql_template": "ALTER TABLE projection_projects\n    DROP COLUMN default_model"
+        },
+        {
+          "line": 62,
+          "sql_template": "ALTER TABLE projection_threads\n    DROP COLUMN model"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/017_ProjectionThreadsArchivedAt.ts",
+      "git_blob_sha": "e1c725ec5ecc477c05cdfbf065446afde388e13e",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/017_ProjectionThreadsArchivedAt.ts",
+      "ddl": [
+        {
+          "line": 15,
+          "sql_template": "ALTER TABLE projection_threads\n    ADD COLUMN archived_at TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/018_ProjectionThreadsArchivedAtIndex.ts",
+      "git_blob_sha": "da13b1b4fdd3d3a4af1e59190df6175f0654d2d2",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/018_ProjectionThreadsArchivedAtIndex.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_threads_project_archived_at\n    ON projection_threads(project_id, archived_at)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/019_ProjectionSnapshotLookupIndexes.ts",
+      "git_blob_sha": "27e74082a9c68d7c891bf640b090716962de714f",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/019_ProjectionSnapshotLookupIndexes.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_projects_workspace_root_deleted_at\n    ON projection_projects(workspace_root, deleted_at)"
+        },
+        {
+          "line": 13,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_threads_project_deleted_created\n    ON projection_threads(project_id, deleted_at, created_at)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/020_AuthAccessManagement.ts",
+      "git_blob_sha": "1b7b9a6aa7e14622a71c0e45761617b70b59e5cc",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/020_AuthAccessManagement.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE TABLE IF NOT EXISTS auth_pairing_links (\n      id TEXT PRIMARY KEY,\n      credential TEXT NOT NULL UNIQUE,\n      method TEXT NOT NULL,\n      role TEXT NOT NULL,\n      subject TEXT NOT NULL,\n      created_at TEXT NOT NULL,\n      expires_at TEXT NOT NULL,\n      consumed_at TEXT,\n      revoked_at TEXT\n    )"
+        },
+        {
+          "line": 22,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_auth_pairing_links_active\n    ON auth_pairing_links(revoked_at, consumed_at, expires_at)"
+        },
+        {
+          "line": 27,
+          "sql_template": "CREATE TABLE IF NOT EXISTS auth_sessions (\n      session_id TEXT PRIMARY KEY,\n      subject TEXT NOT NULL,\n      role TEXT NOT NULL,\n      method TEXT NOT NULL,\n      issued_at TEXT NOT NULL,\n      expires_at TEXT NOT NULL,\n      revoked_at TEXT\n    )"
+        },
+        {
+          "line": 39,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_auth_sessions_active\n    ON auth_sessions(revoked_at, expires_at, issued_at)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/021_AuthSessionClientMetadata.ts",
+      "git_blob_sha": "1426208f23ab96e90f777446b24763f83018cb33",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/021_AuthSessionClientMetadata.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE auth_pairing_links\n      ADD COLUMN label TEXT"
+        },
+        {
+          "line": 23,
+          "sql_template": "ALTER TABLE auth_sessions\n      ADD COLUMN client_label TEXT"
+        },
+        {
+          "line": 30,
+          "sql_template": "ALTER TABLE auth_sessions\n      ADD COLUMN client_ip_address TEXT"
+        },
+        {
+          "line": 37,
+          "sql_template": "ALTER TABLE auth_sessions\n      ADD COLUMN client_user_agent TEXT"
+        },
+        {
+          "line": 44,
+          "sql_template": "ALTER TABLE auth_sessions\n      ADD COLUMN client_device_type TEXT NOT NULL DEFAULT 'unknown'"
+        },
+        {
+          "line": 51,
+          "sql_template": "ALTER TABLE auth_sessions\n      ADD COLUMN client_os TEXT"
+        },
+        {
+          "line": 58,
+          "sql_template": "ALTER TABLE auth_sessions\n      ADD COLUMN client_browser TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/022_AuthSessionLastConnectedAt.ts",
+      "git_blob_sha": "9394f2e539b881fc28aaea130a437130f7cb54e0",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/022_AuthSessionLastConnectedAt.ts",
+      "ddl": [
+        {
+          "line": 13,
+          "sql_template": "ALTER TABLE auth_sessions\n      ADD COLUMN last_connected_at TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/023_ProjectionThreadShellSummary.ts",
+      "git_blob_sha": "3a550e943761028c5fe2559f5605351acce670f6",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/023_ProjectionThreadShellSummary.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "ALTER TABLE projection_threads\n    ADD COLUMN latest_user_message_at TEXT"
+        },
+        {
+          "line": 13,
+          "sql_template": "ALTER TABLE projection_threads\n    ADD COLUMN pending_approval_count INTEGER NOT NULL DEFAULT 0"
+        },
+        {
+          "line": 18,
+          "sql_template": "ALTER TABLE projection_threads\n    ADD COLUMN pending_user_input_count INTEGER NOT NULL DEFAULT 0"
+        },
+        {
+          "line": 23,
+          "sql_template": "ALTER TABLE projection_threads\n    ADD COLUMN has_actionable_proposed_plan INTEGER NOT NULL DEFAULT 0"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/024_BackfillProjectionThreadShellSummary.ts",
+      "git_blob_sha": "9be3764e715b273f2d161f32dd09f17b45d89751",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/024_BackfillProjectionThreadShellSummary.ts",
+      "ddl": []
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/025_CleanupInvalidProjectionPendingApprovals.ts",
+      "git_blob_sha": "f15b9d9117054d1ed745041f78d9c6ebd2b8ad6d",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/025_CleanupInvalidProjectionPendingApprovals.ts",
+      "ddl": []
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/026_CanonicalizeModelSelectionOptions.ts",
+      "git_blob_sha": "fb18482f207491e2a0514371576f561da98e9eea",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/026_CanonicalizeModelSelectionOptions.ts",
+      "ddl": []
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/027_ProviderSessionRuntimeInstanceId.ts",
+      "git_blob_sha": "b7c4e56c46f0b3b7e8b55ce3cf029a6a187207e0",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/027_ProviderSessionRuntimeInstanceId.ts",
+      "ddl": [
+        {
+          "line": 13,
+          "sql_template": "ALTER TABLE provider_session_runtime\n      ADD COLUMN provider_instance_id TEXT"
+        },
+        {
+          "line": 19,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_provider_session_runtime_instance\n    ON provider_session_runtime(provider_instance_id)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/028_ProjectionThreadSessionInstanceId.ts",
+      "git_blob_sha": "a84f9786f4c6e78e1a354bc2f3c34a859e48039f",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/028_ProjectionThreadSessionInstanceId.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_thread_sessions\n      ADD COLUMN provider_instance_id TEXT"
+        },
+        {
+          "line": 18,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_thread_sessions_instance\n    ON projection_thread_sessions(provider_instance_id)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/029_ProjectionThreadDetailOrderingIndexes.ts",
+      "git_blob_sha": "29691fa11b2d85b7237671124df7fa7688750380",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/029_ProjectionThreadDetailOrderingIndexes.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_thread_activities_thread_sequence_created_id\n    ON projection_thread_activities(thread_id, sequence, created_at, activity_id)"
+        },
+        {
+          "line": 13,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_thread_messages_thread_created_id\n    ON projection_thread_messages(thread_id, created_at, message_id)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/030_ProjectionThreadShellArchiveIndexes.ts",
+      "git_blob_sha": "95fab43eef5fdcc8f2477452d2f8c750d4dc01e9",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/030_ProjectionThreadShellArchiveIndexes.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_threads_shell_active\n    ON projection_threads(deleted_at, archived_at, project_id, created_at, thread_id)"
+        },
+        {
+          "line": 13,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_threads_shell_archived\n    ON projection_threads(deleted_at, archived_at, project_id, thread_id)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/031_AuthAuthorizationScopes.ts",
+      "git_blob_sha": "b9f23fd1daeb8c6a5fe2bd9ae4d30c290fcf723b",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/031_AuthAuthorizationScopes.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "DROP TABLE IF EXISTS auth_pairing_links"
+        },
+        {
+          "line": 9,
+          "sql_template": "DROP TABLE IF EXISTS auth_sessions"
+        },
+        {
+          "line": 12,
+          "sql_template": "CREATE TABLE auth_pairing_links (\n      id TEXT PRIMARY KEY,\n      credential TEXT NOT NULL UNIQUE,\n      method TEXT NOT NULL,\n      scopes TEXT NOT NULL,\n      subject TEXT NOT NULL,\n      label TEXT,\n      created_at TEXT NOT NULL,\n      expires_at TEXT NOT NULL,\n      consumed_at TEXT,\n      revoked_at TEXT\n    )"
+        },
+        {
+          "line": 27,
+          "sql_template": "CREATE INDEX idx_auth_pairing_links_active\n    ON auth_pairing_links(revoked_at, consumed_at, expires_at)"
+        },
+        {
+          "line": 32,
+          "sql_template": "CREATE TABLE auth_sessions (\n      session_id TEXT PRIMARY KEY,\n      subject TEXT NOT NULL,\n      scopes TEXT NOT NULL,\n      method TEXT NOT NULL,\n      client_label TEXT,\n      client_ip_address TEXT,\n      client_user_agent TEXT,\n      client_device_type TEXT NOT NULL DEFAULT 'unknown',\n      client_os TEXT,\n      client_browser TEXT,\n      issued_at TEXT NOT NULL,\n      expires_at TEXT NOT NULL,\n      last_connected_at TEXT,\n      revoked_at TEXT\n    )"
+        },
+        {
+          "line": 51,
+          "sql_template": "CREATE INDEX idx_auth_sessions_active\n    ON auth_sessions(revoked_at, expires_at, issued_at)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/032_AuthPairingProofKeyThumbprint.ts",
+      "git_blob_sha": "b0c430333941836473487bc97e3f1a7a0bf29787",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/032_AuthPairingProofKeyThumbprint.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE auth_pairing_links\n      ADD COLUMN proof_key_thumbprint TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/033_ProjectionThreadsSettled.ts",
+      "git_blob_sha": "543080821e6aa45e87810494b23623919ca161e4",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/033_ProjectionThreadsSettled.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_threads\n      ADD COLUMN settled_override TEXT"
+        },
+        {
+          "line": 19,
+          "sql_template": "ALTER TABLE projection_threads\n      ADD COLUMN settled_at TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/034_ProjectionThreadsSnoozed.ts",
+      "git_blob_sha": "172aa09d897184a0f9c23638c1733dcdb0895325",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/034_ProjectionThreadsSnoozed.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_threads\n      ADD COLUMN snoozed_until TEXT"
+        },
+        {
+          "line": 19,
+          "sql_template": "ALTER TABLE projection_threads\n      ADD COLUMN snoozed_at TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/035_ProjectionThreadTitleRegeneration.ts",
+      "git_blob_sha": "f12641b324476b8706a6168bdbcc37df69fc266e",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/035_ProjectionThreadTitleRegeneration.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_threads\n      ADD COLUMN title_regeneration_request_id TEXT"
+        },
+        {
+          "line": 19,
+          "sql_template": "ALTER TABLE projection_threads\n      ADD COLUMN title_regeneration_started_at TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/036_ProjectionThreadsPinned.ts",
+      "git_blob_sha": "5ba13208d3c07ee593eb757ff59969c4e5178b39",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/036_ProjectionThreadsPinned.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_threads\n      ADD COLUMN pinned_at TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/037_ProjectionTurnsKeysetIndex.ts",
+      "git_blob_sha": "5db41191508f5843118384dc617c66fdc67d62e1",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/037_ProjectionTurnsKeysetIndex.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_turns_thread_keyset\n    ON projection_turns(thread_id, requested_at, turn_id)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/038_ProjectionThreadsPinOrderKey.ts",
+      "git_blob_sha": "b84faf1a91d1a56c1aeaac23ee5e412b2c9184a4",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/038_ProjectionThreadsPinOrderKey.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_threads\n      ADD COLUMN pin_order_key TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/039_ProjectionProjectsDefaultThreadEnvMode.ts",
+      "git_blob_sha": "de0aa2311ce4f37745e42a321dca63548d98de95",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/039_ProjectionProjectsDefaultThreadEnvMode.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_projects\n      ADD COLUMN default_thread_env_mode TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/040_ProjectionProjectFaviconPath.ts",
+      "git_blob_sha": "7e16896c9ab00d3e221963ff16bd20f3aa41d7fa",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/040_ProjectionProjectFaviconPath.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_projects\n      ADD COLUMN favicon_path TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/041_AuthSessionClientConnection.ts",
+      "git_blob_sha": "51092a0ff93f1acd7e37dd0c78e9cb60319c090f",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/041_AuthSessionClientConnection.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE auth_sessions\n      ADD COLUMN client_surface TEXT"
+        },
+        {
+          "line": 19,
+          "sql_template": "ALTER TABLE auth_sessions\n      ADD COLUMN client_app_version TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/042_ProjectionThreadLinkedPullRequest.ts",
+      "git_blob_sha": "0882f176df7019847ea612e155495192133e246f",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/042_ProjectionThreadLinkedPullRequest.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_threads\n      ADD COLUMN linked_pull_request_json TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/043_ProjectionThreadsUnsettledAt.ts",
+      "git_blob_sha": "87438836e5a07373975d7ea6f017d9ad19354ccc",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/043_ProjectionThreadsUnsettledAt.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_threads\n      ADD COLUMN unsettled_at TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/044_ClearAutomaticProjectModelDefaults.ts",
+      "git_blob_sha": "c1f8545b21d0beefcf3f1508e1dba78a4a53b440",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/044_ClearAutomaticProjectModelDefaults.ts",
+      "ddl": []
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/045_ProjectionProjectsAutoPull.ts",
+      "git_blob_sha": "c9f9d2d1f0db1b95dbc9cfedef8dcea3a84d2679",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/045_ProjectionProjectsAutoPull.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_projects\n      ADD COLUMN auto_pull INTEGER NOT NULL DEFAULT 0"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/046_RepairAutomaticSettlementTimestamps.ts",
+      "git_blob_sha": "3a3fa3192d7981b5f4f86223ab63f7a13fd66446",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/046_RepairAutomaticSettlementTimestamps.ts",
+      "ddl": []
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/047_ProjectionProjectIcon.ts",
+      "git_blob_sha": "1c44e576baaf3ad20c26cd0c7c2f4adcd7ca8cfa",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/047_ProjectionProjectIcon.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_projects\n      ADD COLUMN project_icon_json TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/048_ProjectionThreadBranchPullRequest.ts",
+      "git_blob_sha": "ae8a67c58a88fdc9277afa3e646c8022671a7106",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/048_ProjectionThreadBranchPullRequest.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_threads\n      ADD COLUMN branch_pull_request_json TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/049_ProjectionThreadsActiveOrderKey.ts",
+      "git_blob_sha": "3d028e3671150915831056a851efd81c363a1122",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/049_ProjectionThreadsActiveOrderKey.ts",
+      "ddl": [
+        {
+          "line": 11,
+          "sql_template": "ALTER TABLE projection_threads\n      ADD COLUMN active_order_key TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/050_ProjectionThreadPullRequests.ts",
+      "git_blob_sha": "f130aae7e10a612d9f5d19413a20b7ce898b8887",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/050_ProjectionThreadPullRequests.ts",
+      "ddl": [
+        {
+          "line": 35,
+          "sql_template": "CREATE TABLE IF NOT EXISTS projection_thread_pull_requests (\n      thread_id TEXT NOT NULL,\n      host TEXT NOT NULL,\n      repository TEXT NOT NULL,\n      number INTEGER NOT NULL,\n      url TEXT NOT NULL,\n      source TEXT NOT NULL,\n      linked_at TEXT NOT NULL,\n      snapshot_json TEXT,\n      stack_json TEXT,\n      PRIMARY KEY (thread_id, host, repository, number)\n    )"
+        },
+        {
+          "line": 50,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_projection_thread_pull_requests_pr\n    ON projection_thread_pull_requests(host, repository, number)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/051_ProjectionThreadMessageContext.ts",
+      "git_blob_sha": "a2902a9cfb6fc84235918fab1bd88e03afbe3381",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/051_ProjectionThreadMessageContext.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_thread_messages\n      ADD COLUMN context_json TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/052_ProjectionThreadTitleState.ts",
+      "git_blob_sha": "a25482d49db7f311d47bf8f5ad26113abfb85741",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/052_ProjectionThreadTitleState.ts",
+      "ddl": [
+        {
+          "line": 6,
+          "sql_template": "ALTER TABLE projection_threads ADD COLUMN title_state_json TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/053_PullRequestFilesViewed.ts",
+      "git_blob_sha": "22728ff5705f558eb06df79e4b84aba63f05a0f7",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/053_PullRequestFilesViewed.ts",
+      "ddl": [
+        {
+          "line": 9,
+          "sql_template": "CREATE TABLE IF NOT EXISTS pull_request_files_viewed (\n      provider TEXT NOT NULL,\n      host TEXT NOT NULL,\n      repository TEXT NOT NULL,\n      number INTEGER NOT NULL,\n      viewer TEXT NOT NULL,\n      path TEXT NOT NULL,\n      revision TEXT,\n      viewed_at TEXT NOT NULL,\n      PRIMARY KEY (provider, host, repository, number, viewer, path)\n    ) WITHOUT ROWID"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/054_ProjectionThreadsAutoSettleDisabledAt.ts",
+      "git_blob_sha": "8e0f479bc7312132599d5b1b27d5f371a06dbda2",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/054_ProjectionThreadsAutoSettleDisabledAt.ts",
+      "ddl": [
+        {
+          "line": 11,
+          "sql_template": "ALTER TABLE projection_threads\n      ADD COLUMN auto_settle_disabled_at TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/055_OrchestrationV2.ts",
+      "git_blob_sha": "a4d0c10d30acd90a7879dc408cb470b619a1cb85",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/055_OrchestrationV2.ts",
+      "ddl": [
+        {
+          "line": 20,
+          "sql_template": "CREATE TABLE orchestration_v2_events (\n      sequence INTEGER PRIMARY KEY AUTOINCREMENT,\n      event_id TEXT NOT NULL UNIQUE,\n      command_id TEXT,\n      thread_id TEXT NOT NULL,\n      run_id TEXT,\n      node_id TEXT,\n      provider TEXT,\n      raw_event_id TEXT,\n      event_type TEXT NOT NULL,\n      occurred_at TEXT NOT NULL,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 34,
+          "sql_template": "CREATE INDEX orchestration_v2_events_command_idx ON orchestration_v2_events(command_id, sequence)"
+        },
+        {
+          "line": 35,
+          "sql_template": "CREATE INDEX orchestration_v2_events_thread_sequence_idx ON orchestration_v2_events(thread_id, sequence)"
+        },
+        {
+          "line": 36,
+          "sql_template": "CREATE INDEX orchestration_v2_events_thread_type_sequence_idx ON orchestration_v2_events(thread_id, event_type, sequence)"
+        },
+        {
+          "line": 37,
+          "sql_template": "CREATE INDEX orchestration_v2_events_run_sequence_idx ON orchestration_v2_events(run_id, sequence)"
+        },
+        {
+          "line": 38,
+          "sql_template": "CREATE INDEX orchestration_v2_events_node_sequence_idx ON orchestration_v2_events(node_id, sequence)"
+        },
+        {
+          "line": 39,
+          "sql_template": "CREATE INDEX orchestration_v2_events_raw_event_idx ON orchestration_v2_events(raw_event_id)"
+        },
+        {
+          "line": 42,
+          "sql_template": "CREATE TABLE orchestration_v2_command_receipts (\n      command_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      command_type TEXT NOT NULL,\n      accepted_at TEXT NOT NULL,\n      result_sequence INTEGER NOT NULL,\n      status TEXT NOT NULL,\n      error TEXT\n    )"
+        },
+        {
+          "line": 52,
+          "sql_template": "CREATE INDEX orchestration_v2_command_receipts_thread_sequence_idx ON orchestration_v2_command_receipts(thread_id, result_sequence)"
+        },
+        {
+          "line": 55,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_threads (\n      thread_id TEXT PRIMARY KEY,\n      project_id TEXT NOT NULL,\n      title TEXT NOT NULL,\n      default_provider TEXT NOT NULL,\n      runtime_mode TEXT NOT NULL,\n      interaction_mode TEXT NOT NULL,\n      active_provider_thread_id TEXT,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      archived_at TEXT,\n      deleted_at TEXT,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 70,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_threads_project_updated_idx ON orchestration_v2_projection_threads(project_id, updated_at)"
+        },
+        {
+          "line": 73,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_runs (\n      run_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      ordinal INTEGER NOT NULL,\n      provider TEXT NOT NULL,\n      provider_thread_id TEXT,\n      status TEXT NOT NULL,\n      requested_at TEXT NOT NULL,\n      completed_at TEXT,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 85,
+          "sql_template": "CREATE UNIQUE INDEX orchestration_v2_projection_runs_thread_ordinal_idx ON orchestration_v2_projection_runs(thread_id, ordinal)"
+        },
+        {
+          "line": 86,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_runs_provider_thread_idx ON orchestration_v2_projection_runs(provider_thread_id)"
+        },
+        {
+          "line": 87,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_runs_thread_status_idx ON orchestration_v2_projection_runs(thread_id, status)"
+        },
+        {
+          "line": 90,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_run_attempts (\n      attempt_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      run_id TEXT NOT NULL,\n      attempt_ordinal INTEGER NOT NULL,\n      root_node_id TEXT NOT NULL,\n      provider TEXT NOT NULL,\n      provider_thread_id TEXT NOT NULL,\n      provider_turn_id TEXT,\n      status TEXT NOT NULL,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 103,
+          "sql_template": "CREATE UNIQUE INDEX orchestration_v2_projection_run_attempts_run_ordinal_idx ON orchestration_v2_projection_run_attempts(run_id, attempt_ordinal)"
+        },
+        {
+          "line": 104,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_run_attempts_thread_idx ON orchestration_v2_projection_run_attempts(thread_id, run_id)"
+        },
+        {
+          "line": 107,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_nodes (\n      node_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      run_id TEXT,\n      parent_node_id TEXT,\n      root_node_id TEXT NOT NULL,\n      kind TEXT NOT NULL,\n      status TEXT NOT NULL,\n      provider_thread_id TEXT,\n      provider_turn_id TEXT,\n      runtime_request_id TEXT,\n      checkpoint_scope_id TEXT,\n      started_at TEXT,\n      completed_at TEXT,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 124,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_nodes_thread_run_idx ON orchestration_v2_projection_nodes(thread_id, run_id)"
+        },
+        {
+          "line": 125,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_nodes_parent_idx ON orchestration_v2_projection_nodes(parent_node_id)"
+        },
+        {
+          "line": 126,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_nodes_provider_turn_idx ON orchestration_v2_projection_nodes(provider_turn_id)"
+        },
+        {
+          "line": 129,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_provider_sessions (\n      provider_session_id TEXT PRIMARY KEY,\n      thread_id TEXT,\n      provider TEXT NOT NULL,\n      status TEXT NOT NULL,\n      model TEXT,\n      updated_at TEXT NOT NULL,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 139,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_provider_sessions_thread_idx ON orchestration_v2_projection_provider_sessions(thread_id)"
+        },
+        {
+          "line": 140,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_provider_sessions_provider_status_idx ON orchestration_v2_projection_provider_sessions(provider, status)"
+        },
+        {
+          "line": 143,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_provider_threads (\n      provider_thread_id TEXT PRIMARY KEY,\n      thread_id TEXT,\n      owner_node_id TEXT,\n      provider TEXT NOT NULL,\n      provider_session_id TEXT,\n      status TEXT NOT NULL,\n      first_run_ordinal INTEGER,\n      last_run_ordinal INTEGER,\n      updated_at TEXT NOT NULL,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 156,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_provider_threads_thread_idx ON orchestration_v2_projection_provider_threads(thread_id)"
+        },
+        {
+          "line": 157,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_provider_threads_session_idx ON orchestration_v2_projection_provider_threads(provider_session_id)"
+        },
+        {
+          "line": 158,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_provider_threads_owner_idx ON orchestration_v2_projection_provider_threads(owner_node_id)"
+        },
+        {
+          "line": 161,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_provider_turns (\n      provider_turn_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      provider_thread_id TEXT NOT NULL,\n      node_id TEXT NOT NULL,\n      run_attempt_id TEXT,\n      ordinal INTEGER NOT NULL,\n      status TEXT NOT NULL,\n      started_at TEXT,\n      completed_at TEXT,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 174,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_provider_turns_thread_idx ON orchestration_v2_projection_provider_turns(thread_id)"
+        },
+        {
+          "line": 175,
+          "sql_template": "CREATE UNIQUE INDEX orchestration_v2_projection_provider_turns_thread_ordinal_idx ON orchestration_v2_projection_provider_turns(provider_thread_id, ordinal)"
+        },
+        {
+          "line": 178,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_runtime_requests (\n      runtime_request_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      node_id TEXT NOT NULL,\n      provider_turn_id TEXT,\n      kind TEXT NOT NULL,\n      status TEXT NOT NULL,\n      created_at TEXT NOT NULL,\n      resolved_at TEXT,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 190,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_runtime_requests_thread_status_idx ON orchestration_v2_projection_runtime_requests(thread_id, status)"
+        },
+        {
+          "line": 191,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_runtime_requests_provider_turn_idx ON orchestration_v2_projection_runtime_requests(provider_turn_id)"
+        },
+        {
+          "line": 194,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_messages (\n      message_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      run_id TEXT,\n      node_id TEXT,\n      role TEXT NOT NULL,\n      streaming INTEGER NOT NULL,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 206,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_messages_thread_created_idx ON orchestration_v2_projection_messages(thread_id, created_at, message_id)"
+        },
+        {
+          "line": 207,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_messages_run_idx ON orchestration_v2_projection_messages(run_id)"
+        },
+        {
+          "line": 208,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_messages_node_idx ON orchestration_v2_projection_messages(node_id)"
+        },
+        {
+          "line": 211,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_plans (\n      plan_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      run_id TEXT,\n      node_id TEXT NOT NULL,\n      kind TEXT NOT NULL,\n      status TEXT NOT NULL,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 221,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_plans_thread_idx ON orchestration_v2_projection_plans(thread_id)"
+        },
+        {
+          "line": 222,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_plans_run_idx ON orchestration_v2_projection_plans(run_id)"
+        },
+        {
+          "line": 225,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_turn_items (\n      turn_item_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      run_id TEXT,\n      node_id TEXT,\n      provider_thread_id TEXT,\n      provider_turn_id TEXT,\n      parent_item_id TEXT,\n      ordinal INTEGER NOT NULL,\n      type TEXT NOT NULL,\n      status TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 240,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_turn_items_thread_ordinal_idx ON orchestration_v2_projection_turn_items(thread_id, ordinal, turn_item_id)"
+        },
+        {
+          "line": 241,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_turn_items_run_ordinal_idx ON orchestration_v2_projection_turn_items(run_id, ordinal)"
+        },
+        {
+          "line": 242,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_turn_items_node_ordinal_idx ON orchestration_v2_projection_turn_items(node_id, ordinal)"
+        },
+        {
+          "line": 243,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_turn_items_provider_turn_idx ON orchestration_v2_projection_turn_items(provider_turn_id)"
+        },
+        {
+          "line": 246,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_checkpoint_scopes (\n      scope_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      run_id TEXT,\n      node_id TEXT NOT NULL,\n      parent_scope_id TEXT,\n      provider_thread_id TEXT,\n      kind TEXT NOT NULL,\n      ordinal_within_parent INTEGER NOT NULL,\n      advances_app_run_count INTEGER NOT NULL,\n      created_at TEXT NOT NULL,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 260,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_checkpoint_scopes_thread_idx ON orchestration_v2_projection_checkpoint_scopes(thread_id)"
+        },
+        {
+          "line": 261,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_checkpoint_scopes_parent_idx ON orchestration_v2_projection_checkpoint_scopes(parent_scope_id)"
+        },
+        {
+          "line": 264,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_checkpoints (\n      checkpoint_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      scope_id TEXT NOT NULL,\n      run_id TEXT,\n      node_id TEXT NOT NULL,\n      parent_checkpoint_id TEXT,\n      ordinal_within_scope INTEGER NOT NULL,\n      app_run_ordinal INTEGER,\n      status TEXT NOT NULL,\n      captured_at TEXT NOT NULL,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 278,
+          "sql_template": "CREATE UNIQUE INDEX orchestration_v2_projection_checkpoints_scope_ordinal_idx ON orchestration_v2_projection_checkpoints(scope_id, ordinal_within_scope)"
+        },
+        {
+          "line": 279,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_checkpoints_thread_idx ON orchestration_v2_projection_checkpoints(thread_id)"
+        },
+        {
+          "line": 280,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_checkpoints_parent_idx ON orchestration_v2_projection_checkpoints(parent_checkpoint_id)"
+        },
+        {
+          "line": 283,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_context_handoffs (\n      context_handoff_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      target_run_id TEXT NOT NULL,\n      to_provider_thread_id TEXT NOT NULL,\n      strategy TEXT NOT NULL,\n      status TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 294,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_context_handoffs_thread_idx ON orchestration_v2_projection_context_handoffs(thread_id)"
+        },
+        {
+          "line": 295,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_context_handoffs_target_run_idx ON orchestration_v2_projection_context_handoffs(target_run_id)"
+        },
+        {
+          "line": 298,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_context_transfers (\n      context_transfer_id TEXT PRIMARY KEY,\n      source_thread_id TEXT NOT NULL,\n      target_thread_id TEXT NOT NULL,\n      target_run_id TEXT,\n      type TEXT NOT NULL,\n      status TEXT NOT NULL,\n      source_provider TEXT,\n      target_provider TEXT,\n      updated_at TEXT NOT NULL,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 311,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_context_transfers_source_thread_idx ON orchestration_v2_projection_context_transfers(source_thread_id)"
+        },
+        {
+          "line": 312,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_context_transfers_target_thread_idx ON orchestration_v2_projection_context_transfers(target_thread_id, status)"
+        },
+        {
+          "line": 313,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_context_transfers_target_run_idx ON orchestration_v2_projection_context_transfers(target_run_id)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/056_RemoveRedundantProjectionIndexes.ts",
+      "git_blob_sha": "db914aa6fc116442859ede0912e564b3298a25bf",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/056_RemoveRedundantProjectionIndexes.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "DROP INDEX IF EXISTS idx_projection_threads_project_id"
+        },
+        {
+          "line": 9,
+          "sql_template": "DROP INDEX IF EXISTS idx_projection_thread_messages_thread_created"
+        },
+        {
+          "line": 10,
+          "sql_template": "DROP INDEX IF EXISTS idx_projection_thread_activities_thread_sequence"
+        },
+        {
+          "line": 11,
+          "sql_template": "DROP INDEX IF EXISTS idx_projection_turns_thread_requested"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/057_ScheduledTaskWebhooks.ts",
+      "git_blob_sha": "4ef116634c03275ba65217c824be3d81683c560b",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/057_ScheduledTaskWebhooks.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "ALTER TABLE scheduled_tasks ADD COLUMN webhook_token TEXT"
+        },
+        {
+          "line": 9,
+          "sql_template": "ALTER TABLE scheduled_tasks ADD COLUMN webhook_secret TEXT"
+        },
+        {
+          "line": 12,
+          "sql_template": "CREATE TABLE IF NOT EXISTS scheduled_task_webhook_deliveries (\n      delivery_id TEXT PRIMARY KEY,\n      task_id TEXT NOT NULL,\n      received_at TEXT NOT NULL,\n      method TEXT NOT NULL,\n      query TEXT NOT NULL,\n      headers_json TEXT NOT NULL,\n      body TEXT NOT NULL,\n      body_bytes INTEGER NOT NULL,\n      body_truncated INTEGER NOT NULL,\n      outcome TEXT NOT NULL,\n      signature_verified INTEGER NOT NULL,\n      missing_fields_json TEXT NOT NULL,\n      rendered_prompt TEXT,\n      error TEXT\n    )"
+        },
+        {
+          "line": 31,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_scheduled_task_webhook_deliveries_task\n    ON scheduled_task_webhook_deliveries(task_id, received_at)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/058_WebhookRelayDeliveries.ts",
+      "git_blob_sha": "c32d8e9f6aaf3f1403d73d630c8bdad6563593f6",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/058_WebhookRelayDeliveries.ts",
+      "ddl": [
+        {
+          "line": 9,
+          "sql_template": "CREATE TABLE IF NOT EXISTS scheduled_task_webhook_relay_deliveries (\n      relay_delivery_id TEXT PRIMARY KEY,\n      task_id TEXT NOT NULL,\n      seen_at TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 17,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_scheduled_task_webhook_relay_deliveries_seen\n    ON scheduled_task_webhook_relay_deliveries(seen_at)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/059_McpAppModelContext.ts",
+      "git_blob_sha": "6b77269180ef9162082d59f557b4eae5002a3418",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/059_McpAppModelContext.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE TABLE IF NOT EXISTS mcp_app_model_context (\n      thread_id TEXT NOT NULL,\n      item_id TEXT NOT NULL,\n      server TEXT NOT NULL,\n      tool TEXT NOT NULL,\n      text TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      PRIMARY KEY (thread_id, item_id)\n    )"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/060_ThreadSnapshotWindowIndexes.ts",
+      "git_blob_sha": "ad62bc5526626bb025016032c5c368a1215a1920",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/060_ThreadSnapshotWindowIndexes.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_turn_items_user_message_idx\n    ON orchestration_v2_projection_turn_items(thread_id, ordinal, turn_item_id)\n    WHERE type = 'user_message'"
+        },
+        {
+          "line": 13,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_nodes_live_idx\n    ON orchestration_v2_projection_nodes(thread_id)\n    WHERE status IN ('pending', 'starting', 'running', 'waiting')"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/061_PullRequestReviewGuides.ts",
+      "git_blob_sha": "37fc9635eb04c4430d466e41d9d1ece4680f2ae2",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/061_PullRequestReviewGuides.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE TABLE IF NOT EXISTS pull_request_review_guides (\n      host TEXT NOT NULL,\n      repository TEXT NOT NULL,\n      number INTEGER NOT NULL,\n      guide_json TEXT NOT NULL,\n      PRIMARY KEY (host, repository, number)\n    ) WITHOUT ROWID"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/062_ThreadFailureLookupIndex.ts",
+      "git_blob_sha": "86da9229e747616f9148f54b5045a742af0276aa",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/062_ThreadFailureLookupIndex.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_turn_items_failed_error_idx\n    ON orchestration_v2_projection_turn_items(\n      thread_id, run_id, node_id, updated_at DESC, ordinal DESC, turn_item_id DESC\n    )\n    WHERE type = 'error' AND status = 'failed'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/063_DropUnusedV1Projections.ts",
+      "git_blob_sha": "e806b42cec2934f96f3672c630da19bf01eb4816",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/063_DropUnusedV1Projections.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "DROP TABLE IF EXISTS projection_thread_activities"
+        },
+        {
+          "line": 9,
+          "sql_template": "DROP TABLE IF EXISTS projection_turns"
+        },
+        {
+          "line": 10,
+          "sql_template": "DROP TABLE IF EXISTS projection_thread_proposed_plans"
+        },
+        {
+          "line": 11,
+          "sql_template": "DROP TABLE IF EXISTS projection_pending_approvals"
+        },
+        {
+          "line": 12,
+          "sql_template": "DROP TABLE IF EXISTS projection_state"
+        },
+        {
+          "line": 13,
+          "sql_template": "DROP TABLE IF EXISTS checkpoint_diff_blobs"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/064_CanonicalizeThreadPullRequestLinks.ts",
+      "git_blob_sha": "a4d8fb9e7a016d85793cf1664732d1dd83f06164",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/064_CanonicalizeThreadPullRequestLinks.ts",
+      "ddl": []
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/065_CodexUsageNativeTurnIndex.ts",
+      "git_blob_sha": "48f372df1ee5ffa55c2f75cb1388b428ee372ad9",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/065_CodexUsageNativeTurnIndex.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE INDEX orchestration_v2_provider_turns_codex_native_id_idx\n    ON orchestration_v2_projection_provider_turns (\n      json_extract(payload_json, '$.nativeTurnRef.nativeId')\n    )\n    WHERE json_extract(payload_json, '$.nativeTurnRef.driver') = 'codex'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/066_RepairClientSettlementTimestamps.ts",
+      "git_blob_sha": "6f5be0974658b75835a4594308671c0e5ac21a7d",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/066_RepairClientSettlementTimestamps.ts",
+      "ddl": []
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/067_WebhookDedupe.ts",
+      "git_blob_sha": "b132e7c6dd14642d6736ca430273f7d92339ba65",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/067_WebhookDedupe.ts",
+      "ddl": [
+        {
+          "line": 6,
+          "sql_template": "ALTER TABLE scheduled_tasks ADD COLUMN last_run_webhook_delivery_id TEXT"
+        },
+        {
+          "line": 7,
+          "sql_template": "CREATE TABLE scheduled_task_webhook_replay_keys (\n    task_id TEXT NOT NULL REFERENCES scheduled_tasks(task_id) ON DELETE CASCADE,\n    replay_key TEXT NOT NULL,\n    delivery_id TEXT NOT NULL,\n    expires_at INTEGER NOT NULL,\n    PRIMARY KEY (task_id, replay_key)\n  )"
+        },
+        {
+          "line": 14,
+          "sql_template": "CREATE INDEX idx_webhook_replay_expiry ON scheduled_task_webhook_replay_keys(expires_at)"
+        },
+        {
+          "line": 15,
+          "sql_template": "CREATE INDEX idx_webhook_replay_delivery ON scheduled_task_webhook_replay_keys(delivery_id)"
+        },
+        {
+          "line": 16,
+          "sql_template": "CREATE TABLE scheduled_task_webhook_pending (\n    delivery_id TEXT PRIMARY KEY,\n    task_id TEXT NOT NULL REFERENCES scheduled_tasks(task_id) ON DELETE CASCADE,\n    coalesce_key TEXT NOT NULL,\n    due_at INTEGER NOT NULL,\n    state TEXT NOT NULL DEFAULT 'pending',\n    task_json TEXT NOT NULL,\n    request_json TEXT NOT NULL,\n    delivery_ids_json TEXT NOT NULL\n  )"
+        },
+        {
+          "line": 26,
+          "sql_template": "CREATE INDEX idx_webhook_pending_due ON scheduled_task_webhook_pending(state, due_at)"
+        },
+        {
+          "line": 27,
+          "sql_template": "CREATE UNIQUE INDEX idx_webhook_pending_key\n    ON scheduled_task_webhook_pending(task_id, coalesce_key) WHERE state = 'pending'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/068_ShellStopRequestIndex.ts",
+      "git_blob_sha": "2b58b846b2086e3154e76f5c75fb3dd3f7f7890a",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/068_ShellStopRequestIndex.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_turn_items_stop_request_idx\n    ON orchestration_v2_projection_turn_items(thread_id, run_id)\n    WHERE type = 'run_interrupt_request'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/069_ThreadMessageSearch.ts",
+      "git_blob_sha": "2c527d7e3ea99d10e6a80a272df185d5377ea911",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/069_ThreadMessageSearch.ts",
+      "ddl": [
+        {
+          "line": 24,
+          "sql_template": "CREATE VIRTUAL TABLE orchestration_v2_message_search USING fts5(\n      text,\n      content = '',\n      contentless_delete = 1,\n      tokenize = 'trigram remove_diacritics 1'\n    )"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/070_PeerLinks.ts",
+      "git_blob_sha": "5551ccdd07a25e835b27edad42d475741f88836b",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/070_PeerLinks.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "CREATE TABLE IF NOT EXISTS peer_environment_links (\n      environment_id TEXT PRIMARY KEY,\n      secret_name TEXT NOT NULL,\n      label TEXT NOT NULL,\n      urls_json TEXT NOT NULL,\n      access TEXT NOT NULL,\n      linked_at TEXT NOT NULL,\n      expires_at TEXT NOT NULL,\n      last_reached_at TEXT,\n      last_error TEXT\n    )"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/071_PeerLinkFence.ts",
+      "git_blob_sha": "e7424f386cecf756489b8e7573f59164b7c2a8d8",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/071_PeerLinkFence.ts",
+      "ddl": [
+        {
+          "line": 14,
+          "sql_template": "ALTER TABLE peer_environment_links ADD COLUMN fenced INTEGER NOT NULL DEFAULT 0"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/072_WaitingLinkRequestIndex.ts",
+      "git_blob_sha": "feaafe620590f8f910b7496ecfb0b7ce63184801",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/072_WaitingLinkRequestIndex.ts",
+      "ddl": [
+        {
+          "line": 9,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_turn_items_waiting_link_idx\n    ON orchestration_v2_projection_turn_items(thread_id, updated_at DESC, turn_item_id DESC)\n    WHERE type = 'link_request' AND status = 'waiting'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/073_ActiveTurnItemIndexes.ts",
+      "git_blob_sha": "d9759bca6d82ac22d6a29578fbd1f89ceaa77f23",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/073_ActiveTurnItemIndexes.ts",
+      "ddl": [
+        {
+          "line": 10,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_turn_items_active_ordinal_idx\n    ON orchestration_v2_projection_turn_items(thread_id, ordinal, turn_item_id)\n    WHERE status IN ('pending', 'running', 'waiting')"
+        },
+        {
+          "line": 15,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_turn_items_active_run_idx\n    ON orchestration_v2_projection_turn_items(thread_id, run_id)\n    WHERE status IN ('pending', 'running', 'waiting')"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/074_ExcludeAttachmentPlaceholdersFromSearch.ts",
+      "git_blob_sha": "6ec95d108f306a8d4e1c0ac51593f4d39b1a4812",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/074_ExcludeAttachmentPlaceholdersFromSearch.ts",
+      "ddl": [
+        {
+          "line": 14,
+          "sql_template": "DROP TRIGGER orchestration_v2_message_search_insert"
+        },
+        {
+          "line": 15,
+          "sql_template": "DROP TRIGGER orchestration_v2_message_search_update"
+        },
+        {
+          "line": 16,
+          "sql_template": "DROP TRIGGER orchestration_v2_message_search_delete"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/075_SubagentDeliveryState.ts",
+      "git_blob_sha": "0288c89ceed057b1dde6551ca26ad912577aecd5",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/075_SubagentDeliveryState.ts",
+      "ddl": [
+        {
+          "line": 10,
+          "sql_template": "ALTER TABLE orchestration_v2_projection_subagents ADD COLUMN completion_delivery_state TEXT"
+        },
+        {
+          "line": 19,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_subagents_settled_idx\n    ON orchestration_v2_projection_subagents(thread_id, status, completion_delivery_state, run_id)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/076_ProjectionProjectsPinArchive.ts",
+      "git_blob_sha": "279255ec4d5f966d4b95cb7ff51c166092407264",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/076_ProjectionProjectsPinArchive.ts",
+      "ddl": [
+        {
+          "line": 7,
+          "sql_template": "ALTER TABLE projection_projects ADD COLUMN pinned_at TEXT"
+        },
+        {
+          "line": 8,
+          "sql_template": "ALTER TABLE projection_projects ADD COLUMN archived_at TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/077_RepairBooleanSettledOverride.ts",
+      "git_blob_sha": "e84473964fc611e58347834dd996e8167733957f",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/077_RepairBooleanSettledOverride.ts",
+      "ddl": []
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/078_DropOrchestrationEventCorrelationIndex.ts",
+      "git_blob_sha": "bf00778eff5d96eacc67604b7bbb6ac27f3c9900",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/078_DropOrchestrationEventCorrelationIndex.ts",
+      "ddl": [
+        {
+          "line": 9,
+          "sql_template": "DROP INDEX IF EXISTS idx_orch_events_correlation_id"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/079_DelegatedRecoveryIndexes.ts",
+      "git_blob_sha": "3ba72feaf1788adb9a9c65660a118cddd1a83752",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/079_DelegatedRecoveryIndexes.ts",
+      "ddl": [
+        {
+          "line": 9,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_threads_subagent_result_idx\n    ON orchestration_v2_projection_threads(\n      thread_id, json_extract(payload_json, '$.lineage.parentThreadId')\n    )\n    WHERE CASE WHEN json_valid(payload_json) THEN\n      json_extract(payload_json, '$.lineage.relationshipToParent') = 'subagent'\n      AND json_extract(payload_json, '$.lineage.parentThreadId') IS NOT NULL\n      AND json_extract(payload_json, '$.forkedFrom.type') = 'node'\n      ELSE 0 END"
+        },
+        {
+          "line": 20,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_runs_delegated_delivery_idx\n    ON orchestration_v2_projection_runs(thread_id)\n    WHERE CASE WHEN json_valid(payload_json)\n      THEN json_type(payload_json, '$.delegatedCompletion.delivery') = 'object'\n      ELSE 0 END"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/080_ScheduledTaskThreadMode.ts",
+      "git_blob_sha": "01552b57fd1834eab6d80e73f16b12f19dcc5910",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/080_ScheduledTaskThreadMode.ts",
+      "ddl": [
+        {
+          "line": 7,
+          "sql_template": "ALTER TABLE scheduled_tasks ADD COLUMN thread_mode TEXT NOT NULL DEFAULT 'new_thread'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/081_ProjectionMessageSearchText.ts",
+      "git_blob_sha": "4bbcec4d61822e63b36463c2295974d20943567d",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/081_ProjectionMessageSearchText.ts",
+      "ddl": [
+        {
+          "line": 11,
+          "sql_template": "ALTER TABLE orchestration_v2_projection_messages ADD COLUMN search_text TEXT"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/082_TurnItemConversationIndex.ts",
+      "git_blob_sha": "fb1caac44f3ec4e9495763030b8829d51f2de6f4",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/082_TurnItemConversationIndex.ts",
+      "ddl": [
+        {
+          "line": 10,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_turn_items_conversation_idx\n    ON orchestration_v2_projection_turn_items(thread_id, ordinal, type, run_id)\n    WHERE type NOT IN (\n      'command_execution', 'reasoning', 'file_change', 'file_search', 'web_search', 'dynamic_tool'\n    )"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/083_CommandReadIndexes.ts",
+      "git_blob_sha": "864b16305ffe44caf113522ec3ea8eaef85ebd11",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/083_CommandReadIndexes.ts",
+      "ddl": [
+        {
+          "line": 11,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_nodes_settled_leaf_idx\n    ON orchestration_v2_projection_nodes(\n      thread_id,\n      (kind IN ('tool_call', 'assistant_message', 'reasoning')\n        AND status IN ('completed', 'interrupted', 'failed', 'cancelled', 'rolled_back')\n        AND run_id IS NOT NULL)\n    )"
+        },
+        {
+          "line": 22,
+          "sql_template": "DROP INDEX IF EXISTS orchestration_v2_projection_context_transfers_source_thread_idx"
+        },
+        {
+          "line": 24,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_context_transfers_source_thread_status_idx\n    ON orchestration_v2_projection_context_transfers(source_thread_id, status)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/084_LastExecutedRunIndex.ts",
+      "git_blob_sha": "2c36d6263487320c3be397f01578ad43718dc99c",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/084_LastExecutedRunIndex.ts",
+      "ddl": [
+        {
+          "line": 11,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_runs_last_executed_idx\n    ON orchestration_v2_projection_runs(\n      thread_id, (completed_at IS NULL) DESC, completed_at DESC, ordinal DESC, run_id DESC\n    )\n    WHERE status <> 'queued'\n      AND NOT (status = 'cancelled' AND json_extract(payload_json, '$.startedAt') IS NULL)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/085_TurnItemCounts.ts",
+      "git_blob_sha": "a432046e6361a296a3cd326af0a9b7cc19aa7a0c",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/085_TurnItemCounts.ts",
+      "ddl": [
+        {
+          "line": 13,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_turn_item_counts (\n      thread_id TEXT NOT NULL,\n      run_key TEXT NOT NULL,\n      item_count INTEGER NOT NULL,\n      PRIMARY KEY (thread_id, run_key)\n    ) WITHOUT ROWID"
+        },
+        {
+          "line": 28,
+          "sql_template": "CREATE TRIGGER orchestration_v2_turn_item_counts_insert\n    AFTER INSERT ON orchestration_v2_projection_turn_items\n    BEGIN\n      INSERT INTO orchestration_v2_projection_turn_item_counts (thread_id, run_key, item_count)\n      VALUES (new.thread_id, COALESCE(new.run_id, ''), 1)\n      ON CONFLICT (thread_id, run_key) DO UPDATE SET item_count = item_count + 1;\n    END"
+        },
+        {
+          "line": 37,
+          "sql_template": "CREATE TRIGGER orchestration_v2_turn_item_counts_update\n    AFTER UPDATE OF thread_id, run_id ON orchestration_v2_projection_turn_items\n    WHEN old.thread_id IS NOT new.thread_id OR old.run_id IS NOT new.run_id\n    BEGIN\n      UPDATE orchestration_v2_projection_turn_item_counts SET item_count = item_count - 1\n      WHERE thread_id = old.thread_id AND run_key = COALESCE(old.run_id, '');\n      DELETE FROM orchestration_v2_projection_turn_item_counts\n      WHERE thread_id = old.thread_id AND run_key = COALESCE(old.run_id, '') AND item_count <= 0;\n      INSERT INTO orchestration_v2_projection_turn_item_counts (thread_id, run_key, item_count)\n      VALUES (new.thread_id, COALESCE(new.run_id, ''), 1)\n      ON CONFLICT (thread_id, run_key) DO UPDATE SET item_count = item_count + 1;\n    END"
+        },
+        {
+          "line": 51,
+          "sql_template": "CREATE TRIGGER orchestration_v2_turn_item_counts_delete\n    AFTER DELETE ON orchestration_v2_projection_turn_items\n    BEGIN\n      UPDATE orchestration_v2_projection_turn_item_counts SET item_count = item_count - 1\n      WHERE thread_id = old.thread_id AND run_key = COALESCE(old.run_id, '');\n      DELETE FROM orchestration_v2_projection_turn_item_counts\n      WHERE thread_id = old.thread_id AND run_key = COALESCE(old.run_id, '') AND item_count <= 0;\n    END"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/086_QueuedTurnInputIndex.ts",
+      "git_blob_sha": "9509402b4c5ae260bd5f56b8cb7619151a944919",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/086_QueuedTurnInputIndex.ts",
+      "ddl": [
+        {
+          "line": 9,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_turn_items_queued_input_idx\n    ON orchestration_v2_projection_turn_items(run_id)\n    WHERE type = 'user_message'\n      AND json_valid(payload_json)\n      AND json_extract(payload_json, '$.inputIntent') = 'queued_turn'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/087_ProjectionProjectsCustomTitle.ts",
+      "git_blob_sha": "c193137e79c3ba58377ba4c82d5ed20a86bd5574",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/087_ProjectionProjectsCustomTitle.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_projects\n      ADD COLUMN has_custom_title INTEGER NOT NULL DEFAULT 0"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/088_TurnItemTypeStatusIndex.ts",
+      "git_blob_sha": "09e0b3273d6cf537d58e2a0ec64b9deff67aed24",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/088_TurnItemTypeStatusIndex.ts",
+      "ddl": [
+        {
+          "line": 10,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_turn_items_thread_type_idx\n    ON orchestration_v2_projection_turn_items(thread_id, type, status)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/089_ShellThreadReadIndexes.ts",
+      "git_blob_sha": "25133aa84be654ead725462adc20a31e70491b8c",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/089_ShellThreadReadIndexes.ts",
+      "ddl": [
+        {
+          "line": 10,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_threads_worktree_path_idx\n    ON orchestration_v2_projection_threads(\n      CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.worktreePath') END\n    )"
+        },
+        {
+          "line": 16,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_threads_root_thread_idx\n    ON orchestration_v2_projection_threads(\n      CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.lineage.rootThreadId') END\n    )"
+        },
+        {
+          "line": 23,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_runs_run_status_idx\n    ON orchestration_v2_projection_runs(run_id, status)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/090_AuthConnectDevices.ts",
+      "git_blob_sha": "2d7e973cedbcf8f1e0a0cdcbbea355f5322e79d0",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/090_AuthConnectDevices.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE auth_pairing_links\n      ADD COLUMN requires_connect_approval INTEGER NOT NULL DEFAULT 0"
+        },
+        {
+          "line": 18,
+          "sql_template": "ALTER TABLE auth_pairing_links\n      ADD COLUMN requested_client_json TEXT"
+        },
+        {
+          "line": 28,
+          "sql_template": "ALTER TABLE auth_sessions\n      ADD COLUMN proof_key_thumbprint TEXT"
+        },
+        {
+          "line": 34,
+          "sql_template": "CREATE TABLE IF NOT EXISTS auth_connect_devices (\n      proof_key_thumbprint TEXT PRIMARY KEY,\n      client_json TEXT,\n      approved_at TEXT NOT NULL\n    )"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/091_AuthConnectDeniedRequests.ts",
+      "git_blob_sha": "a27b6529489813d54a7a2069c5c4f2225475e49f",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/091_AuthConnectDeniedRequests.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE auth_pairing_links\n      ADD COLUMN connect_denied INTEGER NOT NULL DEFAULT 0"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/092_QueuedTurnInputIndexJsonValid.ts",
+      "git_blob_sha": "469722d9a32076a0d063cdfe91fc5a75ae8a2d88",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/092_QueuedTurnInputIndexJsonValid.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "DROP INDEX IF EXISTS orchestration_v2_projection_turn_items_queued_input_idx"
+        },
+        {
+          "line": 10,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_turn_items_queued_input_idx\n    ON orchestration_v2_projection_turn_items(run_id)\n    WHERE type = 'user_message'\n      AND json_valid(payload_json)\n      AND json_extract(payload_json, '$.inputIntent') = 'queued_turn'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/093_ProviderTurnAttemptIndex.ts",
+      "git_blob_sha": "8e687ba31597f5fd26e0b093ae2af1b59529cd13",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/093_ProviderTurnAttemptIndex.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_provider_turns_attempt_idx\n    ON orchestration_v2_projection_provider_turns(run_attempt_id)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/094_TurnItemMessageOrdinalIndex.ts",
+      "git_blob_sha": "99688323cddda0e9c99fc42b2947b0d948844263",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/094_TurnItemMessageOrdinalIndex.ts",
+      "ddl": [
+        {
+          "line": 14,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_turn_items_message_ordinal_idx\n    ON orchestration_v2_projection_turn_items(\n      thread_id, json_extract(payload_json, '$.messageId'), ordinal\n    )\n    WHERE type IN ('user_message', 'assistant_message') AND json_valid(payload_json)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/095_TurnItemInlineWorkOutput.ts",
+      "git_blob_sha": "731dbcc7df1cc0facd64b3d08cb05d2fc4dfad88",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/095_TurnItemInlineWorkOutput.ts",
+      "ddl": [
+        {
+          "line": 10,
+          "sql_template": "ALTER TABLE orchestration_v2_projection_turn_items\n    ADD COLUMN inline_work_output INTEGER NOT NULL DEFAULT 0"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/096_RepairStaleTitleRegeneration.ts",
+      "git_blob_sha": "b2fc9bfb6733879e7748ccada9c0424811d1c796",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/096_RepairStaleTitleRegeneration.ts",
+      "ddl": []
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/097_IssueTrackerBindings.ts",
+      "git_blob_sha": "6eb450c0cc83d23179da9ea0552fabb9c5e9db24",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/097_IssueTrackerBindings.ts",
+      "ddl": [
+        {
+          "line": 11,
+          "sql_template": "CREATE TABLE IF NOT EXISTS issue_tracker_bindings (\n      project_id TEXT PRIMARY KEY,\n      tracker TEXT NOT NULL,\n      scope TEXT NOT NULL,\n      updated_at TEXT NOT NULL\n    ) WITHOUT ROWID"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/098_ActiveShellIndexIndexes.ts",
+      "git_blob_sha": "da25d04c6ebf79bb04bf356d21c284496e88dc19",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/098_ActiveShellIndexIndexes.ts",
+      "ddl": [
+        {
+          "line": 10,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_threads_active_shell_idx\n    ON orchestration_v2_projection_threads(\n      updated_at,\n      thread_id,\n      project_id,\n      CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.lineage.relationshipToParent') END,\n      CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.lineage.parentThreadId') END,\n      CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.lineage.rootThreadId') END,\n      CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.lineage.sideChat') END,\n      CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.settledOverride') END,\n      CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.settledAt') END,\n      CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.pinnedAt') END,\n      CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.pinOrderKey') END,\n      CASE WHEN json_valid(payload_json) THEN json_extract(payload_json, '$.snoozedUntil') END,\n      CASE WHEN json_valid(payload_json) THEN json_type(payload_json, '$.pullRequests[0]') END\n    )\n    WHERE deleted_at IS NULL AND archived_at IS NULL"
+        },
+        {
+          "line": 29,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_provider_threads_pending_tasks_idx\n    ON orchestration_v2_projection_provider_threads(thread_id)\n    WHERE CASE WHEN json_valid(payload_json)\n      THEN json_array_length(payload_json, '$.pendingBackgroundTasks') > 0\n      ELSE 0 END"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/099_BackgroundRecoveryIndexes.ts",
+      "git_blob_sha": "9d37f5e3da7be31771207092551a71bd88cc521c",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/099_BackgroundRecoveryIndexes.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_turn_items_usage_limit_idx\n    ON orchestration_v2_projection_turn_items(thread_id)\n    WHERE type = 'error' AND status = 'failed'\n      AND CASE WHEN json_valid(payload_json) THEN\n        json_extract(payload_json, '$.failure.class') = 'usage_limit'\n        ELSE 0 END"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/100_TurnStartReadIndexes.ts",
+      "git_blob_sha": "3c90f82c6fae40cd899efa67ae4bfa5902149b8a",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/100_TurnStartReadIndexes.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_messages_deferred_command_idx\n    ON orchestration_v2_projection_messages(thread_id, created_at, message_id)\n    WHERE ${DEFERRED_COMMAND_MESSAGE_CONDITION}"
+        },
+        {
+          "line": 17,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_subagents_routable_idx\n    ON orchestration_v2_projection_subagents(thread_id, subagent_id)\n    WHERE origin = 'provider_native' AND status = 'completed'"
+        },
+        {
+          "line": 22,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_context_transfers_fork_idx\n    ON orchestration_v2_projection_context_transfers(target_thread_id)\n    WHERE type = 'fork'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/101_DelegatedTaskReadIndexes.ts",
+      "git_blob_sha": "e057296dafab2576a381cf34df218a9c35e54a39",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/101_DelegatedTaskReadIndexes.ts",
+      "ddl": [
+        {
+          "line": 13,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_runs_delegated_task_idx\n    ON orchestration_v2_projection_runs(thread_id, json_extract(payload_json, '$.delegatedTaskId'))\n    WHERE json_valid(payload_json) AND json_extract(payload_json, '$.delegatedTaskId') IS NOT NULL"
+        },
+        {
+          "line": 18,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_messages_delegated_task_idx\n    ON orchestration_v2_projection_messages(thread_id, created_at, message_id)\n    WHERE ${DELEGATED_TASK_MESSAGE_CONDITION}"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/102_ThreadItemCounts.ts",
+      "git_blob_sha": "5cbfee859cd4541be3ca25d3d7c719003ca53f42",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/102_ThreadItemCounts.ts",
+      "ddl": [
+        {
+          "line": 13,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_thread_item_counts (\n      thread_id TEXT PRIMARY KEY,\n      item_count INTEGER NOT NULL\n    ) WITHOUT ROWID"
+        },
+        {
+          "line": 30,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_runs_hidden_items_idx\n    ON orchestration_v2_projection_runs(thread_id, status, run_id)\n    WHERE status IN ('rolled_back', 'queued', 'cancelled')"
+        },
+        {
+          "line": 37,
+          "sql_template": "CREATE TRIGGER orchestration_v2_thread_item_counts_count_insert\n    AFTER INSERT ON orchestration_v2_projection_turn_item_counts\n    WHEN new.run_key = ''\n      OR EXISTS (SELECT 1 FROM orchestration_v2_projection_runs WHERE run_id = new.run_key)\n    BEGIN\n      INSERT INTO orchestration_v2_projection_thread_item_counts (thread_id, item_count)\n      VALUES (new.thread_id, new.item_count)\n      ON CONFLICT (thread_id) DO UPDATE SET item_count = item_count + excluded.item_count;\n    END"
+        },
+        {
+          "line": 48,
+          "sql_template": "CREATE TRIGGER orchestration_v2_thread_item_counts_count_update\n    AFTER UPDATE ON orchestration_v2_projection_turn_item_counts\n    BEGIN\n      UPDATE orchestration_v2_projection_thread_item_counts\n      SET item_count = item_count - old.item_count\n      WHERE thread_id = old.thread_id\n        AND (old.run_key = ''\n          OR EXISTS (SELECT 1 FROM orchestration_v2_projection_runs WHERE run_id = old.run_key));\n      INSERT INTO orchestration_v2_projection_thread_item_counts (thread_id, item_count)\n      SELECT new.thread_id, new.item_count\n      WHERE new.run_key = ''\n        OR EXISTS (SELECT 1 FROM orchestration_v2_projection_runs WHERE run_id = new.run_key)\n      ON CONFLICT (thread_id) DO UPDATE SET item_count = item_count + excluded.item_count;\n      DELETE FROM orchestration_v2_projection_thread_item_counts\n      WHERE thread_id = old.thread_id AND item_count <= 0;\n    END"
+        },
+        {
+          "line": 66,
+          "sql_template": "CREATE TRIGGER orchestration_v2_thread_item_counts_count_delete\n    AFTER DELETE ON orchestration_v2_projection_turn_item_counts\n    WHEN old.run_key = ''\n      OR EXISTS (SELECT 1 FROM orchestration_v2_projection_runs WHERE run_id = old.run_key)\n    BEGIN\n      UPDATE orchestration_v2_projection_thread_item_counts\n      SET item_count = item_count - old.item_count\n      WHERE thread_id = old.thread_id;\n      DELETE FROM orchestration_v2_projection_thread_item_counts\n      WHERE thread_id = old.thread_id AND item_count <= 0;\n    END"
+        },
+        {
+          "line": 81,
+          "sql_template": "CREATE TRIGGER orchestration_v2_thread_item_counts_run_insert\n    AFTER INSERT ON orchestration_v2_projection_runs\n    BEGIN\n      INSERT INTO orchestration_v2_projection_thread_item_counts (thread_id, item_count)\n      SELECT thread_id, COUNT(*)\n      FROM orchestration_v2_projection_turn_items\n      WHERE run_id = new.run_id\n      GROUP BY thread_id\n      ON CONFLICT (thread_id) DO UPDATE SET item_count = item_count + excluded.item_count;\n    END"
+        },
+        {
+          "line": 93,
+          "sql_template": "CREATE TRIGGER orchestration_v2_thread_item_counts_run_delete\n    AFTER DELETE ON orchestration_v2_projection_runs\n    BEGIN\n      UPDATE orchestration_v2_projection_thread_item_counts\n      SET item_count = item_count - (\n        SELECT COUNT(*)\n        FROM orchestration_v2_projection_turn_items item\n        WHERE item.run_id = old.run_id\n          AND item.thread_id = orchestration_v2_projection_thread_item_counts.thread_id\n      )\n      WHERE thread_id IN (\n        SELECT thread_id FROM orchestration_v2_projection_turn_items WHERE run_id = old.run_id\n      );\n      DELETE FROM orchestration_v2_projection_thread_item_counts\n      WHERE item_count <= 0 AND thread_id IN (\n        SELECT thread_id FROM orchestration_v2_projection_turn_items WHERE run_id = old.run_id\n      );\n    END"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/103_IssueTrackerAdditionalScopes.ts",
+      "git_blob_sha": "aa4656e52d291188ecf35a68083a6aa70d6204ef",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/103_IssueTrackerAdditionalScopes.ts",
+      "ddl": [
+        {
+          "line": 7,
+          "sql_template": "ALTER TABLE issue_tracker_bindings ADD COLUMN additional_scopes TEXT NOT NULL DEFAULT '[]'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/104_ProjectionProjectsTrackedFolders.ts",
+      "git_blob_sha": "34c69abe567bc671e118fd4f8dcdfb4925e8576c",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/104_ProjectionProjectsTrackedFolders.ts",
+      "ddl": [
+        {
+          "line": 12,
+          "sql_template": "ALTER TABLE projection_projects\n    ADD COLUMN tracked_folders_json TEXT NOT NULL DEFAULT '[]'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/105_TaskFolders.ts",
+      "git_blob_sha": "87ddeb3e806cea99b6143aa19e9665f653ed5f86",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/105_TaskFolders.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE TABLE IF NOT EXISTS task_folders (\n      root TEXT PRIMARY KEY,\n      real_root TEXT NOT NULL,\n      project_id TEXT NOT NULL,\n      project_root TEXT NOT NULL,\n      anchor TEXT NOT NULL,\n      project_path TEXT NOT NULL,\n      project_is_worktree INTEGER NOT NULL,\n      repositories_json TEXT NOT NULL DEFAULT '[]',\n      created_at TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 20,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_task_folders_real_root ON task_folders (real_root)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/106_WorktreePathKeyIndex.ts",
+      "git_blob_sha": "9b1b42647d60a2b2021bc757e85778d20a489ceb",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/106_WorktreePathKeyIndex.ts",
+      "ddl": [
+        {
+          "line": 9,
+          "sql_template": "CREATE INDEX IF NOT EXISTS orchestration_v2_projection_threads_worktree_path_key_idx\n    ON orchestration_v2_projection_threads(\n      CASE WHEN json_valid(payload_json)\n        THEN lower(rtrim(replace(trim(json_extract(payload_json, '$.worktreePath')), '\\\\', '/'), '/'))\n      END\n    )"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/107_DeferredSlashCommandIndex.ts",
+      "git_blob_sha": "5c997fbc20a631df8fcf5a1f16d2ece7d6c113d6",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/107_DeferredSlashCommandIndex.ts",
+      "ddl": [
+        {
+          "line": 11,
+          "sql_template": "DROP INDEX IF EXISTS orchestration_v2_projection_messages_deferred_command_idx"
+        },
+        {
+          "line": 13,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_messages_deferred_command_idx\n    ON orchestration_v2_projection_messages(thread_id, created_at, message_id)\n    WHERE ${DEFERRED_COMMAND_MESSAGE_CONDITION}"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/ApplicationEventSequenceIndexes.ts",
+      "git_blob_sha": "45e760646f1b4fdaa0c3e8a3c754998a885dc5b5",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/OrchestrationV2/ApplicationEventSequenceIndexes.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE INDEX idx_orchestration_events_application_high_water\n    ON orchestration_events(sequence)\n    WHERE aggregate_kind = 'project'\n      OR (application_event_version = 2 AND aggregate_kind = 'thread')"
+        },
+        {
+          "line": 14,
+          "sql_template": "CREATE INDEX idx_orchestration_events_agent_stream_sequence\n    ON orchestration_events(stream_id, sequence)\n    WHERE application_event_version = 2 AND aggregate_kind = 'thread'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/ApplicationEventSource.ts",
+      "git_blob_sha": "00924b565899f028c1a5bda85a18606870dfa60d",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/OrchestrationV2/ApplicationEventSource.ts",
+      "ddl": [
+        {
+          "line": 37,
+          "sql_template": "ALTER TABLE orchestration_events\n    ADD COLUMN application_event_version INTEGER NOT NULL DEFAULT 1"
+        },
+        {
+          "line": 41,
+          "sql_template": "CREATE INDEX idx_orchestration_events_application_sequence\n    ON orchestration_events(application_event_version, sequence)"
+        },
+        {
+          "line": 45,
+          "sql_template": "ALTER TABLE orchestration_command_receipts\n    ADD COLUMN command_type TEXT NOT NULL DEFAULT 'legacy'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/EffectCancellation.ts",
+      "git_blob_sha": "04231f04656cd51c04a77ee3f0987dbb7ca7a831",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/OrchestrationV2/EffectCancellation.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE TABLE orchestration_v2_effect_outbox_next (\n      effect_id TEXT PRIMARY KEY,\n      command_id TEXT NOT NULL,\n      thread_id TEXT NOT NULL,\n      effect_type TEXT NOT NULL,\n      payload_json TEXT NOT NULL,\n      status TEXT NOT NULL CHECK (\n        status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled')\n      ),\n      attempt_count INTEGER NOT NULL DEFAULT 0,\n      available_at TEXT NOT NULL,\n      lease_owner TEXT,\n      lease_expires_at TEXT,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      completed_at TEXT,\n      last_error TEXT\n    )"
+        },
+        {
+          "line": 61,
+          "sql_template": "DROP TABLE orchestration_v2_effect_outbox"
+        },
+        {
+          "line": 63,
+          "sql_template": "ALTER TABLE orchestration_v2_effect_outbox_next\n    RENAME TO orchestration_v2_effect_outbox"
+        },
+        {
+          "line": 67,
+          "sql_template": "CREATE INDEX orchestration_v2_effect_outbox_claim_idx\n    ON orchestration_v2_effect_outbox(status, available_at, lease_expires_at, created_at)"
+        },
+        {
+          "line": 71,
+          "sql_template": "CREATE INDEX orchestration_v2_effect_outbox_command_idx\n    ON orchestration_v2_effect_outbox(command_id, effect_id)"
+        },
+        {
+          "line": 75,
+          "sql_template": "CREATE INDEX orchestration_v2_effect_outbox_thread_status_idx\n    ON orchestration_v2_effect_outbox(thread_id, status, effect_type)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/Foundation.ts",
+      "git_blob_sha": "022d8fb9b9742320c1bd375602632151ddfa4b7f",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/OrchestrationV2/Foundation.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "ALTER TABLE orchestration_v2_events ADD COLUMN driver TEXT"
+        },
+        {
+          "line": 9,
+          "sql_template": "ALTER TABLE orchestration_v2_events ADD COLUMN provider_instance_id TEXT"
+        },
+        {
+          "line": 19,
+          "sql_template": "CREATE INDEX orchestration_v2_events_instance_sequence_idx ON orchestration_v2_events(provider_instance_id, sequence)"
+        },
+        {
+          "line": 21,
+          "sql_template": "ALTER TABLE orchestration_v2_projection_threads ADD COLUMN provider_instance_id TEXT"
+        },
+        {
+          "line": 30,
+          "sql_template": "ALTER TABLE orchestration_v2_projection_runs ADD COLUMN provider_instance_id TEXT"
+        },
+        {
+          "line": 39,
+          "sql_template": "ALTER TABLE orchestration_v2_projection_run_attempts ADD COLUMN provider_instance_id TEXT"
+        },
+        {
+          "line": 48,
+          "sql_template": "ALTER TABLE orchestration_v2_projection_provider_sessions ADD COLUMN driver TEXT"
+        },
+        {
+          "line": 49,
+          "sql_template": "ALTER TABLE orchestration_v2_projection_provider_sessions ADD COLUMN provider_instance_id TEXT"
+        },
+        {
+          "line": 59,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_provider_sessions_instance_status_idx ON orchestration_v2_projection_provider_sessions(provider_instance_id, status)"
+        },
+        {
+          "line": 61,
+          "sql_template": "ALTER TABLE orchestration_v2_projection_provider_threads ADD COLUMN driver TEXT"
+        },
+        {
+          "line": 62,
+          "sql_template": "ALTER TABLE orchestration_v2_projection_provider_threads ADD COLUMN provider_instance_id TEXT"
+        },
+        {
+          "line": 72,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_provider_threads_instance_status_idx ON orchestration_v2_projection_provider_threads(provider_instance_id, status)"
+        },
+        {
+          "line": 74,
+          "sql_template": "ALTER TABLE orchestration_v2_projection_subagents ADD COLUMN driver TEXT"
+        },
+        {
+          "line": 75,
+          "sql_template": "ALTER TABLE orchestration_v2_projection_subagents ADD COLUMN provider_instance_id TEXT"
+        },
+        {
+          "line": 86,
+          "sql_template": "ALTER TABLE orchestration_v2_projection_context_transfers ADD COLUMN source_provider_instance_id TEXT"
+        },
+        {
+          "line": 87,
+          "sql_template": "ALTER TABLE orchestration_v2_projection_context_transfers ADD COLUMN target_provider_instance_id TEXT"
+        },
+        {
+          "line": 102,
+          "sql_template": "CREATE TABLE orchestration_v2_effect_outbox (\n      effect_id TEXT PRIMARY KEY,\n      command_id TEXT NOT NULL,\n      thread_id TEXT NOT NULL,\n      effect_type TEXT NOT NULL,\n      payload_json TEXT NOT NULL,\n      status TEXT NOT NULL CHECK (status IN ('pending', 'running', 'succeeded', 'failed')),\n      attempt_count INTEGER NOT NULL DEFAULT 0,\n      available_at TEXT NOT NULL,\n      lease_owner TEXT,\n      lease_expires_at TEXT,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      completed_at TEXT,\n      last_error TEXT\n    )"
+        },
+        {
+          "line": 119,
+          "sql_template": "CREATE INDEX orchestration_v2_effect_outbox_claim_idx ON orchestration_v2_effect_outbox(status, available_at, lease_expires_at, created_at)"
+        },
+        {
+          "line": 120,
+          "sql_template": "CREATE INDEX orchestration_v2_effect_outbox_command_idx ON orchestration_v2_effect_outbox(command_id, effect_id)"
+        },
+        {
+          "line": 123,
+          "sql_template": "CREATE TABLE orchestration_v2_turn_item_positions (\n      thread_id TEXT NOT NULL,\n      turn_item_id TEXT NOT NULL,\n      ordinal INTEGER NOT NULL,\n      PRIMARY KEY (thread_id, turn_item_id),\n      UNIQUE (thread_id, ordinal)\n    )"
+        },
+        {
+          "line": 151,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_metadata (\n      projection_name TEXT PRIMARY KEY,\n      schema_version INTEGER NOT NULL,\n      last_sequence INTEGER NOT NULL,\n      updated_at TEXT NOT NULL\n    )"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/LegacyV1ImportState.ts",
+      "git_blob_sha": "a253c83035adb945ed4cf49d59bdadaf937f551c",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/OrchestrationV2/LegacyV1ImportState.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE TABLE orchestration_v2_legacy_imports (\n      thread_id TEXT PRIMARY KEY,\n      source_updated_at TEXT NOT NULL,\n      shell_imported_at TEXT NOT NULL,\n      transcript_imported_at TEXT,\n      imported_message_count INTEGER NOT NULL DEFAULT 0,\n      last_error TEXT\n    )"
+        },
+        {
+          "line": 19,
+          "sql_template": "CREATE INDEX orchestration_v2_legacy_imports_pending_transcript_idx\n    ON orchestration_v2_legacy_imports(transcript_imported_at, shell_imported_at, thread_id)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/ProviderSessionBindings.ts",
+      "git_blob_sha": "f0aa13f29a6b0eee0fe3eeb2766bdef4c883c1c7",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/OrchestrationV2/ProviderSessionBindings.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_provider_session_bindings (\n      provider_session_id TEXT NOT NULL,\n      thread_id TEXT NOT NULL,\n      PRIMARY KEY (provider_session_id, thread_id)\n    )"
+        },
+        {
+          "line": 24,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_provider_session_bindings_thread_idx\n    ON orchestration_v2_projection_provider_session_bindings(thread_id)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/RecoveryIndexes.ts",
+      "git_blob_sha": "5a5d629055c481496f4af39e5c7c7cd3f28a5bdd",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/OrchestrationV2/RecoveryIndexes.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE INDEX orchestration_events_v2_created_threads_idx\n    ON orchestration_events(stream_id)\n    WHERE application_event_version = 2\n      AND aggregate_kind = 'thread'\n      AND event_type = 'thread.created'"
+        },
+        {
+          "line": 15,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_runs_recovery_idx\n    ON orchestration_v2_projection_runs(status, thread_id)\n    WHERE status IN ('queued', 'preparing', 'starting', 'running', 'waiting')"
+        },
+        {
+          "line": 20,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_requests_recovery_idx\n    ON orchestration_v2_projection_runtime_requests(thread_id)\n    WHERE status = 'pending'"
+        },
+        {
+          "line": 25,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_turn_items_recovery_idx\n    ON orchestration_v2_projection_turn_items(thread_id)\n    WHERE type IN ('command_execution', 'dynamic_tool', 'subagent')\n      AND status IN ('pending', 'running', 'waiting')"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/ScheduledTasks.ts",
+      "git_blob_sha": "c12ca08d2ec00430436ee96a21039ec261d513cd",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/OrchestrationV2/ScheduledTasks.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE TABLE IF NOT EXISTS scheduled_tasks (\n      task_id TEXT PRIMARY KEY,\n      title TEXT NOT NULL,\n      prompt TEXT NOT NULL,\n      enabled INTEGER NOT NULL,\n      schedule_json TEXT NOT NULL,\n      project_id TEXT NOT NULL,\n      thread_id TEXT,\n      workspace_strategy_json TEXT NOT NULL,\n      model_selection_json TEXT NOT NULL,\n      runtime_mode TEXT NOT NULL,\n      interaction_mode TEXT NOT NULL,\n      created_by TEXT NOT NULL,\n      creation_source TEXT NOT NULL,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL,\n      next_run_at TEXT,\n      last_run_at TEXT,\n      last_run_status TEXT NOT NULL,\n      last_run_error TEXT,\n      run_count INTEGER NOT NULL\n    )"
+        },
+        {
+          "line": 33,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_due\n    ON scheduled_tasks(enabled, next_run_at)\n    WHERE enabled = 1 AND next_run_at IS NOT NULL"
+        },
+        {
+          "line": 39,
+          "sql_template": "CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_project\n    ON scheduled_tasks(project_id, updated_at)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/ShellIndexes.ts",
+      "git_blob_sha": "b0b66c3b40a5d2a5cc34926f834b9928ef42e1b7",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/OrchestrationV2/ShellIndexes.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_turn_items_thread_run_idx\n    ON orchestration_v2_projection_turn_items(thread_id, run_id)"
+        },
+        {
+          "line": 13,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_turn_items_shell_pending_idx\n    ON orchestration_v2_projection_turn_items(thread_id, run_id)\n    WHERE type IN ('command_execution', 'dynamic_tool', 'subagent')\n      AND status NOT IN ('completed', 'interrupted', 'failed', 'cancelled')"
+        },
+        {
+          "line": 19,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_messages_latest_user_idx\n    ON orchestration_v2_projection_messages(thread_id, updated_at DESC, message_id DESC)\n    WHERE role = 'user'"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/Subagents.ts",
+      "git_blob_sha": "28a5457fe06c1b22859d42fc654754e69065a949",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/OrchestrationV2/Subagents.ts",
+      "ddl": [
+        {
+          "line": 8,
+          "sql_template": "CREATE TABLE orchestration_v2_projection_subagents (\n      subagent_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      run_id TEXT,\n      parent_node_id TEXT NOT NULL,\n      provider TEXT NOT NULL,\n      provider_thread_id TEXT,\n      child_thread_id TEXT,\n      origin TEXT NOT NULL,\n      status TEXT NOT NULL,\n      started_at TEXT,\n      completed_at TEXT,\n      updated_at TEXT NOT NULL,\n      payload_json TEXT NOT NULL\n    )"
+        },
+        {
+          "line": 24,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_subagents_thread_idx ON orchestration_v2_projection_subagents(thread_id, started_at, subagent_id)"
+        },
+        {
+          "line": 25,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_subagents_parent_node_idx ON orchestration_v2_projection_subagents(parent_node_id)"
+        },
+        {
+          "line": 26,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_subagents_provider_thread_idx ON orchestration_v2_projection_subagents(provider_thread_id)"
+        },
+        {
+          "line": 27,
+          "sql_template": "CREATE INDEX orchestration_v2_projection_subagents_child_thread_idx ON orchestration_v2_projection_subagents(child_thread_id)"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/ThreadLaunchWorkflows.ts",
+      "git_blob_sha": "090509926120cf81549d62ce0a8668fb01ff22d0",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations/OrchestrationV2/ThreadLaunchWorkflows.ts",
+      "ddl": [
+        {
+          "line": 7,
+          "sql_template": "CREATE TABLE IF NOT EXISTS orchestration_v2_thread_launch_workflows (\n      command_id TEXT PRIMARY KEY,\n      thread_id TEXT NOT NULL,\n      project_id TEXT NOT NULL,\n      status TEXT NOT NULL,\n      title TEXT NOT NULL,\n      worktree_path TEXT,\n      branch TEXT,\n      setup_committed INTEGER NOT NULL DEFAULT 0,\n      thread_committed INTEGER NOT NULL DEFAULT 0,\n      message_committed INTEGER NOT NULL DEFAULT 0,\n      last_error TEXT,\n      created_at TEXT NOT NULL,\n      updated_at TEXT NOT NULL\n    )"
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Static migration source history; not an executed or final live sqlite_schema dump",
+    "DDL template extraction is lexical and may include source comments"
+  ]
+}

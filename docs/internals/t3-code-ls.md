@@ -31,13 +31,23 @@ and orchestration contracts. Its tests cannot qualify the normal application.
 
 ## Persistence and transport
 
-Production SQLite still owns the common transaction containing events,
-projections, command receipts and outbox work. The redb store is a candidate for
-that complete boundary, not an independently authoritative participant. Cutover
-requires migration, rejected-command receipts, replay, ordering, worker lifecycle,
-crash recovery and backup/restore tests. Once redb accepts writes, switching back
-to an older SQLite copy is not a safe rollback without transferring those writes.
-SurrealDB is not part of this recovery.
+The selected native route uses the pinned omdb fork through one transaction owner
+for events, projections, command receipts, outbox and the remaining application
+repositories. The port map records this as `redb-persistence`, integrated, with
+platform acceptance still separate. Shared orchestration and provider execution
+remain in the retained application graph; native storage alone is not a Rust
+server replacement.
+
+SQLite remains the migration source, immutable comparison and upstream-selected
+implementation on unqualified targets. Native activation fences older SQLite
+servers and the retained configuration refuses an activated home. An old SQLite
+file is not a current rollback target after native writes. The
+[cutover record](../porting/redb-cutover.md) and
+[port map](../../port-map.json) describe the actual boundary and evidence.
+
+The [full-system implementation guide](../porting/full-system/README.md) proposes
+typed storage, streaming and whole-system comparisons behind the authoritative
+omdb boundary. Its engine candidates do not change production selection.
 
 Iroh currently forwards authenticated bytes. Connect identity, pairing,
 authorization, browser/desktop/mobile connection lifecycle and reconnect behavior
@@ -65,3 +75,4 @@ reference checkouts live outside the product tree. Existing licenses, reference
 pins and source history remain intact. Workspace-owned Rust forbids unsafe code;
 upstream dependencies, OS interfaces and external providers remain separate
 boundaries, so no whole-stack memory-safety claim follows.
+

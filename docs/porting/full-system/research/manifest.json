@@ -1,0 +1,204 @@
+{
+  "schema_version": 1,
+  "document_kind": "public_research_file_manifest",
+  "research_baseline": "pingdotgg/t3code@28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "file_count": 39,
+  "meaning": "Hashes of the sanitized authored research files in this directory, not product acceptance evidence. Paths are relative to this manifest.",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 1770,
+      "sha256": "2aa6aaf522ca88937a7f0b87b917c1c0a8702ed89e69f9d2032f1300df017586"
+    },
+    {
+      "path": "clients/README.md",
+      "bytes": 1707,
+      "sha256": "c02629eab29bee4d5d4a44c588411a1294f62864fa80b2c359cd71253f8e632f"
+    },
+    {
+      "path": "clients/capability-map.json",
+      "bytes": 30548,
+      "sha256": "b21ecfab04c2de4283adb29b4cd3617d5fcf03a30049a9e914181ecfe329524c"
+    },
+    {
+      "path": "clients/capability-map.md",
+      "bytes": 21401,
+      "sha256": "911cf90394fa66b711fffeba48d746fc3a215ed30f44882c27e84562934aee47"
+    },
+    {
+      "path": "clients/cli-contract.md",
+      "bytes": 9856,
+      "sha256": "e7196249145ee92e136f9cba017d3e953764a76398347864c3b83b3eeb669d4d"
+    },
+    {
+      "path": "clients/cli-declarations.json",
+      "bytes": 177914,
+      "sha256": "c903c703de11d9eb650e2e69e1cd496e5c9499309c71b29421ac563be98c1cbc"
+    },
+    {
+      "path": "clients/client-platform-review.md",
+      "bytes": 21653,
+      "sha256": "fbb252a65e3c23c9992db23f648f6d015872fb8ca4cdd55eafa2e190c217e829"
+    },
+    {
+      "path": "clients/performance-acceptance-extension.json",
+      "bytes": 13134,
+      "sha256": "96915baafa6c80dca74d174427f415d985bde79e8989bb67f0b31a5171dcb01b"
+    },
+    {
+      "path": "clients/performance-acceptance-extension.md",
+      "bytes": 13805,
+      "sha256": "b0dd7345407f3f3c2abade001a255acebcca738d69c443018b5ff89e0580c668"
+    },
+    {
+      "path": "clients/pinned-optimization-presence.json",
+      "bytes": 4218,
+      "sha256": "1455314c1f4f41a0bb98f9c26f2fe884e3c8bf8c239d0042ca21aa1d07539376"
+    },
+    {
+      "path": "clients/source-coverage.json",
+      "bytes": 48253,
+      "sha256": "69731f1a5d5bcc6f1e2956ba5389276841ca585dd667a477acd601f54d32a6e6"
+    },
+    {
+      "path": "clients/upstream-optimization-history.json",
+      "bytes": 16597,
+      "sha256": "31ecb94c10ded85cb83d74dbb39acb17ea5a145a920f2f34b936fcb6ed87ef4c"
+    },
+    {
+      "path": "database/engines/engine-research.md",
+      "bytes": 23892,
+      "sha256": "39150a70e9c48d25127bdd683648d383bb8db6411431ec6274f4337904af40df"
+    },
+    {
+      "path": "database/engines/tantivy-benchmark-review.json",
+      "bytes": 867,
+      "sha256": "4f7b7603b04e41e4f0cdcc04d64a0dd3d0752807222ea49d0a76ea02f472850f"
+    },
+    {
+      "path": "database/nonserver/coverage.json",
+      "bytes": 31379,
+      "sha256": "f36c19b54ab1be3fdf8795a6de263749322a2b27dde7e88626f9c9c0837785a1"
+    },
+    {
+      "path": "database/nonserver/nonserver-review.md",
+      "bytes": 30594,
+      "sha256": "8b925eb0baca79096336a7bdfad78fd41347dfb374b5ef642827df8c364b7bea"
+    },
+    {
+      "path": "database/nonserver/owner-path-inventory.ndjson",
+      "bytes": 477746,
+      "sha256": "4ce0e20c545975f7d3f9f42b91b0acfe1f9a789e94fd9b15e7a17fbf27328843"
+    },
+    {
+      "path": "database/nonserver/performance-acceptance-matrix.md",
+      "bytes": 13075,
+      "sha256": "fd092b92049bb8af638c4a2efe23707d8f0d64711d9b1a1061ef5381b3e2533d"
+    },
+    {
+      "path": "database/report.md",
+      "bytes": 45345,
+      "sha256": "0c99b968d539c1e56a3674bfd79346b0f13f40178f5b83022d999b6fe574c2e4"
+    },
+    {
+      "path": "database/server/coverage.json",
+      "bytes": 68778,
+      "sha256": "698952e66824ca38bf156799f90bf63c593e77fd2a28d9efaf54365b63909bf7"
+    },
+    {
+      "path": "database/server/history-index-design-critique.md",
+      "bytes": 15145,
+      "sha256": "5289e081174ef57d7763429aab2a01246eb81dba6881e17dd01e2ebbe776b7cd"
+    },
+    {
+      "path": "database/server/migrations-inventory.json",
+      "bytes": 122615,
+      "sha256": "e8e2e234754bd6ccd24324b9e0ade2d167ce6e94dde6c2be708862192bb4d19c"
+    },
+    {
+      "path": "database/server/operation-family-map.json",
+      "bytes": 35117,
+      "sha256": "167ac9df7cf95093bc4f2fad5e1bfc4db9ac80d8ce2b85e4ab1870f073e35dd0"
+    },
+    {
+      "path": "database/server/runtime-operation-index.json",
+      "bytes": 161573,
+      "sha256": "953f73bc17784ceccf316d053a4cb569d572a41a1559d019bef77a6f7e5a5319"
+    },
+    {
+      "path": "database/server/server-findings.md",
+      "bytes": 48561,
+      "sha256": "8e53efb1dafe9e1b3d2cb14caf858d96a8a8491f26239868a30c64f3c7d73f2b"
+    },
+    {
+      "path": "database/server/sql-inventory.json",
+      "bytes": 277951,
+      "sha256": "f2196bdc6fa2961992f6ff99441c190c8b211aad00c342eccd99e5122a9f98ce"
+    },
+    {
+      "path": "rust-stack/RUST-STACK-RESEARCH.md",
+      "bytes": 42587,
+      "sha256": "81dbe34a325ab05e7d7bad0fd7d9dbf76ed671d7d96159ea93764b3ee47b745a"
+    },
+    {
+      "path": "rust-stack/source-pins.json",
+      "bytes": 4889,
+      "sha256": "8a038f3c5b11db58b5f4cda67fabe6507cc207f4502fe584b978a36dfe0b4820"
+    },
+    {
+      "path": "rust-stack/ui-followup-pins.json",
+      "bytes": 822,
+      "sha256": "bad71893d455d9cbcc5801bcf1c1706da7661f53bfa62770cb30d45f6f77755b"
+    },
+    {
+      "path": "server/api-contract-inventory.json",
+      "bytes": 168094,
+      "sha256": "89841ed7b7d039e2fb6434319fd5361b8759adadd22263f5b92189290ef18120"
+    },
+    {
+      "path": "server/capability-map.json",
+      "bytes": 123563,
+      "sha256": "dc24d7f3e8ac3f39b2e6772faba3de5f21151ec8e74ebaa03e46bfe37444af47"
+    },
+    {
+      "path": "server/coverage.json",
+      "bytes": 3009,
+      "sha256": "328e8745d3de1389e1ff1358817e2bdfdb1393a13f58cd262bdc835dfe09460a"
+    },
+    {
+      "path": "server/direct-http-route-inventory.json",
+      "bytes": 8483,
+      "sha256": "a12fd0a6e69d7ef372f0b9099461581ea2b12695f07b94b36cb33ae9dc2b75e5"
+    },
+    {
+      "path": "server/mcp-tool-inventory.json",
+      "bytes": 20175,
+      "sha256": "15f7dc77406ec76b11638e90c1d77c1419918625ce866af40d470c730ea4f83a"
+    },
+    {
+      "path": "server/provider-capability-declarations.json",
+      "bytes": 28710,
+      "sha256": "2115e4bea95788bfc444d69bb48b5d07340d6986bea7c3af11a6398dfa8de808"
+    },
+    {
+      "path": "server/provider-protocol-map.json",
+      "bytes": 14961,
+      "sha256": "7fb6d4be0549548b2732509e5247fadd0a6351bdfe88fc09514d58b881009589"
+    },
+    {
+      "path": "server/server-capabilities.md",
+      "bytes": 37481,
+      "sha256": "c3897fbb62375abcd5ec8c2d081f9f02e44483d6b2fb79394e72915a17297176"
+    },
+    {
+      "path": "server/source-inventory.json",
+      "bytes": 179102,
+      "sha256": "66ec34c04879961ea9314582dd0069678473f7d462a7e2bc3776ef98582af378"
+    },
+    {
+      "path": "server/source-manifest.json",
+      "bytes": 39826,
+      "sha256": "d638e07b18b31f31039053dafda8d7b5822ce4bbad5cf6d8f591737150fc6030"
+    }
+  ]
+}

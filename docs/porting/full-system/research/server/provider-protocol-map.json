@@ -1,0 +1,262 @@
+{
+  "revision": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "method": "Selected source semantics, not full external provider/SDK conformance audit",
+  "providers": [
+    {
+      "id": "codex",
+      "name": "Codex",
+      "transport": "External Codex app-server; generated JSON-RPC requests/notifications/server requests over child stdio.",
+      "rust_replacement": "Rust protocol codec plus process/session owner; reuse installed Codex executable.",
+      "blocker": "T3 does not need a first-party JS SDK for this observed transport. Protocol generated schemas are patched in upstream, so generated-only implementation is insufficient.",
+      "semantics": [
+        "Native thread fork/rollback, multi-turn goals, asynchronous questions, approvals and MCP elicitation, background work, strong IDs."
+      ],
+      "sources": [
+        {
+          "path": "packages/effect-codex-app-server/src/client.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/effect-codex-app-server/src/client.ts"
+        },
+        {
+          "path": "packages/effect-codex-app-server/src/protocol.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/effect-codex-app-server/src/protocol.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts"
+        }
+      ]
+    },
+    {
+      "id": "claude",
+      "name": "Claude Code",
+      "transport": "@anthropic-ai/claude-agent-sdk query/session APIs; SDK spawns installed Claude Code process; T3 supplies process spawning/cleanup and callbacks.",
+      "rust_replacement": "Rust Claude control-protocol client plus settings/hooks/transcript/session implementation; installed provider executable remains external.",
+      "blocker": "Full parity is unproven. Retaining JS SDK bridge is only an interim stage. T3 consumes forkSession/getSessionMessages/getSubagentMessages/resolveSettings and Query control methods beyond basic streamed prompt output.",
+      "semantics": [
+        "setModel,applyFlagSettings,setPermissionMode,stopTask,backgroundTasks,MCP status/read/reconnect/interrupt,canUseTool,hooks,elicitation,resume-at-message and transcript-backed child info."
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts"
+        },
+        {
+          "path": "apps/server/src/provider/Drivers/ClaudeDriver.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/Drivers/ClaudeDriver.ts"
+        }
+      ]
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "transport": "T3 NDJSON worker calls @cursor/sdk Agent/createAgentPlatform and @cursor/sdk/sqlite; first-party JS/native modules and patched SDK hooks.",
+      "rust_replacement": "A native Cursor API/protocol/storage client with proven parity, or a vendor-supported native SDK. Opaque external engine boundary must be explicit.",
+      "blocker": "Highest observed blocker. Current IPC is T3-owned TS worker, not evidence of a stable Cursor external agent protocol. Native shell hooks and content-addressed checkpoint rewind require additional parity research. Third-party SDK internals/license not audited.",
+      "semantics": [
+        "Shared worker already avoids SDK baseline per session; refcounted workspace SQLite store; hook-based agent shell output/background shells; resume/summarize/steer; rewind via exact checkpoint blobs; no native fork."
+      ],
+      "sources": [
+        {
+          "path": "packages/provider-cursor/src/server/sdk.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/sdk.ts"
+        },
+        {
+          "path": "packages/provider-cursor/src/server/CursorSdk.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/CursorSdk.ts"
+        },
+        {
+          "path": "packages/provider-cursor/src/server/CursorAgentSdk.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/CursorAgentSdk.ts"
+        },
+        {
+          "path": "packages/provider-cursor/src/server/CursorAgentSdkWorker.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/CursorAgentSdkWorker.ts"
+        },
+        {
+          "path": "packages/provider-cursor/src/server/CursorAgentSdkProcessRunner.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/CursorAgentSdkProcessRunner.ts"
+        }
+      ]
+    },
+    {
+      "id": "acp_registry",
+      "name": "ACP Registry / generic ACP",
+      "transport": "External registry-selected process using ACP JSON-RPC and negotiated client/agent capabilities.",
+      "rust_replacement": "Rust shared ACP runtime and catalog/install/auth/launch policy plus flavor interface.",
+      "blocker": "Do not hardcode provider-ID behavior into generic adapter. Some registry executables/wrappers are themselves JS or proprietary external providers; all-Rust T3 does not rewrite them.",
+      "semantics": [
+        "Model/options may arrive later; permission option IDs retained; generic rollback via new session and kept-history replay differs native rollback; registry Copilot cancellation disables interrupt/restart steering."
+      ],
+      "sources": [
+        {
+          "path": "packages/effect-acp/src/client.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/effect-acp/src/client.ts"
+        },
+        {
+          "path": "packages/effect-acp/src/protocol.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/effect-acp/src/protocol.ts"
+        },
+        {
+          "path": "packages/provider-acp/src/server/AcpSessionRuntime.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-acp/src/server/AcpSessionRuntime.ts"
+        },
+        {
+          "path": "packages/provider-acp/src/server/adapter.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-acp/src/server/adapter.ts"
+        },
+        {
+          "path": "packages/provider-acp-registry/src/server/adapter.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-acp-registry/src/server/adapter.ts"
+        }
+      ]
+    },
+    {
+      "id": "grok",
+      "name": "Grok",
+      "transport": "Grok-specific ACP flavor over shared runtime.",
+      "rust_replacement": "Rust ACP plus Grok protocol/steering/history normalization.",
+      "blocker": "Flavor behavior cannot be replaced by generic ACP alone.",
+      "semantics": [
+        "Active interjection waits current tool; cancel kills foreground process; explicit stop restarts process group; no native fork."
+      ],
+      "sources": [
+        {
+          "path": "packages/provider-grok/src/server/adapter.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-grok/src/server/adapter.ts"
+        }
+      ]
+    },
+    {
+      "id": "fx",
+      "name": "fx",
+      "transport": "fx-specific ACP flavor over shared runtime.",
+      "rust_replacement": "Rust ACP plus fx history/tool/subagent normalization.",
+      "blocker": "Capability defaults overridden by flavor and handshake.",
+      "semantics": [
+        "Model switch, readable snapshots, MCP and subagents."
+      ],
+      "sources": [
+        {
+          "path": "packages/provider-fx/src/server/adapter.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-fx/src/server/adapter.ts"
+        }
+      ]
+    },
+    {
+      "id": "kiro",
+      "name": "Kiro",
+      "transport": "Kiro-specific ACP flavor, private steering/fork metadata and hook negotiation.",
+      "rust_replacement": "Rust ACP plus exact Kiro extensions.",
+      "blocker": "Version-sensitive extension behavior must be replayed against actual provider binaries.",
+      "semantics": [
+        "Fork at prompt metadata; steering waits tools and excludes attachments; Kiro V3 hook opt-in version v2."
+      ],
+      "sources": [
+        {
+          "path": "packages/provider-kiro/src/server/adapter.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-kiro/src/server/adapter.ts"
+        }
+      ]
+    },
+    {
+      "id": "antigravity",
+      "name": "Antigravity",
+      "transport": "Antigravity ACP flavor with profile-scoped process/auth and file-read repair.",
+      "rust_replacement": "Rust ACP plus profile/installer/auth/continuation owner.",
+      "blocker": "Cannot advertise native conversation rollback just because shared ACP supports portable replay. Child session IDs absent, children read-only.",
+      "semantics": [
+        "Session model/runtime changes, native goals dynamic, HTTP MCP where negotiated, post-settle continuation/background work, native file-read repair."
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/Adapters/AntigravityAdapterV2.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/Adapters/AntigravityAdapterV2.ts"
+        },
+        {
+          "path": "apps/server/src/provider/Drivers/AntigravityDriver.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/Drivers/AntigravityDriver.ts"
+        }
+      ]
+    },
+    {
+      "id": "pi",
+      "name": "Pi",
+      "transport": "Installed Pi CLI JSON RPC mode; native extension/package/trust behavior retained.",
+      "rust_replacement": "Rust line-RPC client plus Pi session/history/fork/policy adapter.",
+      "blocker": "Native fork CLI destination cwd differs RPC session switch; cannot flatten this distinction.",
+      "semantics": [
+        "Native session history/fork; immutable permission hook requires restart on runtime mode change; active steering; no strong native turn IDs."
+      ],
+      "sources": [
+        {
+          "path": "packages/provider-pi/src/server/rpc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-pi/src/server/rpc.ts"
+        },
+        {
+          "path": "packages/provider-pi/src/server/adapter.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-pi/src/server/adapter.ts"
+        }
+      ]
+    },
+    {
+      "id": "opencode1",
+      "name": "OpenCode 1",
+      "transport": "External HTTP agent server plus event subscription; per-thread chat server with directory-scoped MCP.",
+      "rust_replacement": "Rust HTTP/event client plus OpenCode 1 lifecycle and policy adapter.",
+      "blocker": "Do not substitute OpenCode 2 API/lifecycle. External servers remain externally owned.",
+      "semantics": [
+        "Shared idle helper for catalog/text generation; project-scope always approvals translated so full access remains once; per-thread directory/MCP."
+      ],
+      "sources": [
+        {
+          "path": "packages/provider-opencode/src/server/adapter.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-opencode/src/server/adapter.ts"
+        }
+      ]
+    },
+    {
+      "id": "opencode2",
+      "name": "OpenCode 2",
+      "transport": "@opencode/client/effect HTTP client and SSE decoder against external server; single server per instance across directories.",
+      "rust_replacement": "Rust HTTP/SSE client and protocol schemas; no inherent JS business-logic requirement from this observed transport.",
+      "blocker": "Schema evolution and unreadable start/end events handled explicitly. Subscribe before work since stream is volatile.",
+      "semantics": [
+        "Basic auth user opencode; per-thread MCP names and deny-other-thread permissions; session approval once plus T3 session rule; external server ownership."
+      ],
+      "sources": [
+        {
+          "path": "packages/provider-opencode/src/server/v2/OpenCode2Client.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-opencode/src/server/v2/OpenCode2Client.ts"
+        },
+        {
+          "path": "packages/provider-opencode/src/server/v2/adapter.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-opencode/src/server/v2/adapter.ts"
+        }
+      ]
+    },
+    {
+      "id": "muse",
+      "name": "Muse",
+      "transport": "@muse-code/sdk spawnMspConnection launches external muse serve; MSP command/request/notification/server-request API and initialize schema v1.",
+      "rust_replacement": "Rust MSP transport/codec and process owner, retaining installed Muse executable.",
+      "blocker": "SDK implementation not audited; T3-visible envelope/protocol gives clearer replacement boundary than Cursor. Must preserve command identity and capability handshake.",
+      "semantics": [
+        "Session MCP negotiation; no native rollback/fork/resume; synthetic user handoff; canonical/Windows verbatim paths; process start timeout and cancellation wait for shutdown; Linux env trampoline already present."
+      ],
+      "sources": [
+        {
+          "path": "packages/provider-muse/src/server/sdk.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-muse/src/server/sdk.ts"
+        },
+        {
+          "path": "packages/provider-muse/src/server/protocol.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-muse/src/server/protocol.ts"
+        },
+        {
+          "path": "packages/provider-muse/src/server/adapter.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-muse/src/server/adapter.ts"
+        }
+      ]
+    }
+  ]
+}

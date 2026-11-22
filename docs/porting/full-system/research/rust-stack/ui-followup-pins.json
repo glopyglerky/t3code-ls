@@ -1,0 +1,28 @@
+[
+  {
+    "repo": "makepad/makepad",
+    "sha": "506ec05105b9adb08d1d21f9879df181b5244ea7",
+    "date": "2026-10-31T14:08:48Z",
+    "tree": "bb95352ee719b3655c01e8089e170f602f751350"
+  },
+  {
+    "repo": "linebender/xilem",
+    "sha": "9a78df878a9269a88325ebd71f3f68c757f0a396",
+    "date": "2026-11-22T14:05:48Z",
+    "tree": "6e8e28cfdc01ee4f62074abef050cf8da03137ae"
+  },
+  {
+    "repo": "marc2332/freya",
+    "sha": "747c22dca8fc031d4a5c7d24fcbf2c5458238a9b",
+    "date": "2026-11-22T20:00:21Z",
+    "tree": "9f5a120c0716f4ce543aac4cce70f0981eac9e7d"
+  },
+  {
+    "repo": "project-robius/robrix",
+    "tag": "v1.0.0-beta.7",
+    "published": "2026-11-14T08:18:54Z",
+    "sha": "87385e10680a5b38cf485cc8657a63f8c7174792",
+    "date": "2026-11-13T22:23:48Z",
+    "tree": "be1060c1f2991e2640f2bbf1c052b0def7963419"
+  }
+]

@@ -1,0 +1,5581 @@
+{
+  "revision": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "method": "Immutable git ls-tree, selected server/contracts/provider/protocol/SSH/docs families; tests/fixtures excluded by pattern. Enumeration is not semantic review.",
+  "files": [
+    {
+      "path": "README.md",
+      "blob_sha": "24dc0f8f7f6669ee439bc13f496e0451239f0e31",
+      "bytes": 5362
+    },
+    {
+      "path": "apps/server/package.json",
+      "blob_sha": "780cc64f0b2e502d523d555a73ab28eceff04d98",
+      "bytes": 4135
+    },
+    {
+      "path": "apps/server/src/assets/AssetAccess.ts",
+      "blob_sha": "005ce9ebd3f5f1ab8fa523d41631bba040a3bed8",
+      "bytes": 42269
+    },
+    {
+      "path": "apps/server/src/assets/AssetSigner.ts",
+      "blob_sha": "b113ee55593b2a9952893a0c2a2a0d5e93e08e9c",
+      "bytes": 542
+    },
+    {
+      "path": "apps/server/src/assets/AttachmentUpload.ts",
+      "blob_sha": "d2ea0aea145baab2cfeb52bd6a098ac85e24db10",
+      "bytes": 10323
+    },
+    {
+      "path": "apps/server/src/assets/MediaFile.ts",
+      "blob_sha": "6cd83a797fb71499e55657a6488ce6fbd2830937",
+      "bytes": 5053
+    },
+    {
+      "path": "apps/server/src/assets/NativeAppIconResolver.ts",
+      "blob_sha": "e31d7a1d8c30d8caad4d87c1cdc2331b6c323e3b",
+      "bytes": 9955
+    },
+    {
+      "path": "apps/server/src/assets/WorkspacePreviewRevisions.ts",
+      "blob_sha": "0ccdd2799c8b6b8d2a99b0c9f967797293f79f3f",
+      "bytes": 4756
+    },
+    {
+      "path": "apps/server/src/assets/icns.ts",
+      "blob_sha": "08a03f326c87be5c09b1c65e52f2fb487db4acc5",
+      "bytes": 1349
+    },
+    {
+      "path": "apps/server/src/assets/sourceControlMediaResponse.ts",
+      "blob_sha": "0cc653bc06189f7bea6364df1cf687940a9cd09c",
+      "bytes": 4051
+    },
+    {
+      "path": "apps/server/src/attachmentPaths.ts",
+      "blob_sha": "a5216f76b98938a56f072b54280affc4f44c643e",
+      "bytes": 966
+    },
+    {
+      "path": "apps/server/src/attachmentStore.ts",
+      "blob_sha": "a2b531e3fa5b02b5d0a9e05c86431111dcb3f763",
+      "bytes": 10684
+    },
+    {
+      "path": "apps/server/src/auth/EnvironmentAuth.ts",
+      "blob_sha": "977840617d04c6124732234593b5e387be61236b",
+      "bytes": 70933
+    },
+    {
+      "path": "apps/server/src/auth/EnvironmentAuthPolicy.ts",
+      "blob_sha": "1a5ad39c35853cf9cc1775ef0c5fcb2274ee783b",
+      "bytes": 2289
+    },
+    {
+      "path": "apps/server/src/auth/McpOAuth.ts",
+      "blob_sha": "e63c600ae1b2d67542476f6bf0fd69550b9e540c",
+      "bytes": 25252
+    },
+    {
+      "path": "apps/server/src/auth/PairingGrantStore.ts",
+      "blob_sha": "800486ce8689dd9163239a8968cfa0c91372bb3a",
+      "bytes": 31353
+    },
+    {
+      "path": "apps/server/src/auth/PayloadSigner.ts",
+      "blob_sha": "6136f965d7918664e755fdb6b1b7c4e25b844715",
+      "bytes": 2182
+    },
+    {
+      "path": "apps/server/src/auth/ReusableDevAuth.ts",
+      "blob_sha": "a9c0b5c3e0f50707b4b5896ef7f58c69ba332278",
+      "bytes": 1459
+    },
+    {
+      "path": "apps/server/src/auth/RpcAuthorization.ts",
+      "blob_sha": "ffe84c428a67a9efc5cb4e35baf7768bfba4ac2d",
+      "bytes": 19961
+    },
+    {
+      "path": "apps/server/src/auth/ServerSecretStore.ts",
+      "blob_sha": "f71afd8ce7cac6bdad82d0ef58b5e5d9d10e874c",
+      "bytes": 12152
+    },
+    {
+      "path": "apps/server/src/auth/SessionStore.ts",
+      "blob_sha": "4057cbdb4540c3d2672b9ff56145873131bba9fa",
+      "bytes": 46604
+    },
+    {
+      "path": "apps/server/src/auth/dpop.ts",
+      "blob_sha": "1793e87d00a48b3c554ceeca0c236e1c4be72baa",
+      "bytes": 4989
+    },
+    {
+      "path": "apps/server/src/auth/http.ts",
+      "blob_sha": "39952a385ba87fac32a1abde1192d0e51ae34252",
+      "bytes": 23957
+    },
+    {
+      "path": "apps/server/src/auth/mcpOAuthHtml.ts",
+      "blob_sha": "4cdc177cc4083f1cf91047382d0395653f20960e",
+      "bytes": 1374
+    },
+    {
+      "path": "apps/server/src/auth/mcpOAuthHttp.ts",
+      "blob_sha": "c9ffde0ecda999c1e5da327d9762d9587dc169c4",
+      "bytes": 9271
+    },
+    {
+      "path": "apps/server/src/auth/replayMarkers.ts",
+      "blob_sha": "ee12b5d1aecfe411645fce97f9a8702305489f62",
+      "bytes": 2637
+    },
+    {
+      "path": "apps/server/src/auth/serverInternalPaths.ts",
+      "blob_sha": "0c0cc295eda09d45087cc5f5043ad23939aa9fc8",
+      "bytes": 1308
+    },
+    {
+      "path": "apps/server/src/auth/utils.ts",
+      "blob_sha": "12c27cc1fdf57163d51bf3af1e76fb226d7048ba",
+      "bytes": 7007
+    },
+    {
+      "path": "apps/server/src/background/BackgroundPolicy.ts",
+      "blob_sha": "331b4c4f3365b8d674286cb42d70fcc7f17b558e",
+      "bytes": 9758
+    },
+    {
+      "path": "apps/server/src/background/HostPowerMonitor.ts",
+      "blob_sha": "3d8c8b35998aa23c8c0e9fb8b67c9663dfbc4f2c",
+      "bytes": 3229
+    },
+    {
+      "path": "apps/server/src/background/KeepAwake.ts",
+      "blob_sha": "f9d2cf3da75322a87158c5d09d7f67659506d85d",
+      "bytes": 8836
+    },
+    {
+      "path": "apps/server/src/bin.ts",
+      "blob_sha": "7b980e01b5fa7529ae880e37f9da6cb5dca2453f",
+      "bytes": 2381
+    },
+    {
+      "path": "apps/server/src/binCli.ts",
+      "blob_sha": "995b207e7c78186c71a9abadda54756a0094a7d2",
+      "bytes": 5478
+    },
+    {
+      "path": "apps/server/src/binMain.ts",
+      "blob_sha": "7d4c93fb040e772aa8a40886977a55ccddc4da4d",
+      "bytes": 2624
+    },
+    {
+      "path": "apps/server/src/bootstrap.ts",
+      "blob_sha": "af9521f70145574179f438358a43e8cc4cdf3cff",
+      "bytes": 6631
+    },
+    {
+      "path": "apps/server/src/checkpointing/CheckpointDiffQuery.ts",
+      "blob_sha": "d5344ecaa2fbb501d0fa115eb2c9c0c7400540d3",
+      "bytes": 18223
+    },
+    {
+      "path": "apps/server/src/checkpointing/CheckpointStore.ts",
+      "blob_sha": "425cd2b0c815dd6c125b7b8fb85d06cd8f91f15c",
+      "bytes": 7252
+    },
+    {
+      "path": "apps/server/src/checkpointing/Diffs.ts",
+      "blob_sha": "c832b62d13ba6ad31fa6237662d7e0b28c416ed0",
+      "bytes": 1371
+    },
+    {
+      "path": "apps/server/src/checkpointing/Errors.ts",
+      "blob_sha": "b36fe817e9faa584f0ad9c64bf191dcee256e50d",
+      "bytes": 3196
+    },
+    {
+      "path": "apps/server/src/claude-history-worker.ts",
+      "blob_sha": "2aa7f97c21b97a32ee9a61e77ee32124677f244c",
+      "bytes": 192
+    },
+    {
+      "path": "apps/server/src/claudeHistoryWorker.ts",
+      "blob_sha": "f1629868f3cf5c3cd055169b3c129e0072a6796d",
+      "bytes": 1425
+    },
+    {
+      "path": "apps/server/src/claudeModelOptions.ts",
+      "blob_sha": "c3376ef7ed8dc898a88156f8a43f38fffb7fca4c",
+      "bytes": 3164
+    },
+    {
+      "path": "apps/server/src/cli/acpMcpBridge.ts",
+      "blob_sha": "77ef020f4b6a6c71d9f7c3a3cee1b7af8ddc3a65",
+      "bytes": 918
+    },
+    {
+      "path": "apps/server/src/cli/app.ts",
+      "blob_sha": "e4182945215c31b7e1190af00d36d235431d34d0",
+      "bytes": 9730
+    },
+    {
+      "path": "apps/server/src/cli/auth.ts",
+      "blob_sha": "b1483ef5701ca94a8fa4f399bbef2f072ef75c3a",
+      "bytes": 13197
+    },
+    {
+      "path": "apps/server/src/cli/authScopes.ts",
+      "blob_sha": "9294cc1a12ba7b4f84940632177d42110fc3231c",
+      "bytes": 475
+    },
+    {
+      "path": "apps/server/src/cli/automaticPort.ts",
+      "blob_sha": "354de65d2519b950b50ec732f8098c41c38548c4",
+      "bytes": 3038
+    },
+    {
+      "path": "apps/server/src/cli/browser.ts",
+      "blob_sha": "a82b84ef82d4bf867604841ada0679437a62cfad",
+      "bytes": 10760
+    },
+    {
+      "path": "apps/server/src/cli/claudeHistory.ts",
+      "blob_sha": "d46540f3acba5bb043c9caef125424780505243f",
+      "bytes": 918
+    },
+    {
+      "path": "apps/server/src/cli/config.ts",
+      "blob_sha": "a62682772bcce2a10813d97287f32087e68dbe10",
+      "bytes": 24037
+    },
+    {
+      "path": "apps/server/src/cli/connect.ts",
+      "blob_sha": "8ef202c2d014f84587fc753498f2570d0bc76a51",
+      "bytes": 31505
+    },
+    {
+      "path": "apps/server/src/cli/consoleStdin.ts",
+      "blob_sha": "18ee7bed6d5a1af3eefa1c750b1b2871155e730e",
+      "bytes": 2565
+    },
+    {
+      "path": "apps/server/src/cli/doctor.ts",
+      "blob_sha": "60af29ac41e7bdaf652e3700273e7d78da65a709",
+      "bytes": 8930
+    },
+    {
+      "path": "apps/server/src/cli/environment.ts",
+      "blob_sha": "9243d0340eabf5f1a69e5cecdd36ee8c6a2c5a65",
+      "bytes": 12130
+    },
+    {
+      "path": "apps/server/src/cli/install.ts",
+      "blob_sha": "4e6420842dc9dd201268fb7e04da181282418b2f",
+      "bytes": 15561
+    },
+    {
+      "path": "apps/server/src/cli/invocation.ts",
+      "blob_sha": "4804d44f0e324952767ed4375103f9a29525c670",
+      "bytes": 10070
+    },
+    {
+      "path": "apps/server/src/cli/managedChatGptToken.ts",
+      "blob_sha": "84ed18fb5228a006a3e9db63a7898fb7b87ede45",
+      "bytes": 1908
+    },
+    {
+      "path": "apps/server/src/cli/pair.ts",
+      "blob_sha": "2d45d45befeec3b77f1f58f68dbd87895eee33bc",
+      "bytes": 24377
+    },
+    {
+      "path": "apps/server/src/cli/policy.ts",
+      "blob_sha": "dafc5352166f0296661daf3c56b11e17653937ae",
+      "bytes": 7670
+    },
+    {
+      "path": "apps/server/src/cli/project.ts",
+      "blob_sha": "d2e84e0d4f4f501115be4df63215fa94f0f6f597",
+      "bytes": 20067
+    },
+    {
+      "path": "apps/server/src/cli/runningServer.ts",
+      "blob_sha": "cf315ff223ae5e1c5ee14fa1661b78309825c27c",
+      "bytes": 5597
+    },
+    {
+      "path": "apps/server/src/cli/server.ts",
+      "blob_sha": "303402d46c2b44a4d0b260f46f76224d8b6b0dca",
+      "bytes": 4263
+    },
+    {
+      "path": "apps/server/src/cli/service.ts",
+      "blob_sha": "fc2aa8d0889aa238b8cea764d6239b54dba78fa8",
+      "bytes": 20931
+    },
+    {
+      "path": "apps/server/src/cli/serviceLauncher.ts",
+      "blob_sha": "fc5882cbf935a9ac494f25ba1ce508fab1178f37",
+      "bytes": 1131
+    },
+    {
+      "path": "apps/server/src/cli/servicePreflight.ts",
+      "blob_sha": "eefb2a35d37cb7d2a74f9242e92268d082a93fef",
+      "bytes": 594
+    },
+    {
+      "path": "apps/server/src/cli/speechWorker.ts",
+      "blob_sha": "68be39836e8e36f638e21a751bfa74cc47d1f4ed",
+      "bytes": 554
+    },
+    {
+      "path": "apps/server/src/cli/sshHelper.ts",
+      "blob_sha": "342b4107a54bdfce3a1df53369f522cd45457b94",
+      "bytes": 7135
+    },
+    {
+      "path": "apps/server/src/cli/theme.ts",
+      "blob_sha": "26048240d524898210fe9bcd07812b46bdcd9a6f",
+      "bytes": 20442
+    },
+    {
+      "path": "apps/server/src/cli/thread.ts",
+      "blob_sha": "48d62fb4575b77b9aec8e1090aac1ed427037606",
+      "bytes": 39980
+    },
+    {
+      "path": "apps/server/src/cli/trace.ts",
+      "blob_sha": "b2463dab0d98d8c525a009eac8d069f1faa5a6b7",
+      "bytes": 7358
+    },
+    {
+      "path": "apps/server/src/cli/triage.ts",
+      "blob_sha": "cb0f94b254589feff924290fe1ef670acb4df3c3",
+      "bytes": 8878
+    },
+    {
+      "path": "apps/server/src/cli/uninstall.ts",
+      "blob_sha": "a0d47c73849105e48322b457785b687c04b44c3d",
+      "bytes": 11489
+    },
+    {
+      "path": "apps/server/src/cli/up.ts",
+      "blob_sha": "a56e478c7f45c5878fe65042fe175bb9f6e40f9a",
+      "bytes": 23081
+    },
+    {
+      "path": "apps/server/src/cli/update.ts",
+      "blob_sha": "07f3458fb3b66d405b4b67365799f194def6471e",
+      "bytes": 25031
+    },
+    {
+      "path": "apps/server/src/cli/updateProgress.ts",
+      "blob_sha": "5014bde9930edc9f19013a8b64211d9704aa481a",
+      "bytes": 2833
+    },
+    {
+      "path": "apps/server/src/cliAuthFormat.ts",
+      "blob_sha": "0e58caf4bdcce229e61d1fd8c99d0d9dd96d7536",
+      "bytes": 6817
+    },
+    {
+      "path": "apps/server/src/cliCompileCache.ts",
+      "blob_sha": "9ae842afadd472385eb96e7b6f38e97be84ddbcf",
+      "bytes": 1239
+    },
+    {
+      "path": "apps/server/src/cloud/CliState.ts",
+      "blob_sha": "8c4d9d05c748c856f1750fa49441d561ef85961b",
+      "bytes": 3247
+    },
+    {
+      "path": "apps/server/src/cloud/CliTokenManager.ts",
+      "blob_sha": "596c594a0a34367b6d21ed74a6560ac9536646f0",
+      "bytes": 24646
+    },
+    {
+      "path": "apps/server/src/cloud/CloudLink.ts",
+      "blob_sha": "6c9c70246b67e7b081f0eb088b37de40021bc1ff",
+      "bytes": 67403
+    },
+    {
+      "path": "apps/server/src/cloud/ConnectReachability.ts",
+      "blob_sha": "c3ed37f01c91d926e3ef67f8e42cc4c5b1387bdf",
+      "bytes": 20681
+    },
+    {
+      "path": "apps/server/src/cloud/ManagedEndpointRuntime.ts",
+      "blob_sha": "ffc533486d3eaee6d9041f5ea9d8ae5355b79db9",
+      "bytes": 40449
+    },
+    {
+      "path": "apps/server/src/cloud/RelayClientLedger.ts",
+      "blob_sha": "dfd95e2df1bae8f11ff1dc3eb67837725fb0c93e",
+      "bytes": 9134
+    },
+    {
+      "path": "apps/server/src/cloud/bootService.ts",
+      "blob_sha": "4f81ec864193114c366640ce0f8273597644b76f",
+      "bytes": 65109
+    },
+    {
+      "path": "apps/server/src/cloud/cliAuthHtml.ts",
+      "blob_sha": "69d3b471ae32ede652b93a3855bc2b6e8280ee80",
+      "bytes": 5476
+    },
+    {
+      "path": "apps/server/src/cloud/config.ts",
+      "blob_sha": "5dac9e2db905fca6039ec549a2c1c73cd5221d67",
+      "bytes": 3735
+    },
+    {
+      "path": "apps/server/src/cloud/environmentKeys.ts",
+      "blob_sha": "9b7053908e340731924dbfc0c1d6af9600d7b980",
+      "bytes": 5923
+    },
+    {
+      "path": "apps/server/src/cloud/http.ts",
+      "blob_sha": "84491a274398d8d0b929893580ec8c8f5ad70460",
+      "bytes": 6827
+    },
+    {
+      "path": "apps/server/src/cloud/linkChecks.ts",
+      "blob_sha": "6b8f19e60a6949732c233b45be6c33c068b3ee2b",
+      "bytes": 3024
+    },
+    {
+      "path": "apps/server/src/cloud/managedTunnelStartup.ts",
+      "blob_sha": "ed7dd7aa4d8ebfecea5fd2e6ff2e0b58bafe69f7",
+      "bytes": 10173
+    },
+    {
+      "path": "apps/server/src/cloud/npmRelease.ts",
+      "blob_sha": "230c050d3e9a92760649005f296f5a226423d483",
+      "bytes": 5491
+    },
+    {
+      "path": "apps/server/src/cloud/pinnedRuntime.ts",
+      "blob_sha": "13c8f251c93b6cf9860e0b428a139fe3c091ca2c",
+      "bytes": 38419
+    },
+    {
+      "path": "apps/server/src/cloud/publicConfig.ts",
+      "blob_sha": "85ffbbb046588c6b2bc0b11844ea04e19175947a",
+      "bytes": 8071
+    },
+    {
+      "path": "apps/server/src/cloud/relayResponse.ts",
+      "blob_sha": "ac16308deb7805301ad34e2634965055cd4dc383",
+      "bytes": 5784
+    },
+    {
+      "path": "apps/server/src/cloud/relayTracing.ts",
+      "blob_sha": "c31c6b2691176c0c5132a9c8bddd96d17f6b1762",
+      "bytes": 1597
+    },
+    {
+      "path": "apps/server/src/cloud/selfUpdate.ts",
+      "blob_sha": "1d1263b2ebf78a30bb9952b5cbab5462a0f202a1",
+      "bytes": 13751
+    },
+    {
+      "path": "apps/server/src/cloud/serviceLauncherClient.ts",
+      "blob_sha": "e8f8941f3f9e898157b85c9eaf1265a5be09992e",
+      "bytes": 13528
+    },
+    {
+      "path": "apps/server/src/cloud/servicePreflight.ts",
+      "blob_sha": "56b8537538344e86113d38f495875afa6eaaae7e",
+      "bytes": 6657
+    },
+    {
+      "path": "apps/server/src/cloud/serviceProtection.ts",
+      "blob_sha": "48790bcf6cc05fb7d0dd1678aacfed2a9ce62db8",
+      "bytes": 13939
+    },
+    {
+      "path": "apps/server/src/cloud/serviceProtocol.ts",
+      "blob_sha": "18dbb5199e54a7273f03aafbe777395838ded9a9",
+      "bytes": 14835
+    },
+    {
+      "path": "apps/server/src/cloud/serviceSelectionLock.ts",
+      "blob_sha": "4cbd123c22f7e0af018dc18c8cf135dc3373b11c",
+      "bytes": 3645
+    },
+    {
+      "path": "apps/server/src/cloud/traceRelayRequest.ts",
+      "blob_sha": "d59bb862e16d03f801a5e93a4a68621a57b18f83",
+      "bytes": 2200
+    },
+    {
+      "path": "apps/server/src/cloud/updateHandoff.ts",
+      "blob_sha": "27b66c7f5b2ee82432e0b1fc4c0ad12e53e7595f",
+      "bytes": 2258
+    },
+    {
+      "path": "apps/server/src/codexModelOptions.ts",
+      "blob_sha": "43b8a3c184f5a6548763b9067a3178565009cb35",
+      "bytes": 493
+    },
+    {
+      "path": "apps/server/src/compileCache.ts",
+      "blob_sha": "ea58a1cd3f503e549502d70faa6c4c2207191d79",
+      "bytes": 705
+    },
+    {
+      "path": "apps/server/src/config.ts",
+      "blob_sha": "c707c912d672d1afc07c231057315a4aabd4f80a",
+      "bytes": 11938
+    },
+    {
+      "path": "apps/server/src/desktopUpdate/DesktopAppUpdate.ts",
+      "blob_sha": "ed1d3bba7f822f918de96e8b972c36cf8779a6fa",
+      "bytes": 8920
+    },
+    {
+      "path": "apps/server/src/desktopUpdate/DesktopUpdateMarker.ts",
+      "blob_sha": "9befa63b4becbc99c504e4c7007677eab81c0c53",
+      "bytes": 2750
+    },
+    {
+      "path": "apps/server/src/device/AgentDeviceShim.ts",
+      "blob_sha": "885775279b2ad52bc66cfa012f218e52f2e00d51",
+      "bytes": 12101
+    },
+    {
+      "path": "apps/server/src/device/AgentDeviceTarget.ts",
+      "blob_sha": "db3e2819f20df41854149e33c6895f2348cdb658",
+      "bytes": 4005
+    },
+    {
+      "path": "apps/server/src/device/DeviceActions.ts",
+      "blob_sha": "64630488f3daac87bf8315a0294d29d6fd2fa1dc",
+      "bytes": 19495
+    },
+    {
+      "path": "apps/server/src/device/DeviceHost.ts",
+      "blob_sha": "898b028c4329c432d27140b0d017df3f057679d1",
+      "bytes": 8150
+    },
+    {
+      "path": "apps/server/src/device/DeviceHubOperations.ts",
+      "blob_sha": "41f68548b51039449c1abdbb8f0ad87be8762273",
+      "bytes": 15396
+    },
+    {
+      "path": "apps/server/src/device/DeviceHubProxy.ts",
+      "blob_sha": "9778cf084b0175336c82155bb6e8a41107be7558",
+      "bytes": 10589
+    },
+    {
+      "path": "apps/server/src/device/DeviceService.ts",
+      "blob_sha": "cf8aece6745e09868f2a37679b014fe63acff0c9",
+      "bytes": 68756
+    },
+    {
+      "path": "apps/server/src/device/DeviceToolchain.ts",
+      "blob_sha": "7b041a54502c9662a3424104778f0a936d397d24",
+      "bytes": 10287
+    },
+    {
+      "path": "apps/server/src/device/EasDeviceHost.ts",
+      "blob_sha": "a41b32a347cdc0d9353b0aca5b749469ebc31be2",
+      "bytes": 37191
+    },
+    {
+      "path": "apps/server/src/device/ExpoApi.graphql",
+      "blob_sha": "a5eaa0d069c92501825966d20bc644eaf7c560c2",
+      "bytes": 1315
+    },
+    {
+      "path": "apps/server/src/device/ExpoApi.graphql.ts",
+      "blob_sha": "f9501f1cc0dd06bef0742bedf5d9918980a07ce2",
+      "bytes": 11155
+    },
+    {
+      "path": "apps/server/src/device/ExpoApi.ts",
+      "blob_sha": "1cc61daff7fc0302f913cd6165403b51eabfd0b5",
+      "bytes": 12929
+    },
+    {
+      "path": "apps/server/src/device/LocalDeviceHost.ts",
+      "blob_sha": "d7443d1a4b88b1e2a74c3d25aa3e3a05e62464e8",
+      "bytes": 36791
+    },
+    {
+      "path": "apps/server/src/device/SimlockDeviceHost.ts",
+      "blob_sha": "417399c9114c8716618352cc7d797b0ff137f188",
+      "bytes": 26676
+    },
+    {
+      "path": "apps/server/src/device/SshDeviceHost.ts",
+      "blob_sha": "d6946b419429a6a5e4a6fab2c93ba2763620bd5e",
+      "bytes": 24285
+    },
+    {
+      "path": "apps/server/src/device/deviceToolMaintenance.ts",
+      "blob_sha": "2832071d099d00c3434a48f34af2b8c384fb3738",
+      "bytes": 6773
+    },
+    {
+      "path": "apps/server/src/device/deviceToolVersions.json",
+      "blob_sha": "4145899e9e762da5d88e0c441a89ad197771092a",
+      "bytes": 63
+    },
+    {
+      "path": "apps/server/src/device/easProjectId.ts",
+      "blob_sha": "e14f9d58719103e65e81a82b655982d3fe091d74",
+      "bytes": 11298
+    },
+    {
+      "path": "apps/server/src/device/localSshDeviceHost.ts",
+      "blob_sha": "4151786ce739edb1c36b82ac672bce349fe52a91",
+      "bytes": 3385
+    },
+    {
+      "path": "apps/server/src/device/mjpegStillFrame.ts",
+      "blob_sha": "7cbe30075912c40aee98b30ac7891b76ab8e3908",
+      "bytes": 4827
+    },
+    {
+      "path": "apps/server/src/device/sshDeviceScript.ts",
+      "blob_sha": "7a32640766a8fec42a6166459a750d7f63de0458",
+      "bytes": 16051
+    },
+    {
+      "path": "apps/server/src/diagnostics/ProcessDiagnostics.ts",
+      "blob_sha": "671d8a8afe781b4d914e801186ca009d9d4e75cd",
+      "bytes": 5575
+    },
+    {
+      "path": "apps/server/src/diagnostics/ProcessResourceMonitor.ts",
+      "blob_sha": "7aead0f041f999502f32960fd4a27bbe7cbbf866",
+      "bytes": 3282
+    },
+    {
+      "path": "apps/server/src/diagnostics/TraceDiagnostics.ts",
+      "blob_sha": "6f25c424a7b83598040f8d61ee978b8497ea8f49",
+      "bytes": 15339
+    },
+    {
+      "path": "apps/server/src/entrypoint.ts",
+      "blob_sha": "86714e1ae54dbfd25684b238f9e4fab0723122d8",
+      "bytes": 860
+    },
+    {
+      "path": "apps/server/src/environment/DirectEndpoints.ts",
+      "blob_sha": "c39ca1d85484eb26cee99d9c80336f40fe465357",
+      "bytes": 7360
+    },
+    {
+      "path": "apps/server/src/environment/RemoteOpenTargets.ts",
+      "blob_sha": "beb216339f06a46d17744fbda2de8edfdd0f357f",
+      "bytes": 3675
+    },
+    {
+      "path": "apps/server/src/environment/ServerEnvironment.ts",
+      "blob_sha": "b29f9c874f123d4b1e9c553291ad5c717b7173f5",
+      "bytes": 11931
+    },
+    {
+      "path": "apps/server/src/environment/ServerEnvironmentLabel.ts",
+      "blob_sha": "f23321058172f308b2a6ac646c775dbcf6ae5d77",
+      "bytes": 6987
+    },
+    {
+      "path": "apps/server/src/environment/ServerEnvironmentMachine.ts",
+      "blob_sha": "95ea0666cb09b81b0e90a0467c04b6b2410a9313",
+      "bytes": 5486
+    },
+    {
+      "path": "apps/server/src/environment/staleWhileRevalidate.ts",
+      "blob_sha": "e87757bee703132820f6bd45548c44a9ccb298c3",
+      "bytes": 3073
+    },
+    {
+      "path": "apps/server/src/environmentTheme.ts",
+      "blob_sha": "a27adccd1f63096a4a65de121a6fa5f52d712186",
+      "bytes": 20315
+    },
+    {
+      "path": "apps/server/src/eventStreamResponse.ts",
+      "blob_sha": "85d65257ba4f893ab9ca56410766c93d4d11164f",
+      "bytes": 1392
+    },
+    {
+      "path": "apps/server/src/git/GitManager.ts",
+      "blob_sha": "dedf2d19f54edab626c050e2d99e0cccf3923f5b",
+      "bytes": 160284
+    },
+    {
+      "path": "apps/server/src/git/GitWorkflowService.ts",
+      "blob_sha": "4cf3e62d9a93fe005fa4c830e51ce9998ef9b216",
+      "bytes": 21374
+    },
+    {
+      "path": "apps/server/src/git/detachStackFrame.ts",
+      "blob_sha": "7dc1982529b0a8d17ccab42cdb1f98aef1f4aacc",
+      "bytes": 887
+    },
+    {
+      "path": "apps/server/src/git/linkCreatedPullRequest.ts",
+      "blob_sha": "278f4c9b43406cc11ebdef5ac44f6bb36135d5de",
+      "bytes": 3719
+    },
+    {
+      "path": "apps/server/src/git/refreshPushedPullRequests.ts",
+      "blob_sha": "2986b6f77f56fbe05893a5ac60ce81d8a2c871eb",
+      "bytes": 1483
+    },
+    {
+      "path": "apps/server/src/git/remoteRefs.ts",
+      "blob_sha": "e3873effe475ef93ccba68b6e8e516801919afdd",
+      "bytes": 1924
+    },
+    {
+      "path": "apps/server/src/git/sharedCheckoutGuard.ts",
+      "blob_sha": "442ef14dc71e9bfec6992a459a99c8dc49da903b",
+      "bytes": 4169
+    },
+    {
+      "path": "apps/server/src/guest/GuestShareService.ts",
+      "blob_sha": "b5b21a7af2ae77d3991657aecd683a4e4d6ab4a9",
+      "bytes": 31563
+    },
+    {
+      "path": "apps/server/src/guest/guestAttachments.ts",
+      "blob_sha": "5118899620d641a12537eea8d359301d79420765",
+      "bytes": 5539
+    },
+    {
+      "path": "apps/server/src/guest/guestView.ts",
+      "blob_sha": "ac5af5c040274b1a2404a190491f4597f3865858",
+      "bytes": 1328
+    },
+    {
+      "path": "apps/server/src/guest/http.ts",
+      "blob_sha": "6d1747274e76a5e363b0c041d60ce42c70dee6a5",
+      "bytes": 14055
+    },
+    {
+      "path": "apps/server/src/htmlRender/HtmlRender.ts",
+      "blob_sha": "39cb7a463dbd497706ff94f12bf2afd739c75e34",
+      "bytes": 23085
+    },
+    {
+      "path": "apps/server/src/htmlRender/headlessChrome.ts",
+      "blob_sha": "6a2cb37743472c72d6d31a90584f36f82845bda6",
+      "bytes": 23033
+    },
+    {
+      "path": "apps/server/src/htmlRender/publicProxy.ts",
+      "blob_sha": "c8e15c096ba18cf086075f1bbc7c5fece4044fc5",
+      "bytes": 8412
+    },
+    {
+      "path": "apps/server/src/http.ts",
+      "blob_sha": "47215bef97f7d3ce4cd6edbe84bbe15c5617ef50",
+      "bytes": 30328
+    },
+    {
+      "path": "apps/server/src/httpCors.ts",
+      "blob_sha": "b96e58ead9fcac40d4b280605309124b67e4efd3",
+      "bytes": 539
+    },
+    {
+      "path": "apps/server/src/httpResponseErrorGuard.ts",
+      "blob_sha": "c75ccae660a55a099a78bfdc162c14ad748e6644",
+      "bytes": 3246
+    },
+    {
+      "path": "apps/server/src/imageMime.ts",
+      "blob_sha": "4c985dccb8235441d41cc4afe9c9f804233274f0",
+      "bytes": 3826
+    },
+    {
+      "path": "apps/server/src/issue/IssueService.ts",
+      "blob_sha": "9b9b050ab6ad0dc320ea0cb40af4712fac2e7d52",
+      "bytes": 32410
+    },
+    {
+      "path": "apps/server/src/issue/IssueTrackerConnections.ts",
+      "blob_sha": "704116fc65326909f71a0f10f25c64c97ea98386",
+      "bytes": 7291
+    },
+    {
+      "path": "apps/server/src/issue/IssueTrackerHostLive.ts",
+      "blob_sha": "2e2c5720316bf32f2166a68e650cdcca82381059",
+      "bytes": 1600
+    },
+    {
+      "path": "apps/server/src/issue/IssueTrackerRegistry.ts",
+      "blob_sha": "6f2343e9904799e8e6634ce1133f70dc47756159",
+      "bytes": 2087
+    },
+    {
+      "path": "apps/server/src/issue/linkedThreads.ts",
+      "blob_sha": "03c337996f08ad035a93904f07fe3a6a8afdf689",
+      "bytes": 2510
+    },
+    {
+      "path": "apps/server/src/keybindings.ts",
+      "blob_sha": "d9a6a8dbf01d3c1ad2c0ecc396a50d730615897c",
+      "bytes": 27489
+    },
+    {
+      "path": "apps/server/src/launcherWatch.ts",
+      "blob_sha": "ca109422c95a88ee861bd48da067a0bfc629b935",
+      "bytes": 1514
+    },
+    {
+      "path": "apps/server/src/legacyServerOwner.ts",
+      "blob_sha": "9ed24c9c838f2509577b0c9560c7bd2015dd3304",
+      "bytes": 1049
+    },
+    {
+      "path": "apps/server/src/mcp/AcpMcpStdioBridge.ts",
+      "blob_sha": "11bd819f4b88bb2841944815d45beee4636a15e5",
+      "bytes": 15439
+    },
+    {
+      "path": "apps/server/src/mcp/McpHttpServer.ts",
+      "blob_sha": "4c9d9dca1081a880483fe1180a1fa69530e2c5f4",
+      "bytes": 58027
+    },
+    {
+      "path": "apps/server/src/mcp/McpInvocationContext.ts",
+      "blob_sha": "893c17f23311b0d2c2939ed042650af33ab9bc8d",
+      "bytes": 11102
+    },
+    {
+      "path": "apps/server/src/mcp/McpSessionRegistry.ts",
+      "blob_sha": "9a7142cea3dfa296daae309be5bc13e459e36d9c",
+      "bytes": 9532
+    },
+    {
+      "path": "apps/server/src/mcp/McpToolAccess.ts",
+      "blob_sha": "bbf090809c682bfb73e14526b579cbdd3f5b51b5",
+      "bytes": 18029
+    },
+    {
+      "path": "apps/server/src/mcp/McpToolExposure.ts",
+      "blob_sha": "cb1ff850717d1a6832029748d8e93339cfe41118",
+      "bytes": 2779
+    },
+    {
+      "path": "apps/server/src/mcp/OrchestratorMcpService.ts",
+      "blob_sha": "156555c74d6957926a20ff01865b0a49a1448139",
+      "bytes": 158393
+    },
+    {
+      "path": "apps/server/src/mcp/PreviewAutomationBroker.ts",
+      "blob_sha": "cc3230e5b68b5e65d8c1db8ceb0381d8cffde6f0",
+      "bytes": 28604
+    },
+    {
+      "path": "apps/server/src/mcp/ThreadMetadataMcpService.ts",
+      "blob_sha": "355fba952653f83652b4c44261a37eb86a97900e",
+      "bytes": 6408
+    },
+    {
+      "path": "apps/server/src/mcp/WorktreeMcpService.ts",
+      "blob_sha": "7105f3a0e29236cff510fc74c9b25a8dd5996f01",
+      "bytes": 21001
+    },
+    {
+      "path": "apps/server/src/mcp/advertisedJsonSchema.ts",
+      "blob_sha": "8b8737a529183b89290b58d9da2a95a3e5d59a85",
+      "bytes": 5003
+    },
+    {
+      "path": "apps/server/src/mcp/delegatedTaskModes.ts",
+      "blob_sha": "54d25bbb36e02d9ed90fc6494d3cec367b5708c9",
+      "bytes": 3468
+    },
+    {
+      "path": "apps/server/src/mcp/linkOrigin.ts",
+      "blob_sha": "25763b759a36b0537318d844b96fd87f54516d70",
+      "bytes": 3159
+    },
+    {
+      "path": "apps/server/src/mcp/threadAccess.ts",
+      "blob_sha": "d21495f0ff7c71aac8c26182da11e274a6cbfdab",
+      "bytes": 11183
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/attachment/handlers.ts",
+      "blob_sha": "25d0ac7fad15dc5dcecc00a58ed90f791081eca7",
+      "bytes": 5798
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/attachment/input.ts",
+      "blob_sha": "1f37edbbf6d4de5b84396ff81708f59a85d4a18d",
+      "bytes": 387
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/attachment/tools.ts",
+      "blob_sha": "59cecace843866ad574f2edd3088c017a6cc0c64",
+      "bytes": 2887
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/device/handlers.ts",
+      "blob_sha": "099a9bae9e2d3225d5dddd8006d7107995bc890e",
+      "bytes": 18000
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/device/tools.ts",
+      "blob_sha": "c87b579843ad83e0c66f1cb9e135ac956b8e63f6",
+      "bytes": 4284
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/environment/handlers.ts",
+      "blob_sha": "fb1716885d6e877b547a60642116d753968ce177",
+      "bytes": 3036
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/environment/tools.ts",
+      "blob_sha": "9e10380295de25ab421ecd69fe7eb93e0a348c24",
+      "bytes": 3203
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/html/handlers.ts",
+      "blob_sha": "3cba937186b89b0e83a40d9bf5daedc0572352f8",
+      "bytes": 3658
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/html/tools.ts",
+      "blob_sha": "0cb6153025466036dbfe4e158b614fa5f2045e30",
+      "bytes": 4500
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/issues/handlers.ts",
+      "blob_sha": "c09dbc356d61f96b12b6003287a0518a6e11b41f",
+      "bytes": 12023
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/issues/tools.ts",
+      "blob_sha": "6af757999134dac5d88fd146b4249ae02c84a3c3",
+      "bytes": 13013
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/message/handlers.ts",
+      "blob_sha": "defe3609f08ca23b8e82d9ab4210d005c8b4867a",
+      "bytes": 476
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/message/tools.ts",
+      "blob_sha": "418a252eb9ead02c535515c1d503ef163c2fc1b1",
+      "bytes": 1953
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/orchestrator/handlers.ts",
+      "blob_sha": "57932ac21a619b5338c8c1526e91bc384d461b5f",
+      "bytes": 10013
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "blob_sha": "f617b61fabaa3467b1f36de1e163dca52f3234fd",
+      "bytes": 16801
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/preview/handlers.ts",
+      "blob_sha": "421f9be5973792839b5ba844c874d1780bec6fa4",
+      "bytes": 10792
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/preview/tools.ts",
+      "blob_sha": "37f09c8c8223d17285e6ef702307bba3d035d19f",
+      "bytes": 11250
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/previewControls/handlers.ts",
+      "blob_sha": "4b775233cd80ddd5961275085304e637c24334b8",
+      "bytes": 1833
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/previewControls/tools.ts",
+      "blob_sha": "ca92f57f408b8673da243469ca2a75716f2eae80",
+      "bytes": 2165
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/project/handlers.ts",
+      "blob_sha": "76f53b43bdfdc29fee41876db43e3000fb7210f5",
+      "bytes": 28229
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/project/tools.ts",
+      "blob_sha": "52e9b77ab3df2b2f23206fc608cf6ef42dd730bc",
+      "bytes": 8375
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/pullRequests/handlers.ts",
+      "blob_sha": "ddb3f2a025d4366e7de9e3265f49f72566d173fc",
+      "bytes": 50917
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "blob_sha": "1e75c5bbaa19f7ff171ec52daee42dd0e708ac20",
+      "bytes": 32056
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/theme/handlers.ts",
+      "blob_sha": "a8e3078dcb4d200c5d5f45ee3309214a7022a52c",
+      "bytes": 3362
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/theme/tools.ts",
+      "blob_sha": "716c540b2c41ec7994d73b1b5aef251da8d52460",
+      "bytes": 2699
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/thread/handlers.ts",
+      "blob_sha": "220ed39eb3c81c2198e8364775324c7c6b39e6f3",
+      "bytes": 17577
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/thread/tools.ts",
+      "blob_sha": "9803e8b4fa690eb0101e7e01e47b54f2bfc9e078",
+      "bytes": 10438
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/toolSearch/handlers.ts",
+      "blob_sha": "649069fbc1adb2eb88aec6d8fca09a336413b844",
+      "bytes": 780
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/toolSearch/tools.ts",
+      "blob_sha": "74741ccca557d9866c6c7bf9f6f802915d8555f8",
+      "bytes": 1278
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/worktree/handlers.ts",
+      "blob_sha": "2e78dd2a4f996112c9e4e85b76c175b7b6649f01",
+      "bytes": 2376
+    },
+    {
+      "path": "apps/server/src/mcp/toolkits/worktree/tools.ts",
+      "blob_sha": "ce9dd39f7938fa566464224800a7643da6c5d8d9",
+      "bytes": 3832
+    },
+    {
+      "path": "apps/server/src/mcpApps/McpAppModelContext.ts",
+      "blob_sha": "017e10ae3bf5bfd2e0c4937197a475c254d7e38d",
+      "bytes": 4565
+    },
+    {
+      "path": "apps/server/src/mcpApps/McpAppRequests.ts",
+      "blob_sha": "85451566746fbf8968726d4ebc6359727d6b6538",
+      "bytes": 9296
+    },
+    {
+      "path": "apps/server/src/mcpApps/McpAppSnapshot.ts",
+      "blob_sha": "a43c01a404178ef0a67949435af408b69af68d5c",
+      "bytes": 3827
+    },
+    {
+      "path": "apps/server/src/mcpApps/McpSignIn.ts",
+      "blob_sha": "c6729757457a208814615a51614863f1df5b64a0",
+      "bytes": 4456
+    },
+    {
+      "path": "apps/server/src/noCopyOnWrite.ts",
+      "blob_sha": "03d52a0a6d924193c303e7a15e4947da5fae0efe",
+      "bytes": 1652
+    },
+    {
+      "path": "apps/server/src/observability/Attributes.ts",
+      "blob_sha": "168fad188978990e3658774b4fa02aedfcd2b6f2",
+      "bytes": 1429
+    },
+    {
+      "path": "apps/server/src/observability/BrowserTraceCollector.ts",
+      "blob_sha": "1e3d5f42bc73361024e89868696e8921fa7bfadb",
+      "bytes": 850
+    },
+    {
+      "path": "apps/server/src/observability/DefectReporter.ts",
+      "blob_sha": "39e93ba5fb44a1a31c85ea8f81bf426151c820f0",
+      "bytes": 645
+    },
+    {
+      "path": "apps/server/src/observability/EventLoopMonitor.ts",
+      "blob_sha": "02922cdd3ae67ad25b0418eecac261ef09374852",
+      "bytes": 10232
+    },
+    {
+      "path": "apps/server/src/observability/HeapAttribution.ts",
+      "blob_sha": "4b18efd0fb9119203f6a268351df4e6afa31bfe8",
+      "bytes": 3987
+    },
+    {
+      "path": "apps/server/src/observability/HeapSnapshot.ts",
+      "blob_sha": "6619797d053c53e758ddfee54d3dcd1c5bb6640f",
+      "bytes": 2051
+    },
+    {
+      "path": "apps/server/src/observability/Metrics.ts",
+      "blob_sha": "bdf64da9511c42dc90bb03eceb9eaed42e1f3560",
+      "bytes": 7986
+    },
+    {
+      "path": "apps/server/src/observability/Observability.ts",
+      "blob_sha": "1b0414e43b8a3110d2f505392ce9db7bb2bbf01a",
+      "bytes": 4653
+    },
+    {
+      "path": "apps/server/src/observability/OtlpEndpointCheck.ts",
+      "blob_sha": "cb764f4557d92e0e31045db68acaa0df80f8f31e",
+      "bytes": 3282
+    },
+    {
+      "path": "apps/server/src/observability/OtlpExportFailures.ts",
+      "blob_sha": "db9d089f1aecdf3462a1bb91bf026b9ff32fdc2c",
+      "bytes": 2114
+    },
+    {
+      "path": "apps/server/src/observability/RpcInstrumentation.ts",
+      "blob_sha": "f02f32d67e76465344abaa809cfb2c4b88d835e2",
+      "bytes": 15294
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/Adapters/AntigravityAdapterV2.ts",
+      "blob_sha": "c20afa04e31b8c1bf9563d62f537d3afe532f688",
+      "bytes": 13855
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts",
+      "blob_sha": "5b8c5fabd54b78f20074c6e225b95cc357626ae7",
+      "bytes": 641655
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/Adapters/ClaudeTaskOutputTail.ts",
+      "blob_sha": "7eac250d7afde77262b18601ccdc97aea1e398b9",
+      "bytes": 4862
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts",
+      "blob_sha": "181ed17fd5c16c1a545d0ddf29c87749d4d39513",
+      "bytes": 400881
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/Adapters/ProviderTextDeltaCoalescer.ts",
+      "blob_sha": "3729cb7073f9e1ef27d00468bb4fd0ba55eb4dca",
+      "bytes": 5511
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/Adapters/claudeWorkflowProgress.ts",
+      "blob_sha": "2db512e8250161d8637595798355664a953dcfad",
+      "bytes": 7418
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/AttachmentClaims.ts",
+      "blob_sha": "be48ef68b555989917f4ec8a89b6348dca23a160",
+      "bytes": 6728
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/CheckpointCaptureService.ts",
+      "blob_sha": "dd7f27079a4e5ad35c891e55a70f5a7a408b1b5f",
+      "bytes": 16750
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/CheckpointRestoreSafety.ts",
+      "blob_sha": "aa33497107c153f691c71dec1e3664a0f0482774",
+      "bytes": 9994
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/CheckpointRollbackService.ts",
+      "blob_sha": "8d6fd1c09441d0577ac1ee2f87c2a908e24567fe",
+      "bytes": 24014
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/CheckpointService.ts",
+      "blob_sha": "ec3e872d61c2b17f0c49c1dc0bb772b8eaf65892",
+      "bytes": 48004
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/CommandOutputHub.ts",
+      "blob_sha": "b6b5b634c179c0f76e9560e104ebdd59117befc6",
+      "bytes": 11770
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/CommandPolicy.ts",
+      "blob_sha": "1319083cca03053f591a62ae3b1f60123efbab86",
+      "bytes": 16027
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/CommandReceiptStore.ts",
+      "blob_sha": "f39de342b552625bc51be4bae819e0cec468ce4c",
+      "bytes": 6946
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ContextHandoffDelivery.ts",
+      "blob_sha": "c13e31cb0c16122917498c07f1f4ead3b024ae25",
+      "bytes": 7655
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ContextHandoffService.ts",
+      "blob_sha": "ca6b5ff0fcdf1269ea947352414ac0fc627ec82a",
+      "bytes": 24542
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/DelegatedTaskQuestionReactor.ts",
+      "blob_sha": "e92e8692067251f0c1e197cc1ce984019e9e1e56",
+      "bytes": 10920
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/DispatchModeLimit.ts",
+      "blob_sha": "627806347c5ff3d6bba1748a073fdb85b49683ce",
+      "bytes": 4241
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/EffectOutbox.ts",
+      "blob_sha": "b495293bc2228f5ee9052fbd382e435b03412d2f",
+      "bytes": 30544
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/EffectWorker.ts",
+      "blob_sha": "6c805cfc4592f310b0400d1f306679d3c1747ce8",
+      "bytes": 48892
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/EventSink.ts",
+      "blob_sha": "3f6744e576edd2060e7ab2e7562a8081719a8eaa",
+      "bytes": 54052
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/EventStore.ts",
+      "blob_sha": "e2125508dee8f62322c2cba50fa7e08a400d9171",
+      "bytes": 5971
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/GuestShareDecider.ts",
+      "blob_sha": "9173d4e6d4e373c4b1eb84b4d34b7d6ee6527d01",
+      "bytes": 9372
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/IdleCompaction.ts",
+      "blob_sha": "9aff19a244eaddead4c3f9a553a1b882d33b579e",
+      "bytes": 4574
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/IdleCompactionService.ts",
+      "blob_sha": "c7035de4ec584f2254640e12a9125264e2d65341",
+      "bytes": 5796
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/LiveStreamBudget.ts",
+      "blob_sha": "9ae18c0000769cd788115820bfb82fbb9e11abdc",
+      "bytes": 13866
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/NativeChildWorkQuery.ts",
+      "blob_sha": "389ae6c408273401b71ee2b28ae53480f23d76b4",
+      "bytes": 5285
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/NotificationMailbox.ts",
+      "blob_sha": "79458677c1af011b5498f3d312567fb722d26387",
+      "bytes": 1363
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/Orchestrator.ts",
+      "blob_sha": "5936f57ad501424d81cc5fa62bf4461342178118",
+      "bytes": 668784
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProjectCommands.ts",
+      "blob_sha": "8e5669a76a01aacd0c12e97c086b143ed9d3325b",
+      "bytes": 9050
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProjectStore.ts",
+      "blob_sha": "ee83411213a26b38d2b81f5573b55b3e039053cf",
+      "bytes": 12066
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProjectionMaintenance.ts",
+      "blob_sha": "210322aed686f3d47a696ffaf427d8b5b67f52c7",
+      "bytes": 14206
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProjectionStore.ts",
+      "blob_sha": "e930fa67e3836ff414a3facc14b9e6072e7f2c47",
+      "bytes": 453837
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProviderAdapterRegistry.ts",
+      "blob_sha": "dd0e8f8cb48e27c5ca2f2574ff1217b2ff893f48",
+      "bytes": 9019
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProviderCommitBatch.ts",
+      "blob_sha": "1fa7eac5ecd3760e7410b643b092cb1ba14fe9db",
+      "bytes": 18990
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProviderContinuationService.ts",
+      "blob_sha": "c00c68bce783d16b9b88ed563f11cec8b9221a2f",
+      "bytes": 14597
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProviderEventIngestor.ts",
+      "blob_sha": "118a13a33426683f26debb6207a7e74307ce625b",
+      "bytes": 38333
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProviderRuntimeRecoveryService.ts",
+      "blob_sha": "7a7a1d8123918304db98e741eefa282a37792bb5",
+      "bytes": 49531
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProviderSessionManager.ts",
+      "blob_sha": "dd573acb1fe178d53fbe017460d75699eb72e83b",
+      "bytes": 160772
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProviderSessionTransitionPolicy.ts",
+      "blob_sha": "c0a1e4657a726a2b23156059c81c6e3173597d70",
+      "bytes": 3251
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProviderSwitchService.ts",
+      "blob_sha": "69c3f351602b56c7ee06fe7ae4680f5640cb5e9e",
+      "bytes": 8536
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProviderTurnControlService.ts",
+      "blob_sha": "088b4d386d1772a91dad54a55ca9a32ad47d57e5",
+      "bytes": 21641
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProviderTurnStartService.ts",
+      "blob_sha": "1cb77e387f950bc38723ac383a43e7e74f254907",
+      "bytes": 104888
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/PullRequestSyncReactor.ts",
+      "blob_sha": "8f57f900d0c2d2de9449d818b88ba5caa4b83184",
+      "bytes": 40068
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/PullRequestWatchReactor.ts",
+      "blob_sha": "fc24dcb7b3f5e4846be70e9842d8f07aa4a97125",
+      "bytes": 39059
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/QueuedRunOrder.ts",
+      "blob_sha": "1635f4ab51674c127ca59ad837a4110e0b517e9c",
+      "bytes": 2026
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ResourceCleanupService.ts",
+      "blob_sha": "fd45ecac667efe1ee7050889ac8f49ad2c030d22",
+      "bytes": 5613
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/RestartBackgroundNote.ts",
+      "blob_sha": "878392b8377c6d25a4ed3e8496bd8f780c67d612",
+      "bytes": 23805
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/RestartContinuation.ts",
+      "blob_sha": "21d70c62f920e4f7c82c2a8f5b985a94da35c934",
+      "bytes": 14445
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/RunExecutionService.ts",
+      "blob_sha": "a5eeaa9cb8b956c4da0f472c09bf32281242ae9d",
+      "bytes": 107455
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/RunFinalizationService.ts",
+      "blob_sha": "62195de5ee362282339b037a0ef8540adba5c395",
+      "bytes": 8827
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/RunMetrics.ts",
+      "blob_sha": "b8b403c9b98568b057e1012241e895358c689abb",
+      "bytes": 4267
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/RuntimePolicy.ts",
+      "blob_sha": "aac7a859423fbdd5ac5fda29cf1f901e390db002",
+      "bytes": 8957
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/RuntimeRequestService.ts",
+      "blob_sha": "6bd421058c4c98da1b3f9721fb90ab890945bad5",
+      "bytes": 5692
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ShellStream.ts",
+      "blob_sha": "5ee1005b16830aa1704672a18143f133816edbbb",
+      "bytes": 29780
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadCommandExecutor.ts",
+      "blob_sha": "aa9a1f1ca7ab35057c308f9b0b494a4f41ab4842",
+      "bytes": 1187
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadDeletion.ts",
+      "blob_sha": "265f59008d87fbbeb6479a665cba4f152d9d2cff",
+      "bytes": 8139
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadFind.ts",
+      "blob_sha": "b2370dc83b23dc57143623cac2598199586ae7c0",
+      "bytes": 21314
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadForkService.ts",
+      "blob_sha": "e3e523e372bd09124816b4b721cd85067ac1a698",
+      "bytes": 6895
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadIssueService.ts",
+      "blob_sha": "99e69ab610a4730c41fd327a887582e07dd3e733",
+      "bytes": 4162
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadLaunchService.ts",
+      "blob_sha": "0382415179bfcc0b74345e7353fad90e62beb861",
+      "bytes": 69369
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadLiveEventCoalescer.ts",
+      "blob_sha": "33c82dfe4ef4c9652bbf1c87ebe5e91019f58b34",
+      "bytes": 9221
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadManagementService.ts",
+      "blob_sha": "45b5e9effa8cf95190d84f77ba1b2e2ec141966e",
+      "bytes": 76847
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadMessageIntake.ts",
+      "blob_sha": "5d9ec263b0b0df50bcd5c859b6bd6f6886ef7a07",
+      "bytes": 13913
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadPullRequestService.ts",
+      "blob_sha": "5c32dda1d183c6071dfd0593588cc704121d1cf1",
+      "bytes": 24782
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadSearch.ts",
+      "blob_sha": "3ad48b26f172d3f680f7ba106047e2d21324ec00",
+      "bytes": 32131
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadSettlementService.ts",
+      "blob_sha": "ef0894f3ecbebda68d60200e6bb92ed4272bbce5",
+      "bytes": 38508
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadStream.ts",
+      "blob_sha": "c16a1b9e095aaa4246c795542cc83ec654aefcaf",
+      "bytes": 3931
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadTitleRegenerationService.ts",
+      "blob_sha": "725a15aa136e0c40173b57132501b1fe2931ec9e",
+      "bytes": 10394
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadViewers.ts",
+      "blob_sha": "68d6cf319280fd63f0931e41ca302fd14f955eeb",
+      "bytes": 1158
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/TurnItemPositionStore.ts",
+      "blob_sha": "fb6a026f9287a70a782a79de15415e85af0f7002",
+      "bytes": 6109
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/UsageLimitRecoveryWorker.ts",
+      "blob_sha": "3992d46e6bf9ae4548220307f8a33e57b7f8380f",
+      "bytes": 5862
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/UserFacingErrors.ts",
+      "blob_sha": "7d47dffd1a7623c9e115dd920756d0052a7fc73f",
+      "bytes": 6914
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/WireProjection.ts",
+      "blob_sha": "19857405aaff9b5ef841558a0abc2456604e7098",
+      "bytes": 16316
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/WorktreeBranchSync.ts",
+      "blob_sha": "1561a45d011598f37beb25d54aaea24b26300eeb",
+      "bytes": 3667
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/assistantStreaming.ts",
+      "blob_sha": "8963ec2ede204222a2b076d3a3f2bb6e67a590dd",
+      "bytes": 9277
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/contextBoundary.ts",
+      "blob_sha": "54b265c2d539473c764eb2672bfeea7843dc63ff",
+      "bytes": 1313
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/deferredCommandMessage.ts",
+      "blob_sha": "393fe981add55fba8fa548fbcb6e0066a7b0ac12",
+      "bytes": 669
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/delegatedTaskMessage.ts",
+      "blob_sha": "df98b47dc3791157656624454a9d8d757b583f3b",
+      "bytes": 486
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/http.ts",
+      "blob_sha": "b58ce1b14311964d86003d079295888beb6a7d4a",
+      "bytes": 12285
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/legacy/LegacyV1ThreadImporter.ts",
+      "blob_sha": "ede38bdd396854ae511bee07f592ce928d7744e2",
+      "bytes": 30704
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/messageSearchIndex.ts",
+      "blob_sha": "0855d01171f3fe27f9f5e08628e0643fffba280e",
+      "bytes": 8245
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/modelSwitch.ts",
+      "blob_sha": "9b904500fc661128d404c4242bc25031a4af9572",
+      "bytes": 2534
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/noPullRequestRechecks.ts",
+      "blob_sha": "763ece7bd9d48ccc9b3915a8f0885a9bee62a611",
+      "bytes": 2283
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/placeholderThreadTitle.ts",
+      "blob_sha": "bc9be3d0ffbda6f2fac88a88a48c89e17efa1bdc",
+      "bytes": 397
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/pullRequestWatch.ts",
+      "blob_sha": "5999996ec5dda4506aa34dd2a06b0e78515abce8",
+      "bytes": 24138
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/runOutput.ts",
+      "blob_sha": "26df71c0fa2e8aa0932ae054b776d8a2f442e1ba",
+      "bytes": 3845
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/runtimeLayer.ts",
+      "blob_sha": "18ee960fc9e4db73f566ff74331b1dd9c54b79c1",
+      "bytes": 16191
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/threadHistoryPaging.ts",
+      "blob_sha": "cf9a101bba44c3ac14e99156c9740bd7b80ffe8c",
+      "bytes": 27772
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/toolOutputImageBytes.ts",
+      "blob_sha": "6cde6c5448c71d6d1813dfb58305ba26704e2c53",
+      "bytes": 3878
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/unknownField.ts",
+      "blob_sha": "840d6a9ebe37415062eb6e575ae729b0582bc38e",
+      "bytes": 358
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/workflowAgentAnswers.ts",
+      "blob_sha": "d96f3684a4e2b60d933dfe5cbb8d8c64465d6f4c",
+      "bytes": 1125
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/workflowAgentTranscript.ts",
+      "blob_sha": "059eb0740434c86cfd456f1d35fd8b711d33c11a",
+      "bytes": 3190
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/workflowFileRead.ts",
+      "blob_sha": "af8356806c96dd2449ec10e0c62b21ac271f8ea1",
+      "bytes": 5397
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/workflowScriptQuery.ts",
+      "blob_sha": "1775202a79a3b6ea7cb94c25d0fdd3a3308e8420",
+      "bytes": 797
+    },
+    {
+      "path": "apps/server/src/os-jank.ts",
+      "blob_sha": "dc0c90a7871235f10793638067560fa452259e18",
+      "bytes": 9723
+    },
+    {
+      "path": "apps/server/src/outboundHttp.ts",
+      "blob_sha": "ead14cb5d203599327a2d6d35aea03c5f532bbc2",
+      "bytes": 3021
+    },
+    {
+      "path": "apps/server/src/peer/PeerClientPairing.ts",
+      "blob_sha": "da10e3d78d157e0a3f751d025687c392b71f1065",
+      "bytes": 10767
+    },
+    {
+      "path": "apps/server/src/peer/PeerForwarding.ts",
+      "blob_sha": "d60ebcd8f42d753373bbc1c3b9381d462648c112",
+      "bytes": 13074
+    },
+    {
+      "path": "apps/server/src/peer/PeerLinkRequests.ts",
+      "blob_sha": "a33bb47d7ec17b4ec62d084cb7a066d2db80d5de",
+      "bytes": 18660
+    },
+    {
+      "path": "apps/server/src/peer/PeerLinks.ts",
+      "blob_sha": "859266c469c70e78c5e7c77b6bd53825274e0b8f",
+      "bytes": 33885
+    },
+    {
+      "path": "apps/server/src/peer/PeerMcpClient.ts",
+      "blob_sha": "25c3b70287ab1732cc9fb29ec8e9fd09734e30c0",
+      "bytes": 12715
+    },
+    {
+      "path": "apps/server/src/peer/PeerThreadRelay.ts",
+      "blob_sha": "df6e460b33a4fd3307334677b117dd6208739c2c",
+      "bytes": 10604
+    },
+    {
+      "path": "apps/server/src/peer/RemoteDelegation.ts",
+      "blob_sha": "5ed03b795b686076aa95efc7838425aa17c2eb25",
+      "bytes": 45713
+    },
+    {
+      "path": "apps/server/src/peer/http.ts",
+      "blob_sha": "4baf9bebb9746fa5ed5c3dfc7168e01916822a09",
+      "bytes": 2986
+    },
+    {
+      "path": "apps/server/src/peer/linkThreadHttp.ts",
+      "blob_sha": "96db47c46362465034ca86ae53dca8026ebc32e7",
+      "bytes": 6739
+    },
+    {
+      "path": "apps/server/src/persistence/AuthConnectDevices.ts",
+      "blob_sha": "52ec1039f018c76e4ed2808a9ee72826fd257400",
+      "bytes": 5767
+    },
+    {
+      "path": "apps/server/src/persistence/AuthPairingLinks.ts",
+      "blob_sha": "0af5c28f7359dca218e4e1899e0203fc78b0ee01",
+      "bytes": 22983
+    },
+    {
+      "path": "apps/server/src/persistence/AuthSessions.ts",
+      "blob_sha": "921f99f3bab774a012eaacf8c1d7d992177857dd",
+      "bytes": 20560
+    },
+    {
+      "path": "apps/server/src/persistence/DatabaseMaintenance.ts",
+      "blob_sha": "bdb1c459f6e94f63369ecff477674750bd71adfb",
+      "bytes": 17148
+    },
+    {
+      "path": "apps/server/src/persistence/DatabaseStorage.ts",
+      "blob_sha": "9df5bf7ede03b4fae68601644109dff682e14eec",
+      "bytes": 10515
+    },
+    {
+      "path": "apps/server/src/persistence/Errors.ts",
+      "blob_sha": "63f2c67dd6c74d9d39e4087f26692d4a1bcca3c1",
+      "bytes": 4182
+    },
+    {
+      "path": "apps/server/src/persistence/IssueTrackerBindings.ts",
+      "blob_sha": "2f665b487e03f1f513bd239aa796891db344f6b9",
+      "bytes": 4740
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations.ts",
+      "blob_sha": "2b767af21f52f1e76aea36e93374e2de94c37af3",
+      "bytes": 20766
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/001_OrchestrationEvents.ts",
+      "blob_sha": "b547dc1bc627c7a325fb8cf432156274b4f1a15a",
+      "bytes": 1251
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/002_OrchestrationCommandReceipts.ts",
+      "blob_sha": "4e545d5e6606618759016bc91c12d8c0315ed3d6",
+      "bytes": 789
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/003_CheckpointDiffBlobs.ts",
+      "blob_sha": "0f9078a3f68253bc40bd4a5d8e625792d6861bdd",
+      "bytes": 632
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/004_ProviderSessionRuntime.ts",
+      "blob_sha": "9aebc2a4e71be6b2bfdd7d46d3c5ea37d9501c82",
+      "bytes": 810
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/005_Projections.ts",
+      "blob_sha": "7c27ba44a4967e9322d3b86ace1040189eefe762",
+      "bytes": 4032
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/006_ProjectionThreadSessionRuntimeModeColumns.ts",
+      "blob_sha": "9198198872da51ff3a57092897f28950264298fd",
+      "bytes": 494
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/007_ProjectionThreadMessageAttachments.ts",
+      "blob_sha": "679259bfdf72ebfea1c99c48aec4924edf620bdf",
+      "bytes": 280
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/008_ProjectionThreadActivitySequence.ts",
+      "blob_sha": "299a7fb82f086e4b8417842cc111c78cd5571a46",
+      "bytes": 434
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/009_ProviderSessionRuntimeMode.ts",
+      "blob_sha": "82aa5df871b8f3452d4677d4c841b862fbbd1d30",
+      "bytes": 144
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/010_ProjectionThreadsRuntimeMode.ts",
+      "blob_sha": "a0c2c72f1f846d7b96001f4ce9cbec9f9ecbb2da",
+      "bytes": 417
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/011_OrchestrationThreadCreatedRuntimeMode.ts",
+      "blob_sha": "8387e32f52c217ca4e01017979693c0cf6b4d00a",
+      "bytes": 409
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/012_ProjectionThreadsInteractionMode.ts",
+      "blob_sha": "1a49be029b964814de8e8595f0125130d01f6fd6",
+      "bytes": 299
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/013_ProjectionThreadProposedPlans.ts",
+      "blob_sha": "53e25d44b699205cf9b8f7da7f78cf3e9dd53f86",
+      "bytes": 619
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/014_ProjectionThreadProposedPlanImplementation.ts",
+      "blob_sha": "15869b613cbd9d74b0b40f3642cfabd5d0918a1f",
+      "bytes": 398
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/015_ProjectionTurnsSourceProposedPlan.ts",
+      "blob_sha": "5c9a39d0c56f55d45274332d6659c9a1ad404eeb",
+      "bytes": 381
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/016_CanonicalizeModelSelections.ts",
+      "blob_sha": "f7057be22147973009a61c6881881bef0a0e5f64",
+      "bytes": 8092
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/017_ProjectionThreadsArchivedAt.ts",
+      "blob_sha": "e1c725ec5ecc477c05cdfbf065446afde388e13e",
+      "bytes": 453
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/018_ProjectionThreadsArchivedAtIndex.ts",
+      "blob_sha": "da13b1b4fdd3d3a4af1e59190df6175f0654d2d2",
+      "bytes": 325
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/019_ProjectionSnapshotLookupIndexes.ts",
+      "blob_sha": "27e74082a9c68d7c891bf640b090716962de714f",
+      "bytes": 496
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/020_AuthAccessManagement.ts",
+      "blob_sha": "1b7b9a6aa7e14622a71c0e45761617b70b59e5cc",
+      "bytes": 1069
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/021_AuthSessionClientMetadata.ts",
+      "blob_sha": "1426208f23ab96e90f777446b24763f83018cb33",
+      "bytes": 1637
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/022_AuthSessionLastConnectedAt.ts",
+      "blob_sha": "9394f2e539b881fc28aaea130a437130f7cb54e0",
+      "bytes": 466
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/023_ProjectionThreadShellSummary.ts",
+      "blob_sha": "3a550e943761028c5fe2559f5605351acce670f6",
+      "bytes": 798
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/024_BackfillProjectionThreadShellSummary.ts",
+      "blob_sha": "9be3764e715b273f2d161f32dd09f17b45d89751",
+      "bytes": 9601
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/025_CleanupInvalidProjectionPendingApprovals.ts",
+      "blob_sha": "f15b9d9117054d1ed745041f78d9c6ebd2b8ad6d",
+      "bytes": 813
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/026_CanonicalizeModelSelectionOptions.ts",
+      "blob_sha": "fb18482f207491e2a0514371576f561da98e9eea",
+      "bytes": 3279
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/027_ProviderSessionRuntimeInstanceId.ts",
+      "blob_sha": "b7c4e56c46f0b3b7e8b55ce3cf029a6a187207e0",
+      "bytes": 728
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/028_ProjectionThreadSessionInstanceId.ts",
+      "blob_sha": "a84f9786f4c6e78e1a354bc2f3c34a859e48039f",
+      "bytes": 630
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/029_ProjectionThreadDetailOrderingIndexes.ts",
+      "blob_sha": "29691fa11b2d85b7237671124df7fa7688750380",
+      "bytes": 542
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/030_ProjectionThreadShellArchiveIndexes.ts",
+      "blob_sha": "95fab43eef5fdcc8f2477452d2f8c750d4dc01e9",
+      "bytes": 516
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/031_AuthAuthorizationScopes.ts",
+      "blob_sha": "b9f23fd1daeb8c6a5fe2bd9ae4d30c290fcf723b",
+      "bytes": 1459
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/032_AuthPairingProofKeyThumbprint.ts",
+      "blob_sha": "b0c430333941836473487bc97e3f1a7a0bf29787",
+      "bytes": 489
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/033_ProjectionThreadsSettled.ts",
+      "blob_sha": "543080821e6aa45e87810494b23623919ca161e4",
+      "bytes": 622
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/034_ProjectionThreadsSnoozed.ts",
+      "blob_sha": "172aa09d897184a0f9c23638c1733dcdb0895325",
+      "bytes": 616
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/035_ProjectionThreadTitleRegeneration.ts",
+      "blob_sha": "f12641b324476b8706a6168bdbcc37df69fc266e",
+      "bytes": 686
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/036_ProjectionThreadsPinned.ts",
+      "blob_sha": "5ba13208d3c07ee593eb757ff59969c4e5178b39",
+      "bytes": 445
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/037_ProjectionTurnsKeysetIndex.ts",
+      "blob_sha": "5db41191508f5843118384dc617c66fdc67d62e1",
+      "bytes": 433
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/038_ProjectionThreadsPinOrderKey.ts",
+      "blob_sha": "b84faf1a91d1a56c1aeaac23ee5e412b2c9184a4",
+      "bytes": 453
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/039_ProjectionProjectsDefaultThreadEnvMode.ts",
+      "blob_sha": "de0aa2311ce4f37745e42a321dca63548d98de95",
+      "bytes": 475
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/040_ProjectionProjectFaviconPath.ts",
+      "blob_sha": "7e16896c9ab00d3e221963ff16bd20f3aa41d7fa",
+      "bytes": 453
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/041_AuthSessionClientConnection.ts",
+      "blob_sha": "51092a0ff93f1acd7e37dd0c78e9cb60319c090f",
+      "bytes": 619
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/042_ProjectionThreadLinkedPullRequest.ts",
+      "blob_sha": "0882f176df7019847ea612e155495192133e246f",
+      "bytes": 475
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/043_ProjectionThreadsUnsettledAt.ts",
+      "blob_sha": "87438836e5a07373975d7ea6f017d9ad19354ccc",
+      "bytes": 451
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/044_ClearAutomaticProjectModelDefaults.ts",
+      "blob_sha": "c1f8545b21d0beefcf3f1508e1dba78a4a53b440",
+      "bytes": 1998
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/045_ProjectionProjectsAutoPull.ts",
+      "blob_sha": "c9f9d2d1f0db1b95dbc9cfedef8dcea3a84d2679",
+      "bytes": 469
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/046_RepairAutomaticSettlementTimestamps.ts",
+      "blob_sha": "3a3fa3192d7981b5f4f86223ab63f7a13fd66446",
+      "bytes": 2254
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/047_ProjectionProjectIcon.ts",
+      "blob_sha": "1c44e576baaf3ad20c26cd0c7c2f4adcd7ca8cfa",
+      "bytes": 463
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/048_ProjectionThreadBranchPullRequest.ts",
+      "blob_sha": "ae8a67c58a88fdc9277afa3e646c8022671a7106",
+      "bytes": 475
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/049_ProjectionThreadsActiveOrderKey.ts",
+      "blob_sha": "3d028e3671150915831056a851efd81c363a1122",
+      "bytes": 458
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/050_ProjectionThreadPullRequests.ts",
+      "blob_sha": "f130aae7e10a612d9f5d19413a20b7ce898b8887",
+      "bytes": 2619
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/051_ProjectionThreadMessageContext.ts",
+      "blob_sha": "a2902a9cfb6fc84235918fab1bd88e03afbe3381",
+      "bytes": 467
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/052_ProjectionThreadTitleState.ts",
+      "blob_sha": "a25482d49db7f311d47bf8f5ad26113abfb85741",
+      "bytes": 259
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/053_PullRequestFilesViewed.ts",
+      "blob_sha": "22728ff5705f558eb06df79e4b84aba63f05a0f7",
+      "bytes": 662
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/054_ProjectionThreadsAutoSettleDisabledAt.ts",
+      "blob_sha": "8e0f479bc7312132599d5b1b27d5f371a06dbda2",
+      "bytes": 472
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/055_OrchestrationV2.ts",
+      "blob_sha": "a4d0c10d30acd90a7879dc408cb470b619a1cb85",
+      "bytes": 14407
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/056_RemoveRedundantProjectionIndexes.ts",
+      "blob_sha": "db914aa6fc116442859ede0912e564b3298a25bf",
+      "bytes": 580
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/057_ScheduledTaskWebhooks.ts",
+      "blob_sha": "4ef116634c03275ba65217c824be3d81683c560b",
+      "bytes": 1096
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/058_WebhookRelayDeliveries.ts",
+      "blob_sha": "c32d8e9f6aaf3f1403d73d630c8bdad6563593f6",
+      "bytes": 638
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/059_McpAppModelContext.ts",
+      "blob_sha": "6b77269180ef9162082d59f557b4eae5002a3418",
+      "bytes": 472
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/060_ThreadSnapshotWindowIndexes.ts",
+      "blob_sha": "ad62bc5526626bb025016032c5c368a1215a1920",
+      "bytes": 610
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/061_PullRequestReviewGuides.ts",
+      "blob_sha": "37fc9635eb04c4430d466e41d9d1ece4680f2ae2",
+      "bytes": 446
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/062_ThreadFailureLookupIndex.ts",
+      "blob_sha": "86da9229e747616f9148f54b5045a742af0276aa",
+      "bytes": 456
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/063_DropUnusedV1Projections.ts",
+      "blob_sha": "e806b42cec2934f96f3672c630da19bf01eb4816",
+      "bytes": 647
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/064_CanonicalizeThreadPullRequestLinks.ts",
+      "blob_sha": "a4d8fb9e7a016d85793cf1664732d1dd83f06164",
+      "bytes": 3293
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/065_CodexUsageNativeTurnIndex.ts",
+      "blob_sha": "48f372df1ee5ffa55c2f75cb1388b428ee372ad9",
+      "bytes": 461
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/066_RepairClientSettlementTimestamps.ts",
+      "blob_sha": "6f5be0974658b75835a4594308671c0e5ac21a7d",
+      "bytes": 11849
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/067_WebhookDedupe.ts",
+      "blob_sha": "b132e7c6dd14642d6736ca430273f7d92339ba65",
+      "bytes": 1387
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/068_ShellStopRequestIndex.ts",
+      "blob_sha": "2b58b846b2086e3154e76f5c75fb3dd3f7f7890a",
+      "bytes": 379
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/069_ThreadMessageSearch.ts",
+      "blob_sha": "2c527d7e3ea99d10e6a80a272df185d5377ea911",
+      "bytes": 1929
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/070_PeerLinks.ts",
+      "blob_sha": "5551ccdd07a25e835b27edad42d475741f88836b",
+      "bytes": 811
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/071_PeerLinkFence.ts",
+      "blob_sha": "e7424f386cecf756489b8e7573f59164b7c2a8d8",
+      "bytes": 601
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/072_WaitingLinkRequestIndex.ts",
+      "blob_sha": "feaafe620590f8f910b7496ecfb0b7ce63184801",
+      "bytes": 516
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/073_ActiveTurnItemIndexes.ts",
+      "blob_sha": "d9759bca6d82ac22d6a29578fbd1f89ceaa77f23",
+      "bytes": 775
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/074_ExcludeAttachmentPlaceholdersFromSearch.ts",
+      "blob_sha": "6ec95d108f306a8d4e1c0ac51593f4d39b1a4812",
+      "bytes": 771
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/075_SubagentDeliveryState.ts",
+      "blob_sha": "0288c89ceed057b1dde6551ca26ad912577aecd5",
+      "bytes": 994
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/076_ProjectionProjectsPinArchive.ts",
+      "blob_sha": "279255ec4d5f966d4b95cb7ff51c166092407264",
+      "bytes": 369
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/077_RepairBooleanSettledOverride.ts",
+      "blob_sha": "e84473964fc611e58347834dd996e8167733957f",
+      "bytes": 598
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/078_DropOrchestrationEventCorrelationIndex.ts",
+      "blob_sha": "bf00778eff5d96eacc67604b7bbb6ac27f3c9900",
+      "bytes": 381
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/079_DelegatedRecoveryIndexes.ts",
+      "blob_sha": "3ba72feaf1788adb9a9c65660a118cddd1a83752",
+      "bytes": 1051
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/080_ScheduledTaskThreadMode.ts",
+      "blob_sha": "01552b57fd1834eab6d80e73f16b12f19dcc5910",
+      "bytes": 377
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/081_ProjectionMessageSearchText.ts",
+      "blob_sha": "4bbcec4d61822e63b36463c2295974d20943567d",
+      "bytes": 1663
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/082_TurnItemConversationIndex.ts",
+      "blob_sha": "fb1caac44f3ec4e9495763030b8829d51f2de6f4",
+      "bytes": 680
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/083_CommandReadIndexes.ts",
+      "blob_sha": "864b16305ffe44caf113522ec3ea8eaef85ebd11",
+      "bytes": 1292
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/084_LastExecutedRunIndex.ts",
+      "blob_sha": "2c36d6263487320c3be397f01578ad43718dc99c",
+      "bytes": 798
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/085_TurnItemCounts.ts",
+      "blob_sha": "a432046e6361a296a3cd326af0a9b7cc19aa7a0c",
+      "bytes": 2708
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/086_QueuedTurnInputIndex.ts",
+      "blob_sha": "9509402b4c5ae260bd5f56b8cb7619151a944919",
+      "bytes": 557
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/087_ProjectionProjectsCustomTitle.ts",
+      "blob_sha": "c193137e79c3ba58377ba4c82d5ed20a86bd5574",
+      "bytes": 867
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/088_TurnItemTypeStatusIndex.ts",
+      "blob_sha": "09e0b3273d6cf537d58e2a0ec64b9deff67aed24",
+      "bytes": 539
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/089_ShellThreadReadIndexes.ts",
+      "blob_sha": "25133aa84be654ead725462adc20a31e70491b8c",
+      "bytes": 1109
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/090_AuthConnectDevices.ts",
+      "blob_sha": "2d7e973cedbcf8f1e0a0cdcbbea355f5322e79d0",
+      "bytes": 1188
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/091_AuthConnectDeniedRequests.ts",
+      "blob_sha": "a27b6529489813d54a7a2069c5c4f2225475e49f",
+      "bytes": 499
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/092_QueuedTurnInputIndexJsonValid.ts",
+      "blob_sha": "469722d9a32076a0d063cdfe91fc5a75ae8a2d88",
+      "bytes": 653
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/093_ProviderTurnAttemptIndex.ts",
+      "blob_sha": "8e687ba31597f5fd26e0b093ae2af1b59529cd13",
+      "bytes": 338
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/094_TurnItemMessageOrdinalIndex.ts",
+      "blob_sha": "99688323cddda0e9c99fc42b2947b0d948844263",
+      "bytes": 868
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/095_TurnItemInlineWorkOutput.ts",
+      "blob_sha": "731dbcc7df1cc0facd64b3d08cb05d2fc4dfad88",
+      "bytes": 895
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/096_RepairStaleTitleRegeneration.ts",
+      "blob_sha": "b2fc9bfb6733879e7748ccada9c0424811d1c796",
+      "bytes": 1031
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/097_IssueTrackerBindings.ts",
+      "blob_sha": "6eb450c0cc83d23179da9ea0552fabb9c5e9db24",
+      "bytes": 680
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/098_ActiveShellIndexIndexes.ts",
+      "blob_sha": "da25d04c6ebf79bb04bf356d21c284496e88dc19",
+      "bytes": 1924
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/099_BackgroundRecoveryIndexes.ts",
+      "blob_sha": "9d37f5e3da7be31771207092551a71bd88cc521c",
+      "bytes": 880
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/100_TurnStartReadIndexes.ts",
+      "blob_sha": "3c90f82c6fae40cd899efa67ae4bfa5902149b8a",
+      "bytes": 1144
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/101_DelegatedTaskReadIndexes.ts",
+      "blob_sha": "e057296dafab2576a381cf34df218a9c35e54a39",
+      "bytes": 1060
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/102_ThreadItemCounts.ts",
+      "blob_sha": "5cbfee859cd4541be3ca25d3d7c719003ca53f42",
+      "bytes": 4863
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/103_IssueTrackerAdditionalScopes.ts",
+      "blob_sha": "aa4656e52d291188ecf35a68083a6aa70d6204ef",
+      "bytes": 294
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/104_ProjectionProjectsTrackedFolders.ts",
+      "blob_sha": "34c69abe567bc671e118fd4f8dcdfb4925e8576c",
+      "bytes": 565
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/105_TaskFolders.ts",
+      "blob_sha": "87ddeb3e806cea99b6143aa19e9665f653ed5f86",
+      "bytes": 754
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/106_WorktreePathKeyIndex.ts",
+      "blob_sha": "9b1b42647d60a2b2021bc757e85778d20a489ceb",
+      "bytes": 573
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/107_DeferredSlashCommandIndex.ts",
+      "blob_sha": "5c997fbc20a631df8fcf5a1f16d2ece7d6c113d6",
+      "bytes": 788
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/ApplicationEventSequenceIndexes.ts",
+      "blob_sha": "45e760646f1b4fdaa0c3e8a3c754998a885dc5b5",
+      "bytes": 613
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/ApplicationEventSource.ts",
+      "blob_sha": "00924b565899f028c1a5bda85a18606870dfa60d",
+      "bytes": 8049
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/EffectCancellation.ts",
+      "blob_sha": "04231f04656cd51c04a77ee3f0987dbb7ca7a831",
+      "bytes": 2081
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/Foundation.ts",
+      "blob_sha": "022d8fb9b9742320c1bd375602632151ddfa4b7f",
+      "bytes": 6334
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/LegacyV1ImportState.ts",
+      "blob_sha": "a253c83035adb945ed4cf49d59bdadaf937f551c",
+      "bytes": 668
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/ProviderSessionBindings.ts",
+      "blob_sha": "f0aa13f29a6b0eee0fe3eeb2766bdef4c883c1c7",
+      "bytes": 854
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/RecoveryIndexes.ts",
+      "blob_sha": "5a5d629055c481496f4af39e5c7c7cd3f28a5bdd",
+      "bytes": 1080
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/ScheduledTasks.ts",
+      "blob_sha": "c12ca08d2ec00430436ee96a21039ec261d513cd",
+      "bytes": 1196
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/ShellIndexes.ts",
+      "blob_sha": "b0b66c3b40a5d2a5cc34926f834b9928ef42e1b7",
+      "bytes": 916
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/Subagents.ts",
+      "blob_sha": "28a5457fe06c1b22859d42fc654754e69065a949",
+      "bytes": 1224
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/OrchestrationV2/ThreadLaunchWorkflows.ts",
+      "blob_sha": "090509926120cf81549d62ce0a8668fb01ff22d0",
+      "bytes": 716
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations/legacyThreadPullRequestKey.ts",
+      "blob_sha": "c5c0f80b8d9d49766805cdd4d059d1f10939ec63",
+      "bytes": 3935
+    },
+    {
+      "path": "apps/server/src/persistence/OrchestrationCommandReceipts.ts",
+      "blob_sha": "4a39061a00cb0e7ab1c10864fb400fc6795dbc48",
+      "bytes": 5362
+    },
+    {
+      "path": "apps/server/src/persistence/OrchestrationEventStore.ts",
+      "blob_sha": "e55d82713871bce675d605da926da0514879b422",
+      "bytes": 29019
+    },
+    {
+      "path": "apps/server/src/persistence/ProviderSessionRuntime.ts",
+      "blob_sha": "e3395b74884a1434520f59c06c28d37a4b214fb0",
+      "bytes": 14950
+    },
+    {
+      "path": "apps/server/src/persistence/PullRequestFilesViewed.ts",
+      "blob_sha": "476643c1f0b367a907d3bfdd351808c8ba22987d",
+      "bytes": 5185
+    },
+    {
+      "path": "apps/server/src/persistence/PullRequestReviewGuides.ts",
+      "blob_sha": "0a12b3f6f74a71a8d47e8664fde3985d26a0021d",
+      "bytes": 3128
+    },
+    {
+      "path": "apps/server/src/persistence/Sqlite.ts",
+      "blob_sha": "d9506e31154fec2d3b3dfaa3290928cd59a1ec4d",
+      "bytes": 6830
+    },
+    {
+      "path": "apps/server/src/persistence/databaseMigrationHead.ts",
+      "blob_sha": "046039a703410f6d124eed43de82d6c0553a32a1",
+      "bytes": 1857
+    },
+    {
+      "path": "apps/server/src/persistence/initializeV2Database.ts",
+      "blob_sha": "1a9f4bac55543a351b14336e566aae9c4956c0ba",
+      "bytes": 4195
+    },
+    {
+      "path": "apps/server/src/persistence/reconcileV2PreviewMigration.ts",
+      "blob_sha": "d57da24639bcbbf06604868d39d867bb157dc1c0",
+      "bytes": 3684
+    },
+    {
+      "path": "apps/server/src/policy/ManagedPolicy.ts",
+      "blob_sha": "36665b6e1572be56f66532cfc99306395d9fdf28",
+      "bytes": 8163
+    },
+    {
+      "path": "apps/server/src/policy/managedLimits.ts",
+      "blob_sha": "88df7d63c27c22b86d61b3f4a7d96d61ce28f907",
+      "bytes": 10530
+    },
+    {
+      "path": "apps/server/src/policy/managedProviders.ts",
+      "blob_sha": "1996aa2e11646eba1ff4a8bfd1c29131a1b90d92",
+      "bytes": 25220
+    },
+    {
+      "path": "apps/server/src/policy/managedSettings.ts",
+      "blob_sha": "272377bb91e45f6075495718263473fa2c320c2d",
+      "bytes": 22020
+    },
+    {
+      "path": "apps/server/src/policy/managedUpdates.ts",
+      "blob_sha": "d805cfa028e2f46b3c851f2b86137bb04968029b",
+      "bytes": 1450
+    },
+    {
+      "path": "apps/server/src/policy/policyTemplates.ts",
+      "blob_sha": "602bb740db04f56127a5423d7a02a7dcda128a2a",
+      "bytes": 15398
+    },
+    {
+      "path": "apps/server/src/preview/DesktopBrowserChannel.ts",
+      "blob_sha": "4da0efe3ce8f061f7f9dfe3b28ee319d175f364d",
+      "bytes": 12056
+    },
+    {
+      "path": "apps/server/src/preview/Manager.ts",
+      "blob_sha": "e18e1686c0427cde313107c747528fb317a2c0d0",
+      "bytes": 17985
+    },
+    {
+      "path": "apps/server/src/preview/PdfDocumentNavigation.ts",
+      "blob_sha": "4fc01f437cf221ebea1aa0362cfcfadfcdf8eeba",
+      "bytes": 2936
+    },
+    {
+      "path": "apps/server/src/preview/PortScanner.ts",
+      "blob_sha": "abe3603f44fbc38a0dc82524cb8f24c5e7aa8317",
+      "bytes": 50292
+    },
+    {
+      "path": "apps/server/src/preview/PreviewAgentActivity.ts",
+      "blob_sha": "1f0e39eb0374e2b3c154159131c5c695b945fd53",
+      "bytes": 2349
+    },
+    {
+      "path": "apps/server/src/preview/PreviewBrowser.ts",
+      "blob_sha": "3f0de9b0af3463a697b9d1d347f8545ad41da64f",
+      "bytes": 17441
+    },
+    {
+      "path": "apps/server/src/preview/PreviewBrowserHost.ts",
+      "blob_sha": "0952dbaf944cd27fa9ecb0f9149fd52cc93ec348",
+      "bytes": 6072
+    },
+    {
+      "path": "apps/server/src/preview/PreviewTunnel.ts",
+      "blob_sha": "6ace3cec1c456f2e2b331e2ddb4a1ce71fcd820c",
+      "bytes": 8768
+    },
+    {
+      "path": "apps/server/src/preview/ServerBrowser.ts",
+      "blob_sha": "26203fc1a63c88e8da8d6b155a415759df47f925",
+      "bytes": 140623
+    },
+    {
+      "path": "apps/server/src/preview/ServerBrowserContexts.ts",
+      "blob_sha": "670ca75eea195dcd2c67a3a97793e2bd1349087c",
+      "bytes": 13616
+    },
+    {
+      "path": "apps/server/src/preview/ServerBrowserPage.ts",
+      "blob_sha": "f5eed496da5fe54046fb18425eac668dd112ffe8",
+      "bytes": 55875
+    },
+    {
+      "path": "apps/server/src/preview/ServerBrowserStream.ts",
+      "blob_sha": "649af3b31d0db7d5f5d988bcc422ae16e8535695",
+      "bytes": 12617
+    },
+    {
+      "path": "apps/server/src/preview/SessionControl.ts",
+      "blob_sha": "f19f566ed30bbc6acd04c4566432a81f5bec5254",
+      "bytes": 6631
+    },
+    {
+      "path": "apps/server/src/process/NonBlockingSpawner.ts",
+      "blob_sha": "0807b287cb9cc45471361cc435742d9d3cd43e32",
+      "bytes": 7546
+    },
+    {
+      "path": "apps/server/src/process/SpawnWorker.ts",
+      "blob_sha": "5a391ab18ca1ba0e3c03bf38a3611c6d86e1014d",
+      "bytes": 19700
+    },
+    {
+      "path": "apps/server/src/process/agentScope.ts",
+      "blob_sha": "4bbb7d159cf0b95edce9c3206bbea60998aa7cc0",
+      "bytes": 18927
+    },
+    {
+      "path": "apps/server/src/process/externalLauncher.ts",
+      "blob_sha": "b5ffaf82fcc10e1c359c0b0fbb401c035883dbb3",
+      "bytes": 36258
+    },
+    {
+      "path": "apps/server/src/process/providerProcesses.ts",
+      "blob_sha": "4fe9a47637a044f833934237c03fe035a04caba8",
+      "bytes": 5898
+    },
+    {
+      "path": "apps/server/src/process/windowsTcpListeners.ts",
+      "blob_sha": "789915fa4b19353a0a67ba44c59f1223e9a955af",
+      "bytes": 2592
+    },
+    {
+      "path": "apps/server/src/process/windowsVerbatimSpawn.ts",
+      "blob_sha": "c060a78dfc47c4eaf50e1ab8749eba134e5d943a",
+      "bytes": 1430
+    },
+    {
+      "path": "apps/server/src/processRunner.ts",
+      "blob_sha": "4c7efd3cc9942d59543894d4d87a806f7fc83818",
+      "bytes": 12734
+    },
+    {
+      "path": "apps/server/src/project/AgentSessionImporter.ts",
+      "blob_sha": "0f8736986a2dfc4a7c00c6b87294e9f42767cf42",
+      "bytes": 23626
+    },
+    {
+      "path": "apps/server/src/project/AgentSessionJson.ts",
+      "blob_sha": "c9dc6baa5f5e62e76b574dfe3dc4387ad6375429",
+      "bytes": 6408
+    },
+    {
+      "path": "apps/server/src/project/AgentSessionScanner.ts",
+      "blob_sha": "9bd4b5cebd2763be4a915d414207ef9b2f17e6de",
+      "bytes": 93813
+    },
+    {
+      "path": "apps/server/src/project/ManagedProjectFolders.ts",
+      "blob_sha": "d526c381fb40495384489c09b38fb84cf16f067d",
+      "bytes": 18853
+    },
+    {
+      "path": "apps/server/src/project/ProjectCloneTracker.ts",
+      "blob_sha": "367b839cf2a6b5aaba1a9a66b9185f761cea78ef",
+      "bytes": 19891
+    },
+    {
+      "path": "apps/server/src/project/ProjectEnrichmentService.ts",
+      "blob_sha": "c08bba24bcceb30229e66c1f720a815f2c154226",
+      "bytes": 13971
+    },
+    {
+      "path": "apps/server/src/project/ProjectFaviconResolver.ts",
+      "blob_sha": "4554c308b4c1961cc152568168032e663b3d6a0f",
+      "bytes": 12899
+    },
+    {
+      "path": "apps/server/src/project/ProjectMutation.ts",
+      "blob_sha": "8c615e7528ea85de54a493535533fac9f60c0ca9",
+      "bytes": 3526
+    },
+    {
+      "path": "apps/server/src/project/ProjectService.ts",
+      "blob_sha": "80fabe6101c05b1b0cdd2a01064f4f1c6b7765c1",
+      "bytes": 34045
+    },
+    {
+      "path": "apps/server/src/project/ProjectSetupScriptRunner.ts",
+      "blob_sha": "1c94a3f11875749bd56be7523a0a560b026c8e9c",
+      "bytes": 24660
+    },
+    {
+      "path": "apps/server/src/project/RepositoryIdentityResolver.ts",
+      "blob_sha": "22144cb6b96495d3b8be5cc04ca692a8395a2f24",
+      "bytes": 16882
+    },
+    {
+      "path": "apps/server/src/project/ScratchThreadPromotion.ts",
+      "blob_sha": "91ef48adae53eda3d9f0927d6b587ba7cafac349",
+      "bytes": 6481
+    },
+    {
+      "path": "apps/server/src/project/T3ProjectFileLoader.ts",
+      "blob_sha": "1cc008d07cc836d03a607e3f5551b03eabe7876f",
+      "bytes": 3109
+    },
+    {
+      "path": "apps/server/src/project/WorktreeSetupTracker.ts",
+      "blob_sha": "ff5580961d97759d361bbb62602200634ec536c7",
+      "bytes": 11698
+    },
+    {
+      "path": "apps/server/src/project/gitCloneProgress.ts",
+      "blob_sha": "a15426b1e86b20905b05f0caa1d9c07a79fdfdd1",
+      "bytes": 2551
+    },
+    {
+      "path": "apps/server/src/project/http.ts",
+      "blob_sha": "b6dfc5ae75e830348ed611b3604ad5b7b017066a",
+      "bytes": 2611
+    },
+    {
+      "path": "apps/server/src/project/threadWorkspaceRoot.ts",
+      "blob_sha": "7ad8a3da993079ddbf8339fa8b2869d8ad3d8264",
+      "bytes": 910
+    },
+    {
+      "path": "apps/server/src/project/worktreeContainer.ts",
+      "blob_sha": "f20e9c4375cae28487b6ded1f6457ae6d553693b",
+      "bytes": 4111
+    },
+    {
+      "path": "apps/server/src/provider/AcpRegistrySessions.ts",
+      "blob_sha": "e0b46e08ea99337d452e08dc4a2d16e46d40ec8b",
+      "bytes": 10519
+    },
+    {
+      "path": "apps/server/src/provider/AntigravityAuth.ts",
+      "blob_sha": "cfffd859419e09710d5cb957a7613ad56b2d3ccd",
+      "bytes": 27248
+    },
+    {
+      "path": "apps/server/src/provider/AntigravityInstallation.ts",
+      "blob_sha": "569a4a6308756308ee7b8c246b6bafacbd63a30f",
+      "bytes": 62438
+    },
+    {
+      "path": "apps/server/src/provider/AntigravityProvider.ts",
+      "blob_sha": "f5e18f6bece9d2b8b88615cbf4eb395e4d868ca3",
+      "bytes": 23792
+    },
+    {
+      "path": "apps/server/src/provider/ClaudeCodeModelRoutes.ts",
+      "blob_sha": "6a9e7a48e64c5818797d42df4b9103cb02cf7dbf",
+      "bytes": 4931
+    },
+    {
+      "path": "apps/server/src/provider/ClaudeModelCatalog.ts",
+      "blob_sha": "0eef865fa56c5e58ecb8148a69592302ecba65a8",
+      "bytes": 23100
+    },
+    {
+      "path": "apps/server/src/provider/ClaudeModelManifest.ts",
+      "blob_sha": "1bac30b2ce30e585f84d894969ccf07bc2772ec7",
+      "bytes": 2821
+    },
+    {
+      "path": "apps/server/src/provider/ClaudeProvider.ts",
+      "blob_sha": "b657a2b813feb1c65e09e6927ccf7488e35137d6",
+      "bytes": 34489
+    },
+    {
+      "path": "apps/server/src/provider/ClaudeTurnTokenUsage.ts",
+      "blob_sha": "118716c55c26d9abe038e4133ffa0376dcf7504c",
+      "bytes": 9338
+    },
+    {
+      "path": "apps/server/src/provider/CodexAuthCallbackPage.ts",
+      "blob_sha": "66b5543523c03e94f336ef10e22235f7ae5e4737",
+      "bytes": 3135
+    },
+    {
+      "path": "apps/server/src/provider/CodexChatGptAuth.ts",
+      "blob_sha": "5be14a8a1a08fef42c7b0335528334c066737825",
+      "bytes": 47209
+    },
+    {
+      "path": "apps/server/src/provider/CodexChatGptHandoff.ts",
+      "blob_sha": "9d00a1b966e5044be866b4c696825567bffee53c",
+      "bytes": 2997
+    },
+    {
+      "path": "apps/server/src/provider/CodexChatGptModels.ts",
+      "blob_sha": "ce64f0409d6fd9348828b32d78940069bef3dafe",
+      "bytes": 2781
+    },
+    {
+      "path": "apps/server/src/provider/CodexChatGptSessionLock.ts",
+      "blob_sha": "bc725d8f4e195ea0657c3b7991acd747f08b8841",
+      "bytes": 1740
+    },
+    {
+      "path": "apps/server/src/provider/CodexDeveloperInstructions.ts",
+      "blob_sha": "cbfd514eb11a61b3445c6b4ca04372b0b059ab96",
+      "bytes": 2338
+    },
+    {
+      "path": "apps/server/src/provider/CodexInstallation.ts",
+      "blob_sha": "7985e0d3bc914c7dcb8e4f777df28e605e96cffa",
+      "bytes": 43620
+    },
+    {
+      "path": "apps/server/src/provider/CodexManagedErrors.ts",
+      "blob_sha": "a699d31eaae677fe960301d23872d2457acbefdf",
+      "bytes": 4769
+    },
+    {
+      "path": "apps/server/src/provider/CodexManagedHome.ts",
+      "blob_sha": "7f6d6313e11e3af110d7c27fb5133ee7cefee4f4",
+      "bytes": 686
+    },
+    {
+      "path": "apps/server/src/provider/CodexManagedRuntime.ts",
+      "blob_sha": "3704c919c2791e30e1014ef23d8b11c6820a9c71",
+      "bytes": 5564
+    },
+    {
+      "path": "apps/server/src/provider/CodexManagedTokenBroker.ts",
+      "blob_sha": "4a1e86182714248107b2ea6f699267d433029850",
+      "bytes": 8569
+    },
+    {
+      "path": "apps/server/src/provider/CodexManagedTokenProtocol.ts",
+      "blob_sha": "d5f9e610d2188f6f9958e32112c7f90c3020294c",
+      "bytes": 2870
+    },
+    {
+      "path": "apps/server/src/provider/CodexMcpElicitation.ts",
+      "blob_sha": "c8362dad1e84b0e7207e33a56c0ea574812784a3",
+      "bytes": 8205
+    },
+    {
+      "path": "apps/server/src/provider/CodexProvider.ts",
+      "blob_sha": "63154f4e99499219bed1cf277ef499f06f463f31",
+      "bytes": 42711
+    },
+    {
+      "path": "apps/server/src/provider/CodexThreadRevert.ts",
+      "blob_sha": "f2933dfe3d753697ce44a5e9c1ccd85ed03ac3c4",
+      "bytes": 1506
+    },
+    {
+      "path": "apps/server/src/provider/CodexToolPresentation.ts",
+      "blob_sha": "19286c6fd1b4f4de7842f208db40b8ddc99265d2",
+      "bytes": 8882
+    },
+    {
+      "path": "apps/server/src/provider/CodexTurnTokenUsage.ts",
+      "blob_sha": "7b2524464b0e05272f459de3b18a087dc612effb",
+      "bytes": 5538
+    },
+    {
+      "path": "apps/server/src/provider/DocumentText.ts",
+      "blob_sha": "d0e53121ae333909544cd0b347d8291572777b8b",
+      "bytes": 5112
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/AntigravityDriver.ts",
+      "blob_sha": "b0d11b453dc610b4dcb1c710732148be752d8d30",
+      "bytes": 29005
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/AntigravitySkills.ts",
+      "blob_sha": "edbe5e34a73433bcbb25190b04d7ba253aa72d7c",
+      "bytes": 15486
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/AntigravityUsage.ts",
+      "blob_sha": "2eb9744a3e42a3a925733d24b7db61d68740130e",
+      "bytes": 5082
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/ClaudeDriver.ts",
+      "blob_sha": "a03c72c7de458e1bd12f2be39eed3713cebcd6c1",
+      "bytes": 17407
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/ClaudeExecutable.ts",
+      "blob_sha": "6f4e85812f0cc7a4722e8ac8ce61e7d046c95eb4",
+      "bytes": 2904
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/ClaudeHome.ts",
+      "blob_sha": "1dfb94bb91a1e0660113512be0389a1ceca8e28a",
+      "bytes": 7872
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/ClaudeMaintenance.ts",
+      "blob_sha": "cb225d1fde59123ac9c40478ad8111fe8d400b9b",
+      "bytes": 5056
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/ClaudeSkillDispatch.ts",
+      "blob_sha": "bdf2ed1cae61a494874bdb05d3418dfaf8e0cbb3",
+      "bytes": 2591
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/ClaudeSkills.ts",
+      "blob_sha": "ae020bf40a8c177438d741a156c43464e127ebda",
+      "bytes": 35251
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/CodexDriver.ts",
+      "blob_sha": "ee7716e59e0bd582186dedcf6d72e75d7b7cfebc",
+      "bytes": 17178
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/CodexHomeLayout.ts",
+      "blob_sha": "d8a7270ab71309dc248cf7b94e3ab4795a77cee1",
+      "bytes": 15277
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/CodexManagedProvider.ts",
+      "blob_sha": "f182245f8840d6469f5b96e22e22798e08a8add2",
+      "bytes": 13281
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/antigravityUsageReader.ts",
+      "blob_sha": "5dff65928ad24c630f27980c798d8a718b431710",
+      "bytes": 22046
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/claudeUsage.ts",
+      "blob_sha": "713b35884292b27dce740190e101ad6bc95e34d4",
+      "bytes": 5801
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/codexUsage.ts",
+      "blob_sha": "a2977d3080fee7c386d838ad50fb6e036576eebd",
+      "bytes": 22507
+    },
+    {
+      "path": "apps/server/src/provider/Errors.ts",
+      "blob_sha": "b1ef6192faf3be6b65f1dca2a10706d55b3907a7",
+      "bytes": 850
+    },
+    {
+      "path": "apps/server/src/provider/EventNdjsonLogger.ts",
+      "blob_sha": "5a7b3578578f126759665b8c7c67fd6e825816fd",
+      "bytes": 26563
+    },
+    {
+      "path": "apps/server/src/provider/ModelManifest.ts",
+      "blob_sha": "7d790b472f6aaba637ef380f1d11e561049b7b85",
+      "bytes": 12180
+    },
+    {
+      "path": "apps/server/src/provider/ProjectSettingsOverrideSweep.ts",
+      "blob_sha": "06f61f9ad8bfeeeccc11a6668da1a378186583d3",
+      "bytes": 1744
+    },
+    {
+      "path": "apps/server/src/provider/ProviderAuthService.ts",
+      "blob_sha": "625a4ae77c683cb51247851c2afb28e24ea6d77d",
+      "bytes": 13518
+    },
+    {
+      "path": "apps/server/src/provider/ProviderCredentialStore.ts",
+      "blob_sha": "51557a3be0d902b5933628ed7a290737543bc5a6",
+      "bytes": 916
+    },
+    {
+      "path": "apps/server/src/provider/ProviderHostLive.ts",
+      "blob_sha": "8f00468b78d2c4278014669f46fbda15eb64bdb5",
+      "bytes": 4634
+    },
+    {
+      "path": "apps/server/src/provider/ProviderInstallationGate.ts",
+      "blob_sha": "3c526f9ee8255f302960df32de474083aa02b8df",
+      "bytes": 2799
+    },
+    {
+      "path": "apps/server/src/provider/ProviderInstanceRegistry.ts",
+      "blob_sha": "9ab3f56aedcd50ce9331b85fa11159998ba2aa76",
+      "bytes": 28560
+    },
+    {
+      "path": "apps/server/src/provider/ProviderInstanceRegistryHydration.ts",
+      "blob_sha": "1e882e3796c35ec3c2c8125d9e472e72214d75bb",
+      "bytes": 9579
+    },
+    {
+      "path": "apps/server/src/provider/ProviderInstanceRegistryMutator.ts",
+      "blob_sha": "a7cb5be09378a2bff472c0799fe554e6087d666b",
+      "bytes": 1374
+    },
+    {
+      "path": "apps/server/src/provider/ProviderOrchestrationAdapterInfrastructure.ts",
+      "blob_sha": "ffb25e7daa0dc2bbd2370b27dca711bd76a797ce",
+      "bytes": 3143
+    },
+    {
+      "path": "apps/server/src/provider/ProviderRegistry.ts",
+      "blob_sha": "43d66cd1ca049a8007884a5d63f7b41ce6cc76c0",
+      "bytes": 56774
+    },
+    {
+      "path": "apps/server/src/provider/ProviderUsageLimitsIngestion.ts",
+      "blob_sha": "cd72be06b76228972808279b4d7061db3b90ab92",
+      "bytes": 74
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravityAcpSupport.ts",
+      "blob_sha": "4d57305f7e0ec911291b420477c0a950b5a93dd3",
+      "bytes": 20061
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravityChildWork.ts",
+      "blob_sha": "aa0932cf0f41a1659839999fa3b675be82466cc2",
+      "bytes": 31624
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravityClientFiles.ts",
+      "blob_sha": "225c2684d02b9c32c017163eace23ea9b7db6cf1",
+      "bytes": 4562
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravityEditLocation.ts",
+      "blob_sha": "ff16dd014c97aba10bf0539f1bf88b16950ca493",
+      "bytes": 9071
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravityProfilePaths.ts",
+      "blob_sha": "eb5ef1fcac29249ce0dc648cdebad29cc6012209",
+      "bytes": 1476
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravityProtocol.ts",
+      "blob_sha": "2e59a78e376b47f9b81085b08411392ca4ffeff3",
+      "bytes": 22265
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravitySessionFiles.ts",
+      "blob_sha": "f59d785754d44d779bcdc5dab5926ae24061b112",
+      "bytes": 7381
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravityTurnOutcome.ts",
+      "blob_sha": "32eee40f008aeca495927a12a09b74c4c1e650a6",
+      "bytes": 10963
+    },
+    {
+      "path": "apps/server/src/provider/agentContextBudget.json",
+      "blob_sha": "4d4286111477f56534997c1d6cdd6e2fa9906d4d",
+      "bytes": 110
+    },
+    {
+      "path": "apps/server/src/provider/antigravityAuthSupport.ts",
+      "blob_sha": "8edd875839773e4d821c1c741da45b2e1b2761cc",
+      "bytes": 28362
+    },
+    {
+      "path": "apps/server/src/provider/antigravityCallback.ts",
+      "blob_sha": "ae9cc7de05b010924871f5462733611627303f4b",
+      "bytes": 3932
+    },
+    {
+      "path": "apps/server/src/provider/antigravityCliRelease.ts",
+      "blob_sha": "d53f8a820bf2e3cf2e4283ffae96a52ffbb0e402",
+      "bytes": 2347
+    },
+    {
+      "path": "apps/server/src/provider/antigravityUsageLimits.ts",
+      "blob_sha": "fadf2207c31f2e9dce51c0bf1c1cd55068a036c0",
+      "bytes": 19997
+    },
+    {
+      "path": "apps/server/src/provider/builtInDrivers.ts",
+      "blob_sha": "342a6780e9ad05a9e5a37d6b7dcb45811a3e7491",
+      "bytes": 2288
+    },
+    {
+      "path": "apps/server/src/provider/builtInProviderCatalog.ts",
+      "blob_sha": "6359b8872c5f7de26a5725ef11e4285993096d43",
+      "bytes": 531
+    },
+    {
+      "path": "apps/server/src/provider/claudeResetCredits.ts",
+      "blob_sha": "d2000804cf4f65f8c2dd5b9449aab59a37cfff16",
+      "bytes": 12074
+    },
+    {
+      "path": "apps/server/src/provider/claudeUsageLimits.ts",
+      "blob_sha": "ba1263ef704bbc22a5e9b079bd5552b87a388869",
+      "bytes": 8471
+    },
+    {
+      "path": "apps/server/src/provider/codexLaunchArgs.ts",
+      "blob_sha": "e8db6e382c53bedfed7f95201e06c2960cf8e583",
+      "bytes": 3188
+    },
+    {
+      "path": "apps/server/src/provider/codexModelCatalog.ts",
+      "blob_sha": "a459b1af81de09c52cd2c75f31a8094328b233b4",
+      "bytes": 2233
+    },
+    {
+      "path": "apps/server/src/provider/codexUsageLimits.ts",
+      "blob_sha": "526852332033d8a0c429e54ad6f52003b1b8179f",
+      "bytes": 9895
+    },
+    {
+      "path": "apps/server/src/provider/documentTextWorker.ts",
+      "blob_sha": "ec1f1f694c2f4c0a10cff11aa4c6d81d016ae67b",
+      "bytes": 33453
+    },
+    {
+      "path": "apps/server/src/provider/managedRelease.ts",
+      "blob_sha": "2ab75a3d7b32512d7c58726c398d4b7ebfea4227",
+      "bytes": 1109
+    },
+    {
+      "path": "apps/server/src/provider/model-manifest.json",
+      "blob_sha": "09dcf0f752448dac042512f931401c2e01a48f49",
+      "bytes": 30084
+    },
+    {
+      "path": "apps/server/src/provider/providerCompatibility.ts",
+      "blob_sha": "13cc28c944f7c6f477bc7ef9ca30aa93e0cf4a08",
+      "bytes": 6179
+    },
+    {
+      "path": "apps/server/src/provider/providerInstallation.ts",
+      "blob_sha": "471c97b82054720c443e80b0f52036f98553ead8",
+      "bytes": 10109
+    },
+    {
+      "path": "apps/server/src/provider/providerMaintenanceCommandCoordinator.ts",
+      "blob_sha": "d2fa69a8a73231b12d03d16230ddac1f067f3e74",
+      "bytes": 4248
+    },
+    {
+      "path": "apps/server/src/provider/providerMaintenanceRunner.ts",
+      "blob_sha": "014aa67c26df0c6c45002d840f5c9e7f3d5e3a02",
+      "bytes": 28087
+    },
+    {
+      "path": "apps/server/src/provider/providerStatusCache.ts",
+      "blob_sha": "66e7d64d70a642e23e4c2a890d4aa1be706da8c9",
+      "bytes": 4891
+    },
+    {
+      "path": "apps/server/src/provider/resetCreditCoordinator.ts",
+      "blob_sha": "c311dad7c5ab5b8e2c534308d323cf0356b34ee6",
+      "bytes": 4520
+    },
+    {
+      "path": "apps/server/src/provider/unavailableProviderSnapshot.ts",
+      "blob_sha": "8d34deab87b1ce488d8d71a8d71a44d8978d42ca",
+      "bytes": 1721
+    },
+    {
+      "path": "apps/server/src/provider/userInputAttachments.ts",
+      "blob_sha": "96ea22a2690b3396aab0d992a5d8899ecd3136a3",
+      "bytes": 2733
+    },
+    {
+      "path": "apps/server/src/pullRequest/PullRequestProviderRegistry.ts",
+      "blob_sha": "63323b6122d2092d6133e0166925bef93779a814",
+      "bytes": 1335
+    },
+    {
+      "path": "apps/server/src/pullRequest/PullRequestReadCache.ts",
+      "blob_sha": "7f03beef3a245c837493d26261e28e30150ad942",
+      "bytes": 10670
+    },
+    {
+      "path": "apps/server/src/pullRequest/PullRequestReviewGuideService.ts",
+      "blob_sha": "0963b0aeaa52f835fc84213db8de10aa3d083684",
+      "bytes": 20281
+    },
+    {
+      "path": "apps/server/src/pullRequest/PullRequestService.ts",
+      "blob_sha": "59ece029219df1b263b7f284bab976d62d2ceab4",
+      "bytes": 166616
+    },
+    {
+      "path": "apps/server/src/pullRequest/PullRequestWatchService.ts",
+      "blob_sha": "32f51f540bf9fc5a07b2eeea6a4d21e457163216",
+      "bytes": 7435
+    },
+    {
+      "path": "apps/server/src/pullRequest/http.ts",
+      "blob_sha": "0e9f353900eb3512334244cae5638e46cc3edd9f",
+      "bytes": 1027
+    },
+    {
+      "path": "apps/server/src/pullRequest/linkedThreads.ts",
+      "blob_sha": "787a85ebdb3e2bcdfae2d9e5f2a92451618c21db",
+      "bytes": 5531
+    },
+    {
+      "path": "apps/server/src/pullRequest/pullRequestChangeBreakdown.ts",
+      "blob_sha": "0e1f6631f6f68701bac31347b3ffbaf930df68bd",
+      "bytes": 415
+    },
+    {
+      "path": "apps/server/src/pullRequest/pullRequestReviewGuideInput.ts",
+      "blob_sha": "2f483490e86ed2fce2fa95772be159b5da9b5ba6",
+      "bytes": 1351
+    },
+    {
+      "path": "apps/server/src/pullRequest/pullRequestReviewGuideNormalize.ts",
+      "blob_sha": "f130dc5ab49d60d76e76fc8f0780a37c0270711c",
+      "bytes": 6525
+    },
+    {
+      "path": "apps/server/src/pullRequest/pullRequestReviewPosition.ts",
+      "blob_sha": "e55d375e94856968da1687b803e57a3c9cf2f223",
+      "bytes": 1903
+    },
+    {
+      "path": "apps/server/src/pullRequest/pullRequestSyncKey.ts",
+      "blob_sha": "513c2a6b991cdf16124a66df82829a55e15488b6",
+      "bytes": 3173
+    },
+    {
+      "path": "apps/server/src/pullRequest/pullRequestTarget.ts",
+      "blob_sha": "4520b0523a3698f3fdc49f4a1ae5eb3f214467af",
+      "bytes": 4337
+    },
+    {
+      "path": "apps/server/src/pullRequest/pullRequestViewedFiles.ts",
+      "blob_sha": "7558e8b6a166e219c0a214a061ec5ed3d2b87242",
+      "bytes": 13476
+    },
+    {
+      "path": "apps/server/src/relay/AgentAwarenessRelay.ts",
+      "blob_sha": "2eed87a8033bdc7c8a31f88334d2e0161d1817bd",
+      "bytes": 37722
+    },
+    {
+      "path": "apps/server/src/relay/HeldHooksWaker.ts",
+      "blob_sha": "9fee885aa8199603f9c5fecc7790011d6a84ac9b",
+      "bytes": 1881
+    },
+    {
+      "path": "apps/server/src/relay/relayEnvironmentClient.ts",
+      "blob_sha": "58ca32009d33df2e0d8c457a7f9bc3ce6e74bbfe",
+      "bytes": 735
+    },
+    {
+      "path": "apps/server/src/requestUrl.ts",
+      "blob_sha": "a1a0371c5f97f2c91640d44dedddf6111cdc2b81",
+      "bytes": 604
+    },
+    {
+      "path": "apps/server/src/resourceTelemetry/DesktopTelemetryReceiver.ts",
+      "blob_sha": "ca77c9e26220ca0e494084c880dfcb7f9326ea73",
+      "bytes": 28675
+    },
+    {
+      "path": "apps/server/src/resourceTelemetry/HostResources.ts",
+      "blob_sha": "85c985f5a3320b244d08390e5412ccbbb537554d",
+      "bytes": 8059
+    },
+    {
+      "path": "apps/server/src/resourceTelemetry/Model.ts",
+      "blob_sha": "ecabd56d520c578971abb6ddfbac2cddadfff9e1",
+      "bytes": 21446
+    },
+    {
+      "path": "apps/server/src/resourceTelemetry/NativeTelemetryClient.ts",
+      "blob_sha": "741cd00285887c15ea9d357362bf4630a0dcdf39",
+      "bytes": 38908
+    },
+    {
+      "path": "apps/server/src/resourceTelemetry/ProcessGroupMetrics.ts",
+      "blob_sha": "d5b86f65effb537df549d1fad4833b0590c90591",
+      "bytes": 6479
+    },
+    {
+      "path": "apps/server/src/resourceTelemetry/ResourceAttribution.ts",
+      "blob_sha": "a8943a35f32df32d2c024adfc18403dcb16a8aa6",
+      "bytes": 2562
+    },
+    {
+      "path": "apps/server/src/resourceTelemetry/ResourceMonitorBinary.ts",
+      "blob_sha": "a5b34b38aa6c34e0249ced454775f1a8589cf302",
+      "bytes": 6380
+    },
+    {
+      "path": "apps/server/src/resourceTelemetry/ResourceTelemetry.ts",
+      "blob_sha": "99d67fa66174864d4a6ce9222b87b5c5a189f527",
+      "bytes": 17553
+    },
+    {
+      "path": "apps/server/src/resourceTelemetry/ResourceTelemetryHistory.ts",
+      "blob_sha": "890683ae8c7962ac07708bfa046a0a09e822e50c",
+      "bytes": 11254
+    },
+    {
+      "path": "apps/server/src/review/ReviewService.ts",
+      "blob_sha": "39ce1554cea61455e0ed85aa6320acab5aa81099",
+      "bytes": 5342
+    },
+    {
+      "path": "apps/server/src/rpcInitialItems.ts",
+      "blob_sha": "6f3409858920fd7845ffa8b3d46f49aac49ea470",
+      "bytes": 521
+    },
+    {
+      "path": "apps/server/src/scheduledTasks/RelayDeliveryProof.ts",
+      "blob_sha": "4cc7ff2b237582f6a9feae6fc90cfcdd8ee2536f",
+      "bytes": 3513
+    },
+    {
+      "path": "apps/server/src/scheduledTasks/Schedule.ts",
+      "blob_sha": "f8fb648aaaaa99b2576e9a420c53d7875164f111",
+      "bytes": 3059
+    },
+    {
+      "path": "apps/server/src/scheduledTasks/ScheduledTaskService.ts",
+      "blob_sha": "3db6f783f649a6942a37ce027b43fba43585eb72",
+      "bytes": 114000
+    },
+    {
+      "path": "apps/server/src/scheduledTasks/webhookDedupe.ts",
+      "blob_sha": "76f04a97e6dfe1deb397e7f3bc83cdba52c57f0f",
+      "bytes": 5954
+    },
+    {
+      "path": "apps/server/src/scheduledTasks/webhookFilter.ts",
+      "blob_sha": "2ad0e0237e07995d4d27a577f8f30b69d466a835",
+      "bytes": 2580
+    },
+    {
+      "path": "apps/server/src/scheduledTasks/webhookRoute.ts",
+      "blob_sha": "a7e0c512cbe411c707ce057d71c40e9541f81197",
+      "bytes": 6614
+    },
+    {
+      "path": "apps/server/src/scheduledTasks/webhookTemplate.ts",
+      "blob_sha": "fc43dbff921ed5cd8f74c73f2efb50d3c6d31fd6",
+      "bytes": 6483
+    },
+    {
+      "path": "apps/server/src/scheduledTasks/webhookVerification.ts",
+      "blob_sha": "d0c75ed9e43a98911ea82c404102458bbc77e704",
+      "bytes": 1886
+    },
+    {
+      "path": "apps/server/src/scheduling/DueHint.ts",
+      "blob_sha": "2df8af5f0c536d166a0beed403ab72c86ba2fd86",
+      "bytes": 1025
+    },
+    {
+      "path": "apps/server/src/scheduling/Scheduler.ts",
+      "blob_sha": "cec8b7d5c65dca4718e396a1eb5a66bcad7d351e",
+      "bytes": 2106
+    },
+    {
+      "path": "apps/server/src/secrets/SecretCheck.ts",
+      "blob_sha": "f2a6241eeb7a09f8598423c016be9b6981a31122",
+      "bytes": 1585
+    },
+    {
+      "path": "apps/server/src/secrets/SecretRequests.ts",
+      "blob_sha": "e233bdd8cea4fe2f08e306e323dd71fbc527fbe7",
+      "bytes": 19934
+    },
+    {
+      "path": "apps/server/src/secrets/SecretResolver.ts",
+      "blob_sha": "076e4a0780793f654329555d5961945612a57117",
+      "bytes": 807
+    },
+    {
+      "path": "apps/server/src/secrets/secretProviderDefinitions.ts",
+      "blob_sha": "409df40bf16cf63eaeb237a3c2215f46fb1bdde2",
+      "bytes": 392
+    },
+    {
+      "path": "apps/server/src/secrets/settingsSecretValue.ts",
+      "blob_sha": "9567ae6ce61cb6fbd102c6715d9009ce508720b7",
+      "bytes": 2017
+    },
+    {
+      "path": "apps/server/src/server.ts",
+      "blob_sha": "d06186beb198813683cf12e9a276d32c2aa39ecf",
+      "bytes": 64435
+    },
+    {
+      "path": "apps/server/src/serverActivation.ts",
+      "blob_sha": "2945951d847a07a45aff6e9553e08c06e3b39fa8",
+      "bytes": 1114
+    },
+    {
+      "path": "apps/server/src/serverLifecycleEvents.ts",
+      "blob_sha": "d90b7fa57bc3587230001c10cc232aae92a57f25",
+      "bytes": 2394
+    },
+    {
+      "path": "apps/server/src/serverLogger.ts",
+      "blob_sha": "4458c717e1c5447077348258727748eadce4e19a",
+      "bytes": 3505
+    },
+    {
+      "path": "apps/server/src/serverOwnership.ts",
+      "blob_sha": "20bb46a45e66e6a26efa52410c97e84d5217a843",
+      "bytes": 12765
+    },
+    {
+      "path": "apps/server/src/serverRuntimeStartup.ts",
+      "blob_sha": "182297e6bdf0aaaabd36360e0ddc0b2e51011f0b",
+      "bytes": 27515
+    },
+    {
+      "path": "apps/server/src/serverRuntimeState.ts",
+      "blob_sha": "fc5c85a2a9c1e161ef298c57e93b113d2b48adb4",
+      "bytes": 6697
+    },
+    {
+      "path": "apps/server/src/serverSettings.ts",
+      "blob_sha": "d4ddfd8b5c0c1de4c99533c0796d39d7cd76f0a6",
+      "bytes": 55489
+    },
+    {
+      "path": "apps/server/src/serviceLauncher.ts",
+      "blob_sha": "8dcd7886fce51283ce86aaf33993ddeeb3f4183a",
+      "bytes": 63501
+    },
+    {
+      "path": "apps/server/src/settingsSecrets.ts",
+      "blob_sha": "d433621f3b1d7f9d05cdfd09e2a0f4ba4ec61e98",
+      "bytes": 11495
+    },
+    {
+      "path": "apps/server/src/socketHeartbeat.ts",
+      "blob_sha": "6ffd9c9cf785c96049d13d88918dc57b42071b92",
+      "bytes": 985
+    },
+    {
+      "path": "apps/server/src/sourceControl/ServerSourceControlHost.ts",
+      "blob_sha": "00b648d0f0364329abdcac77c0456ea3f0bfc343",
+      "bytes": 2512
+    },
+    {
+      "path": "apps/server/src/sourceControl/SourceControlDiscovery.ts",
+      "blob_sha": "e69f0d3761e68b291b6e58b0710a09fcba9f9079",
+      "bytes": 4969
+    },
+    {
+      "path": "apps/server/src/sourceControl/SourceControlProviderRegistry.ts",
+      "blob_sha": "98c560cbf49731e3b67c329bddb692bfcadc1d7f",
+      "bytes": 15007
+    },
+    {
+      "path": "apps/server/src/sourceControl/SourceControlRepositoryService.ts",
+      "blob_sha": "49a9edfdde0f787f8e00a5bda18bc8980821dcb7",
+      "bytes": 25540
+    },
+    {
+      "path": "apps/server/src/sourceControl/SourceControlSignIn.ts",
+      "blob_sha": "31f7837322fecc836332f6696d70cb660c716356",
+      "bytes": 3456
+    },
+    {
+      "path": "apps/server/src/sourceControl/builtInDrivers.ts",
+      "blob_sha": "33aa77ffefd8ffd273206667d1bb517bf2dd2e49",
+      "bytes": 1764
+    },
+    {
+      "path": "apps/server/src/sourceControl/sourceControlDefinitions.ts",
+      "blob_sha": "6dff3fe3c696225f8a69b0b6d608ff34cb9ba01e",
+      "bytes": 3276
+    },
+    {
+      "path": "apps/server/src/sourceControl/sourceControlHostSecrets.ts",
+      "blob_sha": "aaa6152e219fcaba9a8acff055eb3939408b78b1",
+      "bytes": 5559
+    },
+    {
+      "path": "apps/server/src/sourceControl/threadPullRequests.ts",
+      "blob_sha": "8d9c72b1c6cdf917bcec2c33a175ebe2927353df",
+      "bytes": 536
+    },
+    {
+      "path": "apps/server/src/speech/CloudSpeech.ts",
+      "blob_sha": "31702c80a87eef3e1e3a1d49db7539eaf1684513",
+      "bytes": 10919
+    },
+    {
+      "path": "apps/server/src/speech/SpeechModelStore.ts",
+      "blob_sha": "d12999194df216c44d130a670de885aaa2438b3c",
+      "bytes": 15344
+    },
+    {
+      "path": "apps/server/src/speech/SpeechService.ts",
+      "blob_sha": "ba25233a32c7e91e48036bfaa4baa40eea4bf25e",
+      "bytes": 38204
+    },
+    {
+      "path": "apps/server/src/speech/audio.ts",
+      "blob_sha": "62f31f182c8a44f8aabbf5524b6bb4cb3d3ac0c5",
+      "bytes": 6848
+    },
+    {
+      "path": "apps/server/src/speech/catalog.json",
+      "blob_sha": "782211e0ec16a3372efccba3cfe5f4b9cb8daa79",
+      "bytes": 116388
+    },
+    {
+      "path": "apps/server/src/speech/customWords.ts",
+      "blob_sha": "aeec4239b80bdc5289be3e7b96d0efde32fff04f",
+      "bytes": 8998
+    },
+    {
+      "path": "apps/server/src/speech/fillerWords.ts",
+      "blob_sha": "e939e275fbc0e519f67c1938e23f2e3fe99e0acf",
+      "bytes": 1194
+    },
+    {
+      "path": "apps/server/src/speech/http.ts",
+      "blob_sha": "09c3d4dc23faa2ea2968b21eb9ecd8501b10020d",
+      "bytes": 9613
+    },
+    {
+      "path": "apps/server/src/speech/model.ts",
+      "blob_sha": "59f0dcf0a86cbd1de665c1a95e37d667df8b392e",
+      "bytes": 1161
+    },
+    {
+      "path": "apps/server/src/speech/native.ts",
+      "blob_sha": "2bd2631c63fbaaf49b14041f6d5166706a5fdcc3",
+      "bytes": 16685
+    },
+    {
+      "path": "apps/server/src/speech/nativeLanguage.ts",
+      "blob_sha": "0ff013de970f630b7370e825df106dd1f4337725",
+      "bytes": 806
+    },
+    {
+      "path": "apps/server/src/speech/platform.ts",
+      "blob_sha": "05f9f5eb5d4bb4550459a8af3a42acb768df6b98",
+      "bytes": 385
+    },
+    {
+      "path": "apps/server/src/speech/postProcessing.ts",
+      "blob_sha": "92f4af17696c34788e0b042971cad6389ce2fe4e",
+      "bytes": 2985
+    },
+    {
+      "path": "apps/server/src/speech/silero.ts",
+      "blob_sha": "dceddb71dde5e203f8d6ef259795975b47fceb5d",
+      "bytes": 353
+    },
+    {
+      "path": "apps/server/src/speech/stream.ts",
+      "blob_sha": "60d5acb2334e2d98005eb976ff262b219d8adc20",
+      "bytes": 4522
+    },
+    {
+      "path": "apps/server/src/startupAccess.ts",
+      "blob_sha": "ce1b8be41938f7c00c91606636ecbd537cf8f0f5",
+      "bytes": 9930
+    },
+    {
+      "path": "apps/server/src/storageCleanup.ts",
+      "blob_sha": "7fd3977af51283b089b80757adad6231ecd24339",
+      "bytes": 95988
+    },
+    {
+      "path": "apps/server/src/telemetry/AnalyticsService.ts",
+      "blob_sha": "384da92b3f312dae54e8964c0946e4cd8f000958",
+      "bytes": 13479
+    },
+    {
+      "path": "apps/server/src/telemetry/DelegatedTaskAnalytics.ts",
+      "blob_sha": "b3fb782ae8343688ac686d249d6c45ee7279761c",
+      "bytes": 3456
+    },
+    {
+      "path": "apps/server/src/telemetry/FeatureUsage.ts",
+      "blob_sha": "61fb57ada454ed0b1a9a309eb066ff03db841f86",
+      "bytes": 4802
+    },
+    {
+      "path": "apps/server/src/telemetry/Identify.ts",
+      "blob_sha": "7ea7e9d296771002411709e568ce3776018967c5",
+      "bytes": 11625
+    },
+    {
+      "path": "apps/server/src/telemetry/ProviderDimensions.ts",
+      "blob_sha": "49faea7e688c00d59ca33bc67d60e84d51152aa7",
+      "bytes": 9880
+    },
+    {
+      "path": "apps/server/src/telemetry/ProviderUsageAnalytics.ts",
+      "blob_sha": "ce7f29ba1f8d5d0b9b4150c897fb913c30e20095",
+      "bytes": 16005
+    },
+    {
+      "path": "apps/server/src/terminal/Manager.ts",
+      "blob_sha": "e87ba67cf5837c37ca8942b912cbb156eedf8b10",
+      "bytes": 140822
+    },
+    {
+      "path": "apps/server/src/terminal/NodePtyAdapter.ts",
+      "blob_sha": "4035e23f2b977b4260a6d192069c6232b3112385",
+      "bytes": 9750
+    },
+    {
+      "path": "apps/server/src/terminal/OutputProtocol.ts",
+      "blob_sha": "84f6e4092341783c1e455034519606f3747c026f",
+      "bytes": 9866
+    },
+    {
+      "path": "apps/server/src/textGeneration/AntigravityTextGeneration.ts",
+      "blob_sha": "364a97f3bd53d9a95f60bc39b5958505851352cb",
+      "bytes": 14728
+    },
+    {
+      "path": "apps/server/src/textGeneration/ClaudeTextGeneration.ts",
+      "blob_sha": "30e0c5c6841dea3c98ea73a0042bf5663895b6ef",
+      "bytes": 16535
+    },
+    {
+      "path": "apps/server/src/textGeneration/CodexTextGeneration.ts",
+      "blob_sha": "d1db00f7690f865b97f6d19343c3c8eacd3f594e",
+      "bytes": 15983
+    },
+    {
+      "path": "apps/server/src/textGeneration/TextGeneration.ts",
+      "blob_sha": "0436c552a6b7b7d5269a419f2acb3db1388683e2",
+      "bytes": 10298
+    },
+    {
+      "path": "apps/server/src/textGeneration/TextGenerationPresets.ts",
+      "blob_sha": "ad3ff52688e9fa4a748015dea3c65a2a0a01c507",
+      "bytes": 1561
+    },
+    {
+      "path": "apps/server/src/textGeneration/TextGenerators.ts",
+      "blob_sha": "f9ac96432f81e241348a2b6259b4bceee9a41a63",
+      "bytes": 7600
+    },
+    {
+      "path": "apps/server/src/textGeneration/ThreadTitleLinks.ts",
+      "blob_sha": "cb6f0d924d2753d7583a07425fa87b0c6dd1c1c4",
+      "bytes": 1633
+    },
+    {
+      "path": "apps/server/src/textGeneration/TranscriptionPostProcessing.ts",
+      "blob_sha": "2bf48ad962a84a30c71dec02dcd7558f51278177",
+      "bytes": 2395
+    },
+    {
+      "path": "apps/server/src/textGeneration/textGeneratorDrivers.ts",
+      "blob_sha": "ef7860c84dbc9a01757b58ae918962c0c7f3c258",
+      "bytes": 9407
+    },
+    {
+      "path": "apps/server/src/triage/TriageService.ts",
+      "blob_sha": "14d12c0af9e156279ed00304ab8b96a41024adae",
+      "bytes": 9226
+    },
+    {
+      "path": "apps/server/src/triage/triagePrompt.ts",
+      "blob_sha": "0e9dbb4470a05b7b7d956865270fa6c3dcd28f4b",
+      "bytes": 15169
+    },
+    {
+      "path": "apps/server/src/triage/triageSession.ts",
+      "blob_sha": "e71dd935ef85321395a57946967c1d33f7afea7d",
+      "bytes": 3994
+    },
+    {
+      "path": "apps/server/src/usage/CodexUsageHistory.ts",
+      "blob_sha": "b032c9b1a0be0de0ec52a61fa328d8a63058452d",
+      "bytes": 5038
+    },
+    {
+      "path": "apps/server/src/usage/UsageLimitSources.ts",
+      "blob_sha": "eba449c9a0fb3d2bc542e81bd367dfa0c07c965e",
+      "bytes": 12606
+    },
+    {
+      "path": "apps/server/src/usage/UsageService.ts",
+      "blob_sha": "30edc903a580fa74ac7b5dc7830a199ca803f35c",
+      "bytes": 49903
+    },
+    {
+      "path": "apps/server/src/usage/cliproxyApi.ts",
+      "blob_sha": "af80091c3eb414b79a344ca048ff11668be720f3",
+      "bytes": 22642
+    },
+    {
+      "path": "apps/server/src/usage/usageAggregation.ts",
+      "blob_sha": "f4c39753548fdbe98df22565d4f62096e5064e15",
+      "bytes": 16872
+    },
+    {
+      "path": "apps/server/src/usage/usagePricing.ts",
+      "blob_sha": "a9ffc691643fd457760d814414e8487c2de0399a",
+      "bytes": 15082
+    },
+    {
+      "path": "apps/server/src/usage/usageScanCache.ts",
+      "blob_sha": "843b414b97f32872cba0ad85fee3516a15d37551",
+      "bytes": 14319
+    },
+    {
+      "path": "apps/server/src/usage/usageTestFormats.ts",
+      "blob_sha": "ecc4ede6efd3ced2ae002e98fe7dfc3246b341a9",
+      "bytes": 936
+    },
+    {
+      "path": "apps/server/src/usage/usageTranscriptReader.ts",
+      "blob_sha": "43597513e52401b3ba1440ea77865eaf89236032",
+      "bytes": 17212
+    },
+    {
+      "path": "apps/server/src/utils/subscribeBeforeSnapshot.ts",
+      "blob_sha": "7ca1e1c4feb3d1dca29ae6af239fe017fd6e9486",
+      "bytes": 1199
+    },
+    {
+      "path": "apps/server/src/vcs/CheckoutCloner.ts",
+      "blob_sha": "9938cc6a169cf9ad32ad1159c21bd7bb32ff01b6",
+      "bytes": 3306
+    },
+    {
+      "path": "apps/server/src/vcs/GitVcsDriver.ts",
+      "blob_sha": "3a4dd7cedf10ae50d813412e34241c343b4a6be5",
+      "bytes": 97993
+    },
+    {
+      "path": "apps/server/src/vcs/GitVcsDriverCore.ts",
+      "blob_sha": "f863f01bdb40a1384d1abaa693b7d528f194e9fa",
+      "bytes": 274622
+    },
+    {
+      "path": "apps/server/src/vcs/VcsAutomaticFetchInterval.ts",
+      "blob_sha": "0f2c900b3ba112f062d3df12809ebe3b70af5857",
+      "bytes": 1049
+    },
+    {
+      "path": "apps/server/src/vcs/VcsDriver.ts",
+      "blob_sha": "c5a6408db01286439b6a7235baa82e45d48298a0",
+      "bytes": 4542
+    },
+    {
+      "path": "apps/server/src/vcs/VcsDriverRegistry.ts",
+      "blob_sha": "5bf7263ebe834c282e88596ee8d9a6a523994e61",
+      "bytes": 7484
+    },
+    {
+      "path": "apps/server/src/vcs/VcsProcess.ts",
+      "blob_sha": "91e21e8f07a97ca4cbb3d2665f3b13a615b372a6",
+      "bytes": 15649
+    },
+    {
+      "path": "apps/server/src/vcs/VcsProjectConfig.ts",
+      "blob_sha": "dfd76b1f2b48b1768b6de17e32e032c54db5b729",
+      "bytes": 4532
+    },
+    {
+      "path": "apps/server/src/vcs/VcsProvisioningService.ts",
+      "blob_sha": "96674e940f03bcbce2ea900a6c9135c9e1dd8888",
+      "bytes": 1623
+    },
+    {
+      "path": "apps/server/src/vcs/VcsStatusBroadcaster.ts",
+      "blob_sha": "d1e9a9c5496c6bf0e59978cb2c37d8a3595377a7",
+      "bytes": 50834
+    },
+    {
+      "path": "apps/server/src/vcs/checkpointUntrackedBlobs.ts",
+      "blob_sha": "675dba0121615952c053dd21d5a6935cc81db4de",
+      "bytes": 18081
+    },
+    {
+      "path": "apps/server/src/vcs/gitIndexStat.ts",
+      "blob_sha": "c53fcc28879a0f2e0c7be4e49f154c2245b89442",
+      "bytes": 7005
+    },
+    {
+      "path": "apps/server/src/vcs/removeEmptyDirectory.ts",
+      "blob_sha": "f7c8348af8db69244d9dd455c983ddf687a32e24",
+      "bytes": 1089
+    },
+    {
+      "path": "apps/server/src/vcs/testing/VcsDriverContractHarness.ts",
+      "blob_sha": "fd474283590d13c428901c33f37d94ac1bfb4471",
+      "bytes": 6542
+    },
+    {
+      "path": "apps/server/src/vcs/worktreeCheckoutCache.ts",
+      "blob_sha": "8a51189fe6d699027bb28acc9acc06061181cbcc",
+      "bytes": 34329
+    },
+    {
+      "path": "apps/server/src/vcs/worktreeRemoval.ts",
+      "blob_sha": "b48994873b28230a39d4ffd05815bc442ba5e8fc",
+      "bytes": 8665
+    },
+    {
+      "path": "apps/server/src/watchDirectoryReplacements.ts",
+      "blob_sha": "ca2d9c88941d734142b1a823732e870c0d0882bc",
+      "bytes": 4701
+    },
+    {
+      "path": "apps/server/src/workspace/IgnorePatterns.ts",
+      "blob_sha": "b303c5bf1fa23cde6c330d988dcb5ab876223b97",
+      "bytes": 6690
+    },
+    {
+      "path": "apps/server/src/workspace/KnownWorkspaces.ts",
+      "blob_sha": "b4b17c1e2a565895bfa66b1f36f384aa1aff4e0b",
+      "bytes": 6720
+    },
+    {
+      "path": "apps/server/src/workspace/TaskFolderStore.ts",
+      "blob_sha": "79693b90dd51af047f9dbf32dc09a22b876d2ba2",
+      "bytes": 5367
+    },
+    {
+      "path": "apps/server/src/workspace/TaskFolders.ts",
+      "blob_sha": "4911065118ce412f133576643b136b40cf0b8bfd",
+      "bytes": 61174
+    },
+    {
+      "path": "apps/server/src/workspace/WorkspaceEntries.ts",
+      "blob_sha": "738268f95558bad023de6f33e781bdbdd5ca0ce2",
+      "bytes": 27570
+    },
+    {
+      "path": "apps/server/src/workspace/WorkspaceFileSystem.ts",
+      "blob_sha": "8c3121aed6dbbec9046625bc4ed33efce816b181",
+      "bytes": 25016
+    },
+    {
+      "path": "apps/server/src/workspace/WorkspaceFolders.ts",
+      "blob_sha": "0824c647ce360b8a1d4a4bccbcf4c76229a447ea",
+      "bytes": 22133
+    },
+    {
+      "path": "apps/server/src/workspace/WorkspacePaths.ts",
+      "blob_sha": "e630643c71be6e237ffaabb03e99cb1c866773b6",
+      "bytes": 6727
+    },
+    {
+      "path": "apps/server/src/workspace/WorkspaceSearchIndex.ts",
+      "blob_sha": "a5503a50f55b822007d07f704abf0de5b544e183",
+      "bytes": 55089
+    },
+    {
+      "path": "apps/server/src/workspace/fileHeaderMimeType.ts",
+      "blob_sha": "0c31a734ca730c1962324fda9b322de9910ad5d8",
+      "bytes": 1224
+    },
+    {
+      "path": "apps/server/src/workspace/hostDrivePath.ts",
+      "blob_sha": "776b0fce779d7b899f47accada62a4885091a6b2",
+      "bytes": 1820
+    },
+    {
+      "path": "apps/server/src/workspace/restoreMissingWorktree.ts",
+      "blob_sha": "6aa4b11350efb5b82a76b3b6b9700f2289f62034",
+      "bytes": 12613
+    },
+    {
+      "path": "apps/server/src/workspace/workspaceLease.ts",
+      "blob_sha": "90e6124bb1865e96a0deababb8d01da7715552ce",
+      "bytes": 4127
+    },
+    {
+      "path": "apps/server/src/worktreesDirectory.ts",
+      "blob_sha": "e8464eb077f9df2e816da05dc3ff11e7b8fc6280",
+      "bytes": 3710
+    },
+    {
+      "path": "apps/server/src/ws.ts",
+      "blob_sha": "b5faaaa16f97c38469686d7d8c958ef52e3915f8",
+      "bytes": 176700
+    },
+    {
+      "path": "apps/server/src/zipArchive.ts",
+      "blob_sha": "6711fbd3f5ee892e8cf4dfed45635b3244cf27ed",
+      "bytes": 3623
+    },
+    {
+      "path": "docs/internals/adding-a-provider.md",
+      "blob_sha": "14ac6db1eb68cebc2e77ece20a40040aee0366db",
+      "bytes": 8896
+    },
+    {
+      "path": "docs/internals/assistant-citations.md",
+      "blob_sha": "c5313488b4a061bee30d021425e3dfb4308e43ec",
+      "bytes": 2207
+    },
+    {
+      "path": "docs/internals/composer-context-references.md",
+      "blob_sha": "58c37b359fdb05b89d6006516f3dc4f3d4dfcf0e",
+      "bytes": 13004
+    },
+    {
+      "path": "docs/internals/composer-editors.md",
+      "blob_sha": "650564f751b60e5b0336f2e497470d1ccd1a3fd4",
+      "bytes": 2687
+    },
+    {
+      "path": "docs/internals/connection-runtime.md",
+      "blob_sha": "58eb388a12a13f473d631300ddd00fdabbed65fb",
+      "bytes": 10201
+    },
+    {
+      "path": "docs/internals/consistency-action-names.md",
+      "blob_sha": "7277c1bbf74f743a9d0b26d26a42852dd72fa70f",
+      "bytes": 2317
+    },
+    {
+      "path": "docs/internals/context-handoffs.md",
+      "blob_sha": "965a4623f796269afed6384a9f87d8a0994c3941",
+      "bytes": 1215
+    },
+    {
+      "path": "docs/internals/devcontainer.md",
+      "blob_sha": "2d07c620483e1ecc6a8301efb71133ef979787d5",
+      "bytes": 3121
+    },
+    {
+      "path": "docs/internals/devices.md",
+      "blob_sha": "051f57411d07bebda59d72756df4598d2627d950",
+      "bytes": 9451
+    },
+    {
+      "path": "docs/internals/effect-services.md",
+      "blob_sha": "13e05dc926f67b369be52c00572314c8a64ede63",
+      "bytes": 9899
+    },
+    {
+      "path": "docs/internals/environment-auth.md",
+      "blob_sha": "ea64b8523541bf76f94d648ad31211c02fff5fb5",
+      "bytes": 11498
+    },
+    {
+      "path": "docs/internals/glossary.md",
+      "blob_sha": "abd302faaa1a958f10a5788236cb3c0fbe8980ca",
+      "bytes": 6823
+    },
+    {
+      "path": "docs/internals/i18n.md",
+      "blob_sha": "00d691e9742fea89424e5aad888f963e46283ce6",
+      "bytes": 5322
+    },
+    {
+      "path": "docs/internals/images/mobile-layers.png",
+      "blob_sha": "5b43552d9ad836b1e8b4db22544ea25835c845fd",
+      "bytes": 238680
+    },
+    {
+      "path": "docs/internals/images/mobile-workspace-split.png",
+      "blob_sha": "71297685854a2732c88aa3b13f82a2ce2133cf09",
+      "bytes": 238087
+    },
+    {
+      "path": "docs/internals/legacy-orchestration-migration.md",
+      "blob_sha": "150b1fde8880e4c6ce1cb7aff8ae92c67059da40",
+      "bytes": 3900
+    },
+    {
+      "path": "docs/internals/linux-snap-shot.md",
+      "blob_sha": "81846c7a42b55cbcee82bb066adc55490997223a",
+      "bytes": 6204
+    },
+    {
+      "path": "docs/internals/mobile-development.md",
+      "blob_sha": "5277a66f62dae35b5694c208bad2988324fc8d16",
+      "bytes": 5363
+    },
+    {
+      "path": "docs/internals/mobile-layout.md",
+      "blob_sha": "b98199ff4b6c98bc7bdcaa73398a2bf6079569c8",
+      "bytes": 3936
+    },
+    {
+      "path": "docs/internals/mobile-navigation.md",
+      "blob_sha": "4a3e11ef5f13fecebcc89780a237b357993c4c23",
+      "bytes": 5706
+    },
+    {
+      "path": "docs/internals/model-manifest.md",
+      "blob_sha": "9a13255c3beb7eaf0b386e8a93e28f0bb487eada",
+      "bytes": 2130
+    },
+    {
+      "path": "docs/internals/open-source-licenses.md",
+      "blob_sha": "2b40e5b52dc4c84d9b0f226d8141f106aa39773a",
+      "bytes": 4916
+    },
+    {
+      "path": "docs/internals/overview.md",
+      "blob_sha": "19029cd1d9f3fcbbbe2ea9c35a13cd1893a4a630",
+      "bytes": 10851
+    },
+    {
+      "path": "docs/internals/performance-regressions.md",
+      "blob_sha": "25ecabd80c5a42cfed922f03466dacfa41b1d102",
+      "bytes": 12947
+    },
+    {
+      "path": "docs/internals/product-analytics.md",
+      "blob_sha": "b6dc3f245390aa5c6f4280a95b5c8267dd928eae",
+      "bytes": 9278
+    },
+    {
+      "path": "docs/internals/providers.md",
+      "blob_sha": "102bffe4f065cf4007f797ff4483336c0af84d69",
+      "bytes": 13034
+    },
+    {
+      "path": "docs/internals/pull-request-file-revisions.md",
+      "blob_sha": "dfc03a436aefc013db367b7249b96d69a68fb9fe",
+      "bytes": 4210
+    },
+    {
+      "path": "docs/internals/remote.md",
+      "blob_sha": "c4d52681cb606b4571d28151c7eb4cf403be7f60",
+      "bytes": 15166
+    },
+    {
+      "path": "docs/internals/resource-telemetry.md",
+      "blob_sha": "1b7dea3d6aaab81fc361f679e0b3087113a0ed58",
+      "bytes": 3597
+    },
+    {
+      "path": "docs/internals/server-updates.md",
+      "blob_sha": "4634574f8ff3e36596db19d350a0c7a7084d77fd",
+      "bytes": 10344
+    },
+    {
+      "path": "docs/internals/t3-connect.md",
+      "blob_sha": "7237df5cfe381509561192e472150521de928760",
+      "bytes": 14114
+    },
+    {
+      "path": "docs/internals/terminal-runtime.md",
+      "blob_sha": "ca5f0d46ead6e5eed89c61ce5a23ff2d2ca587fe",
+      "bytes": 2535
+    },
+    {
+      "path": "docs/internals/testing.md",
+      "blob_sha": "6b0b3801c337d300f67cdd99808b54193d3281b6",
+      "bytes": 4865
+    },
+    {
+      "path": "docs/internals/voice-input.md",
+      "blob_sha": "c455388dac491850293c02bd028388dfaf6962af",
+      "bytes": 5658
+    },
+    {
+      "path": "docs/internals/web-ui.md",
+      "blob_sha": "1d3b7d7d8c62d4658d25de3264df369ee640fc60",
+      "bytes": 4571
+    },
+    {
+      "path": "package.json",
+      "blob_sha": "9f1d2bee11b58d3fc77103242dd5ed327c3e2efe",
+      "bytes": 6870
+    },
+    {
+      "path": "packages/contracts/src/acpRegistry.ts",
+      "blob_sha": "fffbe8dd449341bdfb718ed178dd05f2cd134172",
+      "bytes": 13726
+    },
+    {
+      "path": "packages/contracts/src/agentSessions.ts",
+      "blob_sha": "93e0e36e4fbd44accb21563995304a7490bcd59b",
+      "bytes": 3447
+    },
+    {
+      "path": "packages/contracts/src/applicationEvent.ts",
+      "blob_sha": "30079a711638c14bd1e68eccad6bedbb32b05cf8",
+      "bytes": 4794
+    },
+    {
+      "path": "packages/contracts/src/assets.ts",
+      "blob_sha": "0cae763748d7a68b08ca22b8950fc0f6169779c2",
+      "bytes": 12263
+    },
+    {
+      "path": "packages/contracts/src/assistantCitations.ts",
+      "blob_sha": "96572a4bfa6560db216f5c6b9b6d9c44e1bfe03e",
+      "bytes": 1614
+    },
+    {
+      "path": "packages/contracts/src/auth.ts",
+      "blob_sha": "5a630a6b7abe989984b2e7d86acc504f18bc8e9b",
+      "bytes": 27642
+    },
+    {
+      "path": "packages/contracts/src/background.ts",
+      "blob_sha": "8bed6d52bdd49416c0f3722392df7df3fa6c8fee",
+      "bytes": 3755
+    },
+    {
+      "path": "packages/contracts/src/baseSchemas.ts",
+      "blob_sha": "30df0d53c537fca418c0766edc013a50135dd1c4",
+      "bytes": 13145
+    },
+    {
+      "path": "packages/contracts/src/browserImport.ts",
+      "blob_sha": "f7f0f65e00e137699110d506112e08de9f0ee808",
+      "bytes": 3742
+    },
+    {
+      "path": "packages/contracts/src/browserProfile.ts",
+      "blob_sha": "7d763f15415bc125cb33a06692d108389b44fcd9",
+      "bytes": 2271
+    },
+    {
+      "path": "packages/contracts/src/chatAttachment.ts",
+      "blob_sha": "bc3e103d74aab0308841173e94dc448289655bbb",
+      "bytes": 9667
+    },
+    {
+      "path": "packages/contracts/src/checkpointDiff.ts",
+      "blob_sha": "84a4dad91615e0f7141a11bfeff301b2ee960e75",
+      "bytes": 3148
+    },
+    {
+      "path": "packages/contracts/src/clientRpcPermissions.ts",
+      "blob_sha": "b211332c1c8b8bab8473ad757ddd9fe6f23e8f24",
+      "bytes": 6811
+    },
+    {
+      "path": "packages/contracts/src/composerContext.ts",
+      "blob_sha": "9884284b3f0db1017c778622bfb7556e3893a15a",
+      "bytes": 12367
+    },
+    {
+      "path": "packages/contracts/src/composerContextClipboard.ts",
+      "blob_sha": "b2ceab22cf87fff0aa595f67f457fae6e0603e70",
+      "bytes": 955
+    },
+    {
+      "path": "packages/contracts/src/desktopAppActivation.ts",
+      "blob_sha": "020188cf43ebe8b1e2e3e68bf2a0277eb6688a4a",
+      "bytes": 1976
+    },
+    {
+      "path": "packages/contracts/src/desktopBootstrap.ts",
+      "blob_sha": "5148aa2c1c82e4547de6ceac1d0b5efecf34b119",
+      "bytes": 2136
+    },
+    {
+      "path": "packages/contracts/src/desktopBrowser.ts",
+      "blob_sha": "1fa572ca662ae49c01c52004fc9a8966d5fa52be",
+      "bytes": 1786
+    },
+    {
+      "path": "packages/contracts/src/device.ts",
+      "blob_sha": "ab77114980b9a7b6ae8da3b40cf101c05b26bfcb",
+      "bytes": 26080
+    },
+    {
+      "path": "packages/contracts/src/editor.ts",
+      "blob_sha": "98a9c852b255451e60e027b36c5b6b74360f989e",
+      "bytes": 11500
+    },
+    {
+      "path": "packages/contracts/src/environment.ts",
+      "blob_sha": "34c8688316ae21c24d134ecc69ade7243ff948f8",
+      "bytes": 14925
+    },
+    {
+      "path": "packages/contracts/src/environmentHttp.ts",
+      "blob_sha": "2a6c0dc43d50c83126e71d74f489a833538615cc",
+      "bytes": 40485
+    },
+    {
+      "path": "packages/contracts/src/filesystem.ts",
+      "blob_sha": "a1f6c293e90b5c24ffb44d2467870a5c6b9bee2f",
+      "bytes": 3589
+    },
+    {
+      "path": "packages/contracts/src/git.ts",
+      "blob_sha": "751f240f0709e9ca9a3ac43f74fac036fbe11288",
+      "bytes": 18037
+    },
+    {
+      "path": "packages/contracts/src/guestShare.ts",
+      "blob_sha": "715a837daeae3163c2abb5a6d28ba6a29d07afae",
+      "bytes": 6182
+    },
+    {
+      "path": "packages/contracts/src/guestStream.ts",
+      "blob_sha": "575cac74dd03992a008270416c173deb866b3551",
+      "bytes": 1749
+    },
+    {
+      "path": "packages/contracts/src/index.ts",
+      "blob_sha": "d7af43291a061899d49dfbd1a43a53538b5477c2",
+      "bytes": 2704
+    },
+    {
+      "path": "packages/contracts/src/ipc.ts",
+      "blob_sha": "962cfd089dd2b6fb6ea65001603907baddef50e7",
+      "bytes": 52435
+    },
+    {
+      "path": "packages/contracts/src/issue.ts",
+      "blob_sha": "93ed9daf6fba8dd43d0dec1d004701240a3a4010",
+      "bytes": 26729
+    },
+    {
+      "path": "packages/contracts/src/keybindings.ts",
+      "blob_sha": "eda5138b760b9b3d028d89d9b4b7a0c0b7c8075b",
+      "bytes": 6562
+    },
+    {
+      "path": "packages/contracts/src/managedPolicy.ts",
+      "blob_sha": "e35f9f6e5c173d3938873c615ce5873a2c42da7e",
+      "bytes": 11610
+    },
+    {
+      "path": "packages/contracts/src/mcpApps.ts",
+      "blob_sha": "43f701b531715fbc427ed3a3185715597acdb512",
+      "bytes": 3149
+    },
+    {
+      "path": "packages/contracts/src/model.ts",
+      "blob_sha": "1a2a519e1abc714aed1498e7e1e3f7492f964371",
+      "bytes": 8163
+    },
+    {
+      "path": "packages/contracts/src/modelSelection.ts",
+      "blob_sha": "0b4f7bc4833ccbb11e29d32ad487ff70964dd5ad",
+      "bytes": 1766
+    },
+    {
+      "path": "packages/contracts/src/orchestrationDispatch.ts",
+      "blob_sha": "696e4acd3017e3f4bd80c4cff8815c7518531e63",
+      "bytes": 441
+    },
+    {
+      "path": "packages/contracts/src/orchestrationProject.ts",
+      "blob_sha": "e060c7da8059e05df33e7a0e82adb72dabf94aba",
+      "bytes": 1683
+    },
+    {
+      "path": "packages/contracts/src/orchestrationV2.ts",
+      "blob_sha": "8b05c12e17871ae9b75442b8438e2bbab60de915",
+      "bytes": 185453
+    },
+    {
+      "path": "packages/contracts/src/orchestrationV2IdTable.ts",
+      "blob_sha": "3d4205be76ac596b71fc4d8ed33bdee18ea928c2",
+      "bytes": 4823
+    },
+    {
+      "path": "packages/contracts/src/orchestratorMcp.ts",
+      "blob_sha": "49595364ad78677fe9d15f26e2314c692ec4a2cd",
+      "bytes": 41073
+    },
+    {
+      "path": "packages/contracts/src/peerLink.ts",
+      "blob_sha": "3ff0fe93228d8dc6e06edf7d535541567c878b3c",
+      "bytes": 11750
+    },
+    {
+      "path": "packages/contracts/src/preview.ts",
+      "blob_sha": "9216899834b33779b0a4cca6e941941d5768f4d5",
+      "bytes": 14166
+    },
+    {
+      "path": "packages/contracts/src/previewAutomation.ts",
+      "blob_sha": "d708328c6c9b0c1fd45476587e38829d73038c7f",
+      "bytes": 39244
+    },
+    {
+      "path": "packages/contracts/src/previewCapture.ts",
+      "blob_sha": "9960e5b0b3f099ff8cc5c976060d7007360d59a2",
+      "bytes": 1544
+    },
+    {
+      "path": "packages/contracts/src/project.ts",
+      "blob_sha": "0077ef78020d84b9be700761ecc6e3649b9e63b5",
+      "bytes": 21213
+    },
+    {
+      "path": "packages/contracts/src/projectClone.ts",
+      "blob_sha": "d0e2eee82de50a5bd5e310182b1e7b78b1200feb",
+      "bytes": 4179
+    },
+    {
+      "path": "packages/contracts/src/provider.ts",
+      "blob_sha": "accd66de064c8e217546122973f482c53080ed60",
+      "bytes": 3667
+    },
+    {
+      "path": "packages/contracts/src/providerInstance.ts",
+      "blob_sha": "1a93350bbdf5341bde3795b7e1b4e5885c3d582c",
+      "bytes": 4645
+    },
+    {
+      "path": "packages/contracts/src/providerPolicy.ts",
+      "blob_sha": "1b94f43aabd5c621fa584f6ab76e13e65e3c4d29",
+      "bytes": 3353
+    },
+    {
+      "path": "packages/contracts/src/providerRuntime.ts",
+      "blob_sha": "4769bfd7955c7e6fad74f9927916a48347ce97bc",
+      "bytes": 5920
+    },
+    {
+      "path": "packages/contracts/src/providerSetup.ts",
+      "blob_sha": "45ce539afde025ce960f419ead2aa6e7db20f980",
+      "bytes": 8820
+    },
+    {
+      "path": "packages/contracts/src/providerUsageLimits.ts",
+      "blob_sha": "4b10f3745d39275e924b6ce60019f8657f82d305",
+      "bytes": 6572
+    },
+    {
+      "path": "packages/contracts/src/pullRequest.ts",
+      "blob_sha": "0bb2858c107cf40b1a7183a746454921504e3048",
+      "bytes": 43160
+    },
+    {
+      "path": "packages/contracts/src/pullRequestReviewGuide.ts",
+      "blob_sha": "126bf60aa320a0a5920a9e271bce56ead53d19d7",
+      "bytes": 2525
+    },
+    {
+      "path": "packages/contracts/src/relay.ts",
+      "blob_sha": "c32475de4be3eba9eebc0ef9f5ae2c488bf8a0ff",
+      "bytes": 50876
+    },
+    {
+      "path": "packages/contracts/src/relayClient.ts",
+      "blob_sha": "c28f56ce80d6aeb759d60dbb2028804ec063c601",
+      "bytes": 1850
+    },
+    {
+      "path": "packages/contracts/src/remoteAccess.ts",
+      "blob_sha": "e3de3c29e122fea00f09354d5e3a267817271632",
+      "bytes": 2299
+    },
+    {
+      "path": "packages/contracts/src/resourceTelemetry.ts",
+      "blob_sha": "24ac9d1bf3874a4dd4537ecea0380994b61b87b3",
+      "bytes": 21813
+    },
+    {
+      "path": "packages/contracts/src/review.ts",
+      "blob_sha": "d43946e217219027749a0cb8433dfbb7c7556105",
+      "bytes": 4667
+    },
+    {
+      "path": "packages/contracts/src/rpc.ts",
+      "blob_sha": "e30bf9af2937cf1846a19a7814031e174d158ebb",
+      "bytes": 93435
+    },
+    {
+      "path": "packages/contracts/src/scheduledTask.ts",
+      "blob_sha": "33b24ed6dfa08f8588df63c15f4b84324aaf05a8",
+      "bytes": 16328
+    },
+    {
+      "path": "packages/contracts/src/secretReference.ts",
+      "blob_sha": "4e03f8a6756881fe235fdfdeaaba728b4477d1e4",
+      "bytes": 1159
+    },
+    {
+      "path": "packages/contracts/src/secretRequest.ts",
+      "blob_sha": "699f85992d8ab9a0f586b6d05aeb8869c3b5de5e",
+      "bytes": 3856
+    },
+    {
+      "path": "packages/contracts/src/server.ts",
+      "blob_sha": "1e7042600149522b1591eb9a733be473e22668c5",
+      "bytes": 44905
+    },
+    {
+      "path": "packages/contracts/src/settings.ts",
+      "blob_sha": "b0726b07174c9b7bd74d13711ea5a08c0ee412ff",
+      "bytes": 95725
+    },
+    {
+      "path": "packages/contracts/src/settingsSecretValue.ts",
+      "blob_sha": "f644c9b2d298a1e12a99fd93f618f58639fba2e4",
+      "bytes": 5581
+    },
+    {
+      "path": "packages/contracts/src/sourceControl.ts",
+      "blob_sha": "3138c3985a4aa56fa1cf134ce32175c58f24af85",
+      "bytes": 10162
+    },
+    {
+      "path": "packages/contracts/src/speech.ts",
+      "blob_sha": "0784c92be4ab64fbd497e34528adc02ebbd1183e",
+      "bytes": 15162
+    },
+    {
+      "path": "packages/contracts/src/t3ProjectFile.ts",
+      "blob_sha": "543a3603d5a70084fa782c63ddb0a1564cb4bf1f",
+      "bytes": 8145
+    },
+    {
+      "path": "packages/contracts/src/terminal.ts",
+      "blob_sha": "09678600764b2efe7494d459518b94316fdd1cf5",
+      "bytes": 18528
+    },
+    {
+      "path": "packages/contracts/src/threadMetadataMcp.ts",
+      "blob_sha": "e5332ac56ab47f5499f15f9b68db5e1f2a7c1d7d",
+      "bytes": 2485
+    },
+    {
+      "path": "packages/contracts/src/threadPullRequest.ts",
+      "blob_sha": "67ffe72a41de8c9bc5e81852ff0008034fc57725",
+      "bytes": 6010
+    },
+    {
+      "path": "packages/contracts/src/threadSearch.ts",
+      "blob_sha": "42c87ebb610cd33e73cd6abac041bba8c4e26622",
+      "bytes": 2345
+    },
+    {
+      "path": "packages/contracts/src/threadTags.ts",
+      "blob_sha": "ec6d8285c1aed8ff7e741e59d982765f1a6bcce8",
+      "bytes": 679
+    },
+    {
+      "path": "packages/contracts/src/threadTitle.ts",
+      "blob_sha": "08f66bfb663ed61022dcdd6a99251c66fa78243c",
+      "bytes": 955
+    },
+    {
+      "path": "packages/contracts/src/usage.ts",
+      "blob_sha": "427d6c93af5c2e86f7c0b55ac33b1eb5b6e69346",
+      "bytes": 6684
+    },
+    {
+      "path": "packages/contracts/src/usageLimitSourceId.ts",
+      "blob_sha": "88598682a8995724991040cd37b9fcf2f983a0c0",
+      "bytes": 283
+    },
+    {
+      "path": "packages/contracts/src/vcs.ts",
+      "blob_sha": "4d388ad8befa6295157fdf5bab01517dae52ee1f",
+      "bytes": 8840
+    },
+    {
+      "path": "packages/contracts/src/workspaceFolders.ts",
+      "blob_sha": "d45c0d73606172fd23733ad774fdbfc605614041",
+      "bytes": 4987
+    },
+    {
+      "path": "packages/contracts/src/worktreeMcp.ts",
+      "blob_sha": "87f45dea275983b1345c8dfc3e081f468ef507e4",
+      "bytes": 3244
+    },
+    {
+      "path": "packages/contracts/src/worktreeSetup.ts",
+      "blob_sha": "e9b64e4c909e43352666b93b8f2ca5f56641d60c",
+      "bytes": 3432
+    },
+    {
+      "path": "packages/effect-acp/package.json",
+      "blob_sha": "08a2eea4776c89fbd1d577633ba551eece1e0545",
+      "bytes": 1293
+    },
+    {
+      "path": "packages/effect-acp/scripts/generate.ts",
+      "blob_sha": "8617d16dd4b15e06d2719adade313014ed6565ef",
+      "bytes": 19894
+    },
+    {
+      "path": "packages/effect-acp/src/_generated/meta.gen.ts",
+      "blob_sha": "2641ff307a38e6dc8782578932c6c7d826c40cb4",
+      "bytes": 1326
+    },
+    {
+      "path": "packages/effect-acp/src/_generated/schema-v1.gen.ts",
+      "blob_sha": "20a7c26d61c78efd4c6603ecb73a231c826523ba",
+      "bytes": 437258
+    },
+    {
+      "path": "packages/effect-acp/src/_generated/schema.gen.ts",
+      "blob_sha": "eb489ddf45f363beacac2427c5d06c4ddb1f23bc",
+      "bytes": 481811
+    },
+    {
+      "path": "packages/effect-acp/src/_internal/shared.ts",
+      "blob_sha": "0a7c638b5bf27af852abb5160ec0b63eb215070a",
+      "bytes": 4159
+    },
+    {
+      "path": "packages/effect-acp/src/_internal/stdio.ts",
+      "blob_sha": "ca4455179235496e682ed6b377d9724c6936d1f6",
+      "bytes": 2452
+    },
+    {
+      "path": "packages/effect-acp/src/agent.ts",
+      "blob_sha": "ec6e2379342e64f9aec893f632a2bbe1f6951bf6",
+      "bytes": 22073
+    },
+    {
+      "path": "packages/effect-acp/src/client.ts",
+      "blob_sha": "b1dcf700e62e1d32a38538db2f9d96f384139486",
+      "bytes": 56774
+    },
+    {
+      "path": "packages/effect-acp/src/compat.ts",
+      "blob_sha": "b73884d39dd9b1e0dda723f9b936e8f9aabbbb14",
+      "bytes": 15468
+    },
+    {
+      "path": "packages/effect-acp/src/errors.ts",
+      "blob_sha": "d0fa81ccdd8a7e128a8fa868dd28589072597417",
+      "bytes": 13346
+    },
+    {
+      "path": "packages/effect-acp/src/protocol.ts",
+      "blob_sha": "e61ba8ab638a014835ea27ea7b05aceaf231f1bf",
+      "bytes": 41850
+    },
+    {
+      "path": "packages/effect-acp/src/rpc.ts",
+      "blob_sha": "5154b948b0ad40e937f8d861bd05c9bb6b0b4058",
+      "bytes": 13233
+    },
+    {
+      "path": "packages/effect-acp/src/schema.ts",
+      "blob_sha": "e10872b290835ae36fde77d4b98c42b29a3abed0",
+      "bytes": 496
+    },
+    {
+      "path": "packages/effect-acp/tsconfig.json",
+      "blob_sha": "8891950e04e40f52c823be3d4d6832aa107925f9",
+      "bytes": 135
+    },
+    {
+      "path": "packages/effect-codex-app-server/package.json",
+      "blob_sha": "0cb053aff07ae22d8eb58b910a965afa18d59196",
+      "bytes": 1145
+    },
+    {
+      "path": "packages/effect-codex-app-server/scripts/generate.ts",
+      "blob_sha": "9945a300b90e4b41649fc8faa9c1edfb64083179",
+      "bytes": 31906
+    },
+    {
+      "path": "packages/effect-codex-app-server/src/_generated/meta.gen.ts",
+      "blob_sha": "f5d25eec9979740ce402eed97f8193ff76e0d6fd",
+      "bytes": 57325
+    },
+    {
+      "path": "packages/effect-codex-app-server/src/_generated/namespaces.gen.ts",
+      "blob_sha": "c707e6aac0faab069df942e1af415644b2812825",
+      "bytes": 19894
+    },
+    {
+      "path": "packages/effect-codex-app-server/src/_generated/schema.gen.ts",
+      "blob_sha": "d3fa560b64ccff2a48fc0e11ef08baac982c6f51",
+      "bytes": 2338467
+    },
+    {
+      "path": "packages/effect-codex-app-server/src/_internal/shared.ts",
+      "blob_sha": "334dc4a43bd347e0c012a61eebce6a4770f70a75",
+      "bytes": 2602
+    },
+    {
+      "path": "packages/effect-codex-app-server/src/_internal/stdio.ts",
+      "blob_sha": "a047d1aa804d418aafe2763854c54999045d45a1",
+      "bytes": 4646
+    },
+    {
+      "path": "packages/effect-codex-app-server/src/client.ts",
+      "blob_sha": "4bc5873688d2d10b4f4d20399eb456be2f6f46d0",
+      "bytes": 13059
+    },
+    {
+      "path": "packages/effect-codex-app-server/src/errors.ts",
+      "blob_sha": "9f16adcd66c875a1ab2a92fdb75b0bc5d282dee5",
+      "bytes": 11429
+    },
+    {
+      "path": "packages/effect-codex-app-server/src/protocol.ts",
+      "blob_sha": "0faf9e44e4b4437454500ce49c972f37fe932a89",
+      "bytes": 22131
+    },
+    {
+      "path": "packages/effect-codex-app-server/src/replay.ts",
+      "blob_sha": "384e11c8b4a3e3548de56e8a04c6d03e02bc5947",
+      "bytes": 19360
+    },
+    {
+      "path": "packages/effect-codex-app-server/src/rpc.ts",
+      "blob_sha": "21dca8a7ead45a6227b95011b3859f2aa10f04a8",
+      "bytes": 42
+    },
+    {
+      "path": "packages/effect-codex-app-server/src/schema.ts",
+      "blob_sha": "e9acee3bb9e91e10b260e0b8ad4daa3dd118f11f",
+      "bytes": 384
+    },
+    {
+      "path": "packages/effect-codex-app-server/test/examples/codex-app-server-probe.ts",
+      "blob_sha": "898c8cc094598a379c9f4b2b4103272f5b53444c",
+      "bytes": 2122
+    },
+    {
+      "path": "packages/effect-codex-app-server/tsconfig.json",
+      "blob_sha": "8891950e04e40f52c823be3d4d6832aa107925f9",
+      "bytes": 135
+    },
+    {
+      "path": "packages/provider-acp-registry/package.json",
+      "blob_sha": "84db307a4bf6eb9e445b2abcc947df7810a588c7",
+      "bytes": 1443
+    },
+    {
+      "path": "packages/provider-acp-registry/src/client.ts",
+      "blob_sha": "10f8c6e61cbe2c0d6c01e05a229eda2f1bb7f231",
+      "bytes": 2762
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server.ts",
+      "blob_sha": "636fe07230ada0d4eef87258b608112b4031b276",
+      "bytes": 276
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server/AcpRegistryRuntimeCoordinator.ts",
+      "blob_sha": "bec80c06ddd3997a6ac45c77122855a494e0774d",
+      "bytes": 14133
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server/AcpRegistrySupport.ts",
+      "blob_sha": "26d58fb4ea9ad8f671901a372759b2fef7e1c1ef",
+      "bytes": 84522
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server/adapter.ts",
+      "blob_sha": "8eb5dbb30b8cc48e6c6f57b82093c6f1794ed450",
+      "bytes": 19682
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server/auth.ts",
+      "blob_sha": "f77d11178cebaf9f96ac3491e05f0cc64a00cbaf",
+      "bytes": 15861
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server/authenticationState.ts",
+      "blob_sha": "44502ceae467054ea860e7334af2e42e1d7491e1",
+      "bytes": 3393
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server/claudeAcp.ts",
+      "blob_sha": "7804a323acccaf629003269d270e6f8a855d14fd",
+      "bytes": 4206
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server/copilotAcp.ts",
+      "blob_sha": "6594e5036cb026ebd90d394b7280fa72b0b0301b",
+      "bytes": 10286
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server/devinAcp.ts",
+      "blob_sha": "bc148eaa3969b1364924415f1e1c57068b0b1d5a",
+      "bytes": 2692
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server/driver.ts",
+      "blob_sha": "46d8ed3219aa48ad9ccb4495e90f8297a91e2afb",
+      "bytes": 41614
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server/droidAcp.ts",
+      "blob_sha": "d5ad446a8c740e1c7a0e20fc615bfc5d21e7eda0",
+      "bytes": 3574
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server/kimiAcp.ts",
+      "blob_sha": "70b59082feab680d38c4630d130e422a54e99751",
+      "bytes": 5339
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server/mcpTransport.ts",
+      "blob_sha": "49881663a911115b9df5e99898e1bf7d1b9566a1",
+      "bytes": 1051
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server/ompAcp.ts",
+      "blob_sha": "851988337027c46b3c6c19b51cbb34519c93afc5",
+      "bytes": 2563
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server/opencodeAcp.ts",
+      "blob_sha": "3932a2224e6b0c22c6e7ec4926cf4e84633fba72",
+      "bytes": 5274
+    },
+    {
+      "path": "packages/provider-acp-registry/src/server/probe.ts",
+      "blob_sha": "03002f914adf55f6b214cf73fe0bfb4b4760a403",
+      "bytes": 37519
+    },
+    {
+      "path": "packages/provider-acp-registry/src/settings.ts",
+      "blob_sha": "aba9f5f9db5acbcb20c391e636d9591ad799be1b",
+      "bytes": 2904
+    },
+    {
+      "path": "packages/provider-acp-registry/src/testing.ts",
+      "blob_sha": "4cc790443e5cc3b304606972781f56cd1b0758b5",
+      "bytes": 730
+    },
+    {
+      "path": "packages/provider-acp-registry/tsconfig.json",
+      "blob_sha": "024a9dc2d66f35cc921b4124147d194860b487e6",
+      "bytes": 160
+    },
+    {
+      "path": "packages/provider-acp/package.json",
+      "blob_sha": "83f556e4c44e7ab2f70354c142c91ff261ee53f4",
+      "bytes": 1813
+    },
+    {
+      "path": "packages/provider-acp/src/server/AcpSessionRuntime.ts",
+      "blob_sha": "b08eef243fc3e351243cebfb67d5e0923ad99c73",
+      "bytes": 127841
+    },
+    {
+      "path": "packages/provider-acp/src/server/adapter.ts",
+      "blob_sha": "908c99e4eaeb3ac704554933fbe3a046e4f73d0e",
+      "bytes": 480748
+    },
+    {
+      "path": "packages/provider-acp/src/server/clientPolicy.ts",
+      "blob_sha": "022d96dd956f618e19c37dff037d388316ee9abc",
+      "bytes": 8490
+    },
+    {
+      "path": "packages/provider-acp/src/server/clientTerminals.ts",
+      "blob_sha": "592bf4755349499bd26c1915b7e877fec2263216",
+      "bytes": 19009
+    },
+    {
+      "path": "packages/provider-acp/src/server/elicitationForm.ts",
+      "blob_sha": "948306c13772291db4c7ad491cadbac5e09cc1ba",
+      "bytes": 10383
+    },
+    {
+      "path": "packages/provider-acp/src/server/mcpOverAcpBridge.ts",
+      "blob_sha": "779076a622b5bd542c513856aa13e9289bfaa6ff",
+      "bytes": 10956
+    },
+    {
+      "path": "packages/provider-acp/src/server/nativeLogging.ts",
+      "blob_sha": "63b5936e5b071e86ea5ae6ac124cdc69cf901191",
+      "bytes": 2848
+    },
+    {
+      "path": "packages/provider-acp/src/server/runtimeModel.ts",
+      "blob_sha": "e01ca47772f9e3bd391f44f23b85cd3180585d6b",
+      "bytes": 57747
+    },
+    {
+      "path": "packages/provider-acp/src/server/sessionConfig.ts",
+      "blob_sha": "af8ee0eec0f33e41fd567996d2a6e08b10ffa936",
+      "bytes": 5666
+    },
+    {
+      "path": "packages/provider-acp/src/server/stderr.ts",
+      "blob_sha": "92ae01a4c27ef42c3c53160cd00ad700bf106f53",
+      "bytes": 1517
+    },
+    {
+      "path": "packages/provider-acp/tsconfig.json",
+      "blob_sha": "374bac55202ddcad695ede1c567ec219a61e9c48",
+      "bytes": 116
+    },
+    {
+      "path": "packages/provider-core/package.json",
+      "blob_sha": "66942a0c95824d6fe48d6c1650d4b60e8374966c",
+      "bytes": 7079
+    },
+    {
+      "path": "packages/provider-core/src/client.ts",
+      "blob_sha": "646c5e1871ef17d3454a42da6ac3f127b3c31fa1",
+      "bytes": 2724
+    },
+    {
+      "path": "packages/provider-core/src/modelShortName.ts",
+      "blob_sha": "1be593e6eb858e3a1b914cdadd57c130d212e55d",
+      "bytes": 1843
+    },
+    {
+      "path": "packages/provider-core/src/server/IdAllocator.ts",
+      "blob_sha": "b03a98cc4e86c5effe4c50f0846a30ba1e50c8fa",
+      "bytes": 16830
+    },
+    {
+      "path": "packages/provider-core/src/server/McpProviderSessions.ts",
+      "blob_sha": "a58498a0c2e7b36a3bf92b6b0829798c7749f613",
+      "bytes": 7039
+    },
+    {
+      "path": "packages/provider-core/src/server/ModelCatalog.ts",
+      "blob_sha": "a70a381bbdb5f6037b712a993a82369e3150a539",
+      "bytes": 4220
+    },
+    {
+      "path": "packages/provider-core/src/server/ProviderAdapter.ts",
+      "blob_sha": "796ec9541d29513086f77b2efd3e3a6d231f7203",
+      "bytes": 34308
+    },
+    {
+      "path": "packages/provider-core/src/server/ProviderContinuationRequests.ts",
+      "blob_sha": "576edcc221a11b65379e3e2747a8ebfaef1304d6",
+      "bytes": 2185
+    },
+    {
+      "path": "packages/provider-core/src/server/ProviderEventLoggers.ts",
+      "blob_sha": "d79a6804d0e978d7089f963e39f676bedcc8d12a",
+      "bytes": 725
+    },
+    {
+      "path": "packages/provider-core/src/server/ProviderHost.ts",
+      "blob_sha": "05917d70841531099eca9a5ed242864a0913809b",
+      "bytes": 2966
+    },
+    {
+      "path": "packages/provider-core/src/server/ProviderLatestVersions.ts",
+      "blob_sha": "92239311e4c4ee9fe19bc4920939512f6f2149e8",
+      "bytes": 3654
+    },
+    {
+      "path": "packages/provider-core/src/server/adapterDriver.ts",
+      "blob_sha": "146c178ac674342a519a6f5b71070df73156ff45",
+      "bytes": 1402
+    },
+    {
+      "path": "packages/provider-core/src/server/attachmentPrompt.ts",
+      "blob_sha": "862e36cb0b78f4b48968d079227f80d33436fc44",
+      "bytes": 8144
+    },
+    {
+      "path": "packages/provider-core/src/server/auth.ts",
+      "blob_sha": "314795b0b496f77a61d05012165071eed7685522",
+      "bytes": 2386
+    },
+    {
+      "path": "packages/provider-core/src/server/collectStreamText.ts",
+      "blob_sha": "37fa810604612032bf417d5e77111796a32b0294",
+      "bytes": 2388
+    },
+    {
+      "path": "packages/provider-core/src/server/compatibility.ts",
+      "blob_sha": "cb2eeea63219f0acc06f1cce74098f19bd48c29e",
+      "bytes": 1123
+    },
+    {
+      "path": "packages/provider-core/src/server/driver.ts",
+      "blob_sha": "c0474da3b55d96d66956ea574d71a231b8f346fd",
+      "bytes": 5567
+    },
+    {
+      "path": "packages/provider-core/src/server/errors.ts",
+      "blob_sha": "0e3e231ad7a8e2b3d296a886874cc738fb4f66d7",
+      "bytes": 865
+    },
+    {
+      "path": "packages/provider-core/src/server/failure.ts",
+      "blob_sha": "e7d47cdb2175e14573b0a557cb61b2c83c69cc0c",
+      "bytes": 17110
+    },
+    {
+      "path": "packages/provider-core/src/server/handoffBudget.ts",
+      "blob_sha": "ddf9b692c337c5fed44dafb796b21c70cbd46606",
+      "bytes": 11497
+    },
+    {
+      "path": "packages/provider-core/src/server/instanceEnvironment.ts",
+      "blob_sha": "0ade572984275052b7d76379e8e96b0b52d99a0d",
+      "bytes": 1374
+    },
+    {
+      "path": "packages/provider-core/src/server/instanceIdentity.ts",
+      "blob_sha": "5c54617f9c5167d5331de3164bcbfdd4f7719609",
+      "bytes": 882
+    },
+    {
+      "path": "packages/provider-core/src/server/maintenance.ts",
+      "blob_sha": "9d2a63c5bfbe3aae22259cd41d23bd4ca46883c9",
+      "bytes": 1319
+    },
+    {
+      "path": "packages/provider-core/src/server/maintenanceResolver.ts",
+      "blob_sha": "0db49cd3abaeedbbbc692813a128f716ae574f65",
+      "bytes": 61998
+    },
+    {
+      "path": "packages/provider-core/src/server/managedProvider.ts",
+      "blob_sha": "2762930b5e1e9f8ae6311bd3c7ef61173b39dba8",
+      "bytes": 19312
+    },
+    {
+      "path": "packages/provider-core/src/server/mcpSession.ts",
+      "blob_sha": "20d17df610fd7886c858be775e9e80baf1278f21",
+      "bytes": 1570
+    },
+    {
+      "path": "packages/provider-core/src/server/mcpToolPresentation.ts",
+      "blob_sha": "c8f4dbc0eb11f069431b4f479e54581126c8976a",
+      "bytes": 2652
+    },
+    {
+      "path": "packages/provider-core/src/server/nativeProtocolLogging.ts",
+      "blob_sha": "1413a8097824946b88b9d2d9407b0ce1b344766b",
+      "bytes": 1293
+    },
+    {
+      "path": "packages/provider-core/src/server/notification.ts",
+      "blob_sha": "9ccb425faf2d150a1911407a32e8efecdad39b68",
+      "bytes": 9066
+    },
+    {
+      "path": "packages/provider-core/src/server/orchestrationInstructions.ts",
+      "blob_sha": "3f97035bdacbdadc71e9d90aa25efad16530bdfe",
+      "bytes": 12016
+    },
+    {
+      "path": "packages/provider-core/src/server/pathExpansion.ts",
+      "blob_sha": "6c5eab795000edc4a731a7582ff3d86bc18a6226",
+      "bytes": 691
+    },
+    {
+      "path": "packages/provider-core/src/server/processGroup.ts",
+      "blob_sha": "28178ca8e03f6a28087223000e7f55c077b93fec",
+      "bytes": 380
+    },
+    {
+      "path": "packages/provider-core/src/server/providerAuthFlow.ts",
+      "blob_sha": "cc135de2c2af598d9c74eeb0f4903d05ff69f67d",
+      "bytes": 20581
+    },
+    {
+      "path": "packages/provider-core/src/server/randomUuid.ts",
+      "blob_sha": "2f29fc5e399d44b08dd2190cb0a88581378e5c75",
+      "bytes": 531
+    },
+    {
+      "path": "packages/provider-core/src/server/runtimeInstructions.ts",
+      "blob_sha": "463148500ebb4846b15f1253345a9c99346800d2",
+      "bytes": 5831
+    },
+    {
+      "path": "packages/provider-core/src/server/selectionTransition.ts",
+      "blob_sha": "0f07fc985a2debb24bae3eea67e326606788dd2e",
+      "bytes": 1077
+    },
+    {
+      "path": "packages/provider-core/src/server/snapshot.ts",
+      "blob_sha": "2af61f3adcd072bb00002c90d701b438f992c2dc",
+      "bytes": 1430
+    },
+    {
+      "path": "packages/provider-core/src/server/snapshotProbe.ts",
+      "blob_sha": "c55e98a8b735b01f973f27ad4ff3c70034be5991",
+      "bytes": 12881
+    },
+    {
+      "path": "packages/provider-core/src/server/snapshotSettings.ts",
+      "blob_sha": "299911fcab90f9dd90db1bd05edc9e5edef693a6",
+      "bytes": 1555
+    },
+    {
+      "path": "packages/provider-core/src/server/subagentProjection.ts",
+      "blob_sha": "d1638b8022029d8860490c31a547b7548682dbcf",
+      "bytes": 20837
+    },
+    {
+      "path": "packages/provider-core/src/server/textGeneration.ts",
+      "blob_sha": "f35081c6493e6e66ce477243e8961d97a5590620",
+      "bytes": 3909
+    },
+    {
+      "path": "packages/provider-core/src/server/textGenerationOperations.ts",
+      "blob_sha": "60204a2d82c18f6e495443a3c0d9db4a1b3c2d8e",
+      "bytes": 7041
+    },
+    {
+      "path": "packages/provider-core/src/server/textGenerationPolicy.ts",
+      "blob_sha": "1d244a635a72b1fc84637e7d608e0cdc1b9c8f0d",
+      "bytes": 629
+    },
+    {
+      "path": "packages/provider-core/src/server/textGenerationPrompts.ts",
+      "blob_sha": "7726ab9c0bb5ad8b5605c65ad82ca9c01f080299",
+      "bytes": 26803
+    },
+    {
+      "path": "packages/provider-core/src/server/textGenerationUtils.ts",
+      "blob_sha": "9d08dd963317c4b1addb50bdda56679889d9cada",
+      "bytes": 3879
+    },
+    {
+      "path": "packages/provider-core/src/server/threadTitleContext.ts",
+      "blob_sha": "1bff106003958b446d3178d8b22dcd45ef9e9a69",
+      "bytes": 4657
+    },
+    {
+      "path": "packages/provider-core/src/server/usage.ts",
+      "blob_sha": "ff4c14dfefe00f36711a31fb2fcc56f60abfa8bf",
+      "bytes": 5046
+    },
+    {
+      "path": "packages/provider-core/src/server/usageLimits.ts",
+      "blob_sha": "7d1f6e6a910e9afa15e52ecdf5c3de9f861cc678",
+      "bytes": 4479
+    },
+    {
+      "path": "packages/provider-core/tsconfig.json",
+      "blob_sha": "374bac55202ddcad695ede1c567ec219a61e9c48",
+      "bytes": 116
+    },
+    {
+      "path": "packages/provider-cursor/package.json",
+      "blob_sha": "dcd6bd09043778a38e346622d96b8b9b3c5652e6",
+      "bytes": 2093
+    },
+    {
+      "path": "packages/provider-cursor/src/client.ts",
+      "blob_sha": "720b19de95421185fa64dad14c884c0823516254",
+      "bytes": 1224
+    },
+    {
+      "path": "packages/provider-cursor/src/server.ts",
+      "blob_sha": "76699990bd83424eb2ba47e2f4aee6f654596c70",
+      "bytes": 142
+    },
+    {
+      "path": "packages/provider-cursor/src/server/CursorAccountReader.ts",
+      "blob_sha": "8db2fc42d2d6617a169e9fd7f5c7b3c497486676",
+      "bytes": 1193
+    },
+    {
+      "path": "packages/provider-cursor/src/server/CursorAgentSdk.ts",
+      "blob_sha": "81b8208a5dda857238c42f37ce6824b2efb1d20a",
+      "bytes": 43561
+    },
+    {
+      "path": "packages/provider-cursor/src/server/CursorAgentSdkProcessRunner.ts",
+      "blob_sha": "ed97c62288829221213cf053432995b9e0087bc3",
+      "bytes": 45544
+    },
+    {
+      "path": "packages/provider-cursor/src/server/CursorAgentSdkWorker.ts",
+      "blob_sha": "1481795f4ad6ae5b8723e3f2cb0d029f4ad41b77",
+      "bytes": 21754
+    },
+    {
+      "path": "packages/provider-cursor/src/server/CursorAgentSdkWorkerProtocol.ts",
+      "blob_sha": "e39323ef67925382057bb8325f8b034881037c95",
+      "bytes": 8386
+    },
+    {
+      "path": "packages/provider-cursor/src/server/CursorSdk.ts",
+      "blob_sha": "71eb9d28ff0761aad396940689566ecd88f66590",
+      "bytes": 5944
+    },
+    {
+      "path": "packages/provider-cursor/src/server/CursorSdkCatalog.ts",
+      "blob_sha": "b6e338fae953dd36241c46e11a6207f564cb11d6",
+      "bytes": 7157
+    },
+    {
+      "path": "packages/provider-cursor/src/server/CursorUsageAccounts.ts",
+      "blob_sha": "7bea5ce83290a7a6696a98d4a064d001654f805a",
+      "bytes": 12201
+    },
+    {
+      "path": "packages/provider-cursor/src/server/accountCache.ts",
+      "blob_sha": "da65677781add3de65f055ea7794da636e5619e4",
+      "bytes": 8675
+    },
+    {
+      "path": "packages/provider-cursor/src/server/accountUsage.ts",
+      "blob_sha": "7ebc87489ccd759a629ad8927ee86644423d04fe",
+      "bytes": 18396
+    },
+    {
+      "path": "packages/provider-cursor/src/server/adapter.ts",
+      "blob_sha": "b4dd1033c2a9faa8d88656f85260850a2d56c539",
+      "bytes": 148867
+    },
+    {
+      "path": "packages/provider-cursor/src/server/apiKey.ts",
+      "blob_sha": "06c93e1f3bc55410406fef87ef918697afd52c05",
+      "bytes": 1103
+    },
+    {
+      "path": "packages/provider-cursor/src/server/auth.ts",
+      "blob_sha": "c04c703dfefa62870f51410d94700d7c3d336073",
+      "bytes": 19371
+    },
+    {
+      "path": "packages/provider-cursor/src/server/credentialStore.ts",
+      "blob_sha": "71b2c7aee762150b62cb4586cbef4b65c9fd4c2e",
+      "bytes": 4091
+    },
+    {
+      "path": "packages/provider-cursor/src/server/driver.ts",
+      "blob_sha": "eca22bb61e607418b27da8afd4d510dc2b8f520c",
+      "bytes": 11537
+    },
+    {
+      "path": "packages/provider-cursor/src/server/sdk.ts",
+      "blob_sha": "4350dd95a357606bf014355f7ca9f2f29b9d6564",
+      "bytes": 2711
+    },
+    {
+      "path": "packages/provider-cursor/src/server/sdkModel.ts",
+      "blob_sha": "eb030a415834448e7253e24e7d031a44f4d3bfcd",
+      "bytes": 3990
+    },
+    {
+      "path": "packages/provider-cursor/src/server/skills.ts",
+      "blob_sha": "e68fe23053eac902d77dc1a8bfa1c97995a105a6",
+      "bytes": 12252
+    },
+    {
+      "path": "packages/provider-cursor/src/server/status.ts",
+      "blob_sha": "df50b2579939301c133fab2d9e15a206e7678298",
+      "bytes": 11804
+    },
+    {
+      "path": "packages/provider-cursor/src/server/textGeneration.ts",
+      "blob_sha": "f0709d884bbd0ec537615e6ed439550f4db34ab6",
+      "bytes": 13142
+    },
+    {
+      "path": "packages/provider-cursor/src/server/transportFailure.ts",
+      "blob_sha": "dad72bd6ac484ef29935d949f7f712a650902bd2",
+      "bytes": 1576
+    },
+    {
+      "path": "packages/provider-cursor/src/server/usageLimits.ts",
+      "blob_sha": "48ab7085542066d1c47650955196bc9ec4afcf9e",
+      "bytes": 4362
+    },
+    {
+      "path": "packages/provider-cursor/src/server/workspaceMcpServers.ts",
+      "blob_sha": "f3e53b508e3b3374ae36bc1d184539e57c05a1b4",
+      "bytes": 6787
+    },
+    {
+      "path": "packages/provider-cursor/src/settings.ts",
+      "blob_sha": "a244c5db49212a37cd7f4f5fb6e76df0f34068c5",
+      "bytes": 1027
+    },
+    {
+      "path": "packages/provider-cursor/src/testing.ts",
+      "blob_sha": "d5d125f6159218540230304557d27351d0e7042b",
+      "bytes": 177
+    },
+    {
+      "path": "packages/provider-cursor/tsconfig.json",
+      "blob_sha": "374bac55202ddcad695ede1c567ec219a61e9c48",
+      "bytes": 116
+    },
+    {
+      "path": "packages/provider-fx/package.json",
+      "blob_sha": "bf0ddced2e77f175bdc560e87a4fb8eda25131a2",
+      "bytes": 1067
+    },
+    {
+      "path": "packages/provider-fx/src/client.ts",
+      "blob_sha": "772dc93250f593306a1cb4f8b4c871f9232f96b4",
+      "bytes": 1558
+    },
+    {
+      "path": "packages/provider-fx/src/server.ts",
+      "blob_sha": "fc05432004562510fe5bd3a4adc689e3dcd94e7c",
+      "bytes": 226
+    },
+    {
+      "path": "packages/provider-fx/src/server/acpSupport.ts",
+      "blob_sha": "569bfe4984f765c1a72772ffc607e921acd371a4",
+      "bytes": 14356
+    },
+    {
+      "path": "packages/provider-fx/src/server/adapter.ts",
+      "blob_sha": "d4a94e1bf16d608a1b2944d457f83784d88b033d",
+      "bytes": 11496
+    },
+    {
+      "path": "packages/provider-fx/src/server/driver.ts",
+      "blob_sha": "b069b12a4de7d249edd9e46b538651df6e8bae1f",
+      "bytes": 8251
+    },
+    {
+      "path": "packages/provider-fx/src/server/maintenance.ts",
+      "blob_sha": "c664fd55eaa0508b41283efd58db521736c7add4",
+      "bytes": 3373
+    },
+    {
+      "path": "packages/provider-fx/src/server/skills.ts",
+      "blob_sha": "96251b14cae2bc49be7d218818a531d4da46b10b",
+      "bytes": 14648
+    },
+    {
+      "path": "packages/provider-fx/src/server/status.ts",
+      "blob_sha": "49b4b172fcc0493a14784091a30d23a1d6fca776",
+      "bytes": 14770
+    },
+    {
+      "path": "packages/provider-fx/src/settings.ts",
+      "blob_sha": "fd94e3e57e60a712308e100bb2fbd7ae072daa9b",
+      "bytes": 1178
+    },
+    {
+      "path": "packages/provider-fx/src/testing.ts",
+      "blob_sha": "6b962a2f5b6bcf8e27c8a1579b64c2afd07f8de0",
+      "bytes": 310
+    },
+    {
+      "path": "packages/provider-fx/tsconfig.json",
+      "blob_sha": "374bac55202ddcad695ede1c567ec219a61e9c48",
+      "bytes": 116
+    },
+    {
+      "path": "packages/provider-grok/package.json",
+      "blob_sha": "bbc20af8a89a7ba8e0f5e8646d90cb75e3189058",
+      "bytes": 1180
+    },
+    {
+      "path": "packages/provider-grok/src/client.ts",
+      "blob_sha": "d9df069b68d8bbc82ed154e0d77e8e8ad2708c95",
+      "bytes": 1372
+    },
+    {
+      "path": "packages/provider-grok/src/server.ts",
+      "blob_sha": "4837089cf86af59250571467b35a76f04b34ac25",
+      "bytes": 247
+    },
+    {
+      "path": "packages/provider-grok/src/server/acpSupport.ts",
+      "blob_sha": "729ce24d71551656f6093417cc791c8eba6176ad",
+      "bytes": 9162
+    },
+    {
+      "path": "packages/provider-grok/src/server/adapter.ts",
+      "blob_sha": "db5a136697c10836d8640d677b3254c3464b5a23",
+      "bytes": 20799
+    },
+    {
+      "path": "packages/provider-grok/src/server/driver.ts",
+      "blob_sha": "660324d4f1d0a1b8031422f8be80bcb8735c5a52",
+      "bytes": 12109
+    },
+    {
+      "path": "packages/provider-grok/src/server/probeEnvironment.ts",
+      "blob_sha": "439d009dd9040cf54ff118c71d30acbb226810c9",
+      "bytes": 371
+    },
+    {
+      "path": "packages/provider-grok/src/server/skills.ts",
+      "blob_sha": "a87545c09b9051bc673ead31d2c4b23e9cdfd685",
+      "bytes": 5043
+    },
+    {
+      "path": "packages/provider-grok/src/server/status.ts",
+      "blob_sha": "5c3d0042ce1760ee59115a1889e7c5ca41f667c3",
+      "bytes": 20815
+    },
+    {
+      "path": "packages/provider-grok/src/server/textGeneration.ts",
+      "blob_sha": "a5307709c3fbf145f14ad5a0a645d492615fcae2",
+      "bytes": 5212
+    },
+    {
+      "path": "packages/provider-grok/src/server/usage.ts",
+      "blob_sha": "1e0b75cc796b14c0819a0f589a254d7e722ff56e",
+      "bytes": 7563
+    },
+    {
+      "path": "packages/provider-grok/src/server/usageLimits.ts",
+      "blob_sha": "d7e97518761fe162dd6af90ecaca079b85db076f",
+      "bytes": 8003
+    },
+    {
+      "path": "packages/provider-grok/src/server/xaiAcpExtension.ts",
+      "blob_sha": "7181d1927923c92bd22280852e1bd5d2cf8230ef",
+      "bytes": 58188
+    },
+    {
+      "path": "packages/provider-grok/src/settings.ts",
+      "blob_sha": "3796a5578ab6d8eb1c9377d8cc4e7aa143d8a784",
+      "bytes": 969
+    },
+    {
+      "path": "packages/provider-grok/src/testing.ts",
+      "blob_sha": "ed5ed410887c2930691268afc9ef05840ba0b903",
+      "bytes": 860
+    },
+    {
+      "path": "packages/provider-grok/tsconfig.json",
+      "blob_sha": "374bac55202ddcad695ede1c567ec219a61e9c48",
+      "bytes": 116
+    },
+    {
+      "path": "packages/provider-kiro/package.json",
+      "blob_sha": "be2781eacfce3da351b7f5ecea7ce6fb52167781",
+      "bytes": 1069
+    },
+    {
+      "path": "packages/provider-kiro/src/client.ts",
+      "blob_sha": "06f551688bce6dc435ecf22e7444e1cc0a91f838",
+      "bytes": 2329
+    },
+    {
+      "path": "packages/provider-kiro/src/server.ts",
+      "blob_sha": "e0dce55de5d68b5af235febff54defa4da7c3c71",
+      "bytes": 136
+    },
+    {
+      "path": "packages/provider-kiro/src/server/acpSupport.ts",
+      "blob_sha": "43d8c06b77a9837831c878f491058bca8013412f",
+      "bytes": 5842
+    },
+    {
+      "path": "packages/provider-kiro/src/server/adapter.ts",
+      "blob_sha": "67e837a35b354c9fb6e118948e560f5938494245",
+      "bytes": 26335
+    },
+    {
+      "path": "packages/provider-kiro/src/server/driver.ts",
+      "blob_sha": "0a4e9b85fa28757e618fd78a731daa1b506fb981",
+      "bytes": 6198
+    },
+    {
+      "path": "packages/provider-kiro/src/server/status.ts",
+      "blob_sha": "46f3361147fe3c1a7bc35e9207f611f7027e45b5",
+      "bytes": 17005
+    },
+    {
+      "path": "packages/provider-kiro/src/settings.ts",
+      "blob_sha": "4ae61a3910907384f93ed4b9237d546a778a123c",
+      "bytes": 1038
+    },
+    {
+      "path": "packages/provider-kiro/src/testing.ts",
+      "blob_sha": "3f18a713ad8c3ca3e901dad0b3aabf6d3b262281",
+      "bytes": 347
+    },
+    {
+      "path": "packages/provider-kiro/tsconfig.json",
+      "blob_sha": "374bac55202ddcad695ede1c567ec219a61e9c48",
+      "bytes": 116
+    },
+    {
+      "path": "packages/provider-muse/package.json",
+      "blob_sha": "59348c26a073d141a686bea0fde2c623d9d27410",
+      "bytes": 1134
+    },
+    {
+      "path": "packages/provider-muse/src/client.ts",
+      "blob_sha": "ff2d1a1ac10012f1cfbe67401881cfcc70257098",
+      "bytes": 2492
+    },
+    {
+      "path": "packages/provider-muse/src/server.ts",
+      "blob_sha": "122028d6599fa1830136859d91410fa3d58ebae7",
+      "bytes": 213
+    },
+    {
+      "path": "packages/provider-muse/src/server/MuseUsageHome.ts",
+      "blob_sha": "329dce90c0e7b2478b0e1e7b2b3933e09f24ae27",
+      "bytes": 3507
+    },
+    {
+      "path": "packages/provider-muse/src/server/adapter.ts",
+      "blob_sha": "0b5835e0bad12956c1bc88db2a1272a29b1f9a5f",
+      "bytes": 103376
+    },
+    {
+      "path": "packages/provider-muse/src/server/driver.ts",
+      "blob_sha": "197a219e54ecbb478851afe2035372400b5634c2",
+      "bytes": 10391
+    },
+    {
+      "path": "packages/provider-muse/src/server/itemPresentation.ts",
+      "blob_sha": "d74bc7143ea76b2d2eb94f5236099a7cf699da46",
+      "bytes": 4814
+    },
+    {
+      "path": "packages/provider-muse/src/server/maintenance.ts",
+      "blob_sha": "342e91638b8305c55dca9b95e3700e1d7553d993",
+      "bytes": 6210
+    },
+    {
+      "path": "packages/provider-muse/src/server/modelCatalog.ts",
+      "blob_sha": "a99deca5354db3ee4c8fdbd330f1fe482d7a6f51",
+      "bytes": 5513
+    },
+    {
+      "path": "packages/provider-muse/src/server/protocol.ts",
+      "blob_sha": "87c9c922ef59248fcf13a47f2ad9ebb5ee40437d",
+      "bytes": 9695
+    },
+    {
+      "path": "packages/provider-muse/src/server/sdk.ts",
+      "blob_sha": "aece589b1e188d7b5ca459c0b73bff5d246e23ec",
+      "bytes": 9699
+    },
+    {
+      "path": "packages/provider-muse/src/server/status.ts",
+      "blob_sha": "344ae1d1a684e0e9129be5cdbe3cd220ab6d5a30",
+      "bytes": 6058
+    },
+    {
+      "path": "packages/provider-muse/src/server/textGeneration.ts",
+      "blob_sha": "dacaeae8bd033605f7bc339f19c473f72aab0965",
+      "bytes": 16001
+    },
+    {
+      "path": "packages/provider-muse/src/server/usage.ts",
+      "blob_sha": "665093f154e34c0cfea70e877ec7ca9cb68bba28",
+      "bytes": 5517
+    },
+    {
+      "path": "packages/provider-muse/src/server/usageLimits.ts",
+      "blob_sha": "be981ebc009adbed67e62b63ecea5c40ed8e4506",
+      "bytes": 2446
+    },
+    {
+      "path": "packages/provider-muse/src/settings.ts",
+      "blob_sha": "b9d32cadfb203de784e9224a55fc350371cb14cc",
+      "bytes": 1103
+    },
+    {
+      "path": "packages/provider-muse/src/testing.ts",
+      "blob_sha": "6c55298b9eff77759ccaae69f2566f4bd9795f67",
+      "bytes": 241
+    },
+    {
+      "path": "packages/provider-muse/tsconfig.json",
+      "blob_sha": "374bac55202ddcad695ede1c567ec219a61e9c48",
+      "bytes": 116
+    },
+    {
+      "path": "packages/provider-opencode/package.json",
+      "blob_sha": "3f569ca2c508becdd7f9855607c5eae8823f796f",
+      "bytes": 2005
+    },
+    {
+      "path": "packages/provider-opencode/src/client.ts",
+      "blob_sha": "8ead1f1bd3da1562051ced151231a97325a65752",
+      "bytes": 636
+    },
+    {
+      "path": "packages/provider-opencode/src/server.ts",
+      "blob_sha": "65c6aeb9b87453390d9df241579ded78ee73a6fc",
+      "bytes": 173
+    },
+    {
+      "path": "packages/provider-opencode/src/server/OpenCodeRuntime.ts",
+      "blob_sha": "d550047fa7ae958b6b5adedf7501ba560010ee74",
+      "bytes": 32448
+    },
+    {
+      "path": "packages/provider-opencode/src/server/OpenCodeServerLedger.ts",
+      "blob_sha": "fb3ea7645e9bff50b618d2fd706a8d513d427a8d",
+      "bytes": 11281
+    },
+    {
+      "path": "packages/provider-opencode/src/server/OpenCodeServerOwner.ts",
+      "blob_sha": "839669a49580d0a1341ab3a0ef1e2534b6a30168",
+      "bytes": 6020
+    },
+    {
+      "path": "packages/provider-opencode/src/server/adapter.ts",
+      "blob_sha": "d0e1d27cc2a7bded68fa90ff78d78a77c0152b5e",
+      "bytes": 188320
+    },
+    {
+      "path": "packages/provider-opencode/src/server/driver.ts",
+      "blob_sha": "37cedde2e9a183592c07b338e0b1d1f5057b9e0e",
+      "bytes": 33287
+    },
+    {
+      "path": "packages/provider-opencode/src/server/openCode2Catalog.ts",
+      "blob_sha": "32979a3e109df63284d3f72b5b55682f65d7f10e",
+      "bytes": 2860
+    },
+    {
+      "path": "packages/provider-opencode/src/server/providerErrorMessage.ts",
+      "blob_sha": "5a7328da4bd96581a5f3037c66c59417c84df6e4",
+      "bytes": 710
+    },
+    {
+      "path": "packages/provider-opencode/src/server/status.ts",
+      "blob_sha": "bb8dec4de9d44c94e2f915fd8e84e66ce2bde712",
+      "bytes": 34296
+    },
+    {
+      "path": "packages/provider-opencode/src/server/textGeneration.ts",
+      "blob_sha": "05b0d0d2c4a236921dbced8aecdd56e65f0f7827",
+      "bytes": 15063
+    },
+    {
+      "path": "packages/provider-opencode/src/server/toolItems.ts",
+      "blob_sha": "bb1bb3b9a7010646f6a5446a9d33dbf77db35f0a",
+      "bytes": 8922
+    },
+    {
+      "path": "packages/provider-opencode/src/server/usage.ts",
+      "blob_sha": "9878742ce882ea7b36e94e1ee8a6b04304f2d8f4",
+      "bytes": 21158
+    },
+    {
+      "path": "packages/provider-opencode/src/server/usageLimits.ts",
+      "blob_sha": "03488e515a79f15fdec9b9c45503b42395d33333",
+      "bytes": 7892
+    },
+    {
+      "path": "packages/provider-opencode/src/server/v2/OpenCode2Client.ts",
+      "blob_sha": "1cc1190de00dcf8f38aea0f3526927170d2b015e",
+      "bytes": 14520
+    },
+    {
+      "path": "packages/provider-opencode/src/server/v2/OpenCode2Server.ts",
+      "blob_sha": "ced84482b48d43ac4a8772a04728a3529371db8c",
+      "bytes": 6573
+    },
+    {
+      "path": "packages/provider-opencode/src/server/v2/OpenCode2Service.ts",
+      "blob_sha": "bfbebff52245c7af613c46221190cc3ef42320e5",
+      "bytes": 4941
+    },
+    {
+      "path": "packages/provider-opencode/src/server/v2/adapter.ts",
+      "blob_sha": "5cbc012de984d5b7e7d9b5a273916f29a523cff1",
+      "bytes": 222426
+    },
+    {
+      "path": "packages/provider-opencode/src/server/v2/textGeneration.ts",
+      "blob_sha": "c7664c630508e99462684c054379aa7efad0e756",
+      "bytes": 8516
+    },
+    {
+      "path": "packages/provider-opencode/src/server/v2/usageLimits.ts",
+      "blob_sha": "bdf678e4246927b10344ae64c0551290458c36c8",
+      "bytes": 7551
+    },
+    {
+      "path": "packages/provider-opencode/src/server/versionProbe.ts",
+      "blob_sha": "a87057bd3ea41917b52e780ec7ca5c2c6411e40c",
+      "bytes": 7653
+    },
+    {
+      "path": "packages/provider-opencode/src/settings.ts",
+      "blob_sha": "4391821bb5e97738d6b8e4d3530f51251d310e94",
+      "bytes": 1943
+    },
+    {
+      "path": "packages/provider-opencode/src/testing.ts",
+      "blob_sha": "d9d079c708d864c05dc90109bfa627107191497f",
+      "bytes": 202
+    },
+    {
+      "path": "packages/provider-opencode/tsconfig.json",
+      "blob_sha": "374bac55202ddcad695ede1c567ec219a61e9c48",
+      "bytes": 116
+    },
+    {
+      "path": "packages/provider-pi/package.json",
+      "blob_sha": "4ffa4a03998455d9e9c54a4ce459da23daf8c0b4",
+      "bytes": 1005
+    },
+    {
+      "path": "packages/provider-pi/src/client.ts",
+      "blob_sha": "6d5ac4f3078617bcce06e002b93e9aa308de4748",
+      "bytes": 676
+    },
+    {
+      "path": "packages/provider-pi/src/server.ts",
+      "blob_sha": "a148be9a4e6519598d53ce8dca85b955b88f2097",
+      "bytes": 162
+    },
+    {
+      "path": "packages/provider-pi/src/server/adapter.ts",
+      "blob_sha": "e7803bbe9c5ee886ff01dfd4b603b149f66588d5",
+      "bytes": 189157
+    },
+    {
+      "path": "packages/provider-pi/src/server/commands.ts",
+      "blob_sha": "0abe0d55f7bcd40339bcbd1f836bbc6ad517b24b",
+      "bytes": 4079
+    },
+    {
+      "path": "packages/provider-pi/src/server/driver.ts",
+      "blob_sha": "6a9e07bc60fc2b22a8f7070aac3dca7364e1c955",
+      "bytes": 8413
+    },
+    {
+      "path": "packages/provider-pi/src/server/mcpExtensionSource.ts",
+      "blob_sha": "e934ce60e6ba690d942f392ae40310f5dd0cbd40",
+      "bytes": 23141
+    },
+    {
+      "path": "packages/provider-pi/src/server/mcpInjection.ts",
+      "blob_sha": "679b81ac33b7816f44cf26c66bece16254b113f2",
+      "bytes": 10165
+    },
+    {
+      "path": "packages/provider-pi/src/server/modelCapabilities.ts",
+      "blob_sha": "682ff2d3ed077b65dd7213d7367d0422369ed8ec",
+      "bytes": 5039
+    },
+    {
+      "path": "packages/provider-pi/src/server/rpc.ts",
+      "blob_sha": "3cdb2058f1cf3f2239c06c77396a24b3191a5364",
+      "bytes": 17020
+    },
+    {
+      "path": "packages/provider-pi/src/server/status.ts",
+      "blob_sha": "76a05fde0b88e8e80d78e0193a39368ff97bd4f0",
+      "bytes": 23646
+    },
+    {
+      "path": "packages/provider-pi/src/server/textGeneration.ts",
+      "blob_sha": "100dc0cef5892e52e01414ed79793d0eca08f646",
+      "bytes": 8194
+    },
+    {
+      "path": "packages/provider-pi/src/server/usage.ts",
+      "blob_sha": "2e274b464864a24517cdc8a6297a821e4f8f8d5c",
+      "bytes": 6929
+    },
+    {
+      "path": "packages/provider-pi/src/settings.ts",
+      "blob_sha": "591b1539ea67abed09f3eda5c40c468c7073f776",
+      "bytes": 1387
+    },
+    {
+      "path": "packages/provider-pi/tsconfig.json",
+      "blob_sha": "374bac55202ddcad695ede1c567ec219a61e9c48",
+      "bytes": 116
+    },
+    {
+      "path": "packages/provider-testing/package.json",
+      "blob_sha": "b2da89012680c31b6501613469093d4860e5eff0",
+      "bytes": 1133
+    },
+    {
+      "path": "packages/provider-testing/src/TestProviderHost.ts",
+      "blob_sha": "f16f83b40f7b219aa2ed7cbeba6636acb5802de2",
+      "bytes": 3576
+    },
+    {
+      "path": "packages/provider-testing/src/fakeCli.ts",
+      "blob_sha": "777f20a9f647649cc1a526a3ec535f00b1375a3a",
+      "bytes": 2566
+    },
+    {
+      "path": "packages/provider-testing/src/replayGate.ts",
+      "blob_sha": "541b67a17044010d49cbb2c957e6dec0462b92dc",
+      "bytes": 3540
+    },
+    {
+      "path": "packages/provider-testing/src/replayTranscript.ts",
+      "blob_sha": "43d589c984d1d963eca4ba31ac6d37526cb80f9a",
+      "bytes": 5198
+    },
+    {
+      "path": "packages/provider-testing/src/replayWorkspace.ts",
+      "blob_sha": "1b60b685c788a14f00ba1a06adc21878093e4888",
+      "bytes": 3364
+    },
+    {
+      "path": "packages/provider-testing/tsconfig.json",
+      "blob_sha": "374bac55202ddcad695ede1c567ec219a61e9c48",
+      "bytes": 116
+    },
+    {
+      "path": "packages/ssh/package.json",
+      "blob_sha": "acd6c85d12019136a5e99bdf74ca8044baa6bb93",
+      "bytes": 970
+    },
+    {
+      "path": "packages/ssh/src/auth.ts",
+      "blob_sha": "df2438232394b30dd430f75177fabeb27a3e0168",
+      "bytes": 8735
+    },
+    {
+      "path": "packages/ssh/src/command.ts",
+      "blob_sha": "4d1534bf96b43752aafcdc719048e31826114699",
+      "bytes": 16106
+    },
+    {
+      "path": "packages/ssh/src/config.ts",
+      "blob_sha": "9700d88ea5b482b4b3508f8a948a363de7665ac0",
+      "bytes": 14484
+    },
+    {
+      "path": "packages/ssh/src/errors.ts",
+      "blob_sha": "4199e2a2445f1b502f95211a3bc424acc22f0d0f",
+      "bytes": 1732
+    },
+    {
+      "path": "packages/ssh/src/launcherTestHarness.ts",
+      "blob_sha": "b9b7f30d86e50c032317106459fba338003098e3",
+      "bytes": 10541
+    },
+    {
+      "path": "packages/ssh/src/tunnel.ts",
+      "blob_sha": "af3b814fcd13f576448f4c137a507c03f8b58f0b",
+      "bytes": 84499
+    },
+    {
+      "path": "packages/ssh/tsconfig.json",
+      "blob_sha": "374bac55202ddcad695ede1c567ec219a61e9c48",
+      "bytes": 116
+    }
+  ]
+}

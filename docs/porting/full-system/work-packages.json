@@ -1,0 +1,1406 @@
+{
+  "schema_version": 1,
+  "document_kind": "static_execution_and_acceptance_requirements",
+  "live_implementation_state_owner": "port-map.json",
+  "qualification_owner": "existing exact-source CI and platform acceptance receipts",
+  "baseline": {
+    "repository": "pingdotgg/t3code",
+    "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f"
+  },
+  "supported_target_ids": [
+    "linux-x64",
+    "linux-arm64",
+    "darwin-x64",
+    "darwin-arm64",
+    "win32-x64",
+    "win32-arm64",
+    "browser",
+    "ios",
+    "android"
+  ],
+  "source_matrices": {
+    "database_matrix": "research/database/nonserver/performance-acceptance-matrix.md",
+    "client_matrix": "research/clients/performance-acceptance-extension.md",
+    "server_families": "research/server/capability-map.json",
+    "client_families": "research/clients/capability-map.json"
+  },
+  "milestones": [
+    {
+      "id": "M0",
+      "name": "Traceable source and measurement contract",
+      "work_package_ids": [
+        "T00"
+      ],
+      "exit": "Reconciled generated queue, fixed oracle and budgets, complete ownership mapping, trustworthy qualification selection."
+    },
+    {
+      "id": "M1",
+      "name": "Native and browser interface proofs",
+      "work_package_ids": [
+        "T01"
+      ],
+      "exit": "Required input, accessibility, browser, terminal and extension behavior demonstrated on actual candidate targets."
+    },
+    {
+      "id": "M2",
+      "name": "Durable conversation, history and native state",
+      "work_package_ids": [
+        "T02",
+        "T04",
+        "T03",
+        "T05"
+      ],
+      "exit": "Normal Rust conversation/history path, comparable engine results, mixed-protocol recovery and safe native activation."
+    },
+    {
+      "id": "M3",
+      "name": "Workspace and terminal completion",
+      "work_package_ids": [
+        "T06",
+        "T07"
+      ],
+      "exit": "Edit, review, Git/worktree and terminal operations preserve outcomes and failures through actual clients."
+    },
+    {
+      "id": "M4",
+      "name": "Provider and automation completion",
+      "work_package_ids": [
+        "T08",
+        "T09"
+      ],
+      "exit": "Every provider family and automation/tool contract has its own parity and recovery evidence."
+    },
+    {
+      "id": "M5",
+      "name": "Remote identity and browser completion",
+      "work_package_ids": [
+        "T10",
+        "T11"
+      ],
+      "exit": "Connect, trust, guests/peers and the Rust browser preserve authority, storage and route lifecycle."
+    },
+    {
+      "id": "M6",
+      "name": "Mobile and integrated media/device completion",
+      "work_package_ids": [
+        "T12",
+        "T13"
+      ],
+      "exit": "iOS/Android offline/background behavior and every media/browser/device journey work on applicable targets."
+    },
+    {
+      "id": "M7",
+      "name": "Native desktop, distribution, maintenance and recovery completion",
+      "work_package_ids": [
+        "T14",
+        "T15"
+      ],
+      "exit": "All packages, CLI/site entrypoints, updates, steady-state maintenance and recovery satisfy their gates."
+    },
+    {
+      "id": "M8",
+      "name": "Complete product qualification and source retirement",
+      "work_package_ids": [
+        "T16"
+      ],
+      "exit": "All applicable journeys and targets pass independently before any supported completion claim or scoped retirement."
+    }
+  ],
+  "work_packages": [
+    {
+      "id": "T00",
+      "title": "Reconcile source ownership and freeze the measurement contract",
+      "milestone": "M0",
+      "depends_on": [],
+      "client_capability_ids": [],
+      "server_family_ids": [],
+      "production_entrypoints": [
+        "port-map.json",
+        "upstream.lock.json",
+        "tools/plan-porting.py",
+        "tools/ci_plan.py",
+        "tools/src/migration.rs"
+      ],
+      "delivered_outcome": "Use the existing generated queue to reconcile mapped ports, contracts, retained originals, fork conflicts and clean upstream imports. Keep the research denominator fixed. Assign all 60 journeys, 30 client families and 27 server families to production owners and existing port records. Freeze fixtures, trace boundaries, result equivalence, durability profiles, target budgets and run design before candidate measurement.",
+      "mandatory_failure_cases": [
+        "Missing or incompatible qualification receipt must widen CI selection.",
+        "A new upstream detection must not silently move the research denominator or imply integration.",
+        "Resolve the accepted-route schema mismatch for the current omdb route using the real source guard and receipt semantics.",
+        "Prove that a storage-only implementation change selects the native client flow. The inspected PRODUCTION_PORTS set does not include redb-persistence. CI policy changes require full fork qualification."
+      ],
+      "acceptance_evidence": [
+        "Exact source, tree, compiler artifact, dependency lock and CI policy identities.",
+        "A generated queue and CI plan grounded in a verified qualified ancestor, or explicit full qualification when none is available.",
+        "A traceable contract/entrypoint manifest and preregistered per-journey budgets."
+      ],
+      "suggested_agent_ownership": [
+        "One owner for queue, source map and qualification policy changes.",
+        "A measurement owner can prepare immutable fixtures and trace definitions separately."
+      ],
+      "journey_ids": [],
+      "existing_port_ids": [
+        "command-and-dispatch-policy",
+        "project-commands",
+        "guest-share-decisions",
+        "provider-recovery",
+        "provider-maintenance",
+        "codex-structured-generation",
+        "codex-process-runtime",
+        "redb-persistence",
+        "iroh-transport",
+        "native-api-component"
+      ],
+      "existing_port_use": {
+        "command-and-dispatch-policy": "Reconcile this existing record and its source/adapter/platform inputs through the generated queue; implementation state stays in port-map.json.",
+        "project-commands": "Reconcile this existing record and its source/adapter/platform inputs through the generated queue; implementation state stays in port-map.json.",
+        "guest-share-decisions": "Reconcile this existing record and its source/adapter/platform inputs through the generated queue; implementation state stays in port-map.json.",
+        "provider-recovery": "Reconcile this existing record and its source/adapter/platform inputs through the generated queue; implementation state stays in port-map.json.",
+        "provider-maintenance": "Reconcile this existing record and its source/adapter/platform inputs through the generated queue; implementation state stays in port-map.json.",
+        "codex-structured-generation": "Reconcile this existing record and its source/adapter/platform inputs through the generated queue; implementation state stays in port-map.json.",
+        "codex-process-runtime": "Reconcile this existing record and its source/adapter/platform inputs through the generated queue; implementation state stays in port-map.json.",
+        "redb-persistence": "Reconcile this existing record and its source/adapter/platform inputs through the generated queue; implementation state stays in port-map.json.",
+        "iroh-transport": "Reconcile this existing record and its source/adapter/platform inputs through the generated queue; implementation state stays in port-map.json.",
+        "native-api-component": "Reconcile this existing record and its source/adapter/platform inputs through the generated queue; implementation state stays in port-map.json."
+      }
+    },
+    {
+      "id": "T01",
+      "title": "Prove difficult platform interactions in production routes",
+      "milestone": "M1",
+      "depends_on": [
+        "T00"
+      ],
+      "client_capability_ids": [
+        "C05",
+        "C07",
+        "C12",
+        "C17",
+        "C18",
+        "C22",
+        "C23",
+        "C26",
+        "C27"
+      ],
+      "server_family_ids": [
+        "terminal",
+        "mcp_apps",
+        "preview_browser",
+        "devices",
+        "provider_runtime"
+      ],
+      "production_entrypoints": [
+        "apps/desktop/src/main.ts",
+        "apps/mobile/src/Stack.tsx",
+        "apps/mobile/modules/t3-composer-editor",
+        "apps/web/src/components/ComposerPromptEditorTiptap.tsx",
+        "apps/desktop/src/preview/DesktopBrowserHost.ts",
+        "apps/mobile/app.config.ts"
+      ],
+      "delivered_outcome": "Put the shared Rust document/state model through actual composer, terminal, embedded-browser and native-shell entrypoints. Compare GPUI desktop with Makepad desktop using identical state and content; prove Makepad mobile input, accessibility, extension and browser behavior. Exercise Dioxus DOM/WASM with semantic forms and navigation. A selected target proof is a prerequisite for that target, not platform-wide completion. Start the Cursor and Claude native protocol/SDK replacement proofs early, using controlled fixture and source evidence. A blocker in one provider does not block an unrelated controlled conversation proof, but it blocks full Rust completion for that provider.",
+      "mandatory_failure_cases": [
+        "CJK marked text, UTF-16/byte/grapheme conversion, mixed-direction text, undo and 120k-character drafts where supported.",
+        "Rich-document screen-reader navigation, focus return, scaling and keyboard conflicts.",
+        "Embedded browser clipping, scrolling, popup/file picker, profile isolation, sandboxing and input focus.",
+        "iOS/Android extension lifecycle, process recreation and replacement of mobile OTA/reload assumptions.",
+        "A wrapper protocol around a JavaScript SDK is not evidence of a complete independent native provider interface."
+      ],
+      "acceptance_evidence": [
+        "Real input-to-presentation traces and semantic accessibility observations on each affected target.",
+        "Working integrated browser content and terminal input, including their lifecycle and cleanup.",
+        "A candidate decision that accounts for licensing, external browser hosts and generated platform glue."
+      ],
+      "suggested_agent_ownership": [
+        "Keep shared text/state contracts under one owner.",
+        "Desktop GPUI, Makepad and DOM adapters may be assigned separately once those contracts are stable."
+      ],
+      "journey_ids": [
+        "J37",
+        "J55"
+      ],
+      "existing_port_ids": [],
+      "existing_port_use": {}
+    },
+    {
+      "id": "T02",
+      "title": "Submit, stream, approve, interrupt and reopen a conversation",
+      "milestone": "M2",
+      "depends_on": [
+        "T00",
+        "T01"
+      ],
+      "client_capability_ids": [
+        "C03",
+        "C04",
+        "C06",
+        "C07",
+        "C08"
+      ],
+      "server_family_ids": [
+        "environment_lifecycle",
+        "authorization",
+        "orchestration_commands",
+        "thread_read_stream",
+        "approvals_questions"
+      ],
+      "production_entrypoints": [
+        "orchestration.dispatchCommand",
+        "orchestration.subscribeShell",
+        "orchestration.subscribeThread",
+        "runtime-request.respond",
+        "apps/server/src/orchestration-v2",
+        "packages/client-runtime",
+        "desktop/browser/mobile conversation routes"
+      ],
+      "delivered_outcome": "Implement one real conversation path through Rust command ownership, omdb transaction ownership, a controlled captured provider fixture, bounded publication, shared Rust client state and the selected Rust presentation route. Preserve the existing JSON contract first. Commit events, authoritative projections, receipts, indexes and outbox intent atomically. External effects follow commit. Use only an isolated fresh profile until T05 qualifies native activation of existing profiles. Reuse mapped domain/service internals from native-api-component as migration inputs to the normal application route. Its candidate standalone POST /rpc path is not a replacement product or a substitute for the production WebSocket contract.",
+      "mandatory_failure_cases": [
+        "Disconnect before commit, after commit before acknowledgement and after effect dispatch.",
+        "Duplicate command IDs, failed work inside a coalesced batch, approval rejection, cancellation before provider start and interruption during output.",
+        "Provider completion followed by late finalization, server restart, stale client cursor and slow subscriber.",
+        "No second writer and no retry of an uncertain mutation through another backend."
+      ],
+      "acceptance_evidence": [
+        "Exact expected visible output, permissions, event order and receipt/effect behavior.",
+        "Submit-to-durable-accept, provider-frame-to-presented-text, acknowledgement-to-effect and reopen-to-current-thread.",
+        "Bounded queues, memory, payloads and encode/decode work under concurrent streams."
+      ],
+      "suggested_agent_ownership": [
+        "One command/transaction owner and one client-state/presentation owner.",
+        "A third owner can maintain controlled transcript fixtures and recovery evidence without editing the shared contract."
+      ],
+      "journey_ids": [
+        "J01",
+        "J03",
+        "J06",
+        "J07",
+        "J08",
+        "J13",
+        "J16",
+        "J35",
+        "J37"
+      ],
+      "dependency_requirements": [
+        {
+          "work_package_id": "T00",
+          "scope": "Exact source identities, fixed fixture/behavior/durability contract, and trustworthy qualification selection for this increment."
+        },
+        {
+          "work_package_id": "T01",
+          "scope": "Only the input/state/render/lifecycle interfaces used by the selected client/profile. A retained-client control uses its existing production interfaces. A Rust client increment requires the corresponding Rust interface proof. Full mobile extensions, every provider and every target are not prerequisites for this scoped slice."
+        }
+      ],
+      "existing_port_ids": [
+        "command-and-dispatch-policy",
+        "project-commands",
+        "codex-process-runtime",
+        "redb-persistence",
+        "native-api-component"
+      ],
+      "existing_port_use": {
+        "command-and-dispatch-policy": "Reuse and reconcile command/dispatch semantics inside the real Rust command owner; preserve authorization, omitted/null behavior, ordering and receipts.",
+        "project-commands": "Reuse and reconcile project command decisions in the environment owner and actual navigation/workspace routes.",
+        "codex-process-runtime": "Reuse the existing process/protocol lifecycle as an integration input; preserve controlled fixture and exit/cancellation semantics.",
+        "redb-persistence": "Reuse and reconcile the existing omdb integration, native repositories, transaction/session boundary, migration and activation behavior before replacing process/engine boundaries.",
+        "native-api-component": "Reuse domain/service internals as migration inputs to normal production ingress. Its standalone POST /rpc protocol is not the production WebSocket contract and must not become a second reduced product."
+      }
+    },
+    {
+      "id": "T03",
+      "title": "Negotiate revisioned deltas through commit, replay and rendering",
+      "milestone": "M2",
+      "depends_on": [
+        "T02",
+        "T04"
+      ],
+      "client_capability_ids": [
+        "C06",
+        "C08",
+        "C21"
+      ],
+      "server_family_ids": [
+        "orchestration_commands",
+        "thread_read_stream"
+      ],
+      "production_entrypoints": [
+        "ProviderTextDeltaCoalescer replacement",
+        "ThreadStream and WireProjection replacements",
+        "connection capability negotiation",
+        "shared Rust conversation reducer"
+      ],
+      "delivered_outcome": "Add append, replace and splice semantics only through explicit capability/version negotiation. Persist revisions and chunks with their authoritative header. Update durable event/outbox formats where they retain full prefixes. Reuse encoded bytes only for the same authorized wire representation. Keep old-client JSON behavior intact.",
+      "mandatory_failure_cases": [
+        "Missing or mismatched base revision, retained-anchor pruning, reordered/duplicate event, completion replacement and stream gap.",
+        "Snapshot recovery during concurrent append and cancellation.",
+        "Old/new client-server combinations and downgrade refusal where schemas are incompatible.",
+        "Slow subscribers cannot retain unbounded chunks or encoded generations."
+      ],
+      "acceptance_evidence": [
+        "Exact reconstructed state after replay, pruning and restart.",
+        "Per-turn encoded/stored bytes, allocations, frame latency and bounded retained generations for both negotiated and compatibility paths.",
+        "No gain credited to the new protocol when the measured path still writes or sends full prefixes."
+      ],
+      "suggested_agent_ownership": [
+        "One owner for protocol and durable representation evolution.",
+        "Projection/replay and client application can be separate assignments after schema and recovery rules are fixed."
+      ],
+      "journey_ids": [
+        "J04",
+        "J06",
+        "J08",
+        "J37",
+        "J39"
+      ],
+      "dependency_requirements": [
+        {
+          "work_package_id": "T02",
+          "scope": "Correct durable JSON-compatible command/stream path for the selected profile."
+        },
+        {
+          "work_package_id": "T04",
+          "scope": "Required history revision, retained-anchor, snapshot, replay and index interfaces. Completion of every history/UI case and the entire engine comparison is not required to start this increment."
+        }
+      ],
+      "existing_port_ids": [
+        "redb-persistence"
+      ],
+      "existing_port_use": {
+        "redb-persistence": "Reuse and reconcile the existing omdb integration, native repositories, transaction/session boundary, migration and activation behavior before replacing process/engine boundaries."
+      }
+    },
+    {
+      "id": "T04",
+      "title": "Navigate, search and manage large histories with the same storage API",
+      "milestone": "M2",
+      "depends_on": [
+        "T02"
+      ],
+      "client_capability_ids": [
+        "C04",
+        "C05",
+        "C06",
+        "C08",
+        "C09",
+        "C24"
+      ],
+      "server_family_ids": [
+        "thread_read_stream",
+        "projects_workspace",
+        "checkpoint_fork",
+        "settings_maintenance"
+      ],
+      "production_entrypoints": [
+        "orchestration.searchThread",
+        "orchestration.searchThreads",
+        "orchestration.getThreadFamily",
+        "orchestration.getTurnItem",
+        "ProjectionStore and thread navigation",
+        "projects.mutate",
+        "server.getSettings and server.updateSettings"
+      ],
+      "delivered_outcome": "Deliver the requested visible history window, fork ancestry, seek/jump, item detail, exact search, sidebar changes and settings through indexed Rust reads and stable client views. Compare transactional Fjall and direct redb behind omdb against a SQLite control with identical domain operations, representation, visibility and acknowledged durability. At the inspected snapshot, omdb is a pinned redb API/engine fork. A Fjall backend requires a prospective backend contract inside that authoritative boundary. Specify transaction scope, snapshots, commit/acknowledgement sequences, error/unknown-outcome semantics and ownership before changing engines. A generic omdb library change belongs in a separately scoped dependency PR with its own source pin and qualification; T3-specific layouts and adapters stay with their application owners. Record exact omdb/redb/Fjall engine and layout identities in each native generation and qualify conversion, reopen, backup and recovery. There is one authoritative store for a selected profile; no parallel independently committed index/database or drop-in crate substitution is assumed.",
+      "mandatory_failure_cases": [
+        "Sparse/obsolete cursors, nested forks, retries, superseded items, deletion, late parent changes and concurrent new messages.",
+        "Unicode offsets, punctuation/identifier ranking, stale search generations, cancelled queries and index rebuild visibility.",
+        "Navigation preserves selection, draft, focus and scroll through settings overlays and catch-up.",
+        "Compaction and other writers cannot starve foreground reads.",
+        "Reject a native generation whose engine/layout/schema identity cannot be opened safely. Engine migration must convert a coherent typed state and preserve its transaction/receipt boundary; incompatible files cannot be reused or silently reopened by another engine."
+      ],
+      "acceptance_evidence": [
+        "Exact results, order, rank/ties, snippets, visibility and source offsets.",
+        "Page/jump/search-to-stable-viewport latency, records and bytes decoded, physical reads, memory and scroll-anchor error.",
+        "Paired engine results under fresh, aged and mixed workloads; no generic SQL-on-redb layer.",
+        "A reviewed prospective omdb backend contract and, if needed, a separately pinned/qualified omdb dependency change. Record current omdb fork, direct redb candidate and Fjall candidate identities without calling the omdb fork a crates.io redb build."
+      ],
+      "suggested_agent_ownership": [
+        "One owner for visible-order/search semantics and differential fixtures.",
+        "Engine adapters can be separate assignments against the same frozen domain API and durability profile.",
+        "Client navigation/layout is independently owned after result contracts are fixed.",
+        "Generic omdb library work has a separate dependency owner and scoped PR; application owners integrate only a verified pinned result."
+      ],
+      "journey_ids": [
+        "J02",
+        "J03",
+        "J04",
+        "J05",
+        "J09",
+        "J10",
+        "J27",
+        "J39",
+        "J40",
+        "J56"
+      ],
+      "existing_port_ids": [
+        "project-commands",
+        "redb-persistence"
+      ],
+      "existing_port_use": {
+        "project-commands": "Reuse and reconcile project command decisions in the environment owner and actual navigation/workspace routes.",
+        "redb-persistence": "Reuse and reconcile the existing omdb integration, native repositories, transaction/session boundary, migration and activation behavior before replacing process/engine boundaries."
+      }
+    },
+    {
+      "id": "T05",
+      "title": "Migrate, activate and recover a coherent native store generation",
+      "milestone": "M2",
+      "depends_on": [
+        "T02",
+        "T04"
+      ],
+      "client_capability_ids": [
+        "C21",
+        "C27",
+        "C29"
+      ],
+      "server_family_ids": [
+        "environment_lifecycle",
+        "settings_maintenance"
+      ],
+      "production_entrypoints": [
+        "apps/server/src/persistence",
+        "apps/server/src/serviceLauncher.ts",
+        "desktop/service/SSH lock protocols",
+        "CLI doctor and migration routes"
+      ],
+      "delivered_outcome": "Qualify one environment owner or an exclusive offline lease, resumable import, consistent checkpoints, generation manifests, activation fencing and failed-trial restore before activating native authority for existing profiles. Publish a generation only when events, projections, receipts, pending effects, required indexes and referenced assets agree. The preserved SQLite source remains a migration source and cannot become a fallback after native writes.",
+      "mandatory_failure_cases": [
+        "Kill after each migration/publication/restore stage, low disk, read-only target, corrupt input and legacy identifier collision.",
+        "Concurrent desktop/service/CLI/SSH launch, symlinked store, missing runtime and unsupported schema.",
+        "Candidate schema changes then fails, launcher dies during restore, or a resumed trial attempts to overwrite its original backup.",
+        "Separate failed-trial rollback from a post-commit downgrade."
+      ],
+      "acceptance_evidence": [
+        "Source preservation, reference integrity, a coherent reopened generation and recovery at the declared visible/durable boundary for the exercised crash class.",
+        "Time to usable state/recovery, progress, downtime and peak additional disk.",
+        "Documented process-crash, OS-restart and power-loss guarantees verified separately for the declared durability profile."
+      ],
+      "suggested_agent_ownership": [
+        "One storage-lifecycle owner owns activation, lock and restore state machines.",
+        "A fault-injection owner can prepare stage interruption and low-space scenarios against disposable profiles."
+      ],
+      "journey_ids": [
+        "J01",
+        "J14",
+        "J24",
+        "J25",
+        "J26",
+        "J28",
+        "J58"
+      ],
+      "dependency_requirements": [
+        {
+          "work_package_id": "T02",
+          "scope": "Commit, receipt, outbox, process-owner and selected schema identities."
+        },
+        {
+          "work_package_id": "T04",
+          "scope": "Required index/reference/reconstruction interfaces for the generation being migrated. Implementation and fault probes may proceed per scope. Existing-profile activation requires all authoritative owners, pending effects and references in that profile; it cannot publish a partial migration."
+        }
+      ],
+      "existing_port_ids": [
+        "redb-persistence"
+      ],
+      "existing_port_use": {
+        "redb-persistence": "Reuse and reconcile the existing omdb integration, native repositories, transaction/session boundary, migration and activation behavior before replacing process/engine boundaries."
+      }
+    },
+    {
+      "id": "T06",
+      "title": "Edit files, operate Git and complete PR or issue review",
+      "milestone": "M3",
+      "depends_on": [
+        "T04"
+      ],
+      "client_capability_ids": [
+        "C09",
+        "C10",
+        "C11",
+        "C20"
+      ],
+      "server_family_ids": [
+        "thread_launch",
+        "projects_workspace",
+        "files_search_attachments",
+        "git_review",
+        "source_control",
+        "pull_requests",
+        "issues",
+        "checkpoint_fork"
+      ],
+      "production_entrypoints": [
+        "projects.readFile and projects.writeFile",
+        "projects.searchEntries and projects.searchContents",
+        "filesystem.*",
+        "workspace.*",
+        "vcs.* and git.*",
+        "review.*",
+        "sourceControl.*",
+        "pullRequests.*",
+        "issues.* and issueTrackers.*",
+        "orchestration.launchThread"
+      ],
+      "delivered_outcome": "Complete file/tree/search/edit/save, diff review, multi-repository worktrees, checkpoints and host review as visible client journeys backed by the environment workspace owner. Preserve every registered host and its capability differences. Reuse gix where semantics are covered. Explicit Git subprocess paths preserve working behavior during migration; qualify the intended gitr dependency when it can satisfy the same operation and platform matrix. Record retained external Git execution and completed native Rust operation coverage separately. A wrapper or partial Git library cannot establish complete native Git workflow coverage.",
+      "mandatory_failure_cases": [
+        "External edit during save, save echo, revoked file grant, readonly external file and retained unsaved edits.",
+        "Dirty repositories, hooks/filters/config/credentials, submodules, conflict, linked-worktree invalidation and partial multi-repository rollback.",
+        "Large file/line, Unicode, cancellation, stale status and uncertain remote host mutation."
+      ],
+      "acceptance_evidence": [
+        "Correct file contents, paths, branch/worktree ownership, checkpoints and host/account routing.",
+        "First usable diff/list, edit-to-paint, save-to-confirmation, status/action latency, process count, CPU and memory.",
+        "Optimistic feedback converges to authoritative completion or visible rollback without duplicated actions."
+      ],
+      "suggested_agent_ownership": [
+        "Files/diff, Git/checkpoints and host review can be separate vertical assignments.",
+        "Each assignment owns its client route and server operation together; shared workspace identity stays under one owner."
+      ],
+      "journey_ids": [
+        "J09",
+        "J12",
+        "J41",
+        "J42",
+        "J43",
+        "J44"
+      ],
+      "existing_port_ids": [
+        "project-commands",
+        "redb-persistence"
+      ],
+      "existing_port_use": {
+        "project-commands": "Reuse and reconcile project command decisions in the environment owner and actual navigation/workspace routes.",
+        "redb-persistence": "Reuse and reconcile the existing omdb integration, native repositories, transaction/session boundary, migration and activation behavior before replacing process/engine boundaries."
+      }
+    },
+    {
+      "id": "T07",
+      "title": "Use and reconnect a real terminal under contention",
+      "milestone": "M3",
+      "depends_on": [
+        "T01",
+        "T02"
+      ],
+      "client_capability_ids": [
+        "C12",
+        "C13",
+        "C20"
+      ],
+      "server_family_ids": [
+        "terminal"
+      ],
+      "production_entrypoints": [
+        "terminal.*",
+        "subscribeTerminalMetadata",
+        "packages/client-runtime/src/state/terminalOutput.ts",
+        "packages/client-runtime/src/state/terminalSession.ts",
+        "desktop/web/mobile terminal routes"
+      ],
+      "delivered_outcome": "Implement PTY ownership, terminal state, transport, native/WASM rendering and input as one journey. Preserve the optimized stock Ghostty behavior and bounded attach history. Advance a replay cursor only after the destination accepts the write.",
+      "mandatory_failure_cases": [
+        "Disconnect inside UTF-8 or control sequence, partial native write rejection, missing/stopped terminal and server restart.",
+        "Burst output, alternate screen, terminal query replies, mouse/focus protocols, IME, paste, resize/DPI and selection.",
+        "Saturated chat/diff/media work, cancellation and reconnect without an unintended new shell."
+      ],
+      "acceptance_evidence": [
+        "Byte and parser-state equivalence, bounded replay and attach-to-correct-screen.",
+        "Input-to-echo, output-to-pixels, frame tails, process CPU, memory and protocol bytes."
+      ],
+      "suggested_agent_ownership": [
+        "One terminal core/protocol owner.",
+        "Platform render/input adapters can be separate after the state and write-ack contract is fixed."
+      ],
+      "journey_ids": [
+        "J45",
+        "J46"
+      ],
+      "existing_port_ids": [],
+      "existing_port_use": {}
+    },
+    {
+      "id": "T08",
+      "title": "Complete every provider family, session transition, usage view and import",
+      "milestone": "M4",
+      "depends_on": [
+        "T02",
+        "T04",
+        "T06"
+      ],
+      "client_capability_ids": [
+        "C03",
+        "C08",
+        "C24",
+        "C29"
+      ],
+      "server_family_ids": [
+        "provider_runtime",
+        "approvals_questions",
+        "checkpoint_fork",
+        "agent_import",
+        "usage_observability"
+      ],
+      "production_entrypoints": [
+        "provider driver registry and per-instance interfaces",
+        "provider.auth.* and provider.install.*",
+        "server.refreshProviders and server.updateProvider",
+        "provider.switch and thread.fork",
+        "agentSessions.scan and agentSessions.import",
+        "server.getUsageSummary",
+        "packages/provider-*"
+      ],
+      "delivered_outcome": "Port each declared provider family and instance lifecycle using its actual protocol, permissions and supported/refused actions. Include setup, accounts/models, resume/fork/steer/rewind, questions, goals/background children, usage and external-history import. Keep provider-owned SQLite/SDK state behind its compatibility contract. Cursor and Claude SDK replacement proofs are explicit release blockers for full T3-owned Rust completion.",
+      "mandatory_failure_cases": [
+        "Missing/moved provider state, native IDs, account/home isolation, startup/exit races and late child work.",
+        "Correct refusal before file rollback for a provider that cannot restore conversation state.",
+        "Large live-WAL usage sources, giant payload rows, repeat/partial import and corrupt records.",
+        "Vendor-specific approval option IDs, native versus asynchronous questions and provider-specific steering constraints."
+      ],
+      "acceptance_evidence": [
+        "Per-provider captured transcript conformance through adapter, orchestrator and visible projection.",
+        "Resume/import/first-usable-summary latency, fairness, peak memory and bounded decode work.",
+        "A generic ACP substitute or retained T3 JavaScript SDK controller does not close a richer provider contract."
+      ],
+      "suggested_agent_ownership": [
+        "Assign one provider family or tightly related protocol family per owner.",
+        "Keep provider registry, capability truth and shared recovery coordination under one integrator."
+      ],
+      "journey_ids": [
+        "J07",
+        "J09",
+        "J11",
+        "J21",
+        "J22",
+        "J23"
+      ],
+      "existing_port_ids": [
+        "provider-recovery",
+        "provider-maintenance",
+        "codex-structured-generation",
+        "codex-process-runtime"
+      ],
+      "existing_port_use": {
+        "provider-recovery": "Reuse recovery planning and native child/session identity rules inside complete provider and workflow lifecycle.",
+        "provider-maintenance": "Reuse owned install/update verification and error behavior in the complete provider/launcher path.",
+        "codex-structured-generation": "Reuse structured-generation contracts and controlled conformance inputs in the complete Codex provider integration.",
+        "codex-process-runtime": "Reuse the existing process/protocol lifecycle as an integration input; preserve controlled fixture and exit/cancellation semantics."
+      }
+    },
+    {
+      "id": "T09",
+      "title": "Run approvals, delegation, schedules, webhooks and MCP tools safely",
+      "milestone": "M4",
+      "depends_on": [
+        "T02",
+        "T06",
+        "T08"
+      ],
+      "client_capability_ids": [
+        "C08",
+        "C17"
+      ],
+      "server_family_ids": [
+        "approvals_questions",
+        "delegation_workflows",
+        "thread_launch",
+        "mcp_tools",
+        "mcp_apps",
+        "schedules_webhooks"
+      ],
+      "production_entrypoints": [
+        "runtime-request.respond",
+        "delegated_task.*",
+        "subagent.stop",
+        "orchestration.getNativeChildWork",
+        "orchestration.stopWorkflow",
+        "scheduledTasks.*",
+        "webhook HTTP",
+        "/mcp and ACP stdio bridge",
+        "mcpApps.*"
+      ],
+      "delivered_outcome": "Complete the durable command-to-effect path for approvals, questions, secrets, delegation, plans/goals/workflows, scheduled work and external tool callers. Tool discovery must agree with execution authorization. Preserve thread credential scope, mode ceilings, native child identity and post-turn work.",
+      "mandatory_failure_cases": [
+        "Restart during claim/effect/finalization, lease loss, duplicate webhook, ambiguous delivery and expiration.",
+        "Timezone/DST transition, host offline, rate/backlog caps and exact-body signature verification.",
+        "Cancelled/changed parent run cannot misroute child completion.",
+        "Denied MCP app tool action or guest/peer request cannot gain general RPC authority."
+      ],
+      "acceptance_evidence": [
+        "One intended external action or an explicit unresolved/reconciled outcome when the external protocol cannot prove exactly-once execution.",
+        "Acknowledgement-to-effect, due/arrival-to-action, wake/replay time and bounded backlog under contention.",
+        "Permission, receipt-retention, cancellation and cleanup evidence through actual clients or authorized external callers."
+      ],
+      "suggested_agent_ownership": [
+        "Local automation/effect ownership and MCP authorization can be separate assignments.",
+        "Remote delivery scenarios join T10 and mobile background completion joins T12."
+      ],
+      "journey_ids": [
+        "J07",
+        "J11",
+        "J31",
+        "J51"
+      ],
+      "existing_port_ids": [
+        "command-and-dispatch-policy",
+        "provider-recovery"
+      ],
+      "existing_port_use": {
+        "command-and-dispatch-policy": "Reuse and reconcile command/dispatch semantics inside the real Rust command owner; preserve authorization, omitted/null behavior, ordering and receipts.",
+        "provider-recovery": "Reuse recovery planning and native child/session identity rules inside complete provider and workflow lifecycle."
+      }
+    },
+    {
+      "id": "T10",
+      "title": "Connect remote clients, guests and linked environments with preserved trust",
+      "milestone": "M5",
+      "depends_on": [
+        "T02",
+        "T04"
+      ],
+      "client_capability_ids": [
+        "C03",
+        "C04",
+        "C20",
+        "C22",
+        "C28",
+        "C29"
+      ],
+      "server_family_ids": [
+        "environment_lifecycle",
+        "authorization",
+        "guest_share",
+        "peer_links",
+        "schedules_webhooks"
+      ],
+      "production_entrypoints": [
+        "auth and connect HTTP",
+        "infra/relay",
+        "apps/server/src/cloud and apps/server/src/relay",
+        "packages/client-runtime/src/connection",
+        "guestShare.* and dedicated guest HTTP",
+        "peerLinks.*",
+        "linked MCP calls"
+      ],
+      "delivered_outcome": "Implement Connect accounts, registration/pairing, token/proof handling, broker/route lifecycle, revocation, notification delivery and host wake. Add LAN, SSH, Tailscale and iroh route adapters without changing environment identity or execution authority. Preserve guest proposals and read-only links, peer scopes and browser-compatible routes.",
+      "mandatory_failure_cases": [
+        "Concurrent proof consume, expired/revoked credentials, stale endpoint generation and account switch.",
+        "Direct-to-relay route changes, tunnel interruption, offline host, duplicate wake/job and ambiguous mutation delivery.",
+        "Wrong environment, revoked guest link, permission ceiling mismatch and immutable-origin fence failure."
+      ],
+      "acceptance_evidence": [
+        "Exactly one replay claim where required, correct authorization and no credential/host confusion.",
+        "Connect/resume-to-authoritative-thread, auth and delivery tails, recovery traffic and background energy.",
+        "Iroh byte forwarding alone cannot retire Connect identity, browser access or client lifecycle."
+      ],
+      "suggested_agent_ownership": [
+        "Identity and broker state stay under one owner.",
+        "Transport routes, guest/peer services and notification/wake delivery can be separate assignments against that authority model."
+      ],
+      "journey_ids": [
+        "J08",
+        "J15",
+        "J19",
+        "J20",
+        "J29",
+        "J30",
+        "J31",
+        "J35",
+        "J36",
+        "J46",
+        "J50",
+        "J54",
+        "J59"
+      ],
+      "existing_port_ids": [
+        "guest-share-decisions",
+        "iroh-transport"
+      ],
+      "existing_port_use": {
+        "guest-share-decisions": "Reuse the guest decision rules in the complete thread-scoped guest service, including proposals, revocation and dedicated ingress.",
+        "iroh-transport": "Reuse candidate transport code as a route input to Connect and peer lifecycle; transport alone does not qualify identity or complete remote behavior."
+      }
+    },
+    {
+      "id": "T11",
+      "title": "Complete the Rust browser client, storage and hosted entry routes",
+      "milestone": "M5",
+      "depends_on": [
+        "T01",
+        "T04",
+        "T10"
+      ],
+      "client_capability_ids": [
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C09",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C17",
+        "C18",
+        "C20",
+        "C21",
+        "C23",
+        "C24",
+        "C28",
+        "C29",
+        "C30"
+      ],
+      "server_family_ids": [
+        "environment_lifecycle",
+        "authorization",
+        "thread_read_stream",
+        "guest_share"
+      ],
+      "production_entrypoints": [
+        "apps/web entry/router",
+        "packages/client-runtime",
+        "apps/web/src/connection/storage.ts",
+        "apps/web/src/composerDraftStore.ts",
+        "apps/web/src/browserHistoryStore.ts",
+        "pair/connect/welcome/guest routes"
+      ],
+      "delivered_outcome": "Deliver the browser through Dioxus DOM/WASM with semantic navigation, forms, selection and accessibility. Preserve hosted/local/guest entry, auth callbacks, caches, settings, drafts, multi-tab merge, route history and user-visible denied-storage behavior. All imported capability views remain connected to their owning packages.",
+      "mandatory_failure_cases": [
+        "IDB denied/full/blocked/closed/versionchange, stale or oversized cache, concurrent tabs and stale build tab.",
+        "A stale unrelated save cannot restore a revoked grant or erase another draft edit.",
+        "Slow CPU/network, WASM load/compile failure, CSP, worker failure, expired deep link and background/resume."
+      ],
+      "acceptance_evidence": [
+        "First useful and interactive page, correct authorized destination and authoritative freshness.",
+        "Asset/compile bytes and CPU, cross-boundary traffic, memory and input/frame tails.",
+        "Correct offline cache behavior, quota bounds, draft survival and browser screen-reader semantics."
+      ],
+      "suggested_agent_ownership": [
+        "Browser boot/navigation/storage can be one vertical assignment.",
+        "Feature renderers remain owned with their workspace/terminal/media packages; a browser integrator closes whole-client parity."
+      ],
+      "journey_ids": [
+        "J02",
+        "J18",
+        "J19",
+        "J29",
+        "J34",
+        "J36",
+        "J40",
+        "J55",
+        "J56",
+        "J59"
+      ],
+      "existing_port_ids": [],
+      "existing_port_use": {}
+    },
+    {
+      "id": "T12",
+      "title": "Complete native mobile offline work, secure state and background integrations",
+      "milestone": "M6",
+      "depends_on": [
+        "T01",
+        "T04",
+        "T10"
+      ],
+      "client_capability_ids": [
+        "C03",
+        "C04",
+        "C05",
+        "C07",
+        "C08",
+        "C14",
+        "C15",
+        "C20",
+        "C21",
+        "C22",
+        "C23",
+        "C24",
+        "C27",
+        "C28",
+        "C29"
+      ],
+      "server_family_ids": [
+        "environment_lifecycle",
+        "authorization",
+        "thread_read_stream"
+      ],
+      "production_entrypoints": [
+        "apps/mobile/src/Stack.tsx",
+        "apps/mobile/src/persistence",
+        "apps/mobile/src/state/thread-outbox-storage.ts",
+        "apps/mobile/src/connection",
+        "apps/mobile/app.config.ts",
+        "mobile notification/widget/Live Activity integrations"
+      ],
+      "delivered_outcome": "Deliver iOS and Android through shared Rust state and Makepad/platform adapters. Preserve cached work, durable drafts/outbox/attachments, preference recovery, secure keys, adaptive navigation, account removal, push, notification actions, widgets and Live Activities. Preserve store/update and app-resume behavior without assuming JavaScript OTA compatibility.",
+      "mandatory_failure_cases": [
+        "Offline restart, app kill/update mid-write, low-memory recreation, orientation/fold and hardware keyboard changes.",
+        "Database unavailable, newer/older secure preference fallback, failed cleanup and corrupt individual outbox file.",
+        "Foreground silence, notification tap after OS process death, account signout and extension expiry."
+      ],
+      "acceptance_evidence": [
+        "Recovered unsent content, correct environment scope and one converged send after reconnect.",
+        "Useful-offline-screen, reconnect, tap-to-correct-thread and durable draft-flush latency.",
+        "Native allocations, invisible view retention, energy and background network; separate iOS and Android evidence."
+      ],
+      "suggested_agent_ownership": [
+        "Shared durable mobile state has one owner.",
+        "iOS and Android extension/input/package adapters can be separate once lifecycle contracts are fixed."
+      ],
+      "journey_ids": [
+        "J15",
+        "J16",
+        "J17",
+        "J29",
+        "J30",
+        "J38",
+        "J40",
+        "J48",
+        "J53",
+        "J54",
+        "J55",
+        "J56",
+        "J58",
+        "J59"
+      ],
+      "existing_port_ids": [],
+      "existing_port_use": {}
+    },
+    {
+      "id": "T13",
+      "title": "Use attachments, voice, capture, browser content and devices",
+      "milestone": "M6",
+      "depends_on": [
+        "T01",
+        "T06",
+        "T07",
+        "T09",
+        "T10",
+        "T11",
+        "T12"
+      ],
+      "client_capability_ids": [
+        "C07",
+        "C14",
+        "C15",
+        "C16",
+        "C17",
+        "C18",
+        "C19",
+        "C20",
+        "C23",
+        "C26",
+        "C29"
+      ],
+      "server_family_ids": [
+        "files_search_attachments",
+        "mcp_tools",
+        "mcp_apps",
+        "preview_browser",
+        "devices",
+        "speech"
+      ],
+      "production_entrypoints": [
+        "assets.* and attachments.*",
+        "voice HTTP and speech stream",
+        "desktop SnapShot IPC",
+        "preview.* and preview streams/tunnels",
+        "mcpApps.*",
+        "device.* and device hub proxy",
+        "client document/media viewers"
+      ],
+      "delivered_outcome": "Complete rich paste/drop/camera/share, document/media viewing and search, dictation, SnapShot, integrated previews, scripted HTML/MCP Apps and simulator/device control. Keep real browser engines and OS codecs behind Rust-owned lifecycle/security interfaces. Count startup, native bridge and browser-host costs in the user journey.",
+      "mandatory_failure_cases": [
+        "Huge/hostile files, format limits, cancellation, grant revocation and source-owned readonly files.",
+        "Microphone denial/loss, app interruption, concurrent draft edits and failed selected speech destination.",
+        "Browser storage/origin isolation, passkeys, files/downloads/popups, control lease, malicious app bridge and remote-loopback routing.",
+        "Device permission denial, hidden/PIP stream, network loss and preview-close/device-lifetime semantics."
+      ],
+      "acceptance_evidence": [
+        "First page/frame/table/search hit, capture-to-context, stop-to-editable-transcript and input-to-preview-frame.",
+        "Correct target environment/workspace and explicit speech destination; no automatic send or silent host fallback.",
+        "Bounded caches/media streams, CPU/memory/energy/bitrate, permissions and cleanup."
+      ],
+      "suggested_agent_ownership": [
+        "Document/media, voice/capture, browser/MCP App and device control are separate vertical assignments.",
+        "Each owns server or native-host operation plus all applicable client controls and failure cases."
+      ],
+      "journey_ids": [
+        "J23",
+        "J29",
+        "J38",
+        "J47",
+        "J48",
+        "J49",
+        "J50",
+        "J51",
+        "J52",
+        "J55"
+      ],
+      "existing_port_ids": [],
+      "existing_port_use": {}
+    },
+    {
+      "id": "T14",
+      "title": "Complete native desktop and deliver installation, CLI and updates",
+      "milestone": "M7",
+      "depends_on": [
+        "T05",
+        "T08",
+        "T10",
+        "T11",
+        "T12",
+        "T13"
+      ],
+      "client_capability_ids": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17",
+        "C18",
+        "C19",
+        "C20",
+        "C21",
+        "C23",
+        "C24",
+        "C25",
+        "C26",
+        "C27",
+        "C28",
+        "C29",
+        "C30"
+      ],
+      "server_family_ids": [
+        "environment_lifecycle",
+        "authorization",
+        "settings_maintenance"
+      ],
+      "production_entrypoints": [
+        "apps/marketing",
+        "scripts/install.sh and scripts/install.ps1",
+        "apps/server/src/cli",
+        "apps/server/src/serviceLauncher.ts",
+        "apps/desktop/src/main.ts",
+        "apps/desktop/src/updates/updateMachine.ts",
+        "mobile package/store entrypoints",
+        "docs/user and docs/operations",
+        "apps/desktop complete native view/navigation/window integration"
+      ],
+      "delivered_outcome": "Deliver Rust-generated static discovery/download pages and progressive controls, signed platform packages, install/first-run, launcher/service ownership, complete CLI, remote-only desktop, SSH/WSL and safe update/uninstall. Preserve localized/help/legal/security links, package-manager ownership and existing state. Run update activation through T05 recovery primitives. The desktop integrator composes every accepted vertical route into one complete GPUI or Makepad desktop client, including windows/panes, navigation, commands, settings, shortcuts and focus. It owns cross-route state, lifecycle, accessibility and client parity on every desktop target. T01 interface proofs do not close whole-desktop integration.",
+      "mandatory_failure_cases": [
+        "Release API unavailable, incorrect OS/architecture route, signature/checksum failure, interrupted download/extract and unrelated existing t3 command.",
+        "Secure credential/catalog failure, expired callback, headless device flow, conflicting server owner and missing target runtime.",
+        "Piped stdin, JSON/token-only output on success/failure, --wait needs-input, NO_COLOR, TTY differences, signals and private SSH helper frames.",
+        "Switching between feature views, windows, settings and modal commands must preserve drafts, focus, selection, navigation and active environment identity."
+      ],
+      "acceptance_evidence": [
+        "Useful static content without app runtime, correct downloads and usable signed installation per target.",
+        "Launch-to-interactive composer/current workspace, CLI process/RPC latency and valid stdout/stderr/exit behavior.",
+        "Update-to-ready and recovered prior-version time, downtime, ownership-safe uninstall and retained credentials/state.",
+        "One complete native desktop client with cross-route parity on each desktop target, including native accessibility, shortcuts, window lifecycle and background resource behavior."
+      ],
+      "suggested_agent_ownership": [
+        "CLI/launcher/service, desktop packaging, mobile distribution and static site/docs can be separate assignments.",
+        "One release owner coordinates version/schema compatibility and activation.",
+        "One native-desktop integrator owns complete view composition and cross-route parity."
+      ],
+      "journey_ids": [
+        "J01",
+        "J02",
+        "J13",
+        "J14",
+        "J20",
+        "J24",
+        "J25",
+        "J26",
+        "J34",
+        "J35",
+        "J49",
+        "J56",
+        "J57",
+        "J58",
+        "J59"
+      ],
+      "existing_port_ids": [
+        "provider-maintenance"
+      ],
+      "existing_port_use": {
+        "provider-maintenance": "Reuse owned install/update verification and error behavior in the complete provider/launcher path."
+      }
+    },
+    {
+      "id": "T15",
+      "title": "Maintain aged state and preserve recovery and developer cache contracts",
+      "milestone": "M7",
+      "depends_on": [
+        "T04",
+        "T05",
+        "T08",
+        "T09",
+        "T10"
+      ],
+      "client_capability_ids": [
+        "C21",
+        "C24",
+        "C27",
+        "C29"
+      ],
+      "server_family_ids": [
+        "thread_read_stream",
+        "settings_maintenance",
+        "usage_observability"
+      ],
+      "production_entrypoints": [
+        "server.runStorageCleanup",
+        "server.getDatabaseStorage",
+        "server.reclaimDatabaseSpace",
+        "doctor/rebuild/backup/restore routes",
+        "infra/task-cache",
+        "infra/relay maintenance"
+      ],
+      "delivered_outcome": "Qualify sustained retention, compaction, index rebuild, storage cleanup, export/checkpoint and documented restore while foreground work continues. Preserve historical usage facts and pending effects. Port owned task-cache policy/publication/accounting logic while keeping D1/R2/provider contracts distinct from the environment store.",
+      "mandatory_failure_cases": [
+        "Days of churn, cache eviction, concurrent uploads/updates, low space, corrupt backup and read-only restore target.",
+        "Offline environment removal with drafts/outbox/uploads/incoming shares and partial cleanup failure.",
+        "Competing cache generations, quota exhaustion, interrupted upload/GC and duplicate telemetry receipt."
+      ],
+      "acceptance_evidence": [
+        "Foreground p95/p99, write amplification, disk growth/reclamation and bounded CPU/I/O duty in steady state.",
+        "Recovered IDs/references/authoritative data, ownership-scoped cleanup and documented progress/downtime.",
+        "Task output restore time, atomic ready-generation publication, policy/auth preservation and no duplicate savings accounting."
+      ],
+      "suggested_agent_ownership": [
+        "Store maintenance/recovery, environment cleanup and remote task-cache services can be separate assignments.",
+        "No owner may substitute a cache disposal rule for durable draft, permission or accounting state."
+      ],
+      "journey_ids": [
+        "J21",
+        "J27",
+        "J28",
+        "J29",
+        "J32"
+      ],
+      "existing_port_ids": [
+        "redb-persistence"
+      ],
+      "existing_port_use": {
+        "redb-persistence": "Reuse and reconcile the existing omdb integration, native repositories, transaction/session boundary, migration and activation behavior before replacing process/engine boundaries."
+      }
+    },
+    {
+      "id": "T16",
+      "title": "Qualify the complete product and retire only accepted scopes",
+      "milestone": "M8",
+      "depends_on": [
+        "T00",
+        "T01",
+        "T02",
+        "T03",
+        "T04",
+        "T05",
+        "T06",
+        "T07",
+        "T08",
+        "T09",
+        "T10",
+        "T11",
+        "T12",
+        "T13",
+        "T14",
+        "T15"
+      ],
+      "client_capability_ids": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "C05",
+        "C06",
+        "C07",
+        "C08",
+        "C09",
+        "C10",
+        "C11",
+        "C12",
+        "C13",
+        "C14",
+        "C15",
+        "C16",
+        "C17",
+        "C18",
+        "C19",
+        "C20",
+        "C21",
+        "C22",
+        "C23",
+        "C24",
+        "C25",
+        "C26",
+        "C27",
+        "C28",
+        "C29",
+        "C30"
+      ],
+      "server_family_ids": [
+        "environment_lifecycle",
+        "authorization",
+        "orchestration_commands",
+        "thread_read_stream",
+        "provider_runtime",
+        "approvals_questions",
+        "checkpoint_fork",
+        "delegation_workflows",
+        "thread_launch",
+        "projects_workspace",
+        "files_search_attachments",
+        "terminal",
+        "git_review",
+        "source_control",
+        "pull_requests",
+        "issues",
+        "mcp_tools",
+        "mcp_apps",
+        "schedules_webhooks",
+        "guest_share",
+        "peer_links",
+        "preview_browser",
+        "devices",
+        "speech",
+        "usage_observability",
+        "settings_maintenance",
+        "agent_import"
+      ],
+      "production_entrypoints": [
+        "normal installed desktop/browser/mobile/CLI entrypoints",
+        "existing generated CI plan and platform acceptance receipts",
+        "port-map.json source-retirement mapping"
+      ],
+      "delivered_outcome": "Run the complete Rust product against pinned stock upstream on all applicable journeys and targets. Complete cross-device working days, aged-state mixed load, recovery and compatibility. Update only canonical port records and their exact-source receipts. Retire upstream implementation only for demonstrated accepted platform scopes, retain its mapping, and continue generated upstream review.",
+      "mandatory_failure_cases": [
+        "Any unimplemented route, unsupported promised target, T3-owned non-Rust business logic, missing provider contract or unqualified update/recovery path blocks the corresponding completion claim.",
+        "Aggregate speedup cannot conceal a broken journey or material regression.",
+        "An API/component pass cannot establish UI, platform, whole-process memory safety or native Lust coverage."
+      ],
+      "acceptance_evidence": [
+        "Every applicable journey has output/failure equivalence, normal Rust execution proof and preregistered performance/resource results.",
+        "Exact successful CI and platform receipts, compatibility matrix, source/dependency inventory and attributable release evidence.",
+        "J33 and J60 aggregate results alongside all 58 component journeys, with uncertainty and absolute values."
+      ],
+      "suggested_agent_ownership": [
+        "One release integrator owns the product-wide evidence join and retirement decision.",
+        "Feature owners supply their scoped receipts; a separate review assignment checks missing scope and unsupported claims."
+      ],
+      "journey_ids": [
+        "J33",
+        "J55",
+        "J60"
+      ],
+      "required_journey_ids": [
+        "J01",
+        "J02",
+        "J03",
+        "J04",
+        "J05",
+        "J06",
+        "J07",
+        "J08",
+        "J09",
+        "J10",
+        "J11",
+        "J12",
+        "J13",
+        "J14",
+        "J15",
+        "J16",
+        "J17",
+        "J18",
+        "J19",
+        "J20",
+        "J21",
+        "J22",
+        "J23",
+        "J24",
+        "J25",
+        "J26",
+        "J27",
+        "J28",
+        "J29",
+        "J30",
+        "J31",
+        "J32",
+        "J33",
+        "J34",
+        "J35",
+        "J36",
+        "J37",
+        "J38",
+        "J39",
+        "J40",
+        "J41",
+        "J42",
+        "J43",
+        "J44",
+        "J45",
+        "J46",
+        "J47",
+        "J48",
+        "J49",
+        "J50",
+        "J51",
+        "J52",
+        "J53",
+        "J54",
+        "J55",
+        "J56",
+        "J57",
+        "J58",
+        "J59",
+        "J60"
+      ],
+      "existing_port_ids": [
+        "command-and-dispatch-policy",
+        "project-commands",
+        "guest-share-decisions",
+        "provider-recovery",
+        "provider-maintenance",
+        "codex-structured-generation",
+        "codex-process-runtime",
+        "redb-persistence",
+        "iroh-transport",
+        "native-api-component"
+      ],
+      "existing_port_use": {
+        "command-and-dispatch-policy": "Join exact-source and platform receipts before any canonical state transition or scoped retirement; retain the upstream mapping.",
+        "project-commands": "Join exact-source and platform receipts before any canonical state transition or scoped retirement; retain the upstream mapping.",
+        "guest-share-decisions": "Join exact-source and platform receipts before any canonical state transition or scoped retirement; retain the upstream mapping.",
+        "provider-recovery": "Join exact-source and platform receipts before any canonical state transition or scoped retirement; retain the upstream mapping.",
+        "provider-maintenance": "Join exact-source and platform receipts before any canonical state transition or scoped retirement; retain the upstream mapping.",
+        "codex-structured-generation": "Join exact-source and platform receipts before any canonical state transition or scoped retirement; retain the upstream mapping.",
+        "codex-process-runtime": "Join exact-source and platform receipts before any canonical state transition or scoped retirement; retain the upstream mapping.",
+        "redb-persistence": "Join exact-source and platform receipts before any canonical state transition or scoped retirement; retain the upstream mapping.",
+        "iroh-transport": "Join exact-source and platform receipts before any canonical state transition or scoped retirement; retain the upstream mapping.",
+        "native-api-component": "Join exact-source and platform receipts before any canonical state transition or scoped retirement; retain the upstream mapping."
+      }
+    }
+  ],
+  "dependency_semantics": "A dependency requires the named production contract and evidence for the current target/profile increment, not premature closure of the predecessor across all targets. Each package closes only when its own complete applicable scope passes. T16 requires all applicable package and journey scope.",
+  "release_gate_work_package_id": "T16",
+  "whole_client_integration_owners": {
+    "native_desktop": "T14",
+    "browser": "T11",
+    "ios_and_android": "T12"
+  },
+  "existing_port_mapping_basis": "https://github.com/glopyglerky/t3code-ls/blob/3577878a5e008c8af87a8fbdae13d26dea1c2f50/port-map.json",
+  "requirements_precedence": "The complete full-system architecture and acceptance plan control scope, implementation sequence and performance thresholds. Original journey rows, adverse conditions and behavioral requirements are preserved; historical appendix prescriptions do not override the full-system plan.",
+  "journey_requirements_file": "journeys.json"
+}

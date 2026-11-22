@@ -1,0 +1,1921 @@
+{
+  "repository": "pingdotgg/t3code",
+  "revision": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "comparison": "Pinned upstream only; historical CI comparator 2c4310eb is separate and was not used to infer current behavior.",
+  "source_method": "Immutable git object reads and pinned GitHub file retrieval. No checkout changes, builds, tests or database execution.",
+  "counts": {
+    "tracked_source_blobs": 1717,
+    "production_js_ts_files_scanned": 744,
+    "sql_candidate_files": 172,
+    "runtime_candidates": 54,
+    "migration_source_candidates": 118,
+    "lexical_ddl_occurrences": 314,
+    "named_runtime_effect_operations_lexical": 257,
+    "selected_semantic_runtime_files": 43,
+    "external_interoperability_runtime_files": 5,
+    "dependency_only_runtime_files": 6,
+    "runtime_sources_captured": 54
+  },
+  "runtime_files": [
+    {
+      "path": "apps/server/src/background/KeepAwake.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/background/KeepAwake.ts",
+      "git_blob_sha": "f9d2cf3da75322a87158c5d09d7f67659506d85d",
+      "sha256": "2ba4e2359a1c84ce9fd1378c920af0f6f2c0be08927210b1308063d0aaa6ab8b",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "shell_stream_activity"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 1,
+      "named_operations_lexical": []
+    },
+    {
+      "path": "apps/server/src/issue/linkedThreads.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/issue/linkedThreads.ts",
+      "git_blob_sha": "03c337996f08ad035a93904f07fe3a6a8afdf689",
+      "sha256": "7be800f3361b19f282100845435b5de61a95eddfc05582f0a2457b260b727b5e",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "issue_pr_relations"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 1,
+      "named_operations_lexical": [
+        {
+          "line": 15,
+          "name": "listLinkedIssueThreads"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/mcpApps/McpAppModelContext.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcpApps/McpAppModelContext.ts",
+      "git_blob_sha": "017e10ae3bf5bfd2e0c4937197a475c254d7e38d",
+      "sha256": "8bda5f76cd7ef79f3b87d6d83d01f8a3f81722b0f4337afc2ac7d43a84e33f51",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "mcp_model_context"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 3,
+      "named_operations_lexical": [
+        {
+          "line": 42,
+          "name": "McpAppModelContext.forProvider"
+        },
+        {
+          "line": 70,
+          "name": "McpAppModelContext.set"
+        },
+        {
+          "line": 92,
+          "name": "McpAppModelContext.forThread"
+        },
+        {
+          "line": 118,
+          "name": "McpAppModelContext.set"
+        },
+        {
+          "line": 121,
+          "name": "McpAppModelContext.forThread"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/EffectOutbox.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/EffectOutbox.ts",
+      "git_blob_sha": "b495293bc2228f5ee9052fbd382e435b03412d2f",
+      "sha256": "c9b164784d239f430c657f84f9dbcbc87ecc90645e922dbf0d3e1f69bb500446",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "effect_outbox"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 22,
+      "named_operations_lexical": [
+        {
+          "line": 412,
+          "name": "EffectOutbox.enqueue"
+        },
+        {
+          "line": 501,
+          "name": "EffectOutbox.cancelUnsettled"
+        },
+        {
+          "line": 522,
+          "name": "EffectOutbox.signalCancellations"
+        },
+        {
+          "line": 539,
+          "name": "EffectOutbox.awaitSettled"
+        },
+        {
+          "line": 662,
+          "name": "EffectOutbox.succeed"
+        },
+        {
+          "line": 692,
+          "name": "EffectOutbox.retry"
+        },
+        {
+          "line": 725,
+          "name": "EffectOutbox.fail"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/EventSink.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/EventSink.ts",
+      "git_blob_sha": "3f6744e576edd2060e7ab2e7562a8081719a8eaa",
+      "sha256": "c8630c5b02b861ac3ebe66ece21a5d7956d2b179257ecb19f01599379ea08d65",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "events_and_command_receipts"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 9,
+      "named_operations_lexical": [
+        {
+          "line": 488,
+          "name": "orchestrationV2.EventSink.write"
+        },
+        {
+          "line": 545,
+          "name": "orchestrationV2.EventSink.writeIfRunCurrent"
+        },
+        {
+          "line": 624,
+          "name": "orchestrationV2.EventSink.writeIfProviderThreadOwner"
+        },
+        {
+          "line": 712,
+          "name": "orchestrationV2.EventSink.writeIfProviderThreadUnchanged"
+        },
+        {
+          "line": 732,
+          "name": "orchestrationV2.EventSink.writeIfTurnItemUnchanged"
+        },
+        {
+          "line": 752,
+          "name": "orchestrationV2.EventSink.writeIfSubagentUnchanged"
+        },
+        {
+          "line": 788,
+          "name": "orchestrationV2.EventSink.commitCommand"
+        },
+        {
+          "line": 899,
+          "name": "orchestrationV2.EventSink.commitRejectedCommand"
+        },
+        {
+          "line": 935,
+          "name": "orchestrationV2.EventSink.commitProjectCommand"
+        },
+        {
+          "line": 965,
+          "name": "orchestrationV2.EventSink.commitRejectedProjectCommand"
+        },
+        {
+          "line": 1089,
+          "name": "orchestrationV2.EventSink.providerBatch"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/EventStore.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/EventStore.ts",
+      "git_blob_sha": "e2125508dee8f62322c2cba50fa7e08a400d9171",
+      "sha256": "906d0d513b54ff400682cd20890fb8c12182637470854ce8ce488945c0421ac0",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "dependency_classification",
+      "families": [
+        "events_and_command_receipts"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": [
+        {
+          "line": 110,
+          "name": "EventStoreV2.append"
+        },
+        {
+          "line": 121,
+          "name": "EventStoreV2.appendProjectEvent"
+        },
+        {
+          "line": 133,
+          "name": "EventStoreV2.latestSequence"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProjectStore.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProjectStore.ts",
+      "git_blob_sha": "ee83411213a26b38d2b81f5573b55b3e039053cf",
+      "sha256": "0bc56dfdbe113e0bda2ac0c177fd0d314b5b7199060a9541d997f8b782ef1a43",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "projects"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 5,
+      "named_operations_lexical": [
+        {
+          "line": 246,
+          "name": "ProjectStoreV2.apply"
+        },
+        {
+          "line": 307,
+          "name": "ProjectStoreV2.getShell"
+        },
+        {
+          "line": 310,
+          "name": "ProjectStoreV2.listShells"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProjectionMaintenance.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProjectionMaintenance.ts",
+      "git_blob_sha": "210322aed686f3d47a696ffaf427d8b5b67f52c7",
+      "sha256": "ab3a6d8547167e767c08f0c72f734d5bf4a49868205f78a961feedd0c03c53bd",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "retention_reclaim_cleanup"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 14,
+      "named_operations_lexical": [
+        {
+          "line": 257,
+          "name": "ProjectionMaintenance.pruneEventStore"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProjectionStore.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProjectionStore.ts",
+      "git_blob_sha": "e930fa67e3836ff414a3facc14b9e6072e7f2c47",
+      "sha256": "ed8480a4b09956ed40622d3f2d3fd4d91c9859301844c7a375d36e6dfd95b19b",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "entity_projections",
+        "history_order_and_find"
+      ],
+      "review_note": "Substantive selected review of projection reads/writes, window/local/full history, visibility and ancestry, shell/background/counts and current residual scans; 9910 lines not exhaustively audited branch by branch.",
+      "sql_tags_lexical": 406,
+      "named_operations_lexical": [
+        {
+          "line": 3403,
+          "name": "ProjectionStore.retainedWindowRows"
+        },
+        {
+          "line": 3794,
+          "name": "ProjectionStore.runIdsSinceLastCompaction"
+        },
+        {
+          "line": 3841,
+          "name": "ProjectionStore.commandTurnItems"
+        },
+        {
+          "line": 3893,
+          "name": "ProjectionStore.readCanonicalProjection"
+        },
+        {
+          "line": 4767,
+          "name": "ProjectionStore.readProjection"
+        },
+        {
+          "line": 4954,
+          "name": "ProjectionStore.getLimitRecoveryCandidates"
+        },
+        {
+          "line": 5085,
+          "name": "ProjectionStore.getLimitRecoveryWakeAt"
+        },
+        {
+          "line": 5113,
+          "name": "ProjectionStore.getRecoveryThreadIds"
+        },
+        {
+          "line": 5323,
+          "name": "ProjectionStore.getUnreadableThreadIds"
+        },
+        {
+          "line": 5602,
+          "name": "ProjectionStore.getTurnStartHistory"
+        },
+        {
+          "line": 5632,
+          "name": "ProjectionStore.getRuntimeRecoveryProjection"
+        },
+        {
+          "line": 5987,
+          "name": "ProjectionStore.getThread"
+        },
+        {
+          "line": 5995,
+          "name": "ProjectionStore.findThread"
+        },
+        {
+          "line": 5999,
+          "name": "ProjectionStore.requireThread"
+        },
+        {
+          "line": 6067,
+          "name": "ProjectionStore.hasUnpairedRunInterruptRequest"
+        },
+        {
+          "line": 6084,
+          "name": "ProjectionStore.hasRunInterruptRequest"
+        },
+        {
+          "line": 6100,
+          "name": "ProjectionStore.isNodeStored"
+        },
+        {
+          "line": 6775,
+          "name": "ProjectionStore.hasPendingDelegatedCompletion"
+        },
+        {
+          "line": 6851,
+          "name": "ProjectionStore.runAttachmentIds"
+        },
+        {
+          "line": 6900,
+          "name": "ProjectionStore.unshownRunAttachmentIds"
+        },
+        {
+          "line": 6912,
+          "name": "ProjectionStore.getThreadAttachmentIds"
+        },
+        {
+          "line": 6974,
+          "name": "ProjectionStore.getMessagesById"
+        },
+        {
+          "line": 7007,
+          "name": "ProjectionStore.getRunProviderRecords"
+        },
+        {
+          "line": 7039,
+          "name": "ProjectionStore.getRunCardRecords"
+        },
+        {
+          "line": 7084,
+          "name": "ProjectionStore.readTimelineIndex"
+        },
+        {
+          "line": 7226,
+          "name": "ProjectionStore.readSnapshotTimelineIndex"
+        },
+        {
+          "line": 7256,
+          "name": "ProjectionStore.readTimelineWindow"
+        },
+        {
+          "line": 7329,
+          "name": "ProjectionStore.openLocalTimeline"
+        },
+        {
+          "line": 7433,
+          "name": "ProjectionStore.countVisibleTimelineRows"
+        },
+        {
+          "line": 7496,
+          "name": "ProjectionStore.runsStartedBefore"
+        },
+        {
+          "line": 7543,
+          "name": "ProjectionStore.selectHistoryPageInWindow"
+        },
+        {
+          "line": 7874,
+          "name": "ProjectionStore.materializeHistoryRows"
+        },
+        {
+          "line": 7969,
+          "name": "ProjectionStore.matchLocalTimelineRows"
+        },
+        {
+          "line": 8041,
+          "name": "ProjectionStore.readLocalTimelinePage"
+        },
+        {
+          "line": 8772,
+          "name": "ProjectionStore.pendingBackgroundDataByThreadId"
+        },
+        {
+          "line": 8982,
+          "name": "ProjectionStore.getThreadsWithPullRequests"
+        },
+        {
+          "line": 9220,
+          "name": "ProjectionStore.readShellSnapshotRows"
+        },
+        {
+          "line": 9300,
+          "name": "ProjectionStore.decodeShellSnapshot"
+        },
+        {
+          "line": 9355,
+          "name": "ProjectionStore.getPullRequestSnapshot"
+        },
+        {
+          "line": 9390,
+          "name": "ProjectionStore.getAgentAwarenessSnapshot"
+        },
+        {
+          "line": 9468,
+          "name": "ProjectionStore.listActiveSubagentThreadIds"
+        },
+        {
+          "line": 9482,
+          "name": "ProjectionStore.countThreads"
+        },
+        {
+          "line": 9499,
+          "name": "ProjectionStore.listActiveShellIndex"
+        },
+        {
+          "line": 9596,
+          "name": "ProjectionStore.listActiveThreads"
+        },
+        {
+          "line": 9658,
+          "name": "ProjectionStore.getThreadLinkMetadata"
+        },
+        {
+          "line": 9676,
+          "name": "ProjectionStore.getThreadTitles"
+        },
+        {
+          "line": 9688,
+          "name": "ProjectionStore.findGuestShareThreadId"
+        },
+        {
+          "line": 9700,
+          "name": "ProjectionStore.listOlderSettledThreads"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ShellStream.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ShellStream.ts",
+      "git_blob_sha": "5ee1005b16830aa1704672a18143f133816edbbb",
+      "sha256": "c4be902334a69b3216ed4aeb690e55eda38bf83f87cca9530a83fad8f8ed852a",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "shell_stream_activity"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": [
+        {
+          "line": 413,
+          "name": "ShellStream.loadSubscriberShellSnapshot"
+        },
+        {
+          "line": 458,
+          "name": "ShellStream.loadShellSnapshotParts"
+        },
+        {
+          "line": 486,
+          "name": "ShellStream.loadOlderSettledThreadsPage"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadFind.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadFind.ts",
+      "git_blob_sha": "b2370dc83b23dc57143623cac2598199586ae7c0",
+      "sha256": "3259b0fccf4778170d771d02c6aeba8cf5db9e67fa066c7f857ba3cd9d5f1dc8",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "history_order_and_find"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 3,
+      "named_operations_lexical": [
+        {
+          "line": 198,
+          "name": "makeThreadFind"
+        },
+        {
+          "line": 226,
+          "name": "ThreadFind.load"
+        },
+        {
+          "line": 289,
+          "name": "ThreadFind.readRevision"
+        },
+        {
+          "line": 311,
+          "name": "ThreadFind.snapshot"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadIssueService.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadIssueService.ts",
+      "git_blob_sha": "99e69ab610a4730c41fd327a887582e07dd3e733",
+      "sha256": "40e0fb2980ee053f141077c5bb8a28b50701123a9b47d01ebdf657e6e775db7e",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "dependency_classification",
+      "families": [
+        "issue_pr_relations"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": [
+        {
+          "line": 78,
+          "name": "ThreadIssueService.link"
+        },
+        {
+          "line": 99,
+          "name": "ThreadIssueService.unlink"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadSearch.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadSearch.ts",
+      "git_blob_sha": "3ad48b26f172d3f680f7ba106047e2d21324ec00",
+      "sha256": "b9b813e5b2abd82229207d6a09282363637e3258059700714d759c964085c7f0",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "global_message_search"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 9,
+      "named_operations_lexical": [
+        {
+          "line": 502,
+          "name": "ThreadSearch.search"
+        },
+        {
+          "line": 606,
+          "name": "ThreadSearch.searchThreads"
+        },
+        {
+          "line": 668,
+          "name": "ThreadSearch.searchOlderSettled"
+        },
+        {
+          "line": 726,
+          "name": "ThreadSearch.searchThreadsWithOlderSettledRows"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/TurnItemPositionStore.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/TurnItemPositionStore.ts",
+      "git_blob_sha": "fb6a026f9287a70a782a79de15415e85af0f7002",
+      "sha256": "0283efd61af2b8467cc95490108c9334939efb7dea54c27cc01cf706d0c69bd6",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "history_order_and_find"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 7,
+      "named_operations_lexical": []
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/UserFacingErrors.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/UserFacingErrors.ts",
+      "git_blob_sha": "7d47dffd1a7623c9e115dd920756d0052a7fc73f",
+      "sha256": "6df1a8e05593bf91a3f519bbe9973c7e6306d82e0330fae37ba2fc468c75677c",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "dependency_classification",
+      "families": [
+        "routing_and_errors"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": []
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/http.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/http.ts",
+      "git_blob_sha": "b58ce1b14311964d86003d079295888beb6a7d4a",
+      "sha256": "65c01569653d23d1f1ff710a24785afc281130c3d228390acdc1f4a5bfa9c819",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "dependency_classification",
+      "families": [
+        "routing_and_errors"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": [
+        {
+          "line": 67,
+          "name": "http.orchestration.enrichProjectShells"
+        },
+        {
+          "line": 83,
+          "name": "http.orchestration.loadShellSnapshot"
+        },
+        {
+          "line": 106,
+          "name": "http.orchestration.answerShellSnapshot"
+        },
+        {
+          "line": 122,
+          "name": "http.orchestration.loadThreadSnapshot"
+        },
+        {
+          "line": 145,
+          "name": "http.orchestration.loadThreadSnapshotWindow"
+        },
+        {
+          "line": 187,
+          "name": "environment.orchestration.shellSnapshot"
+        },
+        {
+          "line": 200,
+          "name": "environment.orchestration.threadSnapshot"
+        },
+        {
+          "line": 215,
+          "name": "environment.orchestration.threadTranscript"
+        },
+        {
+          "line": 240,
+          "name": "environment.orchestration.threadBoundedSnapshot"
+        },
+        {
+          "line": 266,
+          "name": "environment.orchestration.threadHistoryPage"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/legacy/LegacyV1ThreadImporter.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/legacy/LegacyV1ThreadImporter.ts",
+      "git_blob_sha": "ede38bdd396854ae511bee07f592ce928d7744e2",
+      "sha256": "07f07984efa9be16f198acf9660832a657af28a27a68040ebe72cb242b71f89c",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "migrations_and_legacy"
+      ],
+      "review_note": "Selected lazy import lifecycle and ordering/locking/markers; every legacy field transformation not audited.",
+      "sql_tags_lexical": 14,
+      "named_operations_lexical": [
+        {
+          "line": 372,
+          "name": "LegacyV1ThreadImporter.listShellMessages"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/messageSearchIndex.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/messageSearchIndex.ts",
+      "git_blob_sha": "0855d01171f3fe27f9f5e08628e0643fffba280e",
+      "sha256": "a967746058b3a7a7a147b08197b8b8f66dabec44a0f847d2cbc269318a2a7a06",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "global_message_search"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 12,
+      "named_operations_lexical": [
+        {
+          "line": 89,
+          "name": "MessageSearchIndex.indexedText"
+        },
+        {
+          "line": 101,
+          "name": "MessageSearchIndex.createTriggers"
+        },
+        {
+          "line": 149,
+          "name": "MessageSearchIndex.recreateTriggers"
+        },
+        {
+          "line": 168,
+          "name": "MessageSearchIndex.rebuild"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/peer/PeerLinks.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/peer/PeerLinks.ts",
+      "git_blob_sha": "859266c469c70e78c5e7c77b6bd53825274e0b8f",
+      "sha256": "97711b92f7218db90384961981cc0e5f230a4b406b30440335b1f060563fdd77",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "peer_links"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 8,
+      "named_operations_lexical": [
+        {
+          "line": 294,
+          "name": "PeerLinks.answersAs"
+        },
+        {
+          "line": 302,
+          "name": "PeerLinks.toLink"
+        },
+        {
+          "line": 331,
+          "name": "PeerLinks.signIn"
+        },
+        {
+          "line": 454,
+          "name": "PeerLinks.answeringAs"
+        },
+        {
+          "line": 504,
+          "name": "PeerLinks.answeringAt"
+        },
+        {
+          "line": 510,
+          "name": "PeerLinks.link"
+        },
+        {
+          "line": 626,
+          "name": "PeerLinks.statusOf"
+        },
+        {
+          "line": 671,
+          "name": "PeerLinks.revokeAtPeer"
+        },
+        {
+          "line": 699,
+          "name": "PeerLinks.unlink"
+        },
+        {
+          "line": 730,
+          "name": "PeerLinks.resolve"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/AuthConnectDevices.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/AuthConnectDevices.ts",
+      "git_blob_sha": "52ec1039f018c76e4ed2808a9ee72826fd257400",
+      "sha256": "bc56a511c3151fba20111f1ac51fbe301f7ed34aeceeae604d966e0b24ea115d",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "authentication"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 5,
+      "named_operations_lexical": []
+    },
+    {
+      "path": "apps/server/src/persistence/AuthPairingLinks.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/AuthPairingLinks.ts",
+      "git_blob_sha": "0af5c28f7359dca218e4e1899e0203fc78b0ee01",
+      "sha256": "a313744bbaa15a43b18b73e16472c27c9a485865ed2673acfb175e4482b48621",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "authentication"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 10,
+      "named_operations_lexical": []
+    },
+    {
+      "path": "apps/server/src/persistence/AuthSessions.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/AuthSessions.ts",
+      "git_blob_sha": "921f99f3bab774a012eaacf8c1d7d992177857dd",
+      "sha256": "4a3ead7b4f3717480443f5a59b902a3e6983c90b33062a10ca417742c7272637",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "authentication"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 14,
+      "named_operations_lexical": []
+    },
+    {
+      "path": "apps/server/src/persistence/DatabaseMaintenance.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/DatabaseMaintenance.ts",
+      "git_blob_sha": "bdb1c459f6e94f63369ecff477674750bd71adfb",
+      "sha256": "a1bb3e42f3fb3f799e62ff87958b23d2299ecdac468a444238089418499797fb",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "retention_reclaim_cleanup"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 13,
+      "named_operations_lexical": [
+        {
+          "line": 157,
+          "name": "DatabaseMaintenance.lockExclusively"
+        },
+        {
+          "line": 179,
+          "name": "DatabaseMaintenance.locate"
+        },
+        {
+          "line": 185,
+          "name": "DatabaseMaintenance.readLegacyOnlyRecords"
+        },
+        {
+          "line": 208,
+          "name": "DatabaseMaintenance.inspect"
+        },
+        {
+          "line": 235,
+          "name": "DatabaseMaintenance.compact"
+        },
+        {
+          "line": 280,
+          "name": "DatabaseMaintenance.removeLegacyDatabase"
+        },
+        {
+          "line": 330,
+          "name": "DatabaseMaintenance.runRequestedReclaim"
+        },
+        {
+          "line": 400,
+          "name": "DatabaseMaintenance.reclaimSpaceShortfall"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/DatabaseStorage.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/DatabaseStorage.ts",
+      "git_blob_sha": "9df5bf7ede03b4fae68601644109dff682e14eec",
+      "sha256": "3ce076825deb2da41eae504795a9b03bc523d2e36dcd588e9526251e602b64aa",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "sqlite_runtime",
+        "retention_reclaim_cleanup"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 6,
+      "named_operations_lexical": []
+    },
+    {
+      "path": "apps/server/src/persistence/IssueTrackerBindings.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/IssueTrackerBindings.ts",
+      "git_blob_sha": "2f665b487e03f1f513bd239aa796891db344f6b9",
+      "sha256": "e580d87ecdf7ba4509a11054d4f927b0a303c644144bc9edbf7f51d53160b9ee",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "issue_pr_relations"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 5,
+      "named_operations_lexical": [
+        {
+          "line": 74,
+          "name": "IssueTrackerBindingsRepository.list"
+        },
+        {
+          "line": 91,
+          "name": "IssueTrackerBindingsRepository.set"
+        },
+        {
+          "line": 113,
+          "name": "IssueTrackerBindingsRepository.removeTracker"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations.ts",
+      "git_blob_sha": "2b767af21f52f1e76aea36e93374e2de94c37af3",
+      "sha256": "6ea8243030d51fbdd0505f74519da41a15139eca5bfe387e5ea6da4eaa712331",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "migrations_and_legacy"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 7,
+      "named_operations_lexical": [
+        {
+          "line": 262,
+          "name": "assertV2MigrationsCanRun"
+        },
+        {
+          "line": 289,
+          "name": "hasPendingMigrations"
+        },
+        {
+          "line": 311,
+          "name": "runMigrations"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/OrchestrationCommandReceipts.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/OrchestrationCommandReceipts.ts",
+      "git_blob_sha": "4a39061a00cb0e7ab1c10864fb400fc6795dbc48",
+      "sha256": "83261764b37f392a1753511e358c970558e1a8339806ab08a7ef88dc34805bd4",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "events_and_command_receipts"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 3,
+      "named_operations_lexical": []
+    },
+    {
+      "path": "apps/server/src/persistence/OrchestrationEventStore.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/OrchestrationEventStore.ts",
+      "git_blob_sha": "e55d82713871bce675d605da926da0514879b422",
+      "sha256": "b15136eef3d213365579ec6815a8dab5a802f5b6ea5accb3bad0942c9806f7f2",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "events_and_command_receipts"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 25,
+      "named_operations_lexical": [
+        {
+          "line": 199,
+          "name": "OrchestrationEventStore.rowToV2StoredEvent"
+        },
+        {
+          "line": 227,
+          "name": "OrchestrationEventStore.rowToProjectEvent"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/ProviderSessionRuntime.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/ProviderSessionRuntime.ts",
+      "git_blob_sha": "e3395b74884a1434520f59c06c28d37a4b214fb0",
+      "sha256": "749921f358c0df4ba94df2de6dedc2a64091d79e9fa4d460633554ea2e1a0e69",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "provider_runtime_and_usage"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 8,
+      "named_operations_lexical": []
+    },
+    {
+      "path": "apps/server/src/persistence/PullRequestFilesViewed.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/PullRequestFilesViewed.ts",
+      "git_blob_sha": "476643c1f0b367a907d3bfdd351808c8ba22987d",
+      "sha256": "072b609b44eeeadf8c6678adf0cd48f55189cbce8f4993da666b842e16685656",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "issue_pr_relations"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 3,
+      "named_operations_lexical": [
+        {
+          "line": 87,
+          "name": "PullRequestFilesViewedRepository.list"
+        },
+        {
+          "line": 98,
+          "name": "PullRequestFilesViewedRepository.set"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/PullRequestReviewGuides.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/PullRequestReviewGuides.ts",
+      "git_blob_sha": "0a12b3f6f74a71a8d47e8664fde3985d26a0021d",
+      "sha256": "2c4d1a1a4934f7b102d38d77a6dc6e3cbea5dfe3360c009401e3fe06b2dac147",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "issue_pr_relations"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 2,
+      "named_operations_lexical": [
+        {
+          "line": 54,
+          "name": "PullRequestReviewGuideRepository.get"
+        },
+        {
+          "line": 65,
+          "name": "PullRequestReviewGuideRepository.put"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Sqlite.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Sqlite.ts",
+      "git_blob_sha": "d9506e31154fec2d3b3dfaa3290928cd59a1ec4d",
+      "sha256": "8772ac9012a80f7d50295251683547818ae68d7cbd2881f65101f1cfe7c94f8a",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "sqlite_runtime"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 11,
+      "named_operations_lexical": [
+        {
+          "line": 54,
+          "name": "SqlitePersistence.runMigrationsAsOwner"
+        },
+        {
+          "line": 104,
+          "name": "makeSqlitePersistenceLive"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/databaseMigrationHead.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/databaseMigrationHead.ts",
+      "git_blob_sha": "046039a703410f6d124eed43de82d6c0553a32a1",
+      "sha256": "5cc060d8857c1ab77216c0eaed4c4ea62d9242f367dd3f3b2b5fe30c29330187",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "migrations_and_legacy"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": []
+    },
+    {
+      "path": "apps/server/src/persistence/initializeV2Database.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/initializeV2Database.ts",
+      "git_blob_sha": "1a9f4bac55543a351b14336e566aae9c4956c0ba",
+      "sha256": "e559cefb4b80b8fb268e6fac886f43afd2f02f26d83c9b6f24e46ded1003eb9f",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "migrations_and_legacy"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": [
+        {
+          "line": 44,
+          "name": "removeAbandonedCopies"
+        },
+        {
+          "line": 61,
+          "name": "initializeV2Database"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/reconcileV2PreviewMigration.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/reconcileV2PreviewMigration.ts",
+      "git_blob_sha": "d57da24639bcbbf06604868d39d867bb157dc1c0",
+      "sha256": "5b5902289db76836921a2353c96d53781e3ed1d512bc908cb6821117714f92f1",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "migrations_and_legacy"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 6,
+      "named_operations_lexical": [
+        {
+          "line": 45,
+          "name": "reconcileV2PreviewMigration"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/project/AgentSessionScanner.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/project/AgentSessionScanner.ts",
+      "git_blob_sha": "9bd4b5cebd2763be4a915d414207ef9b2f17e6de",
+      "sha256": "81afdd1a1048ac0bf2880fda39cd239712480d1480bf96f21964f2bee82102f8",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "external_interoperability_semantic_review",
+      "families": [
+        "external_provider_sqlite"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": [
+        {
+          "line": 955,
+          "name": "AgentSessionScanner.transcriptChunkReader"
+        },
+        {
+          "line": 982,
+          "name": "AgentSessionScanner.directoryIdentity"
+        },
+        {
+          "line": 998,
+          "name": "AgentSessionScanner.projectDirectoryStats"
+        },
+        {
+          "line": 1017,
+          "name": "AgentSessionScanner.readGitFiles"
+        },
+        {
+          "line": 1059,
+          "name": "AgentSessionScanner.readGitIdentities"
+        },
+        {
+          "line": 1146,
+          "name": "AgentSessionScanner.resolveDirectoryProjects"
+        },
+        {
+          "line": 1200,
+          "name": "AgentSessionScanner.readCwd"
+        },
+        {
+          "line": 1287,
+          "name": "AgentSessionScanner.readTranscript"
+        },
+        {
+          "line": 1422,
+          "name": "AgentSessionScanner.readCodexThreadNames"
+        },
+        {
+          "line": 1457,
+          "name": "AgentSessionScanner.discoverClaudeTranscripts"
+        },
+        {
+          "line": 1538,
+          "name": "AgentSessionScanner.readCodexProjectRoots"
+        },
+        {
+          "line": 1579,
+          "name": "AgentSessionScanner.discoverCodexTranscripts"
+        },
+        {
+          "line": 1659,
+          "name": "AgentSessionScanner.discoverPiTranscripts"
+        },
+        {
+          "line": 1712,
+          "name": "AgentSessionScanner.groupTranscriptsByCwd"
+        },
+        {
+          "line": 1774,
+          "name": "AgentSessionScanner.collectCandidates"
+        },
+        {
+          "line": 2049,
+          "name": "AgentSessionScanner.prepareRecentThreads"
+        },
+        {
+          "line": 2072,
+          "name": "AgentSessionScanner.belongsToRoot"
+        },
+        {
+          "line": 2083,
+          "name": "AgentSessionScanner.rootWorktree"
+        },
+        {
+          "line": 2166,
+          "name": "AgentSessionScanner.readCodexHistoryBase"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/provider/AcpRegistrySessions.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/AcpRegistrySessions.ts",
+      "git_blob_sha": "e0b46e08ea99337d452e08dc4a2d16e46d40ec8b",
+      "sha256": "4ff142fd7fae1f51cdbb39c92b2f3292b0d2b3a23e1881eecf0539918ec273ba",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "provider_runtime_and_usage"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 1,
+      "named_operations_lexical": [
+        {
+          "line": 79,
+          "name": "AcpRegistrySessions.findOwner"
+        },
+        {
+          "line": 107,
+          "name": "AcpRegistrySessions.project"
+        },
+        {
+          "line": 128,
+          "name": "AcpRegistrySessions.sessionManager"
+        },
+        {
+          "line": 147,
+          "name": "AcpRegistrySessions.importSession"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/antigravityUsageReader.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/Drivers/antigravityUsageReader.ts",
+      "git_blob_sha": "5dff65928ad24c630f27980c798d8a718b431710",
+      "sha256": "f3a1cac3e42b8d82b6024ec544700df5394e8e46b4ff864e50402c3efd4b80b2",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "external_interoperability_semantic_review",
+      "families": [
+        "external_provider_sqlite"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": [
+        {
+          "line": 246,
+          "name": "readDatabase"
+        },
+        {
+          "line": 417,
+          "name": "readAntigravityUsage"
+        },
+        {
+          "line": 498,
+          "name": "readAntigravityUsage.readFile"
+        },
+        {
+          "line": 520,
+          "name": "antigravityUsageReader.walk"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/provider/ProviderInstanceRegistryHydration.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/ProviderInstanceRegistryHydration.ts",
+      "git_blob_sha": "1e882e3796c35ec3c2c8125d9e472e72214d75bb",
+      "sha256": "2dd5c2b3644de8b80d8a4ca59dceb48e22513344f9b819177c5a53bc8dab8402",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "dependency_classification",
+      "families": [
+        "provider_runtime_and_usage"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": [
+        {
+          "line": 95,
+          "name": "ProviderInstanceRegistryHydration.seedDevReplayInstance"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/provider/ProviderOrchestrationAdapterInfrastructure.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/ProviderOrchestrationAdapterInfrastructure.ts",
+      "git_blob_sha": "ffb25e7daa0dc2bbd2370b27dca711bd76a797ce",
+      "sha256": "2bc08264c63c86afacb283bf17cddd37a6dd69abfd4ed3070ad1cdba38dbe04e",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "provider_runtime_and_usage"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 1,
+      "named_operations_lexical": []
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravityChildWork.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/acp/AntigravityChildWork.ts",
+      "git_blob_sha": "aa0932cf0f41a1659839999fa3b675be82466cc2",
+      "sha256": "e9e0a0e5ae96cde74af244ab1183ee987caa74138dd4cc84012ad24212be59ec",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "external_interoperability_semantic_review",
+      "families": [
+        "external_provider_sqlite"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": [
+        {
+          "line": 437,
+          "name": "readAntigravityChildWork"
+        },
+        {
+          "line": 757,
+          "name": "readAntigravityPendingReply"
+        },
+        {
+          "line": 785,
+          "name": "readAntigravityChildrenAtWork"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravitySessionFiles.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/acp/AntigravitySessionFiles.ts",
+      "git_blob_sha": "f59d785754d44d779bcdc5dab5926ae24061b112",
+      "sha256": "f48187b50c99cb3aed4e6c90af453d63703163403bb135e1acbe012d546941a1",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "external_interoperability_semantic_review",
+      "families": [
+        "external_provider_sqlite"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": [
+        {
+          "line": 118,
+          "name": "removeAntigravitySessionFiles"
+        },
+        {
+          "line": 178,
+          "name": "retireAntigravityRuntimeTempDirs"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravityTurnOutcome.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/acp/AntigravityTurnOutcome.ts",
+      "git_blob_sha": "32eee40f008aeca495927a12a09b74c4c1e650a6",
+      "sha256": "56933e51a651d6a1a21d716d5b0d3a840007c9eb2f58980db1941c7f2cb57601",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "external_interoperability_semantic_review",
+      "families": [
+        "external_provider_sqlite"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": [
+        {
+          "line": 204,
+          "name": "AntigravityTurnOutcome.watch"
+        },
+        {
+          "line": 246,
+          "name": "AntigravityTurnOutcome.check"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/pullRequest/linkedThreads.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/pullRequest/linkedThreads.ts",
+      "git_blob_sha": "787a85ebdb3e2bcdfae2d9e5f2a92451618c21db",
+      "sha256": "91e0c339efa10027752d285ae44f3cff1f5924f086d4d0e5be68ce812523e36d",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "issue_pr_relations"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 1,
+      "named_operations_lexical": [
+        {
+          "line": 24,
+          "name": "listLinkedPullRequestThreads"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/scheduledTasks/ScheduledTaskService.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/scheduledTasks/ScheduledTaskService.ts",
+      "git_blob_sha": "3db6f783f649a6942a37ce027b43fba43585eb72",
+      "sha256": "1ad19ddc4b39b5fec8cd3758705898d554b7f50916efd53afd35bc8b5dd65994",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "scheduled_tasks_and_webhooks"
+      ],
+      "review_note": "Substantive selected review of CRUD, generation/token/run-state concurrency, due/dispatch/recovery, webhook coalescence/dedupe/diagnostics; not every timer/network branch audited.",
+      "sql_tags_lexical": 48,
+      "named_operations_lexical": [
+        {
+          "line": 449,
+          "name": "ScheduledTaskService.listDueTasks"
+        },
+        {
+          "line": 566,
+          "name": "ScheduledTaskService.listRows"
+        },
+        {
+          "line": 606,
+          "name": "ScheduledTaskService.findTask"
+        },
+        {
+          "line": 634,
+          "name": "ScheduledTaskService.loadTask"
+        },
+        {
+          "line": 825,
+          "name": "ScheduledTaskService.releaseStuckRun"
+        },
+        {
+          "line": 863,
+          "name": "ScheduledTaskService.queuedOccurrence"
+        },
+        {
+          "line": 890,
+          "name": "ScheduledTaskService.bindThread"
+        },
+        {
+          "line": 910,
+          "name": "ScheduledTaskService.recordRunOutcome"
+        },
+        {
+          "line": 971,
+          "name": "ScheduledTaskService.runTask"
+        },
+        {
+          "line": 1269,
+          "name": "ScheduledTaskService.rescheduleMissedRun"
+        },
+        {
+          "line": 1309,
+          "name": "ScheduledTaskService.runDueTasks"
+        },
+        {
+          "line": 1436,
+          "name": "ScheduledTaskService.requireDestinationThread"
+        },
+        {
+          "line": 1460,
+          "name": "ScheduledTaskService.upsert"
+        },
+        {
+          "line": 1631,
+          "name": "ScheduledTaskService.setEnabled"
+        },
+        {
+          "line": 1719,
+          "name": "ScheduledTaskService.deleteForThread"
+        },
+        {
+          "line": 1747,
+          "name": "ScheduledTaskService.moveThreadTasks"
+        },
+        {
+          "line": 1763,
+          "name": "ScheduledTaskService.runNow"
+        },
+        {
+          "line": 1781,
+          "name": "ScheduledTaskService.rotateWebhookToken"
+        },
+        {
+          "line": 1847,
+          "name": "ScheduledTaskService.getWebhookDelivery"
+        },
+        {
+          "line": 2052,
+          "name": "ScheduledTaskService.webhookPermit"
+        },
+        {
+          "line": 2066,
+          "name": "ScheduledTaskService.releaseFailedDelivery"
+        },
+        {
+          "line": 2081,
+          "name": "ScheduledTaskService.runWebhookDelivery"
+        },
+        {
+          "line": 2571,
+          "name": "ScheduledTaskService.dispatchPendingWebhooks"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/scheduledTasks/webhookDedupe.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/scheduledTasks/webhookDedupe.ts",
+      "git_blob_sha": "76f04a97e6dfe1deb397e7f3bc83cdba52c57f0f",
+      "sha256": "8266f1e4e43ab75a4dc153bce3f95827c678f03c22a18db7fbc46528900c932f",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "scheduled_tasks_and_webhooks"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 8,
+      "named_operations_lexical": [
+        {
+          "line": 17,
+          "name": "ScheduledTaskService.releaseWebhookReplay"
+        },
+        {
+          "line": 45,
+          "name": "ScheduledTaskService.acceptWebhookDedupe"
+        },
+        {
+          "line": 94,
+          "name": "ScheduledTaskService.acceptImmediateWebhookDedupe"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/serverOwnership.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/serverOwnership.ts",
+      "git_blob_sha": "20bb46a45e66e6a26efa52410c97e84d5217a843",
+      "sha256": "00c1209871dddc4b71a0a025a13eece54893b32edb82d92b194ad73e007d95e3",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "ownership_backup_and_launch"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": [
+        {
+          "line": 81,
+          "name": "legacyOwnerIsLive"
+        },
+        {
+          "line": 105,
+          "name": "olderBootServiceHome"
+        },
+        {
+          "line": 228,
+          "name": "holdServerOwnershipLock"
+        },
+        {
+          "line": 237,
+          "name": "acquireServerOwnership"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/serverSettings.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/serverSettings.ts",
+      "git_blob_sha": "d4ddfd8b5c0c1de4c99533c0796d39d7cd76f0a6",
+      "sha256": "717d69b1c9d5265f3d167b22757409878c36d3281eefeec367f5e3f3b6c41b45",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "settings"
+      ],
+      "review_note": "Storage-boundary and SQL migration-input review; every settings preference and secret operation not audited.",
+      "sql_tags_lexical": 2,
+      "named_operations_lexical": [
+        {
+          "line": 292,
+          "name": "serverSettings.makeTest"
+        },
+        {
+          "line": 758,
+          "name": "serverSettings.moveInlineSettingsSecrets"
+        },
+        {
+          "line": 947,
+          "name": "serverSettings.materializeSettingsSecrets"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/serviceLauncher.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/serviceLauncher.ts",
+      "git_blob_sha": "8dcd7886fce51283ce86aaf33993ddeeb3f4183a",
+      "sha256": "aeb9b3585cde7035db2547476042f5578c4d083ba300cae2c100e7b9f4835cdd",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "ownership_backup_and_launch"
+      ],
+      "review_note": "Selected persistence/owner-lock/online-backup/offline-fallback/restore path review; launcher as a whole not audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": []
+    },
+    {
+      "path": "apps/server/src/storageCleanup.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/storageCleanup.ts",
+      "git_blob_sha": "7fd3977af51283b089b80757adad6231ecd24339",
+      "sha256": "7666537346018ccafdbf16b36dc924c78bc99bc55f5394ba04ce611faeb98ca8",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "retention_reclaim_cleanup"
+      ],
+      "review_note": "Selected database reference and recursive fork-retention queries; whole filesystem cleanup workflow not audited.",
+      "sql_tags_lexical": 6,
+      "named_operations_lexical": [
+        {
+          "line": 389,
+          "name": "storageCleanup.measureWorktree"
+        },
+        {
+          "line": 435,
+          "name": "storageCleanup.isDanglingGitfile"
+        },
+        {
+          "line": 517,
+          "name": "StorageCleanup.readThreads"
+        },
+        {
+          "line": 523,
+          "name": "StorageCleanup.containsProjectRoot"
+        },
+        {
+          "line": 543,
+          "name": "StorageCleanup.reportOrphanWorktrees"
+        },
+        {
+          "line": 713,
+          "name": "StorageCleanup.branchChanged"
+        },
+        {
+          "line": 794,
+          "name": "StorageCleanup.followBranch"
+        },
+        {
+          "line": 808,
+          "name": "StorageCleanup.hiddenTrackedChange"
+        },
+        {
+          "line": 903,
+          "name": "StorageCleanup.worktreeRepository"
+        },
+        {
+          "line": 915,
+          "name": "StorageCleanup.localChangesReason"
+        },
+        {
+          "line": 959,
+          "name": "StorageCleanup.submoduleRemoval"
+        },
+        {
+          "line": 1077,
+          "name": "StorageCleanup.cleanupGit"
+        },
+        {
+          "line": 1098,
+          "name": "StorageCleanup.cleanWorktrees"
+        },
+        {
+          "line": 1131,
+          "name": "StorageCleanup.scratchKeepReason"
+        },
+        {
+          "line": 1153,
+          "name": "StorageCleanup.worktreePathReason"
+        },
+        {
+          "line": 1170,
+          "name": "StorageCleanup.inspectCheckout"
+        },
+        {
+          "line": 1796,
+          "name": "StorageCleanup.cleanFiles"
+        },
+        {
+          "line": 1808,
+          "name": "StorageCleanup.visitFiles"
+        },
+        {
+          "line": 1837,
+          "name": "StorageCleanup.cleanCheckpointRefs"
+        },
+        {
+          "line": 1952,
+          "name": "StorageCleanup.sweep"
+        },
+        {
+          "line": 2086,
+          "name": "StorageCleanup.start"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/usage/CodexUsageHistory.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/usage/CodexUsageHistory.ts",
+      "git_blob_sha": "b032c9b1a0be0de0ec52a61fa328d8a63058452d",
+      "sha256": "c3d194819ae7f13e7cc29830efd43606e49ecbc0be2b6cff9e8002e7f0d599d9",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "provider_runtime_and_usage"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 1,
+      "named_operations_lexical": [
+        {
+          "line": 45,
+          "name": "CodexUsageHistory.resolve"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/workspace/KnownWorkspaces.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/workspace/KnownWorkspaces.ts",
+      "git_blob_sha": "b4b17c1e2a565895bfa66b1f36f384aa1aff4e0b",
+      "sha256": "26de0d5acab19f031674de05d94e995ed214af13f90bb32b5774c63ef7161512",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "workspace_metadata"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 1,
+      "named_operations_lexical": [
+        {
+          "line": 71,
+          "name": "KnownWorkspaces.contains"
+        },
+        {
+          "line": 143,
+          "name": "KnownWorkspaces.assertContains"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/workspace/TaskFolderStore.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/workspace/TaskFolderStore.ts",
+      "git_blob_sha": "79693b90dd51af047f9dbf32dc09a22b876d2ba2",
+      "sha256": "2f15aafa8c96c97181e26f629714d381d6f870c1151a1ffad806df02c481dba3",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "selected_semantic_review",
+      "families": [
+        "workspace_metadata"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 5,
+      "named_operations_lexical": [
+        {
+          "line": 96,
+          "name": "TaskFolderStore.findContaining"
+        },
+        {
+          "line": 108,
+          "name": "TaskFolderStore.put"
+        },
+        {
+          "line": 135,
+          "name": "TaskFolderStore.remove"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/ws.ts",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/ws.ts",
+      "git_blob_sha": "b5faaaa16f97c38469686d7d8c958ef52e3915f8",
+      "sha256": "df8c05452a6c3691bc5134eebb11c1a8ea9ab119a0a30249d6137c7db622abc7",
+      "enumerated": true,
+      "source_captured": true,
+      "review_level": "dependency_classification",
+      "families": [
+        "routing_and_errors"
+      ],
+      "review_note": "Operation-family semantics substantively reviewed; this label is not a claim that every line/branch was audited.",
+      "sql_tags_lexical": 0,
+      "named_operations_lexical": [
+        {
+          "line": 325,
+          "name": "ws.resolveEditorConfig"
+        },
+        {
+          "line": 535,
+          "name": "ws.assets.persistChatAttachments"
+        },
+        {
+          "line": 551,
+          "name": "ws.assets.persistChatAttachment"
+        },
+        {
+          "line": 890,
+          "name": "ws.orchestrationV2.enrichProjectShells"
+        },
+        {
+          "line": 917,
+          "name": "ws.orchestrationV2.subscribeThread"
+        },
+        {
+          "line": 1001,
+          "name": "ws.orchestrationV2.threadSnapshotThenLive"
+        },
+        {
+          "line": 1150,
+          "name": "ws.orchestrationV2.subscribeShell"
+        },
+        {
+          "line": 1170,
+          "name": "ws.orchestrationV2.loadProjectMetadataSnapshot"
+        },
+        {
+          "line": 1185,
+          "name": "ws.orchestrationV2.loadShellSnapshot"
+        },
+        {
+          "line": 1211,
+          "name": "ws.orchestrationV2.projectShellItem"
+        },
+        {
+          "line": 1236,
+          "name": "ws.orchestrationV2.projectShellItems"
+        },
+        {
+          "line": 1632,
+          "name": "ws.acpRegistry.listSessions"
+        },
+        {
+          "line": 1681,
+          "name": "ws.acpRegistry.deleteSession"
+        },
+        {
+          "line": 1730,
+          "name": "ws.acpRegistry.listProviders"
+        },
+        {
+          "line": 1745,
+          "name": "ws.acpRegistry.setProvider"
+        },
+        {
+          "line": 1787,
+          "name": "ws.acpRegistry.disableProvider"
+        },
+        {
+          "line": 1836,
+          "name": "ws.loadServerConfig"
+        },
+        {
+          "line": 1975,
+          "name": "ws.orchestrationV2.readOmittableShellRows"
+        },
+        {
+          "line": 1994,
+          "name": "ws.projects.mutate"
+        }
+      ]
+    }
+  ],
+  "migration_review": "All 118 SQL-related migration sources captured and their 314 lexical DDL occurrences enumerated. Registered order and selected compatibility/performance migrations reviewed. No migration execution or final sqlite_schema validation.",
+  "coverage_limits": [
+    "Regex discovery is mechanically exhaustive only within the stated tracked production JS/TS source scope and patterns; computed/dynamic SQL or unrecognized wrappers could be missed.",
+    "113 non-SQL persistence importers are inventoried as dependency candidates; all caller/control-flow branches were not semantically audited.",
+    "packages/shared/nodeSqliteClient.ts and selected ProviderCommitBatch.ts were reviewed separately, outside apps/server/src candidate count.",
+    "No complete proof of foreign-key/constraint/index final schema; migration extraction records history, including obsolete/renamed objects and helper modules.",
+    "No benchmark, crash injection, data migration, compatibility or behavioral differential test was run in this read-only research.",
+    "No claim of measured speedup from any proposed native data structure.",
+    "Large ProjectionStore, scheduling, launcher, legacy importer and cleanup modules received selected operation-family review, not exhaustive every-line audit."
+  ],
+  "artifacts": [
+    "sql-inventory.json",
+    "migrations-inventory.json",
+    "runtime-operation-index.json",
+    "operation-family-map.json",
+    "server-findings.md",
+    "history-index-design-critique.md"
+  ]
+}

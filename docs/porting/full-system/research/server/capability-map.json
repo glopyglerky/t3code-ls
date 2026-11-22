@@ -1,0 +1,2907 @@
+{
+  "revision": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "scope": "Upstream server/provider/orchestration family inventory for full Rust destination; no product changes or execution",
+  "families": [
+    {
+      "id": "environment_lifecycle",
+      "user_outcomes": [
+        "Run local/headless server; connect independent web/desktop/mobile/CLI clients; keep environment identity stable"
+      ],
+      "rust_owner": "EnvironmentSupervisor plus RuntimeConfig and process owner",
+      "entrypoints": [
+        "HTTP metadata descriptor",
+        "server.probe",
+        "server.getConfig",
+        "subscribeServerConfig",
+        "subscribeServerLifecycle",
+        "CLI start/serve/service"
+      ],
+      "invariants": [
+        "Environment ID and recovery publication atomic",
+        "Routes alter reachability, never execution owner",
+        "Connection presence does not establish projection freshness",
+        "Independent client/server compatibility and feature negotiation"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/server.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/server.ts"
+        },
+        {
+          "path": "apps/server/src/bootstrap.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/bootstrap.ts"
+        },
+        {
+          "path": "apps/server/src/binCli.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/binCli.ts"
+        },
+        {
+          "path": "docs/internals/overview.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/overview.md"
+        },
+        {
+          "path": "docs/internals/remote.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/remote.md"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "server.probe",
+        "server.getConfig",
+        "cloud.getRelayClientStatus",
+        "cloud.installRelayClient",
+        "server.reportClientActivity",
+        "subscribeServerConfig",
+        "subscribeServerLifecycle"
+      ]
+    },
+    {
+      "id": "authorization",
+      "user_outcomes": [
+        "Pair clients; revoke access; OAuth/DPoP; scoped sessions; answer secret requests"
+      ],
+      "rust_owner": "AuthorizationService with durable credential/session state and revocation fanout",
+      "entrypoints": [
+        "auth HTTP",
+        "mcpOAuth HTTP",
+        "connect HTTP",
+        "subscribeAuthAccess",
+        "secrets.answerRequest"
+      ],
+      "invariants": [
+        "One-time consumption and conditional redemption",
+        "Empty permissions authoritative; grants narrow only",
+        "Invalid DPoP never falls back to bearer",
+        "Permission/runtime ceilings checked at operation and under thread lock",
+        "Signed asset URLs bind canonical file identity",
+        "Live session revocation closes or safely rebinds authorized sockets"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/auth/RpcAuthorization.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/auth/RpcAuthorization.ts"
+        },
+        {
+          "path": "apps/server/src/auth/EnvironmentAuthPolicy.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/auth/EnvironmentAuthPolicy.ts"
+        },
+        {
+          "path": "docs/internals/environment-auth.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/environment-auth.md"
+        },
+        {
+          "path": "packages/contracts/src/auth.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/auth.ts"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "secrets.answerRequest",
+        "subscribeAuthAccess"
+      ]
+    },
+    {
+      "id": "orchestration_commands",
+      "user_outcomes": [
+        "Create/manage threads; send, queue, steer, stop or retry work; fork, merge and switch provider"
+      ],
+      "rust_owner": "Typed Orchestrator with keyed thread actors and deletion coordination",
+      "entrypoints": [
+        "orchestration.dispatchCommand",
+        "58 public and16 internal command variants"
+      ],
+      "invariants": [
+        "Atomic command receipt, events, authoritative projections and outbox",
+        "Duplicate receipt never repeats side effects",
+        "Intent acknowledgement distinct from external completion",
+        "Global deletion lock before thread locks",
+        "Provider output enters same ordered state machine",
+        "Unknown external outcome cannot be retried on another adapter silently"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/Orchestrator.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/Orchestrator.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/ThreadCommandExecutor.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadCommandExecutor.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/EffectWorker.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/EffectWorker.ts"
+        },
+        {
+          "path": "packages/contracts/src/orchestrationV2.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/orchestrationV2.ts"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "orchestration.dispatchCommand"
+      ]
+    },
+    {
+      "id": "thread_read_stream",
+      "user_outcomes": [
+        "Read shell, long history, search, live output, diffs, item details and family views"
+      ],
+      "rust_owner": "Projection/query owner plus bounded subscription service",
+      "entrypoints": [
+        "orchestration.subscribeShell",
+        "orchestration.subscribeThread",
+        "orchestration.searchThread",
+        "orchestration.searchThreads",
+        "orchestration.getThreadFamily",
+        "orchestration.getTurnItem"
+      ],
+      "invariants": [
+        "Replay sequence and snapshot fences coherent",
+        "Streaming ACK budget includes in-flight bytes",
+        "Coalescing respects barriers and terminal ordering",
+        "Inherited/folded/cancelled/runless history semantics preserved",
+        "Shell omissions do not mean deleted",
+        "Wire defaults/null/absence/version negotiation preserved"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/ThreadStream.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadStream.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/ThreadLiveEventCoalescer.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadLiveEventCoalescer.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/LiveStreamBudget.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/LiveStreamBudget.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/WireProjection.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/WireProjection.ts"
+        },
+        {
+          "path": "docs/internals/connection-runtime.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/connection-runtime.md"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [
+        "Materialize exact command facts and history rank blocks to avoid residual full-index paths; prior DB report",
+        "Encode bounded event once per negotiated wire shape and share immutable bytes",
+        "Owner-local chunked text accumulation with measured materialization points"
+      ],
+      "rpc_methods": [
+        "orchestration.getTurnDiff",
+        "orchestration.getFullThreadDiff",
+        "orchestration.searchThread",
+        "orchestration.searchThreadStream",
+        "orchestration.searchThreads",
+        "orchestration.getArchivedShellSnapshot",
+        "orchestration.getThreadFamily",
+        "orchestration.getThreadTitles",
+        "orchestration.getThreadLinkMetadata",
+        "orchestration.getWorktreeThreadIds",
+        "orchestration.getOlderSettledThreads",
+        "orchestration.getThreadProjection",
+        "orchestration.getTurnItem",
+        "orchestration.subscribeShell",
+        "orchestration.subscribeThread",
+        "orchestration.subscribeCommandOutput",
+        "orchestration.subscribePromptSuggestion"
+      ]
+    },
+    {
+      "id": "provider_runtime",
+      "user_outcomes": [
+        "Use installed Codex, Claude, Cursor, Grok, fx, OpenCode, Antigravity, Kiro, Pi, Muse and ACP Registry agents"
+      ],
+      "rust_owner": "ProviderRegistry plus per-instance adapter/session actors",
+      "entrypoints": [
+        "provider session driver interface",
+        "provider.auth.*",
+        "provider.install.*",
+        "server.refreshProviders",
+        "server.updateProvider"
+      ],
+      "invariants": [
+        "Per-instance mutable state/accounts/catalogs",
+        "Capabilities report real protocol support; handshake may narrow",
+        "No side-effectful login/session start during background health checks",
+        "Own only installed binaries updater can prove it owns",
+        "Stop waits for native start boundary and owned process shutdown",
+        "Background native work can outlive parent run and wake it later",
+        "Provider option IDs preserved"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/provider/builtInDrivers.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/builtInDrivers.ts"
+        },
+        {
+          "path": "packages/provider-core/src/server/ProviderAdapter.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-core/src/server/ProviderAdapter.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/ProviderSessionManager.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProviderSessionManager.ts"
+        },
+        {
+          "path": "docs/internals/providers.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/providers.md"
+        },
+        {
+          "path": "docs/internals/adding-a-provider.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/adding-a-provider.md"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [
+        "Reduce T3 adapter/intermediate object work, not external model latency",
+        "Cursor native protocol/storage parity remains blocker; shared worker already optimized"
+      ],
+      "rpc_methods": [
+        "server.refreshProviders",
+        "server.updateProvider",
+        "provider.consumeResetCredit",
+        "provider.auth.start",
+        "provider.auth.respond",
+        "provider.auth.complete",
+        "provider.chatgpt.reconnect-profile",
+        "provider.chatgpt.import-profile",
+        "provider.chatgpt.handoff.subscribe",
+        "provider.auth.cancel",
+        "provider.auth.removeMethod",
+        "provider.auth.logout",
+        "provider.auth.subscribe",
+        "provider.install.start",
+        "provider.install.cancel",
+        "provider.install.subscribe",
+        "provider.install.remove",
+        "server.checkSecretSource",
+        "server.searchAcpRegistry",
+        "server.prepareAcpRegistryAgent",
+        "server.uninstallAcpRegistryManagedBinary",
+        "server.acceptAcpRegistryUrlAuth",
+        "server.listAcpRegistryProviders",
+        "server.setAcpRegistryProvider",
+        "server.disableAcpRegistryProvider",
+        "server.logoutAcpRegistry",
+        "server.listTextGeneratorModels",
+        "provider.uploadFeedback",
+        "provider.mcpSignIn.start",
+        "provider.mcpSignIn.complete"
+      ]
+    },
+    {
+      "id": "approvals_questions",
+      "user_outcomes": [
+        "Approve/decline native tools; answer blocking and asynchronous questions; resolve elicitation"
+      ],
+      "rust_owner": "RuntimeRequestService integrated with thread transaction and provider callback registry",
+      "entrypoints": [
+        "runtime-request.respond",
+        "thread.user-input.dismiss",
+        "provider.auth.respond",
+        "MCP elicitation"
+      ],
+      "invariants": [
+        "Provider native policy cannot be replaced by weaker T3 prompt rules",
+        "Asynchronous Codex questions survive turn/process end",
+        "Live callback and persisted message-answer workflows differ",
+        "Late answers, cancellation and refusal distinctions preserved",
+        "Read-only and plan limits cannot be escalated through remote tools"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/RuntimeRequestService.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/RuntimeRequestService.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/RuntimePolicy.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/RuntimePolicy.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/CommandPolicy.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/CommandPolicy.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts"
+        },
+        {
+          "path": "docs/internals/providers.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/providers.md"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [],
+      "rpc_methods": []
+    },
+    {
+      "id": "checkpoint_fork",
+      "user_outcomes": [
+        "Review changes, revert a checkpoint, fork history, merge results or hand context to another provider"
+      ],
+      "rust_owner": "CheckpointCoordinator plus native provider rollback and context handoff services",
+      "entrypoints": [
+        "checkpoint.rollback",
+        "thread.fork",
+        "thread.merge_back",
+        "provider.switch",
+        "orchestration.getTurnDiff",
+        "orchestration.getFullThreadDiff"
+      ],
+      "invariants": [
+        "Provider rollback feasibility checked before file mutation",
+        "Multi-repository restore and cancellation preserve atomic plan boundaries",
+        "Fork ancestor timestamp/cutoff/rollback semantics",
+        "Portable handoff conveys text evidence, not native hidden state",
+        "Task-folder non-repository links remain shared, not copied",
+        "Watcher hints alone cannot prove clean state"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/CheckpointCaptureService.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/CheckpointCaptureService.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/CheckpointRollbackService.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/CheckpointRollbackService.ts"
+        },
+        {
+          "path": "docs/internals/context-handoffs.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/context-handoffs.md"
+        },
+        {
+          "path": "docs/internals/overview.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/overview.md"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [
+        "Reliable dirty-generation journal may skip redundant repository scans only with fence, watch-loss detection and reconciliation",
+        "Use stable repository snapshots for repeated diff views; Git semantics remain authority"
+      ],
+      "rpc_methods": []
+    },
+    {
+      "id": "delegation_workflows",
+      "user_outcomes": [
+        "Delegate child work, inspect native children/scripts, stop workflows, wake parent after local/remote completion"
+      ],
+      "rust_owner": "DelegationCoordinator and WorkflowService",
+      "entrypoints": [
+        "delegated_task.*",
+        "subagent.stop",
+        "orchestration.getNativeChildWork",
+        "orchestration.getWorkflowScript",
+        "orchestration.stopWorkflow",
+        "orchestration.forceStopThread"
+      ],
+      "invariants": [
+        "Native child identity independent of currently active parent run",
+        "Background tool/task updates after turn end retained",
+        "Remote child ordinary thread on remote owner with durable follower recovery",
+        "Completion deliveries acknowledged/disposed idempotently",
+        "Unavailable native operations represented honestly"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/RunExecutionService.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/RunExecutionService.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/RunFinalizationService.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/RunFinalizationService.ts"
+        },
+        {
+          "path": "apps/server/src/peer/RemoteDelegation.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/peer/RemoteDelegation.ts"
+        },
+        {
+          "path": "packages/provider-core/src/server/ProviderAdapter.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-core/src/server/ProviderAdapter.ts"
+        },
+        {
+          "path": "docs/internals/adding-a-provider.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/adding-a-provider.md"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "orchestration.stopWorkflow",
+        "orchestration.forceStopThread",
+        "orchestration.getWorkflowScript",
+        "orchestration.getNativeChildWork"
+      ]
+    },
+    {
+      "id": "thread_launch",
+      "user_outcomes": [
+        "Launch work from repository/PR/issue/task; observe progress; cancel, fail and retry preparation"
+      ],
+      "rust_owner": "ThreadLaunchService plus worktree/setup process supervisor",
+      "entrypoints": [
+        "orchestration.launchThread",
+        "prepared-run.*",
+        "projectClone.*",
+        "subscribeProjectClones",
+        "subscribeWorktreeSetup",
+        "worktreeSetup.cancel"
+      ],
+      "invariants": [
+        "Fetch/checkout/submodules/setup/agent stages have explicit progress and ownership",
+        "Preparation failure distinct from provider failure",
+        "Cancellation removes only owned artifacts",
+        "Linked limited-access work skips setup scripts",
+        "Prepared run release/queue admission is durable"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/ThreadLaunchService.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadLaunchService.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/ProviderTurnStartService.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProviderTurnStartService.ts"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/ThreadMessageIntake.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadMessageIntake.ts"
+        },
+        {
+          "path": "docs/internals/overview.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/overview.md"
+        },
+        {
+          "path": "docs/internals/remote.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/remote.md"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "projectClone.start",
+        "projectClone.cancel",
+        "projectClone.retry",
+        "subscribeProjectClones",
+        "subscribeWorktreeSetup",
+        "worktreeSetup.cancel",
+        "orchestration.launchThread"
+      ]
+    },
+    {
+      "id": "projects_workspace",
+      "user_outcomes": [
+        "Create/import/clone/manage projects; scratch threads; multi-repository task folders"
+      ],
+      "rust_owner": "ProjectService and workspace identity owner",
+      "entrypoints": [
+        "projects.mutate",
+        "projects.ensureScratch",
+        "projects.createNew",
+        "projects.createFromThread",
+        "workspace.*",
+        "sourceControl.cloneRepository"
+      ],
+      "invariants": [
+        "Project belongs to one environment",
+        "Canonical upstream repository identity separate from fork origin display identity",
+        "Task folder paths preserve multi-repository structure and linked shared folders",
+        "Project settings and scripts remain environment owned"
+      ],
+      "sources": [
+        {
+          "path": "packages/contracts/src/orchestrationProject.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/orchestrationProject.ts"
+        },
+        {
+          "path": "docs/internals/overview.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/overview.md"
+        },
+        {
+          "path": "docs/internals/remote.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/remote.md"
+        },
+        {
+          "path": "apps/server/src/ws.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/ws.ts"
+        }
+      ],
+      "review": "contracts_and_docs_plus_selected_boundary_review",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "projects.mutate",
+        "projects.ensureScratch",
+        "projects.createNew",
+        "projects.createFromThread",
+        "workspace.listFolders",
+        "workspace.scanFolders",
+        "workspace.taskFolder",
+        "workspace.addTaskFolderRepository"
+      ]
+    },
+    {
+      "id": "files_search_attachments",
+      "user_outcomes": [
+        "Browse/read/write workspace files; search contents and names; attach uploads and issue asset URLs"
+      ],
+      "rust_owner": "WorkspaceFileService, immutable search snapshots and AttachmentStore",
+      "entrypoints": [
+        "projects.searchEntries",
+        "projects.searchContents",
+        "projects.listEntries",
+        "projects.listIgnoredFiles",
+        "projects.readFile",
+        "projects.writeFile",
+        "filesystem.*",
+        "assets.*",
+        "attachments.*",
+        "projects HTTP"
+      ],
+      "invariants": [
+        "Ignore/symlink/path/read-only rules",
+        "Uploads outside workspace require ownership claim",
+        "Attachment prompt path is not permission grant",
+        "Signed URLs check inode/device identity at open",
+        "Search stale-index and refresh behavior remains usable"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/workspace/WorkspaceSearchIndex.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/workspace/WorkspaceSearchIndex.ts"
+        },
+        {
+          "path": "apps/server/src/workspace/WorkspaceEntries.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/workspace/WorkspaceEntries.ts"
+        },
+        {
+          "path": "apps/server/src/http.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/http.ts"
+        },
+        {
+          "path": "docs/internals/environment-auth.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/environment-auth.md"
+        },
+        {
+          "path": "packages/contracts/src/rpc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [
+        "Replace long shared picker lock with immutable query snapshots and bounded updates; current native fff async implementation already avoids JS blocking",
+        "Retain existing bounded scanning/search caps"
+      ],
+      "rpc_methods": [
+        "projects.searchEntries",
+        "projects.searchContents",
+        "projects.listEntries",
+        "projects.listIgnoredFiles",
+        "projects.readFile",
+        "projects.writeFile",
+        "shell.openInEditor",
+        "filesystem.getMetadata",
+        "filesystem.browse",
+        "assets.createUrl",
+        "assets.persistChatAttachments",
+        "attachments.createUploadUrl",
+        "attachments.delete"
+      ]
+    },
+    {
+      "id": "terminal",
+      "user_outcomes": [
+        "Open/attach/observe/write/resize/clear/close persistent remote PTYs"
+      ],
+      "rust_owner": "PTY owner and bounded output/persistence pipeline",
+      "entrypoints": [
+        "terminal.*",
+        "subscribeTerminalMetadata"
+      ],
+      "invariants": [
+        "Environment owns PTY, all clients share lifetime",
+        "Replay never causes terminal response writes",
+        "UTF8-safe bounded tail restore",
+        "Drain output on close/restart/clear; independent observation vs input authorization",
+        "Process/session cleanup platform specific"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/terminal/Manager.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/terminal/Manager.ts"
+        },
+        {
+          "path": "apps/server/src/terminal/OutputProtocol.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/terminal/OutputProtocol.ts"
+        },
+        {
+          "path": "docs/internals/terminal-runtime.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/terminal-runtime.md"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [
+        "Preserve incremental output and coalesced persistence; avoid reintroducing full scrollback copies"
+      ],
+      "rpc_methods": [
+        "terminal.open",
+        "terminal.attach",
+        "terminal.observe",
+        "terminal.write",
+        "terminal.resize",
+        "terminal.clear",
+        "terminal.close",
+        "subscribeTerminalMetadata"
+      ]
+    },
+    {
+      "id": "git_review",
+      "user_outcomes": [
+        "Branches, refs, worktrees, pulls, stacked actions, commit/diff review and PR-thread preparation"
+      ],
+      "rust_owner": "GitRepositoryService with per-cwd operation coordination",
+      "entrypoints": [
+        "vcs.*",
+        "git.*",
+        "review.*",
+        "subscribeVcsStatus",
+        "subscribeVcsBranch"
+      ],
+      "invariants": [
+        "Git hooks/config/auth/submodules/worktree and platform semantics",
+        "Per-cwd singleflight status refresh and branch coherence",
+        "HEAD parent-directory watch handles atomic rename",
+        "Local/remote status caches distinct",
+        "Do not claim a partial Rust Git library replaces all supported mutations"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/vcs/GitVcsDriver.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/vcs/GitVcsDriver.ts"
+        },
+        {
+          "path": "apps/server/src/vcs/VcsStatusBroadcaster.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/vcs/VcsStatusBroadcaster.ts"
+        },
+        {
+          "path": "packages/contracts/src/rpc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts"
+        },
+        {
+          "path": "docs/internals/overview.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/overview.md"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [
+        "Share repository snapshots and coalesce invalidations without losing external filesystem changes"
+      ],
+      "rpc_methods": [
+        "subscribeVcsBranch",
+        "vcs.refreshBranch",
+        "subscribeVcsStatus",
+        "vcs.pull",
+        "vcs.refreshStatus",
+        "git.runStackedAction",
+        "git.resolvePullRequest",
+        "git.preparePullRequestThread",
+        "vcs.listRefs",
+        "vcs.createWorktree",
+        "vcs.removeWorktree",
+        "vcs.createRef",
+        "vcs.switchRef",
+        "vcs.init",
+        "review.getBranchCommits",
+        "review.getDiffPreview",
+        "review.getDiffFileContents"
+      ]
+    },
+    {
+      "id": "source_control",
+      "user_outcomes": [
+        "Authenticate, discover/clone/publish/star repositories across supported hosts"
+      ],
+      "rust_owner": "SourceControlRegistry with provider-specific HTTP/auth clients",
+      "entrypoints": [
+        "sourceControl.*",
+        "server.discoverSourceControl"
+      ],
+      "invariants": [
+        "Registry includes GitHub, Cursor Origin, GitLab, GitCafe, TanStack Source, Forgejo, Bitbucket, Azure DevOps",
+        "Feature gates retained",
+        "Host credential scoping and rate limits",
+        "Read/mutation capabilities vary by host"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/sourceControl/sourceControlDefinitions.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/sourceControl/sourceControlDefinitions.ts"
+        },
+        {
+          "path": "apps/server/src/sourceControl/builtInDrivers.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/sourceControl/builtInDrivers.ts"
+        },
+        {
+          "path": "packages/contracts/src/rpc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts"
+        }
+      ],
+      "review": "registry_and_contract_inventory; host implementation branches not audited",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "server.discoverSourceControl",
+        "sourceControl.lookupRepository",
+        "sourceControl.cloneRepository",
+        "sourceControl.signInStart",
+        "sourceControl.signInWait",
+        "sourceControl.signInCancel",
+        "sourceControl.appAccess",
+        "sourceControl.starred",
+        "sourceControl.star",
+        "sourceControl.publishRepository"
+      ]
+    },
+    {
+      "id": "pull_requests",
+      "user_outcomes": [
+        "List/filter/route/read PRs; review guides; comments/reviews/reactions; checks, labels and reviewers"
+      ],
+      "rust_owner": "PullRequestService with typed host adapters and durable local review state",
+      "entrypoints": [
+        "pullRequests.*",
+        "pullRequests HTTP",
+        "thread.pull-request.*"
+      ],
+      "invariants": [
+        "Remote mutations and local views distinct authorities",
+        "Review positions/file revisions and seen-state identities preserved",
+        "Routing trust revoked on route-set change, not reorder",
+        "Watch reactors settle only under no-newer-activity guards",
+        "External merge commands can trigger reconciliation"
+      ],
+      "sources": [
+        {
+          "path": "packages/contracts/src/rpc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts"
+        },
+        {
+          "path": "apps/server/src/sourceControl/sourceControlDefinitions.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/sourceControl/sourceControlDefinitions.ts"
+        },
+        {
+          "path": "docs/internals/remote.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/remote.md"
+        }
+      ],
+      "review": "all contract methods enumerated; persistence reviewed in DB report; full remote host semantics not audited",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "pullRequests.list",
+        "pullRequests.listStats",
+        "pullRequests.filterOptions",
+        "pullRequests.routing",
+        "pullRequests.routingIdentity",
+        "pullRequests.summary",
+        "pullRequests.stack",
+        "pullRequests.linkedThreads",
+        "pullRequests.detail",
+        "pullRequests.preview",
+        "pullRequests.checks",
+        "pullRequests.activity",
+        "pullRequests.reviewGuide",
+        "pullRequests.generateReviewGuide",
+        "pullRequests.threadComments",
+        "pullRequests.diffFileContents",
+        "pullRequests.filesViewed",
+        "pullRequests.changeBreakdown",
+        "pullRequests.setFilesViewed",
+        "pullRequests.runAction",
+        "pullRequests.update",
+        "pullRequests.comment",
+        "pullRequests.updateComment",
+        "pullRequests.submitReview",
+        "pullRequests.replyToThread",
+        "pullRequests.setThreadResolution",
+        "pullRequests.setReaction",
+        "pullRequests.invalidate",
+        "pullRequests.reportState",
+        "pullRequests.subscribeRefreshes",
+        "pullRequests.subscribeLinkedThreadRefreshes",
+        "pullRequests.reviewerCandidates",
+        "pullRequests.requestReviewers",
+        "pullRequests.labelCandidates",
+        "pullRequests.setLabels"
+      ]
+    },
+    {
+      "id": "issues",
+      "user_outcomes": [
+        "Connect trackers; list/read/create/comment/update/react; bind projects and link threads"
+      ],
+      "rust_owner": "IssueService plus standalone and host issue drivers",
+      "entrypoints": [
+        "issues.*",
+        "issueTrackers.*",
+        "thread.issue.*"
+      ],
+      "invariants": [
+        "Linear standalone plus host-integrated issue APIs",
+        "Explicit credential scopes/bindings",
+        "Unknown implementation reported unsupported",
+        "Cross-environment routing does not change remote authority"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/issue/IssueTrackerRegistry.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/issue/IssueTrackerRegistry.ts"
+        },
+        {
+          "path": "packages/contracts/src/rpc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts"
+        }
+      ],
+      "review": "registry_and_contract_inventory; binding persistence reviewed previously",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "issues.list",
+        "issues.detail",
+        "issues.linkedThreads",
+        "issues.comments",
+        "issues.templates",
+        "issues.candidates",
+        "issues.create",
+        "issues.comment",
+        "issues.update",
+        "issues.setState",
+        "issues.react",
+        "issueTrackers.list",
+        "issueTrackers.connect",
+        "issueTrackers.bindProject"
+      ]
+    },
+    {
+      "id": "mcp_tools",
+      "user_outcomes": [
+        "Expose T3 tools to embedded agents, outside OAuth clients and linked environments"
+      ],
+      "rust_owner": "McpServer plus centralized ToolAccess and credential context",
+      "entrypoints": [
+        "/mcp",
+        "ACP stdio bridge",
+        "93 tool declarations in15 toolkits"
+      ],
+      "invariants": [
+        "Discovery visibility is not authorization",
+        "Thread credentials required for self/delegation/secret functions",
+        "Mode ceilings and link-origin fence enforced centrally",
+        "Target environment checked before sending; target object checked where it lives",
+        "Outside MCP token cannot use WS to bypass audience"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/mcp/McpHttpServer.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/McpHttpServer.ts"
+        },
+        {
+          "path": "apps/server/src/mcp/McpToolAccess.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/McpToolAccess.ts"
+        },
+        {
+          "path": "apps/server/src/mcp/McpToolExposure.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/McpToolExposure.ts"
+        },
+        {
+          "path": "apps/server/src/mcp/OrchestratorMcpService.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/OrchestratorMcpService.ts"
+        },
+        {
+          "path": "docs/internals/environment-auth.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/environment-auth.md"
+        },
+        {
+          "path": "docs/internals/remote.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/remote.md"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [],
+      "rpc_methods": []
+    },
+    {
+      "id": "mcp_apps",
+      "user_outcomes": [
+        "Run embedded MCP apps, read their resources, call tools and update model context"
+      ],
+      "rust_owner": "McpAppBroker plus model-context persistence and provider request owner",
+      "entrypoints": [
+        "mcpApps.*"
+      ],
+      "invariants": [
+        "Provider session and caller authorization retained",
+        "Model context tied to originating app/tool and thread",
+        "Resource/tool call cancellation and capability boundaries",
+        "HTML rendering retains sandbox/host messaging behavior"
+      ],
+      "sources": [
+        {
+          "path": "packages/contracts/src/rpc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts"
+        },
+        {
+          "path": "apps/server/src/mcp/toolkits/html/tools.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/html/tools.ts"
+        },
+        {
+          "path": "packages/shared/src/htmlRender.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/shared/src/htmlRender.ts"
+        }
+      ],
+      "review": "contract and model-context persistence review; app transport handlers not fully audited",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "mcpApps.callTool",
+        "mcpApps.toolInfo",
+        "mcpApps.updateModelContext",
+        "mcpApps.readResource"
+      ]
+    },
+    {
+      "id": "schedules_webhooks",
+      "user_outcomes": [
+        "Schedule autonomous runs; trigger signed hooks; inspect deliveries, run now and rotate tokens"
+      ],
+      "rust_owner": "Scheduler with durable due queue and conditional dispatch owner",
+      "entrypoints": [
+        "scheduledTasks.*",
+        "webhooks HTTP"
+      ],
+      "invariants": [
+        "Generation/token/enable checks at dispatch, no stale run after changes",
+        "Raw body bytes used for signature validation;1MiB cap",
+        "Relay proof required before trusting relay ID/time/trace",
+        "Dedup/coalescing/rate/queue controls survive restart",
+        "Accepted/running dispatch prompt identity preserved on recovery",
+        "Claim transfer and queue admission cannot be interrupted halfway"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/scheduledTasks/ScheduledTaskService.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/scheduledTasks/ScheduledTaskService.ts"
+        },
+        {
+          "path": "apps/server/src/scheduledTasks/webhookRoute.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/scheduledTasks/webhookRoute.ts"
+        },
+        {
+          "path": "packages/contracts/src/environmentHttp.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [
+        "Deadline-indexed wakeups and batched due reads already partially represented; optimize only measured scheduler work"
+      ],
+      "rpc_methods": [
+        "scheduledTasks.subscribe",
+        "scheduledTasks.upsert",
+        "scheduledTasks.setEnabled",
+        "scheduledTasks.delete",
+        "scheduledTasks.runNow",
+        "scheduledTasks.rotateWebhookToken",
+        "scheduledTasks.listWebhookDeliveries",
+        "scheduledTasks.getWebhookDelivery"
+      ]
+    },
+    {
+      "id": "guest_share",
+      "user_outcomes": [
+        "Share a restricted thread view and accept guest message proposals"
+      ],
+      "rust_owner": "GuestShareService tied to thread state and HMAC credential",
+      "entrypoints": [
+        "guestShare.create",
+        "guest HTTP routes",
+        "thread.guest-share.*",
+        "thread.guest-message.*"
+      ],
+      "invariants": [
+        "Share replacement/archive revokes access",
+        "Guest token is not a normal session and cannot call RPC/MCP",
+        "Guest messages are proposals with owner acceptance/dismissal",
+        "Share/attachment/history visibility follows thread-only rules"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/guest/http.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/guest/http.ts"
+        },
+        {
+          "path": "packages/contracts/src/orchestrationV2.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/orchestrationV2.ts"
+        },
+        {
+          "path": "docs/internals/environment-auth.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/environment-auth.md"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "guestShare.create"
+      ]
+    },
+    {
+      "id": "peer_links",
+      "user_outcomes": [
+        "Link environments; delegate remote work; view and interrupt remote threads"
+      ],
+      "rust_owner": "PeerLinkRegistry, token store, forwarding service and follower actors",
+      "entrypoints": [
+        "peerLinks.*",
+        "linked MCP calls",
+        "link thread HTTP routes"
+      ],
+      "invariants": [
+        "Environment identity independent of endpoint; descriptor alone is not cryptographic proof",
+        "Only user-trusted addresses get credentials",
+        "Caller namespace hashed into idempotency keys",
+        "Mode limit only narrows; limited link origin fences mutations/derived work",
+        "Remote expiry owned by receiver",
+        "Waits chunked at50s; stream relay lifetime follows local subscription",
+        "Feature-off permits existing task reads/waits/stops on linking side"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/peer/RemoteDelegation.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/peer/RemoteDelegation.ts"
+        },
+        {
+          "path": "docs/internals/remote.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/remote.md"
+        },
+        {
+          "path": "apps/server/src/mcp/McpToolAccess.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/McpToolAccess.ts"
+        },
+        {
+          "path": "packages/contracts/src/rpc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts"
+        }
+      ],
+      "review": "selected_semantic_review",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "peerLinks.list",
+        "peerLinks.names",
+        "peerLinks.link",
+        "peerLinks.unlink",
+        "peerLinks.subscribeThread",
+        "peerLinks.threadHistoryPage",
+        "peerLinks.threadItem",
+        "peerLinks.pairClient",
+        "peerLinks.pairLink",
+        "peerLinks.answerRequest"
+      ]
+    },
+    {
+      "id": "preview_browser",
+      "user_outcomes": [
+        "Open/control browser previews, inspect pages, operate browser automation, manage profiles and local servers"
+      ],
+      "rust_owner": "PreviewSupervisor and browser context owner with authenticated stream/tunnel",
+      "entrypoints": [
+        "preview.*",
+        "preview HTTP stream/upload",
+        "subscribePreviewEvents",
+        "subscribeDiscoveredLocalServers",
+        "preview MCP tools"
+      ],
+      "invariants": [
+        "Loopback tunnels stay on owning environment",
+        "Profile/permission/user interaction ownership",
+        "Preview frame/file-origin sandbox and host messages",
+        "Automation session control and screenshots distinct from DOM page data",
+        "Stream and upload authentication retained"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/preview/ServerBrowser.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/preview/ServerBrowser.ts"
+        },
+        {
+          "path": "apps/server/src/preview/ServerBrowserStream.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/preview/ServerBrowserStream.ts"
+        },
+        {
+          "path": "apps/server/src/preview/PreviewTunnel.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/preview/PreviewTunnel.ts"
+        },
+        {
+          "path": "apps/server/src/mcp/toolkits/preview/tools.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/preview/tools.ts"
+        },
+        {
+          "path": "docs/internals/remote.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/remote.md"
+        }
+      ],
+      "review": "selected transport and contract review; full browser operation semantics not audited",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "preview.open",
+        "preview.resize",
+        "preview.adjust",
+        "preview.close",
+        "preview.list",
+        "preview.clearProfile",
+        "preview.reportProfiles",
+        "preview.reportStatus",
+        "subscribePreviewEvents",
+        "preview.stopLocalServer",
+        "subscribeDiscoveredLocalServers"
+      ]
+    },
+    {
+      "id": "devices",
+      "user_outcomes": [
+        "Use local/SSH/mobile simulators, EAS or Simlock devices, view streams and perform actions"
+      ],
+      "rust_owner": "DeviceSupervisor with host/session ledger and typed automation gateway",
+      "entrypoints": [
+        "device.*",
+        "subscribeDeviceState",
+        "device hub proxy",
+        "device MCP tools"
+      ],
+      "invariants": [
+        "Host ID part of device identity",
+        "Installed hub and automation consent separate",
+        "Only owned EAS sessions stopped; billable limits/idle cleanup persisted",
+        "Simlock session/lease/cwd/TTL preserved",
+        "No unsafe arbitrary hub exec route",
+        "Video transports and no-transform behavior preserved"
+      ],
+      "sources": [
+        {
+          "path": "docs/internals/devices.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/devices.md"
+        },
+        {
+          "path": "apps/server/src/device/DeviceHubProxy.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/device/DeviceHubProxy.ts"
+        },
+        {
+          "path": "packages/contracts/src/rpc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts"
+        },
+        {
+          "path": "apps/server/src/mcp/toolkits/device/tools.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/device/tools.ts"
+        }
+      ],
+      "review": "full internal architecture doc plus selected gateway/contract review",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "device.testHost",
+        "device.easAccount",
+        "device.simlockIdentity",
+        "device.list",
+        "device.configure",
+        "device.open",
+        "device.close",
+        "device.shutdown",
+        "device.detail",
+        "device.action",
+        "subscribeDeviceState"
+      ]
+    },
+    {
+      "id": "speech",
+      "user_outcomes": [
+        "Dictate into drafts using local or cloud transcription and manage models/voice streams"
+      ],
+      "rust_owner": "SpeechService with isolated worker lifetime and model store",
+      "entrypoints": [
+        "voice HTTP",
+        "speech stream",
+        "CLI speech worker"
+      ],
+      "invariants": [
+        "Transcription edits draft, never sends turn itself",
+        "Cancel waits for native resource release",
+        "Explicit environment/provider/model/audio grant; no silent audio fallback",
+        "Catalog hash verification and foreign-cache ownership",
+        "Optional VAD degradation distinct from provider fallback"
+      ],
+      "sources": [
+        {
+          "path": "docs/internals/voice-input.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/voice-input.md"
+        },
+        {
+          "path": "packages/contracts/src/environmentHttp.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts"
+        }
+      ],
+      "review": "full internal architecture doc and HTTP contracts; native backend source not audited",
+      "cost_opportunities": [],
+      "rpc_methods": []
+    },
+    {
+      "id": "usage_observability",
+      "user_outcomes": [
+        "View usage, resource/process telemetry, diagnostics, traces and provider feedback"
+      ],
+      "rust_owner": "TelemetryCollector with bounded ring/history and source-specific usage readers",
+      "entrypoints": [
+        "server.getUsageSummary",
+        "server.refreshUsageRates",
+        "server.getTraceDiagnostics",
+        "server.getProcessDiagnostics",
+        "server.getHostResources",
+        "server.getProcessResourceHistory",
+        "server.getResourceTelemetryHistory",
+        "subscribeResourceTelemetry",
+        "provider.uploadFeedback"
+      ],
+      "invariants": [
+        "Sensitive bodies filtered before logging",
+        "Provider usage readers may open external provider-owned SQLite stores",
+        "Process signaling permissions and identity must be preserved",
+        "Telemetry stays off critical acknowledgement path"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/provider/builtInDrivers.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/builtInDrivers.ts"
+        },
+        {
+          "path": "apps/server/src/provider/EventNdjsonLogger.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/EventNdjsonLogger.ts"
+        },
+        {
+          "path": "packages/contracts/src/rpc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts"
+        }
+      ],
+      "review": "registry/logging selected review; individual telemetry collectors not fully audited",
+      "cost_opportunities": [
+        "Retain delta filtering and bounded log traversal; profile allocation and encoding before redesign"
+      ],
+      "rpc_methods": [
+        "server.getTraceDiagnostics",
+        "server.getProcessDiagnostics",
+        "server.getHostResources",
+        "server.getProcessResourceHistory",
+        "server.getResourceTelemetryHistory",
+        "server.retryResourceTelemetry",
+        "server.checkOtlpEndpoint",
+        "server.getUsageSummary",
+        "server.refreshUsageRates",
+        "server.signalProcess",
+        "subscribeResourceTelemetry"
+      ]
+    },
+    {
+      "id": "settings_maintenance",
+      "user_outcomes": [
+        "Manage settings/keybindings/providers; update services; diagnose/clean storage and reclaim DB space"
+      ],
+      "rust_owner": "ConfigurationService, InstallerSupervisor and MaintenanceCoordinator",
+      "entrypoints": [
+        "server.getSettings",
+        "server.updateSettings",
+        "server.upsertKeybinding",
+        "server.removeKeybinding",
+        "server.updateServer",
+        "server.updateServerWithProgress",
+        "server.commitDesktopUpdate",
+        "server.runStorageCleanup",
+        "server.getDatabaseStorage",
+        "server.reclaimDatabaseSpace"
+      ],
+      "invariants": [
+        "Atomic settings publication and server/client scope separation",
+        "Updates only touch provably owned install",
+        "Maintenance cannot delete live provider/worktree/attachment ownership",
+        "Production owner and migration version fenced",
+        "Full backup/import/recovery semantics retained"
+      ],
+      "sources": [
+        {
+          "path": "apps/server/src/server.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/server.ts"
+        },
+        {
+          "path": "apps/server/src/bootstrap.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/bootstrap.ts"
+        },
+        {
+          "path": "packages/contracts/src/rpc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts"
+        },
+        {
+          "path": "docs/internals/overview.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/overview.md"
+        }
+      ],
+      "review": "contracts and prior persistence/maintenance review; all installer implementations not audited",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "server.upsertKeybinding",
+        "server.removeKeybinding",
+        "server.getNpmRelease",
+        "server.updateServer",
+        "server.updateServerWithProgress",
+        "server.commitDesktopUpdate",
+        "server.runStorageCleanup",
+        "server.getStorageCleanupReport",
+        "server.getDatabaseStorage",
+        "server.reclaimDatabaseSpace",
+        "server.getSettings",
+        "server.updateSettings",
+        "server.prepareTriage"
+      ]
+    },
+    {
+      "id": "agent_import",
+      "user_outcomes": [
+        "Discover and import native provider sessions, including ACP registry histories"
+      ],
+      "rust_owner": "AgentSessionImporter and provider-native history readers",
+      "entrypoints": [
+        "agentSessions.scan",
+        "agentSessions.import",
+        "server.listAcpRegistrySessions",
+        "server.importAcpRegistrySession",
+        "server.deleteAcpRegistrySession"
+      ],
+      "invariants": [
+        "Imported history is not fabricated native runnable state",
+        "Provider-specific path/ID/ownership",
+        "Legacy lazy imports preserved across migration",
+        "Deleting provider-native history requires exact owner/capability"
+      ],
+      "sources": [
+        {
+          "path": "packages/contracts/src/rpc.ts",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts"
+        },
+        {
+          "path": "docs/internals/context-handoffs.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/context-handoffs.md"
+        },
+        {
+          "path": "docs/internals/providers.md",
+          "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/providers.md"
+        }
+      ],
+      "review": "contracts, provider constraints and prior external DB reader inventory; scanner branches not audited",
+      "cost_opportunities": [],
+      "rpc_methods": [
+        "server.listAcpRegistrySessions",
+        "server.importAcpRegistrySession",
+        "server.deleteAcpRegistrySession",
+        "agentSessions.scan",
+        "agentSessions.import"
+      ]
+    }
+  ],
+  "rpc_assignments": [
+    {
+      "wire_name": "server.upsertKeybinding",
+      "family": "settings_maintenance",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L714",
+      "stream": false
+    },
+    {
+      "wire_name": "server.removeKeybinding",
+      "family": "settings_maintenance",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L720",
+      "stream": false
+    },
+    {
+      "wire_name": "server.probe",
+      "family": "environment_lifecycle",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L726",
+      "stream": false
+    },
+    {
+      "wire_name": "server.getConfig",
+      "family": "environment_lifecycle",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L732",
+      "stream": false
+    },
+    {
+      "wire_name": "server.refreshProviders",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L738",
+      "stream": false
+    },
+    {
+      "wire_name": "server.updateProvider",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L777",
+      "stream": false
+    },
+    {
+      "wire_name": "provider.consumeResetCredit",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L785",
+      "stream": false
+    },
+    {
+      "wire_name": "provider.auth.start",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L791",
+      "stream": false
+    },
+    {
+      "wire_name": "provider.auth.respond",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L797",
+      "stream": false
+    },
+    {
+      "wire_name": "provider.auth.complete",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L803",
+      "stream": false
+    },
+    {
+      "wire_name": "provider.chatgpt.reconnect-profile",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L809",
+      "stream": false
+    },
+    {
+      "wire_name": "provider.chatgpt.import-profile",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L814",
+      "stream": false
+    },
+    {
+      "wire_name": "provider.chatgpt.handoff.subscribe",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L819",
+      "stream": true
+    },
+    {
+      "wire_name": "provider.auth.cancel",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L826",
+      "stream": false
+    },
+    {
+      "wire_name": "provider.auth.removeMethod",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L832",
+      "stream": false
+    },
+    {
+      "wire_name": "provider.auth.logout",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L838",
+      "stream": false
+    },
+    {
+      "wire_name": "provider.auth.subscribe",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L844",
+      "stream": true
+    },
+    {
+      "wire_name": "provider.install.start",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L851",
+      "stream": false
+    },
+    {
+      "wire_name": "provider.install.cancel",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L857",
+      "stream": false
+    },
+    {
+      "wire_name": "provider.install.subscribe",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L863",
+      "stream": true
+    },
+    {
+      "wire_name": "provider.install.remove",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L870",
+      "stream": false
+    },
+    {
+      "wire_name": "server.getNpmRelease",
+      "family": "settings_maintenance",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L876",
+      "stream": false
+    },
+    {
+      "wire_name": "server.updateServer",
+      "family": "settings_maintenance",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L882",
+      "stream": false
+    },
+    {
+      "wire_name": "server.updateServerWithProgress",
+      "family": "settings_maintenance",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L888",
+      "stream": true
+    },
+    {
+      "wire_name": "server.commitDesktopUpdate",
+      "family": "settings_maintenance",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L895",
+      "stream": false
+    },
+    {
+      "wire_name": "server.runStorageCleanup",
+      "family": "settings_maintenance",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L901",
+      "stream": false
+    },
+    {
+      "wire_name": "server.getStorageCleanupReport",
+      "family": "settings_maintenance",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L906",
+      "stream": true
+    },
+    {
+      "wire_name": "server.getDatabaseStorage",
+      "family": "settings_maintenance",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L913",
+      "stream": true
+    },
+    {
+      "wire_name": "server.reclaimDatabaseSpace",
+      "family": "settings_maintenance",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L920",
+      "stream": false
+    },
+    {
+      "wire_name": "peerLinks.list",
+      "family": "peer_links",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L925",
+      "stream": false
+    },
+    {
+      "wire_name": "peerLinks.names",
+      "family": "peer_links",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L932",
+      "stream": false
+    },
+    {
+      "wire_name": "peerLinks.link",
+      "family": "peer_links",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L938",
+      "stream": false
+    },
+    {
+      "wire_name": "peerLinks.unlink",
+      "family": "peer_links",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L944",
+      "stream": false
+    },
+    {
+      "wire_name": "peerLinks.subscribeThread",
+      "family": "peer_links",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L951",
+      "stream": true
+    },
+    {
+      "wire_name": "peerLinks.threadHistoryPage",
+      "family": "peer_links",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L958",
+      "stream": false
+    },
+    {
+      "wire_name": "peerLinks.threadItem",
+      "family": "peer_links",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L964",
+      "stream": false
+    },
+    {
+      "wire_name": "peerLinks.pairClient",
+      "family": "peer_links",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L970",
+      "stream": false
+    },
+    {
+      "wire_name": "peerLinks.pairLink",
+      "family": "peer_links",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L976",
+      "stream": false
+    },
+    {
+      "wire_name": "peerLinks.answerRequest",
+      "family": "peer_links",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L982",
+      "stream": false
+    },
+    {
+      "wire_name": "server.getSettings",
+      "family": "settings_maintenance",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L988",
+      "stream": false
+    },
+    {
+      "wire_name": "server.updateSettings",
+      "family": "settings_maintenance",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L994",
+      "stream": false
+    },
+    {
+      "wire_name": "server.discoverSourceControl",
+      "family": "source_control",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1003",
+      "stream": false
+    },
+    {
+      "wire_name": "server.checkSecretSource",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1009",
+      "stream": false
+    },
+    {
+      "wire_name": "server.searchAcpRegistry",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1015",
+      "stream": false
+    },
+    {
+      "wire_name": "server.prepareAcpRegistryAgent",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1021",
+      "stream": false
+    },
+    {
+      "wire_name": "server.uninstallAcpRegistryManagedBinary",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1027",
+      "stream": false
+    },
+    {
+      "wire_name": "server.acceptAcpRegistryUrlAuth",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1036",
+      "stream": false
+    },
+    {
+      "wire_name": "server.listAcpRegistrySessions",
+      "family": "agent_import",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1042",
+      "stream": false
+    },
+    {
+      "wire_name": "server.importAcpRegistrySession",
+      "family": "agent_import",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1048",
+      "stream": false
+    },
+    {
+      "wire_name": "server.deleteAcpRegistrySession",
+      "family": "agent_import",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1054",
+      "stream": false
+    },
+    {
+      "wire_name": "server.listAcpRegistryProviders",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1060",
+      "stream": false
+    },
+    {
+      "wire_name": "server.setAcpRegistryProvider",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1066",
+      "stream": false
+    },
+    {
+      "wire_name": "server.disableAcpRegistryProvider",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1072",
+      "stream": false
+    },
+    {
+      "wire_name": "server.logoutAcpRegistry",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1081",
+      "stream": false
+    },
+    {
+      "wire_name": "server.getTraceDiagnostics",
+      "family": "usage_observability",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1087",
+      "stream": false
+    },
+    {
+      "wire_name": "server.getProcessDiagnostics",
+      "family": "usage_observability",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1093",
+      "stream": false
+    },
+    {
+      "wire_name": "server.getHostResources",
+      "family": "usage_observability",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1099",
+      "stream": false
+    },
+    {
+      "wire_name": "server.getProcessResourceHistory",
+      "family": "usage_observability",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1105",
+      "stream": false
+    },
+    {
+      "wire_name": "server.getResourceTelemetryHistory",
+      "family": "usage_observability",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1111",
+      "stream": false
+    },
+    {
+      "wire_name": "server.retryResourceTelemetry",
+      "family": "usage_observability",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1120",
+      "stream": false
+    },
+    {
+      "wire_name": "server.checkOtlpEndpoint",
+      "family": "usage_observability",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1126",
+      "stream": false
+    },
+    {
+      "wire_name": "server.listTextGeneratorModels",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1132",
+      "stream": false
+    },
+    {
+      "wire_name": "server.prepareTriage",
+      "family": "settings_maintenance",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1138",
+      "stream": false
+    },
+    {
+      "wire_name": "server.getUsageSummary",
+      "family": "usage_observability",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1144",
+      "stream": false
+    },
+    {
+      "wire_name": "server.refreshUsageRates",
+      "family": "usage_observability",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1150",
+      "stream": false
+    },
+    {
+      "wire_name": "server.signalProcess",
+      "family": "usage_observability",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1156",
+      "stream": false
+    },
+    {
+      "wire_name": "cloud.getRelayClientStatus",
+      "family": "environment_lifecycle",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1162",
+      "stream": false
+    },
+    {
+      "wire_name": "cloud.installRelayClient",
+      "family": "environment_lifecycle",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1168",
+      "stream": true
+    },
+    {
+      "wire_name": "server.reportClientActivity",
+      "family": "environment_lifecycle",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1175",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.list",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1186",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.listStats",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1193",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.filterOptions",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1199",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.routing",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1205",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.routingIdentity",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1211",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.summary",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1217",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.stack",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1223",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.linkedThreads",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1229",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.detail",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1235",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.preview",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1241",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.checks",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1247",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.activity",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1253",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.reviewGuide",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1259",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.generateReviewGuide",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1265",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.threadComments",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1271",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.diffFileContents",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1277",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.filesViewed",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1283",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.changeBreakdown",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1289",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.setFilesViewed",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1295",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.runAction",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1301",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.update",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1308",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.comment",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1314",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.updateComment",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1320",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.submitReview",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1326",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.replyToThread",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1332",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.setThreadResolution",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1338",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.setReaction",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1344",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.invalidate",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1350",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.reportState",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1356",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.subscribeRefreshes",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1362",
+      "stream": true
+    },
+    {
+      "wire_name": "pullRequests.subscribeLinkedThreadRefreshes",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1370",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.reviewerCandidates",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1381",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.requestReviewers",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1387",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.labelCandidates",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1393",
+      "stream": false
+    },
+    {
+      "wire_name": "pullRequests.setLabels",
+      "family": "pull_requests",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1399",
+      "stream": false
+    },
+    {
+      "wire_name": "issues.list",
+      "family": "issues",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1411",
+      "stream": false
+    },
+    {
+      "wire_name": "issues.detail",
+      "family": "issues",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1417",
+      "stream": false
+    },
+    {
+      "wire_name": "issues.linkedThreads",
+      "family": "issues",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1424",
+      "stream": false
+    },
+    {
+      "wire_name": "issues.comments",
+      "family": "issues",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1430",
+      "stream": false
+    },
+    {
+      "wire_name": "issues.templates",
+      "family": "issues",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1436",
+      "stream": false
+    },
+    {
+      "wire_name": "issues.candidates",
+      "family": "issues",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1443",
+      "stream": false
+    },
+    {
+      "wire_name": "issues.create",
+      "family": "issues",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1449",
+      "stream": false
+    },
+    {
+      "wire_name": "issues.comment",
+      "family": "issues",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1455",
+      "stream": false
+    },
+    {
+      "wire_name": "issues.update",
+      "family": "issues",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1461",
+      "stream": false
+    },
+    {
+      "wire_name": "issues.setState",
+      "family": "issues",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1467",
+      "stream": false
+    },
+    {
+      "wire_name": "issues.react",
+      "family": "issues",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1473",
+      "stream": false
+    },
+    {
+      "wire_name": "issueTrackers.list",
+      "family": "issues",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1485",
+      "stream": false
+    },
+    {
+      "wire_name": "issueTrackers.connect",
+      "family": "issues",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1495",
+      "stream": false
+    },
+    {
+      "wire_name": "issueTrackers.bindProject",
+      "family": "issues",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1501",
+      "stream": false
+    },
+    {
+      "wire_name": "sourceControl.lookupRepository",
+      "family": "source_control",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1507",
+      "stream": false
+    },
+    {
+      "wire_name": "sourceControl.cloneRepository",
+      "family": "source_control",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1513",
+      "stream": false
+    },
+    {
+      "wire_name": "sourceControl.signInStart",
+      "family": "source_control",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1520",
+      "stream": false
+    },
+    {
+      "wire_name": "sourceControl.signInWait",
+      "family": "source_control",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1527",
+      "stream": false
+    },
+    {
+      "wire_name": "sourceControl.signInCancel",
+      "family": "source_control",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1534",
+      "stream": false
+    },
+    {
+      "wire_name": "sourceControl.appAccess",
+      "family": "source_control",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1540",
+      "stream": false
+    },
+    {
+      "wire_name": "sourceControl.starred",
+      "family": "source_control",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1547",
+      "stream": false
+    },
+    {
+      "wire_name": "sourceControl.star",
+      "family": "source_control",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1554",
+      "stream": false
+    },
+    {
+      "wire_name": "projectClone.start",
+      "family": "thread_launch",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1561",
+      "stream": false
+    },
+    {
+      "wire_name": "projectClone.cancel",
+      "family": "thread_launch",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1571",
+      "stream": false
+    },
+    {
+      "wire_name": "projectClone.retry",
+      "family": "thread_launch",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1577",
+      "stream": false
+    },
+    {
+      "wire_name": "subscribeProjectClones",
+      "family": "thread_launch",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1583",
+      "stream": true
+    },
+    {
+      "wire_name": "sourceControl.publishRepository",
+      "family": "source_control",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1590",
+      "stream": false
+    },
+    {
+      "wire_name": "projects.searchEntries",
+      "family": "files_search_attachments",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1596",
+      "stream": false
+    },
+    {
+      "wire_name": "projects.searchContents",
+      "family": "files_search_attachments",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1602",
+      "stream": false
+    },
+    {
+      "wire_name": "projects.listEntries",
+      "family": "files_search_attachments",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1608",
+      "stream": false
+    },
+    {
+      "wire_name": "projects.listIgnoredFiles",
+      "family": "files_search_attachments",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1614",
+      "stream": false
+    },
+    {
+      "wire_name": "projects.readFile",
+      "family": "files_search_attachments",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1620",
+      "stream": false
+    },
+    {
+      "wire_name": "projects.writeFile",
+      "family": "files_search_attachments",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1626",
+      "stream": false
+    },
+    {
+      "wire_name": "projects.mutate",
+      "family": "projects_workspace",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1632",
+      "stream": false
+    },
+    {
+      "wire_name": "projects.ensureScratch",
+      "family": "projects_workspace",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1638",
+      "stream": false
+    },
+    {
+      "wire_name": "projects.createNew",
+      "family": "projects_workspace",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1644",
+      "stream": false
+    },
+    {
+      "wire_name": "projects.createFromThread",
+      "family": "projects_workspace",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1650",
+      "stream": false
+    },
+    {
+      "wire_name": "shell.openInEditor",
+      "family": "files_search_attachments",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1656",
+      "stream": false
+    },
+    {
+      "wire_name": "filesystem.getMetadata",
+      "family": "files_search_attachments",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1661",
+      "stream": false
+    },
+    {
+      "wire_name": "filesystem.browse",
+      "family": "files_search_attachments",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1667",
+      "stream": false
+    },
+    {
+      "wire_name": "workspace.listFolders",
+      "family": "projects_workspace",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1673",
+      "stream": false
+    },
+    {
+      "wire_name": "workspace.scanFolders",
+      "family": "projects_workspace",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1679",
+      "stream": false
+    },
+    {
+      "wire_name": "workspace.taskFolder",
+      "family": "projects_workspace",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1685",
+      "stream": false
+    },
+    {
+      "wire_name": "workspace.addTaskFolderRepository",
+      "family": "projects_workspace",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1691",
+      "stream": false
+    },
+    {
+      "wire_name": "agentSessions.scan",
+      "family": "agent_import",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1700",
+      "stream": false
+    },
+    {
+      "wire_name": "agentSessions.import",
+      "family": "agent_import",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1706",
+      "stream": false
+    },
+    {
+      "wire_name": "assets.createUrl",
+      "family": "files_search_attachments",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1717",
+      "stream": false
+    },
+    {
+      "wire_name": "assets.persistChatAttachments",
+      "family": "files_search_attachments",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1723",
+      "stream": false
+    },
+    {
+      "wire_name": "attachments.createUploadUrl",
+      "family": "files_search_attachments",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1729",
+      "stream": false
+    },
+    {
+      "wire_name": "attachments.delete",
+      "family": "files_search_attachments",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1735",
+      "stream": false
+    },
+    {
+      "wire_name": "mcpApps.callTool",
+      "family": "mcp_apps",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1740",
+      "stream": false
+    },
+    {
+      "wire_name": "mcpApps.toolInfo",
+      "family": "mcp_apps",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1746",
+      "stream": false
+    },
+    {
+      "wire_name": "mcpApps.updateModelContext",
+      "family": "mcp_apps",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1752",
+      "stream": false
+    },
+    {
+      "wire_name": "mcpApps.readResource",
+      "family": "mcp_apps",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1757",
+      "stream": false
+    },
+    {
+      "wire_name": "provider.uploadFeedback",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1763",
+      "stream": false
+    },
+    {
+      "wire_name": "provider.mcpSignIn.start",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1769",
+      "stream": false
+    },
+    {
+      "wire_name": "provider.mcpSignIn.complete",
+      "family": "provider_runtime",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1775",
+      "stream": false
+    },
+    {
+      "wire_name": "subscribeVcsBranch",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1781",
+      "stream": true
+    },
+    {
+      "wire_name": "vcs.refreshBranch",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1788",
+      "stream": false
+    },
+    {
+      "wire_name": "subscribeVcsStatus",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1794",
+      "stream": true
+    },
+    {
+      "wire_name": "vcs.pull",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1801",
+      "stream": false
+    },
+    {
+      "wire_name": "vcs.refreshStatus",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1807",
+      "stream": false
+    },
+    {
+      "wire_name": "subscribeWorktreeSetup",
+      "family": "thread_launch",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1816",
+      "stream": true
+    },
+    {
+      "wire_name": "worktreeSetup.cancel",
+      "family": "thread_launch",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1823",
+      "stream": false
+    },
+    {
+      "wire_name": "git.runStackedAction",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1829",
+      "stream": true
+    },
+    {
+      "wire_name": "git.resolvePullRequest",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1836",
+      "stream": false
+    },
+    {
+      "wire_name": "git.preparePullRequestThread",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1842",
+      "stream": false
+    },
+    {
+      "wire_name": "vcs.listRefs",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1848",
+      "stream": false
+    },
+    {
+      "wire_name": "vcs.createWorktree",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1854",
+      "stream": false
+    },
+    {
+      "wire_name": "vcs.removeWorktree",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1861",
+      "stream": false
+    },
+    {
+      "wire_name": "vcs.createRef",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1866",
+      "stream": false
+    },
+    {
+      "wire_name": "vcs.switchRef",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1872",
+      "stream": false
+    },
+    {
+      "wire_name": "vcs.init",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1878",
+      "stream": false
+    },
+    {
+      "wire_name": "review.getBranchCommits",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1883",
+      "stream": false
+    },
+    {
+      "wire_name": "review.getDiffPreview",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1889",
+      "stream": false
+    },
+    {
+      "wire_name": "review.getDiffFileContents",
+      "family": "git_review",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1895",
+      "stream": false
+    },
+    {
+      "wire_name": "terminal.open",
+      "family": "terminal",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1901",
+      "stream": false
+    },
+    {
+      "wire_name": "terminal.attach",
+      "family": "terminal",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1907",
+      "stream": true
+    },
+    {
+      "wire_name": "terminal.observe",
+      "family": "terminal",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1914",
+      "stream": true
+    },
+    {
+      "wire_name": "terminal.write",
+      "family": "terminal",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1921",
+      "stream": false
+    },
+    {
+      "wire_name": "terminal.resize",
+      "family": "terminal",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1926",
+      "stream": false
+    },
+    {
+      "wire_name": "terminal.clear",
+      "family": "terminal",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1931",
+      "stream": false
+    },
+    {
+      "wire_name": "terminal.close",
+      "family": "terminal",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1936",
+      "stream": false
+    },
+    {
+      "wire_name": "preview.open",
+      "family": "preview_browser",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1941",
+      "stream": false
+    },
+    {
+      "wire_name": "preview.resize",
+      "family": "preview_browser",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1947",
+      "stream": false
+    },
+    {
+      "wire_name": "preview.adjust",
+      "family": "preview_browser",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1953",
+      "stream": false
+    },
+    {
+      "wire_name": "preview.close",
+      "family": "preview_browser",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1959",
+      "stream": false
+    },
+    {
+      "wire_name": "preview.list",
+      "family": "preview_browser",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1964",
+      "stream": false
+    },
+    {
+      "wire_name": "preview.clearProfile",
+      "family": "preview_browser",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1970",
+      "stream": false
+    },
+    {
+      "wire_name": "preview.reportProfiles",
+      "family": "preview_browser",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1975",
+      "stream": false
+    },
+    {
+      "wire_name": "preview.reportStatus",
+      "family": "preview_browser",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1980",
+      "stream": false
+    },
+    {
+      "wire_name": "subscribePreviewEvents",
+      "family": "preview_browser",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1985",
+      "stream": true
+    },
+    {
+      "wire_name": "preview.stopLocalServer",
+      "family": "preview_browser",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1992",
+      "stream": false
+    },
+    {
+      "wire_name": "subscribeDiscoveredLocalServers",
+      "family": "preview_browser",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1997",
+      "stream": true
+    },
+    {
+      "wire_name": "device.testHost",
+      "family": "devices",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2006",
+      "stream": false
+    },
+    {
+      "wire_name": "device.easAccount",
+      "family": "devices",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2012",
+      "stream": false
+    },
+    {
+      "wire_name": "device.simlockIdentity",
+      "family": "devices",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2018",
+      "stream": false
+    },
+    {
+      "wire_name": "device.list",
+      "family": "devices",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2024",
+      "stream": false
+    },
+    {
+      "wire_name": "device.configure",
+      "family": "devices",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2030",
+      "stream": false
+    },
+    {
+      "wire_name": "device.open",
+      "family": "devices",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2036",
+      "stream": false
+    },
+    {
+      "wire_name": "device.close",
+      "family": "devices",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2042",
+      "stream": false
+    },
+    {
+      "wire_name": "device.shutdown",
+      "family": "devices",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2047",
+      "stream": false
+    },
+    {
+      "wire_name": "device.detail",
+      "family": "devices",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2052",
+      "stream": false
+    },
+    {
+      "wire_name": "device.action",
+      "family": "devices",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2058",
+      "stream": false
+    },
+    {
+      "wire_name": "subscribeDeviceState",
+      "family": "devices",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2064",
+      "stream": true
+    },
+    {
+      "wire_name": "orchestration.dispatchCommand",
+      "family": "orchestration_commands",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2071",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.getTurnDiff",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2077",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.getFullThreadDiff",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2083",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.searchThread",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2092",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.searchThreadStream",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2098",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.searchThreads",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2108",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.getArchivedShellSnapshot",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2114",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.getThreadFamily",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2123",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.getThreadTitles",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2129",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.getThreadLinkMetadata",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2135",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.getWorktreeThreadIds",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2144",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.getOlderSettledThreads",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2153",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.getThreadProjection",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2162",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.stopWorkflow",
+      "family": "delegation_workflows",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2171",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.forceStopThread",
+      "family": "delegation_workflows",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2177",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.getWorkflowScript",
+      "family": "delegation_workflows",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2183",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.getNativeChildWork",
+      "family": "delegation_workflows",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2192",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.getTurnItem",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2201",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.launchThread",
+      "family": "thread_launch",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2207",
+      "stream": false
+    },
+    {
+      "wire_name": "orchestration.subscribeShell",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2213",
+      "stream": true
+    },
+    {
+      "wire_name": "orchestration.subscribeThread",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2220",
+      "stream": true
+    },
+    {
+      "wire_name": "orchestration.subscribeCommandOutput",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2227",
+      "stream": true
+    },
+    {
+      "wire_name": "orchestration.subscribePromptSuggestion",
+      "family": "thread_read_stream",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2237",
+      "stream": true
+    },
+    {
+      "wire_name": "subscribeTerminalMetadata",
+      "family": "terminal",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2247",
+      "stream": true
+    },
+    {
+      "wire_name": "subscribeServerConfig",
+      "family": "environment_lifecycle",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2254",
+      "stream": true
+    },
+    {
+      "wire_name": "subscribeServerLifecycle",
+      "family": "environment_lifecycle",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2278",
+      "stream": true
+    },
+    {
+      "wire_name": "scheduledTasks.subscribe",
+      "family": "schedules_webhooks",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2285",
+      "stream": true
+    },
+    {
+      "wire_name": "scheduledTasks.upsert",
+      "family": "schedules_webhooks",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2292",
+      "stream": false
+    },
+    {
+      "wire_name": "scheduledTasks.setEnabled",
+      "family": "schedules_webhooks",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2298",
+      "stream": false
+    },
+    {
+      "wire_name": "scheduledTasks.delete",
+      "family": "schedules_webhooks",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2304",
+      "stream": false
+    },
+    {
+      "wire_name": "scheduledTasks.runNow",
+      "family": "schedules_webhooks",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2310",
+      "stream": false
+    },
+    {
+      "wire_name": "scheduledTasks.rotateWebhookToken",
+      "family": "schedules_webhooks",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2316",
+      "stream": false
+    },
+    {
+      "wire_name": "guestShare.create",
+      "family": "guest_share",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2325",
+      "stream": false
+    },
+    {
+      "wire_name": "secrets.answerRequest",
+      "family": "authorization",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2331",
+      "stream": false
+    },
+    {
+      "wire_name": "scheduledTasks.listWebhookDeliveries",
+      "family": "schedules_webhooks",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2336",
+      "stream": true
+    },
+    {
+      "wire_name": "scheduledTasks.getWebhookDelivery",
+      "family": "schedules_webhooks",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2345",
+      "stream": true
+    },
+    {
+      "wire_name": "subscribeAuthAccess",
+      "family": "authorization",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2354",
+      "stream": true
+    },
+    {
+      "wire_name": "subscribeResourceTelemetry",
+      "family": "usage_observability",
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2361",
+      "stream": true
+    }
+  ],
+  "rpc_unassigned": [],
+  "limits": [
+    "Family assignments are research categorization, not authorization mapping. RpcAuthorization remains normative.",
+    "All method declarations enumerated; full request/response schemas and every handler branch are not semantically audited.",
+    "Side-channel HTTP and embedded-provider protocols require separate contract preservation.",
+    "Rust owners are proposed architecture, not observed upstream modules."
+  ]
+}

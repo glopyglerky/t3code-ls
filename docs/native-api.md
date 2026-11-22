@@ -1,6 +1,8 @@
 # Native API walkthrough
 
-This is the native application's JSON-RPC protocol. It is not compatible with the retired web, desktop or mobile clients. The sequence below follows the implemented service and controlled provider tests; it is not evidence of qualification with a real Codex installation or model.
+This is the standalone experimental `t3-code-ls-app` component's JSON-RPC protocol. It does not implement the production clients' WebSocket/orchestration protocol. The web, desktop and mobile clients remain retained production clients; they are not retired. The sequence below follows the component service and controlled provider tests, and is not evidence of full-application or real-provider qualification.
+
+Use the [full-system implementation guide](porting/full-system/README.md) for product work. Extend the real application owners and entrypoints; this walkthrough does not define a second replacement product.
 
 ## Start a server
 
@@ -187,4 +189,5 @@ Use `result.last_sequence` as the next `events.list` request's `afterSequence`. 
 
 ## Implementation references
 
-The exact request boundary is in [service.rs](../crates/app/src/service.rs), HTTP limits are in [http.rs](../crates/app/src/http.rs), and provider state transitions are in [runtime.rs](../crates/app/src/runtime.rs). Controlled examples and recovery assertions are in [provider_runtime.rs](../crates/app/tests/provider_runtime.rs); [application.rs](../crates/app/tests/application.rs) covers durable commands and receipts. These source/tests define the implemented subset; they do not establish real-provider or retired-client parity.
+The exact request boundary is in [service.rs](../crates/app/src/service.rs), HTTP limits are in [http.rs](../crates/app/src/http.rs), and provider state transitions are in [runtime.rs](../crates/app/src/runtime.rs). Controlled examples and recovery assertions are in [provider_runtime.rs](../crates/app/tests/provider_runtime.rs); [application.rs](../crates/app/tests/application.rs) covers durable commands and receipts. These source/tests define the implemented subset; they do not establish real-provider or production-client parity.
+

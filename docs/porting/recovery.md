@@ -1,5 +1,7 @@
 # Hybrid application recovery
 
+This is a historical recovery report. Its source pins and checks apply to the recorded checkpoints, not automatically to the current application. Read [the current port map](../../port-map.json), [upstream lock](../../upstream.lock.json) and [full-system guide](full-system/README.md) for implementation and acceptance work.
+
 ## Source and product boundary
 
 The recovery starts from `0be60f85268daece83e616b97f6fc421ec83ee6b` and restores
@@ -141,3 +143,4 @@ nightly `v0.1.9-nightly.20261110.4452`, commit
 qualified. A subsequent nightly update must review mapped translated paths and
 contracts, merge unported source, translate affected behavior and rerun the
 relevant acceptance gates. No source percentage or changed pin establishes parity.
+

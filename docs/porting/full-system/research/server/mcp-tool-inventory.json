@@ -1,0 +1,675 @@
+{
+  "revision": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "method": "Lexical Tool.make declaration extraction from all 15 toolkit tools.ts files; three imported constant names resolved from pinned sources. Runtime exposure depends on caller, permission and capability.",
+  "count": 93,
+  "toolkits": {
+    "attachment": 3,
+    "device": 4,
+    "environment": 2,
+    "html": 2,
+    "issues": 8,
+    "message": 1,
+    "orchestrator": 20,
+    "preview": 12,
+    "previewControls": 2,
+    "project": 7,
+    "pullRequests": 18,
+    "theme": 2,
+    "thread": 8,
+    "toolSearch": 1,
+    "worktree": 3
+  },
+  "tools": [
+    {
+      "tool": "t3_attachment_prepare_upload",
+      "name_expression": "\"t3_attachment_prepare_upload\"",
+      "toolkit": "attachment",
+      "path": "apps/server/src/mcp/toolkits/attachment/tools.ts",
+      "line": 34
+    },
+    {
+      "tool": "t3_attachment_discard",
+      "name_expression": "\"t3_attachment_discard\"",
+      "toolkit": "attachment",
+      "path": "apps/server/src/mcp/toolkits/attachment/tools.ts",
+      "line": 44
+    },
+    {
+      "tool": "t3_thread_send_attachments",
+      "name_expression": "\"t3_thread_send_attachments\"",
+      "toolkit": "attachment",
+      "path": "apps/server/src/mcp/toolkits/attachment/tools.ts",
+      "line": 50
+    },
+    {
+      "tool": "device_list",
+      "name_expression": "\"device_list\"",
+      "toolkit": "device",
+      "path": "apps/server/src/mcp/toolkits/device/tools.ts",
+      "line": 30
+    },
+    {
+      "tool": "device_open",
+      "name_expression": "\"device_open\"",
+      "toolkit": "device",
+      "path": "apps/server/src/mcp/toolkits/device/tools.ts",
+      "line": 51
+    },
+    {
+      "tool": "device_screenshot",
+      "name_expression": "\"device_screenshot\"",
+      "toolkit": "device",
+      "path": "apps/server/src/mcp/toolkits/device/tools.ts",
+      "line": 73
+    },
+    {
+      "tool": "device_close",
+      "name_expression": "\"device_close\"",
+      "toolkit": "device",
+      "path": "apps/server/src/mcp/toolkits/device/tools.ts",
+      "line": 88
+    },
+    {
+      "tool": "t3_environment_read",
+      "name_expression": "\"t3_environment_read\"",
+      "toolkit": "environment",
+      "path": "apps/server/src/mcp/toolkits/environment/tools.ts",
+      "line": 41
+    },
+    {
+      "tool": "t3_environment_preferences_update",
+      "name_expression": "\"t3_environment_preferences_update\"",
+      "toolkit": "environment",
+      "path": "apps/server/src/mcp/toolkits/environment/tools.ts",
+      "line": 56
+    },
+    {
+      "tool": "html_preview",
+      "name_expression": "\"html_preview\"",
+      "toolkit": "html",
+      "path": "apps/server/src/mcp/toolkits/html/tools.ts",
+      "line": 30
+    },
+    {
+      "tool": "html_render",
+      "name_expression": "HTML_RENDER_TOOL_NAME",
+      "toolkit": "html",
+      "path": "apps/server/src/mcp/toolkits/html/tools.ts",
+      "line": 79
+    },
+    {
+      "tool": "list_issues",
+      "name_expression": "\"list_issues\"",
+      "toolkit": "issues",
+      "path": "apps/server/src/mcp/toolkits/issues/tools.ts",
+      "line": 241
+    },
+    {
+      "tool": "read_issue",
+      "name_expression": "\"read_issue\"",
+      "toolkit": "issues",
+      "path": "apps/server/src/mcp/toolkits/issues/tools.ts",
+      "line": 267
+    },
+    {
+      "tool": "create_issue",
+      "name_expression": "\"create_issue\"",
+      "toolkit": "issues",
+      "path": "apps/server/src/mcp/toolkits/issues/tools.ts",
+      "line": 281
+    },
+    {
+      "tool": "comment_on_issue",
+      "name_expression": "\"comment_on_issue\"",
+      "toolkit": "issues",
+      "path": "apps/server/src/mcp/toolkits/issues/tools.ts",
+      "line": 307
+    },
+    {
+      "tool": "set_issue_state",
+      "name_expression": "\"set_issue_state\"",
+      "toolkit": "issues",
+      "path": "apps/server/src/mcp/toolkits/issues/tools.ts",
+      "line": 323
+    },
+    {
+      "tool": "link_issue",
+      "name_expression": "\"link_issue\"",
+      "toolkit": "issues",
+      "path": "apps/server/src/mcp/toolkits/issues/tools.ts",
+      "line": 341
+    },
+    {
+      "tool": "unlink_issue",
+      "name_expression": "\"unlink_issue\"",
+      "toolkit": "issues",
+      "path": "apps/server/src/mcp/toolkits/issues/tools.ts",
+      "line": 355
+    },
+    {
+      "tool": "list_thread_issues",
+      "name_expression": "\"list_thread_issues\"",
+      "toolkit": "issues",
+      "path": "apps/server/src/mcp/toolkits/issues/tools.ts",
+      "line": 368
+    },
+    {
+      "tool": "send_to_user",
+      "name_expression": "SEND_TO_USER_TOOL_NAME",
+      "toolkit": "message",
+      "path": "apps/server/src/mcp/toolkits/message/tools.ts",
+      "line": 11
+    },
+    {
+      "tool": "orchestrator_capabilities",
+      "name_expression": "\"orchestrator_capabilities\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 75
+    },
+    {
+      "tool": "delegate_task",
+      "name_expression": "\"delegate_task\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 89
+    },
+    {
+      "tool": "task_status",
+      "name_expression": "\"task_status\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 103
+    },
+    {
+      "tool": "task_cancel",
+      "name_expression": "\"task_cancel\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 118
+    },
+    {
+      "tool": "t3_workflow_stop",
+      "name_expression": "\"t3_workflow_stop\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 131
+    },
+    {
+      "tool": "t3_background_wait",
+      "name_expression": "\"t3_background_wait\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 146
+    },
+    {
+      "tool": "schedule_task",
+      "name_expression": "\"schedule_task\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 170
+    },
+    {
+      "tool": "list_scheduled_tasks",
+      "name_expression": "\"list_scheduled_tasks\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 183
+    },
+    {
+      "tool": "delete_scheduled_task",
+      "name_expression": "\"delete_scheduled_task\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 197
+    },
+    {
+      "tool": "request_secret",
+      "name_expression": "\"request_secret\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 209
+    },
+    {
+      "tool": "create_threads",
+      "name_expression": "\"create_threads\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 224
+    },
+    {
+      "tool": "t3_thread_list",
+      "name_expression": "\"t3_thread_list\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 238
+    },
+    {
+      "tool": "t3_thread_read",
+      "name_expression": "\"t3_thread_read\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 252
+    },
+    {
+      "tool": "t3_thread_update",
+      "name_expression": "\"t3_thread_update\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 267
+    },
+    {
+      "tool": "t3_thread_send",
+      "name_expression": "\"t3_thread_send\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 284
+    },
+    {
+      "tool": "t3_thread_wait",
+      "name_expression": "\"t3_thread_wait\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 297
+    },
+    {
+      "tool": "t3_thread_interrupt",
+      "name_expression": "\"t3_thread_interrupt\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 311
+    },
+    {
+      "tool": "t3_environment_links",
+      "name_expression": "\"t3_environment_links\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 323
+    },
+    {
+      "tool": "t3_environment_link",
+      "name_expression": "\"t3_environment_link\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 337
+    },
+    {
+      "tool": "t3_environment_unlink",
+      "name_expression": "\"t3_environment_unlink\"",
+      "toolkit": "orchestrator",
+      "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+      "line": 351
+    },
+    {
+      "tool": "preview_status",
+      "name_expression": "\"preview_status\"",
+      "toolkit": "preview",
+      "path": "apps/server/src/mcp/toolkits/preview/tools.ts",
+      "line": 60
+    },
+    {
+      "tool": "preview_open",
+      "name_expression": "\"preview_open\"",
+      "toolkit": "preview",
+      "path": "apps/server/src/mcp/toolkits/preview/tools.ts",
+      "line": 78
+    },
+    {
+      "tool": "preview_dialog",
+      "name_expression": "\"preview_dialog\"",
+      "toolkit": "preview",
+      "path": "apps/server/src/mcp/toolkits/preview/tools.ts",
+      "line": 94
+    },
+    {
+      "tool": "preview_navigate",
+      "name_expression": "\"preview_navigate\"",
+      "toolkit": "preview",
+      "path": "apps/server/src/mcp/toolkits/preview/tools.ts",
+      "line": 105
+    },
+    {
+      "tool": "preview_resize",
+      "name_expression": "\"preview_resize\"",
+      "toolkit": "preview",
+      "path": "apps/server/src/mcp/toolkits/preview/tools.ts",
+      "line": 116
+    },
+    {
+      "tool": "preview_set_appearance",
+      "name_expression": "\"preview_set_appearance\"",
+      "toolkit": "preview",
+      "path": "apps/server/src/mcp/toolkits/preview/tools.ts",
+      "line": 129
+    },
+    {
+      "tool": "preview_snapshot",
+      "name_expression": "\"preview_snapshot\"",
+      "toolkit": "preview",
+      "path": "apps/server/src/mcp/toolkits/preview/tools.ts",
+      "line": 146
+    },
+    {
+      "tool": "preview_act",
+      "name_expression": "\"preview_act\"",
+      "toolkit": "preview",
+      "path": "apps/server/src/mcp/toolkits/preview/tools.ts",
+      "line": 169
+    },
+    {
+      "tool": "preview_evaluate",
+      "name_expression": "\"preview_evaluate\"",
+      "toolkit": "preview",
+      "path": "apps/server/src/mcp/toolkits/preview/tools.ts",
+      "line": 191
+    },
+    {
+      "tool": "preview_wait_for",
+      "name_expression": "\"preview_wait_for\"",
+      "toolkit": "preview",
+      "path": "apps/server/src/mcp/toolkits/preview/tools.ts",
+      "line": 202
+    },
+    {
+      "tool": "preview_recording_start",
+      "name_expression": "\"preview_recording_start\"",
+      "toolkit": "preview",
+      "path": "apps/server/src/mcp/toolkits/preview/tools.ts",
+      "line": 213
+    },
+    {
+      "tool": "preview_recording_stop",
+      "name_expression": "\"preview_recording_stop\"",
+      "toolkit": "preview",
+      "path": "apps/server/src/mcp/toolkits/preview/tools.ts",
+      "line": 223
+    },
+    {
+      "tool": "t3_preview_list",
+      "name_expression": "\"t3_preview_list\"",
+      "toolkit": "previewControls",
+      "path": "apps/server/src/mcp/toolkits/previewControls/tools.ts",
+      "line": 26
+    },
+    {
+      "tool": "t3_preview_close",
+      "name_expression": "\"t3_preview_close\"",
+      "toolkit": "previewControls",
+      "path": "apps/server/src/mcp/toolkits/previewControls/tools.ts",
+      "line": 42
+    },
+    {
+      "tool": "t3_project_list",
+      "name_expression": "\"t3_project_list\"",
+      "toolkit": "project",
+      "path": "apps/server/src/mcp/toolkits/project/tools.ts",
+      "line": 54
+    },
+    {
+      "tool": "t3_project_read",
+      "name_expression": "\"t3_project_read\"",
+      "toolkit": "project",
+      "path": "apps/server/src/mcp/toolkits/project/tools.ts",
+      "line": 69
+    },
+    {
+      "tool": "t3_project_create",
+      "name_expression": "\"t3_project_create\"",
+      "toolkit": "project",
+      "path": "apps/server/src/mcp/toolkits/project/tools.ts",
+      "line": 79
+    },
+    {
+      "tool": "t3_project_update",
+      "name_expression": "\"t3_project_update\"",
+      "toolkit": "project",
+      "path": "apps/server/src/mcp/toolkits/project/tools.ts",
+      "line": 91
+    },
+    {
+      "tool": "t3_project_delete",
+      "name_expression": "\"t3_project_delete\"",
+      "toolkit": "project",
+      "path": "apps/server/src/mcp/toolkits/project/tools.ts",
+      "line": 100
+    },
+    {
+      "tool": "t3_project_clone",
+      "name_expression": "\"t3_project_clone\"",
+      "toolkit": "project",
+      "path": "apps/server/src/mcp/toolkits/project/tools.ts",
+      "line": 114
+    },
+    {
+      "tool": "t3_thread_launch",
+      "name_expression": "\"t3_thread_launch\"",
+      "toolkit": "project",
+      "path": "apps/server/src/mcp/toolkits/project/tools.ts",
+      "line": 130
+    },
+    {
+      "tool": "link_pull_request",
+      "name_expression": "\"link_pull_request\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 311
+    },
+    {
+      "tool": "link_pull_requests",
+      "name_expression": "\"link_pull_requests\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 325
+    },
+    {
+      "tool": "unlink_pull_request",
+      "name_expression": "\"unlink_pull_request\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 343
+    },
+    {
+      "tool": "unlink_pull_requests",
+      "name_expression": "\"unlink_pull_requests\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 357
+    },
+    {
+      "tool": "list_thread_pull_requests",
+      "name_expression": "\"list_thread_pull_requests\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 375
+    },
+    {
+      "tool": "watch_pull_request",
+      "name_expression": "\"watch_pull_request\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 404
+    },
+    {
+      "tool": "unwatch_pull_request",
+      "name_expression": "\"unwatch_pull_request\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 419
+    },
+    {
+      "tool": "write_pull_request_guides",
+      "name_expression": "\"write_pull_request_guides\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 464
+    },
+    {
+      "tool": "read_pull_request_guide",
+      "name_expression": "\"read_pull_request_guide\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 481
+    },
+    {
+      "tool": "pull_request_read",
+      "name_expression": "\"pull_request_read\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 634
+    },
+    {
+      "tool": "pull_request_list",
+      "name_expression": "\"pull_request_list\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 657
+    },
+    {
+      "tool": "pull_request_create",
+      "name_expression": "\"pull_request_create\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 678
+    },
+    {
+      "tool": "pull_request_update",
+      "name_expression": "\"pull_request_update\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 707
+    },
+    {
+      "tool": "pull_request_respond",
+      "name_expression": "\"pull_request_respond\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 733
+    },
+    {
+      "tool": "pull_request_review",
+      "name_expression": "\"pull_request_review\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 766
+    },
+    {
+      "tool": "pull_request_merge",
+      "name_expression": "\"pull_request_merge\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 786
+    },
+    {
+      "tool": "ci_logs",
+      "name_expression": "\"ci_logs\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 841
+    },
+    {
+      "tool": "ci_rerun",
+      "name_expression": "\"ci_rerun\"",
+      "toolkit": "pullRequests",
+      "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+      "line": 863
+    },
+    {
+      "tool": "t3_theme_read",
+      "name_expression": "\"t3_theme_read\"",
+      "toolkit": "theme",
+      "path": "apps/server/src/mcp/toolkits/theme/tools.ts",
+      "line": 27
+    },
+    {
+      "tool": "t3_theme_set",
+      "name_expression": "\"t3_theme_set\"",
+      "toolkit": "theme",
+      "path": "apps/server/src/mcp/toolkits/theme/tools.ts",
+      "line": 55
+    },
+    {
+      "tool": "t3_thread_organize",
+      "name_expression": "\"t3_thread_organize\"",
+      "toolkit": "thread",
+      "path": "apps/server/src/mcp/toolkits/thread/tools.ts",
+      "line": 33
+    },
+    {
+      "tool": "t3_queue",
+      "name_expression": "\"t3_queue\"",
+      "toolkit": "thread",
+      "path": "apps/server/src/mcp/toolkits/thread/tools.ts",
+      "line": 84
+    },
+    {
+      "tool": "t3_pending_request",
+      "name_expression": "\"t3_pending_request\"",
+      "toolkit": "thread",
+      "path": "apps/server/src/mcp/toolkits/thread/tools.ts",
+      "line": 129
+    },
+    {
+      "tool": "t3_thread_configure",
+      "name_expression": "\"t3_thread_configure\"",
+      "toolkit": "thread",
+      "path": "apps/server/src/mcp/toolkits/thread/tools.ts",
+      "line": 155
+    },
+    {
+      "tool": "t3_thread_transfer",
+      "name_expression": "\"t3_thread_transfer\"",
+      "toolkit": "thread",
+      "path": "apps/server/src/mcp/toolkits/thread/tools.ts",
+      "line": 167
+    },
+    {
+      "tool": "t3_thread_search",
+      "name_expression": "\"t3_thread_search\"",
+      "toolkit": "thread",
+      "path": "apps/server/src/mcp/toolkits/thread/tools.ts",
+      "line": 194
+    },
+    {
+      "tool": "run_scheduled_task_now",
+      "name_expression": "\"run_scheduled_task_now\"",
+      "toolkit": "thread",
+      "path": "apps/server/src/mcp/toolkits/thread/tools.ts",
+      "line": 222
+    },
+    {
+      "tool": "t3_submit_output",
+      "name_expression": "\"t3_submit_output\"",
+      "toolkit": "thread",
+      "path": "apps/server/src/mcp/toolkits/thread/tools.ts",
+      "line": 244
+    },
+    {
+      "tool": "tool_search",
+      "name_expression": "McpToolExposure.TOOL_SEARCH",
+      "toolkit": "toolSearch",
+      "path": "apps/server/src/mcp/toolkits/toolSearch/tools.ts",
+      "line": 8
+    },
+    {
+      "tool": "t3_worktree_handoff",
+      "name_expression": "\"t3_worktree_handoff\"",
+      "toolkit": "worktree",
+      "path": "apps/server/src/mcp/toolkits/worktree/tools.ts",
+      "line": 28
+    },
+    {
+      "tool": "t3_worktree_status",
+      "name_expression": "\"t3_worktree_status\"",
+      "toolkit": "worktree",
+      "path": "apps/server/src/mcp/toolkits/worktree/tools.ts",
+      "line": 44
+    },
+    {
+      "tool": "t3_worktree_list",
+      "name_expression": "\"t3_worktree_list\"",
+      "toolkit": "worktree",
+      "path": "apps/server/src/mcp/toolkits/worktree/tools.ts",
+      "line": 63
+    }
+  ]
+}
