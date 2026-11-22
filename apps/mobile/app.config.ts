@@ -17,6 +17,7 @@ const runtimeVersionPolicy =
   (APP_VARIANT === "development" ? "appVersion" : "fingerprint");
 
 const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
+const iosBuildNumber = repoEnv.T3CODE_IOS_BUILD_NUMBER;
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
 // Compiled into the native project. Without a relay, Observe's native side could dispatch to
@@ -36,6 +37,10 @@ if (
   throw new Error(
     "T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID must be a reverse-DNS identifier such as com.example.t3code when T3CODE_IOS_PERSONAL_TEAM=1.",
   );
+}
+
+if (iosBuildNumber !== undefined && !/^[1-9][0-9]*$/.test(iosBuildNumber)) {
+  throw new Error("T3CODE_IOS_BUILD_NUMBER must be a positive decimal build number.");
 }
 
 const DEVELOPMENT_ASSETS = {
@@ -256,6 +261,7 @@ const config: ExpoConfig = {
     supportsTablet: true,
     requireFullScreen: process.env.T3_SHOWCASE_CAPTURE_BUILD === "1",
     bundleIdentifier: iosBundleIdentifier,
+    ...(iosBuildNumber === undefined ? {} : { buildNumber: iosBuildNumber }),
     ...(isIosPersonalTeamBuild
       ? {}
       : {

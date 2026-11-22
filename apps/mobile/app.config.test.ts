@@ -8,7 +8,12 @@ import assetLinks from "../web/public/.well-known/assetlinks.json";
 vi.mock("../../scripts/lib/public-config.ts", () => ({
   loadRepoEnv: () =>
     Object.fromEntries(
-      ["APP_VARIANT", "T3CODE_IOS_PERSONAL_TEAM", "T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID"]
+      [
+        "APP_VARIANT",
+        "T3CODE_IOS_PERSONAL_TEAM",
+        "T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID",
+        "T3CODE_IOS_BUILD_NUMBER",
+      ]
         .filter((key) => process.env[key] !== undefined)
         .map((key) => [key, process.env[key]]),
     ),
@@ -61,4 +66,17 @@ it("keeps the personal bundle's Keychain group and omits unavailable signing cap
   ]);
   expect(config.ios?.associatedDomains).toBeUndefined();
   expect(config.ios?.appleTeamId).toBeUndefined();
+});
+
+it("selects the supplied iOS nightly number before native project generation", async () => {
+  vi.stubEnv("T3CODE_IOS_BUILD_NUMBER", "5098");
+  const config = await loadConfig("preview");
+  expect(config.ios?.buildNumber).toBe("5098");
+});
+
+it.each(["0", "5098+1", " 5098", ""])("rejects invalid iOS build number %j", async (value) => {
+  vi.stubEnv("T3CODE_IOS_BUILD_NUMBER", value);
+  await expect(loadConfig("preview")).rejects.toThrow(
+    "T3CODE_IOS_BUILD_NUMBER must be a positive decimal build number.",
+  );
 });
