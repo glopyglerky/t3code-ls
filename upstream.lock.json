@@ -4,9 +4,9 @@
     "repository": "pingdotgg/t3code",
     "channel": "default-branch",
     "branch": "main",
-    "source_url": "https://github.com/pingdotgg/t3code/commit/2c4310eb061373bb1c6ccefe6dafd0500ee8f5e3",
-    "commit": "2c4310eb061373bb1c6ccefe6dafd0500ee8f5e3",
-    "root_tree": "77f3c5eaf8093f52b929c9c0020966d09538576e"
+    "source_url": "https://github.com/pingdotgg/t3code/commit/344de5fe8e70e9eeaacaedc34e7aa5e2a29287d1",
+    "commit": "344de5fe8e70e9eeaacaedc34e7aa5e2a29287d1",
+    "root_tree": "cba3cb46b04f56bd43452449c13ae399752a369b"
   },
   "qualification": {
     "status": "unqualified",
@@ -19,7 +19,7 @@
     "server": {
       "path_prefixes": ["apps/server/"],
       "entries": 1764,
-      "inventory_sha256": "bf433746603c0817c582221e3d45094f9370766a2540d8cba28e8d10fc2643dd"
+      "inventory_sha256": "d8761fd28b363be5928cfc38183aec94c21360d12f283245e0f6c88f7ac4fa70"
     },
     "contracts": {
       "path_prefixes": ["packages/contracts/"],
@@ -68,7 +68,7 @@
         "packages/effect-codex-app-server/"
       ],
       "entries": 369,
-      "inventory_sha256": "28b9e5cc18b9c4b6da52cc0e5dab9b025474c760f75f5b19a9f1f4e9fe72e41c"
+      "inventory_sha256": "c83d080d48cfbe744349bbe5502f64367fa48d2337d6b182c214e90b9d38d344"
     },
     "shared": {
       "path_prefixes": ["packages/shared/"],

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "recovery_commit": "d29a94f3a175eac1f26c548023fedd8695cedfaf",
-  "integrated_upstream_commit": "2c4310eb061373bb1c6ccefe6dafd0500ee8f5e3",
+  "integrated_upstream_commit": "344de5fe8e70e9eeaacaedc34e7aa5e2a29287d1",
   "source_history": [
     "521ac7c218b3faa74281fb72fc36ce74a0951fb3",
     "822671581383a357c5dc8d3ea9984b408c3e03c6",
@@ -65,7 +65,8 @@
     "1d028248683f90f405b2d8e7b71682e3b67317ed",
     "f10e1eb3825a773cf702569d2258edfdbc8b77dc",
     "2251de4d2e61f921b90fb7bfdabef8b1a34d8803",
-    "2c4310eb061373bb1c6ccefe6dafd0500ee8f5e3"
+    "2c4310eb061373bb1c6ccefe6dafd0500ee8f5e3",
+    "344de5fe8e70e9eeaacaedc34e7aa5e2a29287d1"
   ],
   "upstream_removals": [
     {
@@ -1126,7 +1127,7 @@
       "id": "command-and-dispatch-policy",
       "state": "integrated",
       "domain_owner": "apps/server/src/orchestration-v2",
-      "reviewed_upstream_commit": "2c4310eb061373bb1c6ccefe6dafd0500ee8f5e3",
+      "reviewed_upstream_commit": "344de5fe8e70e9eeaacaedc34e7aa5e2a29287d1",
       "upstream_sources": [
         {
           "path": "apps/server/src/orchestration-v2/CommandPolicy.ts",
@@ -1175,7 +1176,7 @@
       "id": "project-commands",
       "state": "integrated",
       "domain_owner": "apps/server/src/project",
-      "reviewed_upstream_commit": "2c4310eb061373bb1c6ccefe6dafd0500ee8f5e3",
+      "reviewed_upstream_commit": "344de5fe8e70e9eeaacaedc34e7aa5e2a29287d1",
       "upstream_sources": [
         {
           "path": "apps/server/src/orchestration-v2/ProjectCommands.ts",
@@ -1227,7 +1228,7 @@
       "id": "guest-share-decisions",
       "state": "integrated",
       "domain_owner": "apps/server/src/guest",
-      "reviewed_upstream_commit": "2c4310eb061373bb1c6ccefe6dafd0500ee8f5e3",
+      "reviewed_upstream_commit": "344de5fe8e70e9eeaacaedc34e7aa5e2a29287d1",
       "upstream_sources": [
         {
           "path": "apps/server/src/orchestration-v2/GuestShareDecider.ts",
@@ -1284,7 +1285,7 @@
       "id": "provider-recovery",
       "state": "integrated",
       "domain_owner": "apps/server/src/orchestration-v2",
-      "reviewed_upstream_commit": "2c4310eb061373bb1c6ccefe6dafd0500ee8f5e3",
+      "reviewed_upstream_commit": "344de5fe8e70e9eeaacaedc34e7aa5e2a29287d1",
       "upstream_sources": [
         {
           "path": "packages/provider-core/src/server/subagentProjection.ts",
@@ -1336,7 +1337,7 @@
       "id": "provider-maintenance",
       "state": "integrated",
       "domain_owner": "packages/provider-core/src/server",
-      "reviewed_upstream_commit": "2c4310eb061373bb1c6ccefe6dafd0500ee8f5e3",
+      "reviewed_upstream_commit": "344de5fe8e70e9eeaacaedc34e7aa5e2a29287d1",
       "upstream_sources": [
         {
           "path": "packages/provider-core/src/server/maintenanceResolver.ts",
@@ -1389,7 +1390,7 @@
       "id": "codex-structured-generation",
       "state": "integrated",
       "domain_owner": "apps/server/src/textGeneration",
-      "reviewed_upstream_commit": "2c4310eb061373bb1c6ccefe6dafd0500ee8f5e3",
+      "reviewed_upstream_commit": "344de5fe8e70e9eeaacaedc34e7aa5e2a29287d1",
       "upstream_sources": [
         {
           "path": "apps/server/src/provider/codexLaunchArgs.ts",
@@ -1448,7 +1449,7 @@
       "id": "codex-process-runtime",
       "state": "integrated",
       "domain_owner": "apps/server/src/provider",
-      "reviewed_upstream_commit": "2c4310eb061373bb1c6ccefe6dafd0500ee8f5e3",
+      "reviewed_upstream_commit": "344de5fe8e70e9eeaacaedc34e7aa5e2a29287d1",
       "upstream_sources": [
         {
           "path": "apps/server/src/provider/CodexProvider.ts",
@@ -1506,7 +1507,7 @@
       "id": "redb-persistence",
       "state": "integrated",
       "domain_owner": "apps/server/src/persistence",
-      "reviewed_upstream_commit": "2c4310eb061373bb1c6ccefe6dafd0500ee8f5e3",
+      "reviewed_upstream_commit": "344de5fe8e70e9eeaacaedc34e7aa5e2a29287d1",
       "upstream_sources": [
         {
           "path": "apps/server/integration/transferBudgetV2.integration.test.ts",
@@ -2246,7 +2247,7 @@
       "id": "iroh-transport",
       "state": "candidate",
       "domain_owner": "infra/relay",
-      "reviewed_upstream_commit": "2c4310eb061373bb1c6ccefe6dafd0500ee8f5e3",
+      "reviewed_upstream_commit": "344de5fe8e70e9eeaacaedc34e7aa5e2a29287d1",
       "upstream_sources": [
         {
           "path": "apps/server/src/ws.ts",
@@ -2348,7 +2349,7 @@
       "id": "native-api-component",
       "state": "candidate",
       "domain_owner": "apps/server",
-      "reviewed_upstream_commit": "2c4310eb061373bb1c6ccefe6dafd0500ee8f5e3",
+      "reviewed_upstream_commit": "344de5fe8e70e9eeaacaedc34e7aa5e2a29287d1",
       "upstream_sources": [
         {
           "path": "packages/contracts/src/orchestrationV2.ts",
