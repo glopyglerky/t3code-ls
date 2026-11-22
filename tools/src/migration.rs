@@ -412,6 +412,9 @@ fn evidence(
     {
         return Err(format!("acceptance receipt does not qualify this port/target: {path}").into());
     }
+    if route["implementation"] == "omdb" && receipt["implementation"] != "omdb" {
+        return Err(format!("acceptance receipt must identify omdb execution: {path}").into());
+    }
     let run = text(&receipt, "run_url")?;
     let run_id = run
         .strip_prefix("https://github.com/glopyglerky/t3code-ls/actions/runs/")
@@ -446,18 +449,19 @@ fn evidence(
     Ok(())
 }
 
+fn require_qualified_implementation(port: &Value, route: &Value) -> Result<()> {
+    match text(route, "implementation")? {
+        "rust" | "rust-backed-client" => Ok(()),
+        "omdb" if text(port, "id")? == "redb-persistence" => Ok(()),
+        _ => Err("accepted port routes must execute Rust in the actual application".into()),
+    }
+}
+
 fn retirement_targets(port: &Value) -> Result<BTreeSet<&str>> {
     let mut targets = BTreeSet::new();
     for route in array(port, "platform_routes")? {
         if qualified(text(route, "state")?) {
-            if !matches!(
-                text(route, "implementation")?,
-                "rust" | "rust-backed-client"
-            ) {
-                return Err(
-                    "accepted port routes must execute Rust in the actual application".into(),
-                );
-            }
+            require_qualified_implementation(port, route)?;
             for target in paths(route, "targets")? {
                 if route["acceptance_evidence"][target].as_str().is_none() {
                     return Err(
@@ -646,15 +650,7 @@ pub fn check(root: &Path) -> Result<()> {
                     return Err(format!("unknown or duplicated port target: {id}/{target}").into());
                 }
                 if qualified(route_state) {
-                    if !matches!(
-                        text(route, "implementation")?,
-                        "rust" | "rust-backed-client"
-                    ) {
-                        return Err(
-                            "accepted port routes must execute Rust in the actual application"
-                                .into(),
-                        );
-                    }
+                    require_qualified_implementation(port, route)?;
                     let receipt = route["acceptance_evidence"][target]
                         .as_str()
                         .ok_or("accepted target requires an acceptance receipt")?;
@@ -1045,6 +1041,27 @@ mod tests {
     }
 
     #[test]
+    fn only_the_storage_port_can_qualify_an_omdb_route() {
+        let mut port = json!({
+            "id": "redb-persistence",
+            "platform_routes": [{
+                "targets": ["linux-x64"], "state": "accepted", "implementation": "omdb",
+                "acceptance_evidence": {"linux-x64": "qualification/linux.json"}
+            }]
+        });
+        assert_eq!(
+            retirement_targets(&port).unwrap(),
+            BTreeSet::from(["linux-x64"])
+        );
+        port["platform_routes"][0]["acceptance_evidence"] = json!({});
+        assert!(retirement_targets(&port).is_err());
+        port["platform_routes"][0]["acceptance_evidence"]["linux-x64"] =
+            json!("qualification/linux.json");
+        port["id"] = json!("project-commands");
+        assert!(retirement_targets(&port).is_err());
+    }
+
+    #[test]
     fn acceptance_receipt_expires_when_an_adapter_compiler_or_shared_decoder_changes() {
         struct Directory(std::path::PathBuf);
         impl Drop for Directory {
@@ -1086,54 +1103,53 @@ mod tests {
             );
             tracked.insert(path.to_owned());
         }
-        let port = json!({"id":"policy","reviewed_upstream_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"});
-        let route = json!({"compiler_route":"lustr-bluefe-compatibility"});
-        let receipt = json!({
-            "schema_version":1,"port":"policy","target":"linux-x64","result":"passed",
+        let port = json!({"id":"redb-persistence","reviewed_upstream_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"});
+        let mut route =
+            json!({"implementation":"omdb","compiler_route":"lustr-bluefe-compatibility"});
+        let mut receipt = json!({
+            "schema_version":1,"port":"redb-persistence","target":"linux-x64","result":"passed",
             "upstream_commit":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "compiler_route":"lustr-bluefe-compatibility",
             "run_url":"https://github.com/glopyglerky/t3code-ls/actions/runs/123",
             "checks":["normal-client-flow","contract-parity","failure-recovery","target-build"],
             "source_hashes":hashes,
         });
-        fs::write(
-            root.join("receipt.json"),
-            serde_json::to_vec(&receipt).unwrap(),
-        )
-        .unwrap();
         tracked.insert("receipt.json".to_owned());
         let mut all_inputs = inputs.to_vec();
         all_inputs.extend(crate_inputs(&tracked, &["crates/core"]).unwrap());
         assert!(all_inputs.contains(&"crates/core/src/json.rs"));
         assert!(all_inputs.contains(&"crates/core/Cargo.toml"));
-        assert!(
+        let verify_receipt = |route: &Value, receipt: &Value| {
+            fs::write(
+                root.join("receipt.json"),
+                serde_json::to_vec(receipt).unwrap(),
+            )
+            .unwrap();
             evidence(
                 root,
                 &tracked,
                 &port,
-                &route,
+                route,
                 "linux-x64",
                 "receipt.json",
-                &all_inputs
+                &all_inputs,
             )
-            .is_ok()
-        );
+        };
+        assert!(verify_receipt(&route, &receipt).is_err());
+        route["implementation"] = json!("rust");
+        assert!(verify_receipt(&route, &receipt).is_ok());
+        route["implementation"] = json!("omdb");
+        receipt["implementation"] = json!("upstream");
+        assert!(verify_receipt(&route, &receipt).is_err());
+        receipt["implementation"] = json!("omdb");
+        assert!(verify_receipt(&route, &receipt).is_ok());
         for changed in [
             "adapter.ts",
             "toolchain.lock.json",
             "crates/core/src/json.rs",
         ] {
             fs::write(root.join(changed), "changed acceptance input\n").unwrap();
-            let error = evidence(
-                root,
-                &tracked,
-                &port,
-                &route,
-                "linux-x64",
-                "receipt.json",
-                &all_inputs,
-            )
-            .unwrap_err();
+            let error = verify_receipt(&route, &receipt).unwrap_err();
             assert!(
                 error
                     .to_string()
