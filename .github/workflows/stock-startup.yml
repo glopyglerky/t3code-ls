@@ -26,12 +26,11 @@ jobs:
         with:
           path: measurement
           persist-credentials: false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          repository: pingdotgg/t3code
-          ref: ${{ env.STOCK_COMMIT }}
-          path: stock
-          persist-credentials: false
+      - name: Fetch the pinned stock source without submodule setup
+        run: |
+          git init stock
+          git -C stock fetch --no-tags --depth=1 https://github.com/pingdotgg/t3code.git "$STOCK_COMMIT"
+          git -C stock checkout --detach --no-recurse-submodules FETCH_HEAD
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "26.13.1"

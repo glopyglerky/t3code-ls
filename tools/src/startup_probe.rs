@@ -126,12 +126,31 @@ fn fetch(origin: &str, path: &str) -> Result<Option<Vec<u8>>> {
             "-q",
             "--noproxy",
             "*",
-            "--fail",
             "--silent",
             "--max-time",
             "1",
+            "--write-out",
+            "\n%{response_code}",
         ])
         .arg(format!("{origin}{path}"))
         .output()?;
-    Ok(response.status.success().then_some(response.stdout))
+    match response.status.code() {
+        Some(0) => {}
+        Some(7 | 28) => return Ok(None),
+        _ => return Err(format!("curl failed for {path}: {}", response.status).into()),
+    }
+    let mut parts = response.stdout.rsplitn(2, |byte| *byte == b'\n');
+    let status = parts.next().ok_or("curl returned no response status")?;
+    let body = parts
+        .next()
+        .ok_or("curl returned no response body separator")?;
+    match status {
+        b"200" => Ok(Some(body.to_vec())),
+        b"503" => Ok(None),
+        _ => Err(format!(
+            "unexpected HTTP {} for {path}",
+            std::str::from_utf8(status)?
+        )
+        .into()),
+    }
 }
