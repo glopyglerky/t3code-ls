@@ -42,6 +42,7 @@ import {
   type Transaction,
 } from "@tiptap/pm/state";
 import { ReplaceStep } from "@tiptap/pm/transform";
+import { nativeComposerOffsetMap } from "./composer-native-offsets";
 
 import { splitPromptIntoComposerSegments } from "~/composer-editor-mentions";
 import { nextOrderedMarkerText } from "~/composer-list-continuation";
@@ -1802,6 +1803,8 @@ function runOwnsOffset(run: RichRun, flatOffset: number): boolean {
 }
 
 export function flatToMarkdown(map: RichDocMap, flatOffset: number): number {
+  const native = nativeComposerOffsetMap(map);
+  if (native) return native.flat_to_markdown(flatOffset);
   const bounded = Math.max(0, Math.min(flatOffset, map.docLength));
   for (const run of map.runs) {
     if (runOwnsOffset(run, bounded)) {
@@ -1816,6 +1819,8 @@ export function flatToMarkdown(map: RichDocMap, flatOffset: number): number {
 }
 
 export function markdownToFlat(map: RichDocMap, markdownOffset: number): number {
+  const native = nativeComposerOffsetMap(map);
+  if (native) return native.markdown_to_flat(markdownOffset);
   for (const run of map.runs) {
     if (markdownOffset < run.mdStart + run.mdLen) {
       if (run.kind === "prefix") return run.flatStart;
@@ -1835,6 +1840,8 @@ export function markdownToFlat(map: RichDocMap, markdownOffset: number): number 
 }
 
 export function flatToPm(map: RichDocMap, flatOffset: number): number {
+  const native = nativeComposerOffsetMap(map);
+  if (native) return native.flat_to_prose_mirror(flatOffset);
   const bounded = Math.max(0, Math.min(flatOffset, map.docLength));
   for (const run of map.runs) {
     if (bounded < run.flatStart + run.docLen) {
@@ -1847,6 +1854,8 @@ export function flatToPm(map: RichDocMap, flatOffset: number): number {
 }
 
 export function pmToFlat(map: RichDocMap, pmPos: number): number {
+  const native = nativeComposerOffsetMap(map);
+  if (native) return native.prose_mirror_to_flat(pmPos);
   for (const run of map.runs) {
     if (pmPos >= run.pmPos && pmPos <= run.pmPos + run.docLen) {
       if (run.kind === "token" && pmPos === run.pmPos + run.docLen) {
