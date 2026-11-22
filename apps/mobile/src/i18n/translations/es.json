@@ -5462,5 +5462,10 @@
   "ad208e3e32c85029": "Ocultar todo",
   "3328503592789bed": "Zen",
   "856812e7e1fc445e": "Llamadas a herramientas en el chat",
-  "8d545d54c0a9e950": "Oculta los comandos, ediciones y búsquedas que ejecutan los agentes. Ocultar las correctas mantiene los fallos. Zen solo muestra las respuestas finales. Las aprobaciones, preguntas y errores siempre se muestran."
+  "8d545d54c0a9e950": "Oculta los comandos, ediciones y búsquedas que ejecutan los agentes. Ocultar las correctas mantiene los fallos. Zen solo muestra las respuestas finales. Las aprobaciones, preguntas y errores siempre se muestran.",
+  "bee7f2bec8154c79": "Iroh",
+  "f2cc3094f0a8cc4c": "La ruta de Iroh no tiene ningún túnel abierto.",
+  "6857ef3a84e14ba2": "El túnel de Iroh no está disponible en este dispositivo.",
+  "16082efcfacecd06": "No se pudo copiar el ID de dispositivo de Iroh",
+  "b67fd64daa370243": "Copiar ID de dispositivo de Iroh"
 }
