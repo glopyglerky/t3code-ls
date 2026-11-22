@@ -14,7 +14,7 @@ import {
   selectAcceptanceTests,
   validateAcceptanceManifest,
 } from "./check-acceptance.mjs";
-import { adapterPortIds, planAdapterChecks } from "./hybrid-checks.mjs";
+import { adapterPortIds, applicationChecks, planAdapterChecks } from "./hybrid-checks.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const targetDirectory = Path.resolve("/tmp/acceptance-target");
@@ -26,6 +26,7 @@ Test.test("every declared acceptance test has exactly one execution route", () =
   const declared = new Set(mapping.ports.flatMap((port) => port.acceptance_tests));
   const adapters = new Set(planAdapterChecks(adapterPortIds).map((check) => check.script));
   const components = new Set(Object.keys(acceptanceChecks));
+  const applicationArguments = applicationChecks().flatMap((check) => check.arguments);
   for (const script of declared) {
     Assert.ok(FS.existsSync(Path.join(root, script)), `Missing acceptance source: ${script}`);
     if (script.endsWith(".rs")) {
@@ -33,8 +34,9 @@ Test.test("every declared acceptance test has exactly one execution route", () =
         "Rust acceptance must be a Cargo integration test included by --all-targets");
       Assert.equal(adapters.has(script) || components.has(script), false);
     } else {
-      Assert.equal(Number(adapters.has(script)) + Number(components.has(script)), 1,
-        `Acceptance script must have one explicit execution route: ${script}`);
+      const applicationCount = applicationArguments.filter((argument) => argument === script).length;
+      const routeCount = Number(adapters.has(script)) + Number(components.has(script)) + applicationCount;
+      Assert.equal(routeCount, 1, `Acceptance script must have one explicit execution route: ${script}`);
     }
   }
   for (const script of [...adapters, ...components]) {

@@ -42,7 +42,7 @@ async function fixture(test) {
     await NodeFSP.mkdir(NodePath.dirname(destination), { recursive: true });
     await NodeFSP.symlink(target, destination, "dir");
   }
-  for (const name of ["contracts", "shared"]) {
+  for (const name of ["contracts", "provider-core", "shared"]) {
     const directory = NodePath.join(root, "packages", name);
     await NodeFSP.mkdir(directory, { recursive: true });
     await NodeFSP.writeFile(
@@ -58,7 +58,14 @@ NodeTest.test(
   async (test) => {
     const root = await fixture(test);
     const links = await linkPerformanceRuntime(root);
-    NodeAssert.equal(links.length, 5);
+    NodeAssert.deepEqual(links.map(({ name }) => name), [
+      "effect",
+      "@effect/platform-node",
+      "yaml",
+      "@t3tools/contracts",
+      "@t3tools/provider-core",
+      "@t3tools/shared",
+    ]);
     NodeAssert.deepEqual(await linkPerformanceRuntime(root), links);
     for (const { name, target } of links) {
       NodeAssert.equal(await NodeFSP.realpath(NodePath.join(root, "node_modules", name)), target);
@@ -133,7 +140,7 @@ NodeTest.test(
       }),
     );
     const links = await linkPerformanceRuntime(root);
-    NodeAssert.equal(links.length, 5);
+    NodeAssert.equal(links.length, 6);
     for (const { name, target } of links)
       NodeAssert.equal(await NodeFSP.realpath(NodePath.join(root, "node_modules", name)), target);
   },
