@@ -2935,14 +2935,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "t3-code-ls-core"
-version = "0.1.0"
-dependencies = [
- "ryu-js",
- "signal-hook",
-]
-
-[[package]]
 name = "t3-code-ls-transport"
 version = "0.1.0"
 dependencies = [
