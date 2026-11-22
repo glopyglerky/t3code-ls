@@ -11,7 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::{Error, Result, Store, store_key};
+use crate::{Error, Result, Store, hex, store_key};
 
 const FORMAT: &str = "t3-code-ls/sqlite-export";
 const CHUNK_BYTES: usize = 1024 * 1024;
@@ -103,16 +103,6 @@ fn io_error(_: std::io::Error) -> Error {
 
 fn hash(bytes: &[u8]) -> String {
     hex(&Sha256::digest(bytes))
-}
-
-fn hex(bytes: &[u8]) -> String {
-    const DIGITS: &[u8] = b"0123456789abcdef";
-    let mut output = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        output.push(DIGITS[(byte >> 4) as usize] as char);
-        output.push(DIGITS[(byte & 15) as usize] as char);
-    }
-    output
 }
 
 fn is_hash(value: &str) -> bool {

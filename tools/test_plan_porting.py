@@ -297,6 +297,8 @@ class PortingPlans(unittest.TestCase):
         self.assertEqual(mapping["ports"][0]["reviewed_upstream_commit"], head)
         self.assertEqual(mapping["ports"][0]["upstream_sources"], self.mapping["ports"][0]["upstream_sources"])
         self.assertEqual(lock["upstream"]["commit"], head)
+        self.assertIn('"path_prefixes": ["apps/server/"],',
+                      (self.root / "upstream.lock.json").read_text())
         self.assertEqual(lock["qualification"]["status"], "unqualified")
         self.assertIsNone(lock["qualification"]["last_qualified_commit"])
 

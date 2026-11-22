@@ -180,7 +180,7 @@ fn key(catalog: &ApplicationCatalog, suffix: &str) -> Vec<u8> {
     ))
 }
 fn hex(value: &str) -> String {
-    value.bytes().map(|byte| format!("{byte:02x}")).collect()
+    crate::hex(value.as_bytes())
 }
 fn prefix_end(prefix: &[u8]) -> Result<Vec<u8>> {
     let mut end = prefix.to_vec();

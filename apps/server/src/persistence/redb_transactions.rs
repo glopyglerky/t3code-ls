@@ -206,7 +206,7 @@ pub(crate) fn row_prefix(generation: &str, table: &str) -> Result<Vec<u8>> {
     if (generation != "native" && !digest(generation)) || !identifier(table) {
         return Err(invalid("invalid application row location"));
     }
-    let name: String = table.bytes().map(|byte| format!("{byte:02x}")).collect();
+    let name: String = crate::hex(table.as_bytes());
     Ok(store_key(&format!(
         "application/generation/{generation}/row/{name}/"
     )))
@@ -683,7 +683,7 @@ async fn require_unmanaged(
     generation: &str,
     table: &str,
 ) -> Result<()> {
-    let name: String = table.bytes().map(|byte| format!("{byte:02x}")).collect();
+    let name: String = crate::hex(table.as_bytes());
     let key = store_key(&format!(
         "application/generation/{generation}/managed/{name}"
     ));

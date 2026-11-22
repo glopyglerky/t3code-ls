@@ -299,14 +299,21 @@ fn validate_batch(batch: &CommitBatch) -> Result<()> {
     Ok(())
 }
 
+pub(crate) fn hex(bytes: &[u8]) -> String {
+    const DIGITS: &[u8] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        output.push(DIGITS[(byte >> 4) as usize] as char);
+        output.push(DIGITS[(byte & 15) as usize] as char);
+    }
+    output
+}
+
 /// Hash the original validated command, excluding attempt-specific revision and event IDs.
 pub fn request_digest(request: &Value) -> String {
     let mut hash = Sha256::new();
     hash_json(request, &mut hash);
-    hash.finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    hex(&hash.finalize())
 }
 
 fn hash_json(value: &Value, hash: &mut Sha256) {
@@ -1005,4 +1012,16 @@ fn validate_response_bytes(value: &impl Serialize) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn hex_preserves_storage_key_encoding_for_every_byte() {
+    let bytes: Vec<u8> = (0..=u8::MAX).collect();
+    let reference = bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    assert_eq!(hex(&bytes), reference);
+    assert_eq!(hex(&[]), "");
 }

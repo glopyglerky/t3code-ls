@@ -169,7 +169,7 @@ fn key(catalog: &ApplicationCatalog, suffix: &str) -> Vec<u8> {
     ))
 }
 fn marker(catalog: &ApplicationCatalog) -> Vec<u8> {
-    let name: String = EVENTS.bytes().map(|b| format!("{b:02x}")).collect();
+    let name: String = crate::hex(EVENTS.as_bytes());
     store_key(&format!(
         "application/generation/{}/managed/{name}",
         catalog.generation

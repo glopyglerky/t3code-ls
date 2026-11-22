@@ -321,10 +321,15 @@ def mechanical_metadata_patch(root: Path, plan: dict) -> str:
             or json.loads(updated_map) != mapping):
         raise nightly.TrackingError("Could not preserve the port map while updating its pins.")
 
-    updates = {
-        lock_path: json.dumps(next_lock, indent=2, ensure_ascii=True) + "\n",
-        map_path: updated_map,
-    }
+    # Match the repository formatter's compact one-item prefix arrays so a
+    # generated merge passes the same hook when reapplied from its first parent.
+    updated_lock = re.sub(
+        r'^([ ]+"path_prefixes": )\[\n +("[^"\n]*")\n +\],$',
+        r"\1[\2],",
+        json.dumps(next_lock, indent=2, ensure_ascii=True),
+        flags=re.MULTILINE,
+    )
+    updates = {lock_path: updated_lock + "\n", map_path: updated_map}
     return "".join(
         line for path, updated in updates.items()
         for line in difflib.unified_diff(

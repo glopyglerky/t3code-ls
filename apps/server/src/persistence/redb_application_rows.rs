@@ -79,7 +79,7 @@ pub(crate) fn validate_table(
 }
 
 pub(crate) fn managed_marker(catalog: &ApplicationCatalog, name: &str) -> Vec<u8> {
-    let name: String = name.bytes().map(|byte| format!("{byte:02x}")).collect();
+    let name: String = crate::hex(name.as_bytes());
     store_key(&format!(
         "application/generation/{}/managed/{name}",
         catalog.generation

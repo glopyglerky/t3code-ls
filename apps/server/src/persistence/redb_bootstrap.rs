@@ -45,10 +45,29 @@ fn definition() -> Result<Definition> {
 
 impl Store {
     pub async fn application_migrations(&self) -> Result<Vec<Migration>> {
+        Ok(self
+            .inspect_application_migrations()
+            .await?
+            .map(|(_, migrations)| migrations)
+            .unwrap_or_default())
+    }
+
+    /// Inspect the schema and the recorded migrations from one immutable snapshot.
+    pub async fn application_upgrade_needed(&self) -> Result<bool> {
+        let Some((schema, migrations)) = self.inspect_application_migrations().await? else {
+            return Ok(false);
+        };
+        let expected = definition()?;
+        Ok(schema != expected.schema || migrations != expected.migrations)
+    }
+
+    async fn inspect_application_migrations(
+        &self,
+    ) -> Result<Option<(ApplicationSchema, Vec<Migration>)>> {
         let mut tx = self.db.begin_read_only().await?;
         let Some(bytes) = tx.get(&schema_key()).await? else {
             tx.rollback().await?;
-            return Ok(Vec::new());
+            return Ok(None);
         };
         let catalog = decode_catalog(&bytes)?;
         let prefix = row_prefix(&catalog.generation, "effect_sql_migrations")?;
@@ -82,7 +101,7 @@ impl Store {
         }
         result.sort_by_key(|entry| entry.id.parse::<i64>().unwrap_or(i64::MAX));
         tx.rollback().await?;
-        Ok(result)
+        Ok(Some((catalog.schema, result)))
     }
 
     /// New files are initialized atomically; an imported or existing file is
@@ -152,6 +171,7 @@ mod tests {
     async fn migration_inspection_is_read_only_and_cannot_initialize_or_promote() {
         let fixture = TestFixture::start().await;
         let store = fixture.initialize().await;
+        assert!(!store.application_upgrade_needed().await.unwrap());
         store.bootstrap_application().await.unwrap();
         store.shutdown().await.unwrap();
         let before = std::fs::read(fixture.path()).unwrap();
@@ -160,6 +180,7 @@ mod tests {
             read_only.application_migrations().await.unwrap(),
             definition().unwrap().migrations
         );
+        assert!(!read_only.application_upgrade_needed().await.unwrap());
         assert!(read_only.bootstrap_application().await.is_err());
         read_only.shutdown().await.unwrap();
         assert_eq!(std::fs::read(fixture.path()).unwrap(), before);

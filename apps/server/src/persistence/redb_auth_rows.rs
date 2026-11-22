@@ -254,7 +254,7 @@ fn decode<T: DeserializeOwned>(bytes: &[u8]) -> Result<T> {
     serde_json::from_slice(bytes).map_err(|_| Error::IncompatibleStore)
 }
 fn hex(value: &str) -> String {
-    value.bytes().map(|byte| format!("{byte:02x}")).collect()
+    crate::hex(value.as_bytes())
 }
 fn key(catalog: &ApplicationCatalog, suffix: &str) -> Vec<u8> {
     store_key(&format!(

@@ -732,7 +732,7 @@ impl Backend {
                 bytes: std::fs::metadata(&destination)
                     .map_err(storage_error)?
                     .len(),
-                checksum: digest.iter().map(|byte| format!("{byte:02x}")).collect(),
+                checksum: crate::hex(&digest),
             })
         })
         .await

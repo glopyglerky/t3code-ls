@@ -14,7 +14,6 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as ServerOwnership from "../serverOwnership.ts";
 import * as NativeServerOwnershipLock from "./NativeServerOwnershipLock.ts";
 import * as RedbClient from "./RedbClient.ts";
-import currentSchema from "./omdb-schema.json" with { type: "json" };
 
 export class OmdbStartupError extends Schema.TaggedError<OmdbStartupError>()("OmdbStartupError", {
   path: Schema.String,
@@ -68,22 +67,9 @@ export const make = Effect.fn("Omdb.make")(
       (yield* Effect.scoped(
         Effect.gen(function* () {
           const inspection = yield* NativeDatabase.make({ ...options, mode: "read-only-local" });
-          const schema = yield* inspection.request(
-            { operation: "application_schema" },
-            Schema.NullOr(RedbClient.ApplicationSchema),
-          );
-          if (schema === null) return false;
-          const migrations = yield* inspection.request(
-            { operation: "application_migrations" },
-            Bootstrap.fields.migrations,
-          );
-          return (
-            migrations.length !== currentSchema.migrations.length ||
-            migrations.some(
-              (migration, index) =>
-                migration.id !== currentSchema.migrations[index]?.id ||
-                migration.name !== currentSchema.migrations[index]?.name,
-            )
+          return yield* inspection.request(
+            { operation: "application_upgrade_needed" },
+            Schema.Boolean,
           );
         }),
       ));

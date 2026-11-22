@@ -1148,7 +1148,7 @@ fn owner_prefix(catalog: &ApplicationCatalog, owner: &NativeOwner) -> Vec<u8> {
         None => prefix.extend_from_slice(b"N/"),
         Some(thread) => {
             prefix.push(b'S');
-            let encoded: String = thread.bytes().map(|byte| format!("{byte:02x}")).collect();
+            let encoded: String = crate::hex(thread.as_bytes());
             prefix.extend_from_slice(encoded.as_bytes());
             prefix.push(b'/');
         }

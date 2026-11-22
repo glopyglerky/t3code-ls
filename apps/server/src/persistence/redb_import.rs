@@ -342,8 +342,7 @@ impl Store {
                         let rowid: i64 = record["rowid"].as_str()
                             .and_then(|value| value.parse().ok()).ok_or(Error::IncompatibleStore)?;
                         let offset = record["offset"].as_u64().ok_or(Error::IncompatibleStore)?;
-                        let term_key: String = term.as_bytes().iter()
-                            .map(|byte| format!("{byte:02x}")).collect();
+                        let term_key: String = crate::hex(term.as_bytes());
                         let ordered_rowid = !((rowid as u64) ^ (1 << 63));
                         let posting = encode(&json!({"term":term,"rowid":rowid.to_string(),"offset":offset}))?;
                         let original = metadata_key(&generation, &format!("search-posting/{term_key}/{ordered_rowid:016x}/{offset:016x}"));
@@ -361,24 +360,25 @@ impl Store {
                             stage.push(
                                 self,
                                 metadata_key(&generation, &format!("search-survivor-posting/{term_key}/{ordered_rowid:016x}/{offset:016x}")),
-                                posting.clone(),
+                                posting,
                             ).await?;
                             stage.push(
                                 self,
-                                metadata_key(&generation, &format!("search-survivor-document/{ordered_rowid:016x}/{term_key}/{offset:016x}")),
-                                posting,
+                                metadata_key(&generation, &format!("search-survivor-document/{ordered_rowid:016x}/")),
+                                Vec::new(),
                             ).await?;
                             continue;
                         }
                         stage.push(
                             self,
                             original,
-                            posting.clone(),
+                            posting,
                         ).await?;
+                        // This index only witnesses whether a rowid has any imported posting.
                         stage.push(
                             self,
-                            metadata_key(&generation, &format!("search-document/{ordered_rowid:016x}/{term_key}/{offset:016x}")),
-                            posting,
+                            metadata_key(&generation, &format!("search-document/{ordered_rowid:016x}/")),
+                            Vec::new(),
                         ).await?;
                     }
                     "search_current_document" => {

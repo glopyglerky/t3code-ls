@@ -129,7 +129,7 @@ fn metadata(catalog: &ApplicationCatalog, suffix: &str) -> Vec<u8> {
     ))
 }
 fn hex(value: &str) -> String {
-    value.bytes().map(|byte| format!("{byte:02x}")).collect()
+    crate::hex(value.as_bytes())
 }
 fn descending(rowid: i64) -> String {
     format!("{:016x}", !((rowid as u64) ^ (1 << 63)))
@@ -301,7 +301,7 @@ fn add_position(positions: &mut Positions, offset: u64) -> Result<()> {
     positions.push([offset, offset]);
     Ok(())
 }
-fn posting_keys(catalog: &ApplicationCatalog, posting: &Posting) -> Result<[Vec<u8>; 2]> {
+fn posting_key(catalog: &ApplicationCatalog, posting: &Posting) -> Result<Vec<u8>> {
     let rowid = posting
         .rowid
         .parse::<i64>()
@@ -309,18 +309,9 @@ fn posting_keys(catalog: &ApplicationCatalog, posting: &Posting) -> Result<[Vec<
     if posting.rowid != rowid.to_string() {
         return Err(Error::IncompatibleStore);
     }
-    let order = descending(rowid);
-    let term = hex(&posting.term);
-    Ok([
-        metadata(
-            catalog,
-            &format!("search-posting/{term}/{order}/{:016x}", posting.offset),
-        ),
-        metadata(
-            catalog,
-            &format!("search-document/{order}/{term}/{:016x}", posting.offset),
-        ),
-    ])
+    let mut key = posting_prefix(catalog, &posting.term, rowid);
+    key.extend_from_slice(format!("{:016x}", posting.offset).as_bytes());
+    Ok(key)
 }
 
 async fn has_index(tx: &mut Transaction, catalog: &ApplicationCatalog) -> Result<bool> {
@@ -684,7 +675,7 @@ async fn legacy_next_document(
             .rowid
             .parse::<i64>()
             .map_err(|_| Error::IncompatibleStore)?;
-        if posting.term != term || rowid > maximum || posting_keys(catalog, &posting)?[0] != key {
+        if posting.term != term || rowid > maximum || posting_key(catalog, &posting)? != key {
             return Err(Error::IncompatibleStore);
         }
         let available = match live_document(tx, catalog, rowid).await? {

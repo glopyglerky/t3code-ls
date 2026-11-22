@@ -789,7 +789,7 @@ async fn guard_pending_effects(tx: &mut Transaction, id: &str) -> Result<()> {
 }
 
 fn hex_component(value: &str) -> String {
-    value.bytes().map(|byte| format!("{byte:02x}")).collect()
+    crate::hex(value.as_bytes())
 }
 
 fn normalize_model(value: &Value) -> Result<Value> {

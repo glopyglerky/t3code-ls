@@ -57,6 +57,7 @@ enum Request {
     },
     ApplicationBootstrap {},
     ApplicationMigrations {},
+    ApplicationUpgradeNeeded {},
     ApplicationProjectionWindowQuery {
         transaction_id: String,
         query: ProjectionWindowQuery,
@@ -554,6 +555,7 @@ impl Request {
             | Self::ApplicationProjectionsShell { .. }
             | Self::ApplicationThreadSearchRead { .. }
             | Self::ApplicationMigrations { .. }
+            | Self::ApplicationUpgradeNeeded { .. }
             | Self::ApplicationProjectionWindowQuery { .. }
             | Self::StorageStatistics { .. }
             | Self::ApplicationLegacyV1Read { .. }
@@ -679,6 +681,9 @@ async fn evaluate(
         }
         Request::ApplicationMigrations {} => {
             serde_json::to_value(store.application_migrations().await?)
+        }
+        Request::ApplicationUpgradeNeeded {} => {
+            serde_json::to_value(store.application_upgrade_needed().await?)
         }
         Request::ApplicationProjectionWindowQuery {
             transaction_id,
