@@ -19,23 +19,34 @@ NodeChildProcess.execFileSync("npm", ["ci", "--ignore-scripts", "--no-audit", "-
 
 // Production adapters and recovery imports reach Markdown and provider SDKs.
 // Apply the same pinned patches as the workspace installation before importing.
+const lock = JSON.parse(
+  await NodeFSP.readFile(NodePath.join(runtime, "package-lock.json"), "utf8"),
+);
 const patches = [
-  ["@cursor/sdk", "1.2.0"],
-  ["@ff-labs/fff-node", "0.11.0"],
-  ["node-pty", "1.2.0-beta.15"],
-  ["mdast-util-math", "3.0.0"],
-  ["micromark-extension-llm-math", "3.1.0", "micromark-extension-math"],
-  ["micromark-extension-gfm-table", "2.1.1"],
-  ["micromark", "4.0.2"],
-  ["mdast-util-to-hast", "13.2.1"],
-  ["@muse-code/sdk", "1.4.6"],
+  ["@cursor/sdk"],
+  ["@effect/platform-node-shared"],
+  ["@ff-labs/fff-node"],
+  ["node-pty"],
+  ["mdast-util-math"],
+  ["micromark-extension-llm-math", "micromark-extension-math"],
+  ["micromark-extension-gfm-table"],
+  ["micromark"],
+  ["mdast-util-to-hast"],
+  ["@muse-code/sdk"],
 ];
-for (const [name, version, installedName = name] of patches) {
+for (const [name, installedName = name] of patches) {
   const directory = NodePath.join(runtime, "node_modules", installedName);
   const manifest = JSON.parse(
     await NodeFSP.readFile(NodePath.join(directory, "package.json"), "utf8"),
   );
-  if (manifest.version !== version) throw new Error(`Unexpected ${name} test dependency version`);
+  const version = lock.packages["node_modules/" + installedName]?.version;
+  if (
+    manifest.name !== name ||
+    manifest.version !== version ||
+    !/^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(version)
+  ) {
+    throw new Error(`Unexpected ${name} locked test dependency`);
+  }
   NodeChildProcess.execFileSync(
     "patch",
     [

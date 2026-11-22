@@ -6,7 +6,12 @@ import assetLinks from "../web/public/.well-known/assetlinks.json";
 
 // Keep config parsing independent of local env files and build credentials.
 vi.mock("../../scripts/lib/public-config.ts", () => ({
-  loadRepoEnv: () => ({ APP_VARIANT: process.env.APP_VARIANT }),
+  loadRepoEnv: () =>
+    Object.fromEntries(
+      ["APP_VARIANT", "T3CODE_IOS_PERSONAL_TEAM", "T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID"]
+        .filter((key) => process.env[key] !== undefined)
+        .map((key) => [key, process.env[key]]),
+    ),
 }));
 
 afterEach(() => {
@@ -44,4 +49,16 @@ it.each([
     { scheme: "https", host, pathPrefix: "/threads/" },
   ]);
   expect(assetLinks.map((link) => link.target.package_name)).toContain(identifier);
+});
+
+it("keeps the personal bundle's Keychain group and omits unavailable signing capabilities", async () => {
+  vi.stubEnv("T3CODE_IOS_PERSONAL_TEAM", "1");
+  vi.stubEnv("T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID", "com.example.t3.preview");
+  const config = await loadConfig("preview");
+  expect(config.ios?.bundleIdentifier).toBe("com.example.t3.preview");
+  expect(config.ios?.entitlements?.["keychain-access-groups"]).toEqual([
+    "$(AppIdentifierPrefix)com.example.t3.preview",
+  ]);
+  expect(config.ios?.associatedDomains).toBeUndefined();
+  expect(config.ios?.appleTeamId).toBeUndefined();
 });

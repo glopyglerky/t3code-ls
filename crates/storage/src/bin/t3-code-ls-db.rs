@@ -251,6 +251,20 @@ enum Request {
         run_id: Option<String>,
         run_ordinal: Option<i64>,
         placement: Option<PositionPlacement>,
+        keep_existing: Option<bool>,
+    },
+    ApplicationTaskFoldersPrepare {},
+    ApplicationTaskFoldersFind {
+        transaction_id: String,
+        paths: Vec<String>,
+    },
+    ApplicationTaskFoldersUpsert {
+        transaction_id: String,
+        row: Map<String, Value>,
+    },
+    ApplicationTaskFoldersDelete {
+        transaction_id: String,
+        root: String,
     },
     ApplicationProjectsPrepare {},
     ApplicationProjectsSelect {
@@ -263,6 +277,11 @@ enum Request {
     ApplicationProjectsUpsert {
         transaction_id: String,
         row: ProjectRecord,
+    },
+    ApplicationProjectsReduceEvent {
+        transaction_id: String,
+        existing_json: Option<String>,
+        event_json: String,
     },
     ApplicationViewedFilesPrepare {},
     ApplicationGuideGet {
@@ -319,6 +338,11 @@ enum Request {
     ApplicationOutboxList {
         transaction_id: String,
         command_id: String,
+    },
+    ApplicationOutboxFirstSteer {
+        transaction_id: String,
+        thread_id: String,
+        message_id: String,
     },
     ApplicationOutboxCancel {
         transaction_id: String,
@@ -401,6 +425,10 @@ enum Request {
     OutboxGet {
         effect_id: String,
     },
+    OutboxFirstSteer {
+        thread_id: String,
+        message_id: String,
+    },
     OutboxList {
         command_id: String,
     },
@@ -424,7 +452,9 @@ enum Request {
         #[serde(default)]
         max_running_title_generations: Option<f64>,
     },
-    OutboxNextClaimableAt { max_running_title_generations: Option<f64> },
+    OutboxNextClaimableAt {
+        max_running_title_generations: Option<f64>,
+    },
     OutboxSucceed {
         effect_id: String,
         worker_id: String,
@@ -499,6 +529,7 @@ impl Request {
             | Self::ApplicationReceiptsPrepare { .. }
             | Self::ApplicationPositionsPrepare { .. }
             | Self::ApplicationProjectsPrepare { .. }
+            | Self::ApplicationTaskFoldersPrepare { .. }
             | Self::ApplicationViewedFilesPrepare { .. }
             | Self::ApplicationProjectionsPrepare { .. }
             | Self::ApplicationOutboxPrepare { .. }
@@ -562,8 +593,12 @@ impl Request {
             | Self::ApplicationReceiptsUpsert { .. }
             | Self::ApplicationReceiptsGet { .. }
             | Self::ApplicationPositionsAllocate { .. }
+            | Self::ApplicationTaskFoldersFind { .. }
+            | Self::ApplicationTaskFoldersUpsert { .. }
+            | Self::ApplicationTaskFoldersDelete { .. }
             | Self::ApplicationProjectsSelect { .. }
             | Self::ApplicationProjectsUpsert { .. }
+            | Self::ApplicationProjectsReduceEvent { .. }
             | Self::ApplicationGuideGet { .. }
             | Self::ApplicationGuidePut { .. }
             | Self::ApplicationViewedFilesList { .. }
@@ -576,6 +611,7 @@ impl Request {
             | Self::ApplicationOutboxEnqueue { .. }
             | Self::ApplicationOutboxGet { .. }
             | Self::ApplicationOutboxList { .. }
+            | Self::ApplicationOutboxFirstSteer { .. }
             | Self::ApplicationOutboxCancel { .. }
             | Self::ApplicationOutboxReconcile { .. }
             | Self::ApplicationOutboxClaim { .. }
@@ -591,6 +627,7 @@ impl Request {
             | Self::OutboxReceipt { .. }
             | Self::OutboxGet { .. }
             | Self::OutboxList { .. }
+            | Self::OutboxFirstSteer { .. }
             | Self::OutboxNextClaimableAt { .. }
             | Self::Events { .. }
             | Self::PendingEffects { .. }
@@ -878,6 +915,7 @@ async fn evaluate(
             run_id,
             run_ordinal,
             placement,
+            keep_existing,
         } => serde_json::to_value(
             transactions
                 .positions_allocate(
@@ -888,10 +926,40 @@ async fn evaluate(
                         run_id,
                         run_ordinal,
                         placement,
+                        keep_existing,
                     },
                 )
                 .await?,
         ),
+        Request::ApplicationTaskFoldersPrepare {} => {
+            serde_json::to_value(store.prepare_application_task_folders().await?)
+        }
+        Request::ApplicationTaskFoldersFind {
+            transaction_id,
+            paths,
+        } => serde_json::to_value(
+            transactions
+                .task_folders_find(&transaction_id, paths)
+                .await?,
+        ),
+        Request::ApplicationTaskFoldersUpsert {
+            transaction_id,
+            row,
+        } => {
+            transactions
+                .task_folders_upsert(&transaction_id, row)
+                .await?;
+            Ok(Value::Null)
+        }
+        Request::ApplicationTaskFoldersDelete {
+            transaction_id,
+            root,
+        } => {
+            transactions
+                .task_folders_delete(&transaction_id, &root)
+                .await?;
+            Ok(Value::Null)
+        }
         Request::ApplicationProjectsPrepare {} => {
             serde_json::to_value(store.prepare_application_projects().await?)
         }
@@ -921,6 +989,15 @@ async fn evaluate(
             transactions.projects_upsert(&transaction_id, row).await?;
             Ok(json!({"written":true}))
         }
+        Request::ApplicationProjectsReduceEvent {
+            transaction_id,
+            existing_json,
+            event_json,
+        } => serde_json::to_value(
+            transactions
+                .projects_reduce_event(&transaction_id, existing_json.as_deref(), &event_json)
+                .await?,
+        ),
         Request::ApplicationViewedFilesPrepare {} => {
             serde_json::to_value(store.prepare_application_viewed_files().await?)
         }
@@ -1127,6 +1204,15 @@ async fn evaluate(
                 .outbox_list(&transaction_id, &command_id)
                 .await?,
         ),
+        Request::ApplicationOutboxFirstSteer {
+            transaction_id,
+            thread_id,
+            message_id,
+        } => serde_json::to_value(
+            transactions
+                .outbox_first_steer(&transaction_id, &thread_id, &message_id)
+                .await?,
+        ),
         Request::ApplicationOutboxCancel {
             transaction_id,
             thread_id,
@@ -1198,7 +1284,10 @@ async fn evaluate(
                 )
                 .await?,
         ),
-        Request::ApplicationOutboxNextClaimableAt { transaction_id, max_running_title_generations } => serde_json::to_value(
+        Request::ApplicationOutboxNextClaimableAt {
+            transaction_id,
+            max_running_title_generations,
+        } => serde_json::to_value(
             transactions
                 .outbox_next_claimable_at_limited(&transaction_id, max_running_title_generations)
                 .await?,
@@ -1289,6 +1378,10 @@ async fn evaluate(
         Request::OutboxGet { effect_id } => {
             serde_json::to_value(store.outbox_get(&effect_id).await?)
         }
+        Request::OutboxFirstSteer {
+            thread_id,
+            message_id,
+        } => serde_json::to_value(store.outbox_first_steer(&thread_id, &message_id).await?),
         Request::OutboxList { command_id } => {
             serde_json::to_value(store.outbox_list_by_command(&command_id).await?)
         }
@@ -1331,9 +1424,13 @@ async fn evaluate(
                 })
                 .await?,
         ),
-        Request::OutboxNextClaimableAt { max_running_title_generations } => {
-            serde_json::to_value(store.outbox_next_claimable_at_limited(max_running_title_generations).await?)
-        }
+        Request::OutboxNextClaimableAt {
+            max_running_title_generations,
+        } => serde_json::to_value(
+            store
+                .outbox_next_claimable_at_limited(max_running_title_generations)
+                .await?,
+        ),
         Request::OutboxSucceed {
             effect_id,
             worker_id,
@@ -1591,9 +1688,27 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[tokio::main(worker_threads = 2)]
-async fn main() {
-    if let Err(error) = run().await {
+fn main() {
+    let owned = t3_code_ls_storage::run_on_database_thread(|| {
+        let runtime = match tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        };
+        runtime.block_on(async {
+            if let Err(error) = run().await {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        });
+    });
+    if let Err(error) = owned {
         eprintln!("{error}");
         std::process::exit(1);
     }

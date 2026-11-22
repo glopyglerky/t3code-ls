@@ -14,6 +14,19 @@ const error = (cause: unknown) =>
       (("errcode" in cause && cause.errcode === 5) ||
         ("code" in cause && cause.code === "SQLITE_BUSY")),
   });
+export const isHeld = (lockPath: string): boolean => {
+  let db: NodeSqlite.DatabaseSync | undefined;
+  try {
+    db = new NodeSqlite.DatabaseSync(lockPath, { readOnly: true, timeout: 0 });
+    db.prepare("SELECT 1 FROM sqlite_schema").get();
+    return false;
+  } catch (cause) {
+    return error(cause).busy;
+  } finally {
+    db?.close();
+  }
+};
+
 export const layer = Layer.succeed(
   ServerOwnershipLock,
   ServerOwnershipLock.of({

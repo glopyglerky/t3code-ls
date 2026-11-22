@@ -2,6 +2,7 @@
 import * as NodeAssert from "node:assert/strict";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as ProjectionStore from "../apps/server/src/orchestration-v2/ProjectionStore.ts";
@@ -28,7 +29,12 @@ NodeAssert.ok(
   "Pass an absolute native database executable",
 );
 await NodeFSP.access(executable, NodeFSP.constants.X_OK);
-const oracle = await loadUpstreamModule("apps/server/src/orchestration-v2/ProjectionStore.ts");
+const continuationOracle = await loadUpstreamModule(
+  "packages/shared/src/orchestrationV2ManualContinuation.ts",
+);
+const oracle = await loadUpstreamModule("apps/server/src/orchestration-v2/ProjectionStore.ts", {
+  "@t3tools/shared/orchestrationV2ManualContinuation": continuationOracle.url,
+});
 const fixture = await createFixture();
 const checks = [];
 const captureTarget = { runId: "run:main", scopeId: "scope:main" };
@@ -96,9 +102,14 @@ const userMessage = (id, text, extra = {}) =>
     streaming: false,
     ...extra,
   });
-const failed = (body) =>
+const failed = (body, expected) =>
   Effect.exit(body).pipe(
-    Effect.tap((exit) => Effect.sync(() => NodeAssert.ok(Exit.isFailure(exit)))),
+    Effect.tap((exit) =>
+      Effect.sync(() => {
+        NodeAssert.ok(Exit.isFailure(exit));
+        NodeAssert.equal(Cause.squash(exit.cause), expected);
+      }),
+    ),
   );
 
 async function withServices(kind, filename, use, databaseFixture = fixture) {
@@ -200,10 +211,26 @@ const seed = Effect.fn("checkRedbProjectionContext.seed")(function* (store) {
     }),
   );
   yield* store.apply(
-    makeEvent("context-handoff.updated", { ...jsonPayloads.contextHandoff, id: "handoff:z" }),
+    makeEvent("subagent.updated", {
+      ...jsonPayloads.subagent,
+      id: "subagent:turn-complete",
+      status: "completed",
+      completedAt: fixedTime,
+    }),
   );
   yield* store.apply(
-    makeEvent("context-handoff.updated", { ...jsonPayloads.contextHandoff, id: "handoff:a" }),
+    makeEvent("context-handoff.updated", {
+      ...jsonPayloads.contextHandoff,
+      id: "handoff:z",
+      transferId: "transfer:incoming",
+    }),
+  );
+  yield* store.apply(
+    makeEvent("context-handoff.updated", {
+      ...jsonPayloads.contextHandoff,
+      id: "handoff:a",
+      transferId: "transfer:incoming",
+    }),
   );
   yield* store.apply(
     makeEvent("context-transfer.created", {
@@ -277,6 +304,143 @@ const seed = Effect.fn("checkRedbProjectionContext.seed")(function* (store) {
   );
 });
 
+const continuationContexts = Effect.fn("checkRedbProjectionContext.continuationContexts")(
+  function* ({ store, apply }) {
+    const owner = "thread:continuation";
+    const providerThreadId = "provider:continuation";
+    const providerSessionId = "session:continuation";
+    const sourceText = "Preserve this unsent steering prompt 🦊 & its attachment";
+    const sourceAttachment = file("continuation_source");
+    const event = (type, payload) => makeEvent(type, payload, { threadId: owner });
+    const run = (suffix, ordinal, prior) => ({
+      ...jsonPayloads.run,
+      id: `run:continuation:${suffix}`,
+      threadId: owner,
+      ordinal,
+      providerThreadId,
+      userMessageId: `message:continuation:${suffix}`,
+      rootNodeId: `node:continuation:${suffix}`,
+      activeAttemptId: null,
+      status: suffix === "resume" ? "preparing" : "interrupted",
+      completedAt: suffix === "resume" ? null : fixedTime,
+      ...(prior === undefined ? {} : { manualContinuationOfRunId: prior }),
+    });
+    const ancestor = run("ancestor", 1);
+    const source = run("source", 2, ancestor.id);
+    const resumed = run("resume", 3, source.id);
+    yield* apply(threadEvent(owner));
+    yield* apply(
+      event("provider-session.attached", {
+        ...jsonPayloads.providerSession,
+        id: providerSessionId,
+      }),
+    );
+    yield* apply(
+      event("provider-thread.updated", {
+        ...jsonPayloads.providerThread,
+        id: providerThreadId,
+        providerSessionId,
+        appThreadId: owner,
+        ownerNodeId: null,
+        nativeThreadRef: { driver: "codex", nativeId: "continuation", strength: "strong" },
+        lastRunOrdinal: 3,
+      }),
+    );
+    for (const current of [ancestor, source, resumed]) {
+      yield* apply(event("run.created", current));
+      yield* apply(
+        event("node.updated", {
+          ...jsonPayloads.node,
+          id: current.rootNodeId,
+          threadId: owner,
+          runId: current.id,
+          rootNodeId: current.rootNodeId,
+          providerThreadId,
+          providerTurnId: null,
+          checkpointScopeId: null,
+        }),
+      );
+      yield* apply(
+        event("message.updated", {
+          ...jsonPayloads.message,
+          id: current.userMessageId,
+          threadId: owner,
+          runId: current.id,
+          nodeId: current.rootNodeId,
+          role: "user",
+          text:
+            current === source
+              ? sourceText
+              : current === ancestor
+                ? "An older ancestor prompt must not replace the restarted source"
+                : "",
+          attachments: current === source ? [sourceAttachment] : [],
+          streaming: false,
+        }),
+      );
+    }
+    const output = [];
+    for (const test of [
+      { ordinal: 1, accepted: true, includeSource: false },
+      { ordinal: 2, accepted: false, includeSource: true },
+      { ordinal: 2, accepted: true, includeSource: false },
+      { ordinal: 3, accepted: false, includeSource: true },
+    ]) {
+      const attemptId = `attempt:continuation:${test.ordinal}`;
+      const providerTurnId = test.accepted ? `turn:continuation:${test.ordinal}` : null;
+      yield* apply(
+        event("run-attempt.updated", {
+          ...jsonPayloads.attempt,
+          id: attemptId,
+          runId: source.id,
+          rootNodeId: source.rootNodeId,
+          providerThreadId,
+          providerTurnId,
+          attemptOrdinal: test.ordinal,
+          reason: test.ordinal === 1 ? "initial" : "steering_restart",
+          status: "interrupted",
+          completedAt: fixedTime,
+        }),
+      );
+      if (test.accepted)
+        yield* apply(
+          event("provider-turn.updated", {
+            ...jsonPayloads.providerTurn,
+            id: providerTurnId,
+            providerThreadId,
+            nodeId: source.rootNodeId,
+            runAttemptId: attemptId,
+            ordinal: test.ordinal,
+            nativeTurnRef: {
+              driver: "codex",
+              nativeId: `continuation:${test.ordinal}`,
+              strength: "strong",
+            },
+            status: "interrupted",
+            completedAt: fixedTime,
+          }),
+        );
+      yield* apply(event("run.updated", { ...source, activeAttemptId: attemptId }));
+      const context = yield* store.getTurnStartContext(owner, resumed.id);
+      NodeAssert.deepEqual(
+        context.messages.map((message) => message.id),
+        test.includeSource
+          ? [resumed.userMessageId, source.userMessageId]
+          : [resumed.userMessageId],
+      );
+      const prompt = context.messages.find((message) => message.id === source.userMessageId);
+      NodeAssert.equal(prompt?.text, test.includeSource ? sourceText : undefined);
+      NodeAssert.deepEqual(
+        prompt?.attachments,
+        test.includeSource ? [sourceAttachment] : undefined,
+      );
+      NodeAssert.ok(!context.messages.some((message) => message.id === ancestor.userMessageId));
+      output.push(context);
+    }
+    return output;
+  },
+);
+
 const exercise = Effect.fn("checkRedbProjectionContext.exercise")(function* ({
   store,
   apply,
@@ -292,6 +456,14 @@ const exercise = Effect.fn("checkRedbProjectionContext.exercise")(function* ({
   NodeAssert.equal(result.rollbackEarly.targetAttempt, undefined);
   NodeAssert.equal(result.turn.hasConversation, true);
   NodeAssert.deepEqual(
+    result.turn.subagents.map((subagent) => subagent.id),
+    ["subagent:turn-complete"],
+  );
+  NodeAssert.deepEqual(
+    result.turn.contextTransfers.map((transfer) => transfer.id),
+    ["transfer:incoming"],
+  );
+  NodeAssert.deepEqual(
     result.turn.nodes.map((v) => v.id),
     ["node:main"],
   );
@@ -301,7 +473,7 @@ const exercise = Effect.fn("checkRedbProjectionContext.exercise")(function* ({
   );
   NodeAssert.deepEqual(
     result.turn.messages.map((v) => v.id),
-    ["message:a", "message:main", "message:z"],
+    ["message:a", "message:main", "message:uppercase-goal", "message:z"],
   );
   NodeAssert.ok(result.attachments.includes(ownHtml));
   NodeAssert.ok(result.attachments.includes("guest"));
@@ -351,13 +523,16 @@ const exercise = Effect.fn("checkRedbProjectionContext.exercise")(function* ({
     "attempt:b",
   ]);
 
-  // Missing snapshots still anchor a run, while unowned missing slots may rebaseline.
+  // Missing and failed snapshots anchor a conversation only when owned by a run.
   yield* failed(
     transaction(
       Effect.gen(function* () {
-        for (const [id, ordinalWithinScope, runId] of [
-          ["checkpoint:missing-owned", 901, "run:main"],
-          ["checkpoint:missing-unowned", 902, null],
+        for (const [id, ordinalWithinScope, runId, status] of [
+          ["checkpoint:missing-owned", 901, "run:main", "missing"],
+          ["checkpoint:missing-unowned", 902, null, "missing"],
+          ["checkpoint:failed-owned", 903, "run:main", "error"],
+          ["checkpoint:failed-unowned", 904, null, "error"],
+          ["checkpoint:stale", 905, "run:main", "stale"],
         ])
           yield* apply(
             makeEvent("checkpoint.captured", {
@@ -365,7 +540,7 @@ const exercise = Effect.fn("checkRedbProjectionContext.exercise")(function* ({
               id,
               ordinalWithinScope,
               runId,
-              status: "missing",
+              status,
             }),
           );
         result.missingCapture = yield* store.getCheckpointCaptureContext(
@@ -379,13 +554,33 @@ const exercise = Effect.fn("checkRedbProjectionContext.exercise")(function* ({
           "thread:main",
           rollbackTarget,
         );
+        yield* apply(
+          makeEvent("checkpoint.captured", { ...jsonPayloads.checkpoint, status: "error" }),
+        );
+        result.failedCaptureRollback = yield* store.getCheckpointRollbackContext(
+          "thread:main",
+          rollbackTarget,
+        );
+        yield* apply(
+          makeEvent("checkpoint.captured", { ...jsonPayloads.checkpoint, status: "stale" }),
+        );
+        result.staleCaptureRollback = yield* store.getCheckpointRollbackContext(
+          "thread:main",
+          rollbackTarget,
+        );
         return yield* Effect.fail("missing-checkpoint fixture rollback");
       }),
     ),
+    "missing-checkpoint fixture rollback",
   );
   NodeAssert.ok(result.missingCapture.preservedCheckpointOrdinals.includes(901));
   NodeAssert.ok(!result.missingCapture.preservedCheckpointOrdinals.includes(902));
   NodeAssert.equal(result.missingRollback.targetAttempt.id, "attempt:main");
+  NodeAssert.ok(result.missingCapture.preservedCheckpointOrdinals.includes(903));
+  NodeAssert.ok(!result.missingCapture.preservedCheckpointOrdinals.includes(904));
+  NodeAssert.ok(!result.missingCapture.preservedCheckpointOrdinals.includes(905));
+  NodeAssert.equal(result.failedCaptureRollback.targetAttempt.id, "attempt:main");
+  NodeAssert.equal(result.staleCaptureRollback.targetAttempt, undefined);
 
   // Deleting a source preserves files still visible in an active run fork, including runless files.
   yield* failed(
@@ -407,6 +602,15 @@ const exercise = Effect.fn("checkRedbProjectionContext.exercise")(function* ({
             },
           }),
         );
+        yield* apply(
+          makeEvent("context-transfer.created", {
+            ...jsonPayloads.contextTransfer,
+            id: "transfer:attachment-fork",
+            type: "fork",
+            sourceThreadId: "thread:main",
+            targetThreadId: "thread:attachment-fork",
+          }),
+        );
         result.liveForkAttachments = yield* store.getThreadAttachmentIds("thread:main");
         yield* apply(
           threadEvent("thread:attachment-fork", {
@@ -423,12 +627,116 @@ const exercise = Effect.fn("checkRedbProjectionContext.exercise")(function* ({
         return yield* Effect.fail("live-fork attachment fixture rollback");
       }),
     ),
+    "live-fork attachment fixture rollback",
   );
   NodeAssert.ok(!result.liveForkAttachments.includes("runless_shared"));
   NodeAssert.ok(!result.liveForkAttachments.includes(ownHtml));
   NodeAssert.ok(result.liveForkAttachments.includes("guest"));
   NodeAssert.ok(result.sideChatAttachments.includes("runless_shared"));
   NodeAssert.ok(result.sideChatAttachments.includes(ownHtml));
+
+  // A deleted intermediate must keep its source visible to a live descendant.
+  // An older sibling retains shared IDs even when a later fork leaves.
+  const chain = (id, extra = {}) => threadEvent(id, extra);
+  const forkFrom = (id, source, runId, extra = {}) =>
+    chain(id, {
+      forkedFrom: { type: "run", threadId: source, runId },
+      ...extra,
+    });
+  const transfer = (source, target) =>
+    makeEvent("context-transfer.created", {
+      ...jsonPayloads.contextTransfer,
+      id: `transfer:${target}`,
+      type: "fork",
+      sourceThreadId: source,
+      targetThreadId: target,
+    });
+  yield* apply(chain("attachment:source"));
+  for (const ordinal of [1, 2, 3]) {
+    yield* apply(
+      makeEvent(
+        "run.created",
+        {
+          ...jsonPayloads.run,
+          id: `attachment:run:${ordinal}`,
+          threadId: "attachment:source",
+          ordinal,
+          status: "completed",
+          completedAt: fixedTime,
+        },
+        { threadId: "attachment:source" },
+      ),
+    );
+    yield* apply(
+      makeEvent(
+        "message.updated",
+        {
+          ...jsonPayloads.message,
+          id: `attachment:message:${ordinal}`,
+          threadId: "attachment:source",
+          runId: `attachment:run:${ordinal}`,
+          attachments: [file(`range_${ordinal}`), file("range_shared")],
+        },
+        { threadId: "attachment:source" },
+      ),
+    );
+  }
+  yield* apply(
+    makeEvent(
+      "message.updated",
+      {
+        ...jsonPayloads.message,
+        id: "attachment:runless",
+        threadId: "attachment:source",
+        runId: null,
+        attachments: [file("chain_runless")],
+      },
+      { threadId: "attachment:source" },
+    ),
+  );
+  yield* apply(forkFrom("attachment:older", "attachment:source", "attachment:run:1"));
+  yield* apply(transfer("attachment:source", "attachment:older"));
+  yield* apply(forkFrom("attachment:middle", "attachment:source", "attachment:run:2"));
+  yield* apply(transfer("attachment:source", "attachment:middle"));
+  yield* apply(
+    makeEvent(
+      "run.created",
+      {
+        ...jsonPayloads.run,
+        id: "attachment:middle-run",
+        threadId: "attachment:middle",
+        ordinal: 1,
+      },
+      { threadId: "attachment:middle" },
+    ),
+  );
+  yield* apply(forkFrom("attachment:leaf", "attachment:middle", "attachment:middle-run"));
+  yield* apply(transfer("attachment:middle", "attachment:leaf"));
+  result.chainBeforeDelete = yield* store.getThreadAttachmentIds("attachment:source");
+  NodeAssert.deepEqual(result.chainBeforeDelete, ["range_3"]);
+  yield* apply(
+    forkFrom("attachment:middle", "attachment:source", "attachment:run:2", {
+      deletedAt: fixedTime,
+    }),
+  );
+  result.chainDeletedMiddle = yield* store.getThreadAttachmentIds("attachment:source");
+  NodeAssert.deepEqual(result.chainDeletedMiddle, ["range_3"]);
+  yield* apply(chain("attachment:source", { deletedAt: fixedTime }));
+  result.chainLeafRelease = yield* store.getThreadAttachmentIds("attachment:leaf");
+  NodeAssert.deepEqual(result.chainLeafRelease, ["range_2"]);
+  result.chainIncludeShown = yield* store.getThreadAttachmentIds("attachment:leaf", {
+    includeShownByLiveFork: true,
+  });
+  NodeAssert.deepEqual(result.chainIncludeShown, []);
+  yield* apply(
+    forkFrom("attachment:leaf", "attachment:middle", "attachment:middle-run", {
+      deletedAt: fixedTime,
+    }),
+  );
+  result.chainOlderRelease = yield* store.getThreadAttachmentIds("attachment:older");
+  NodeAssert.ok(result.chainOlderRelease.includes("chain_runless"));
+  NodeAssert.ok(result.chainOlderRelease.includes("range_shared"));
+  NodeAssert.ok(!result.chainOlderRelease.includes("range_2"));
 
   // Recovery keeps live work owners, pending input nodes and orphan root turns.
   for (const [suffix, ordinal, status] of [
@@ -537,6 +845,21 @@ const exercise = Effect.fn("checkRedbProjectionContext.exercise")(function* ({
       completedAt: fixedTime,
     }),
   );
+  for (const [offset, status] of ["preparing", "starting", "running", "waiting"].entries()) {
+    yield* apply(
+      makeEvent("run.created", {
+        ...jsonPayloads.run,
+        id: `run:active-${status}`,
+        ordinal: 20 + offset,
+        status,
+        providerThreadId: "provider:background",
+        completedAt: null,
+        rootNodeId: `node:active-${status}`,
+        activeAttemptId: null,
+        startedAt: fixedTime,
+      }),
+    );
+  }
   result.liveRecovery = yield* store.getRuntimeRecoveryProjection("thread:main");
   NodeAssert.ok(result.liveRecovery.runs.some((run) => run.id === "run:background"));
   NodeAssert.ok(!result.liveRecovery.runs.some((run) => run.id === "run:never"));
@@ -575,6 +898,37 @@ const exercise = Effect.fn("checkRedbProjectionContext.exercise")(function* ({
   result.compactFile = yield* store.getTurnStartContext("thread:compact", "missing");
   NodeAssert.equal(result.compactFile.hasConversation, true);
 
+  for (const [id, role, text] of [
+    ["message:deferred-status", "user", "\u00a0 /status details"],
+    ["message:deferred-path", "user", "/tmp/a-path"],
+    ["message:ordinary-history", "user", "ordinary message"],
+    ["message:assistant-slash", "assistant", "/status"],
+  ]) {
+    yield* apply(
+      makeEvent(
+        "message.updated",
+        {
+          ...jsonPayloads.message,
+          id,
+          threadId: "thread:compact",
+          runId: null,
+          nodeId: null,
+          role,
+          text,
+          streaming: false,
+        },
+        { threadId: "thread:compact" },
+      ),
+    );
+  }
+  result.deferredSlash = yield* store.getTurnStartContext("thread:compact", "missing");
+  NodeAssert.deepEqual(
+    result.deferredSlash.messages.map((message) => message.id),
+    ["message:compact-only", "message:deferred-path", "message:deferred-status"],
+  );
+
+  result.manualContinuation = yield* continuationContexts({ store, apply });
+
   yield* transaction(
     Effect.gen(function* () {
       yield* failed(
@@ -597,6 +951,7 @@ const exercise = Effect.fn("checkRedbProjectionContext.exercise")(function* ({
             return yield* Effect.fail("rollback fixture checkpoint");
           }),
         ),
+        "rollback fixture checkpoint",
       );
       NodeAssert.ok(
         !(yield* store.getCheckpointCaptureContext(
@@ -664,6 +1019,9 @@ try {
     "Nested writer rollback restores checkpoint rows and derived native indexes",
     "Missing checkpoints preserve run anchors and remain valid rollback targets",
     "Live run forks protect inherited message, render and answer files; side chats do not retain them",
+    "Transfer-backed nested forks retain history through deleted intermediates, release departing-fork files in either deletion order, and preserve shared IDs retained by older siblings",
+    "Turn-start contexts preserve the unsent source prompt after a later steering restart, stop resending after acceptance, and retain a subsequent restart without substituting its ancestor",
+    "Deliberate rollback fixtures require their exact sentinel, so an assertion defect cannot count as successful rollback",
   );
   const resumedRollback = await withServices("upstream", upstream, resumeRollback);
   NodeAssert.deepEqual(
@@ -731,6 +1089,22 @@ try {
       fails: matches,
     })),
     {
+      name: "retained corrupt render stays unread",
+      table: "orchestration_v2_projection_turn_items",
+      column: "turn_item_id",
+      id: "item:corrupt",
+      event: itemEvent("item:corrupt", "dynamic_tool", 200, {
+        runId: "run:main",
+        status: "completed",
+        toolName: "fixture",
+        input: {},
+      }),
+      payload: '{"htmlRender":',
+      method: "getThreadAttachmentIds",
+      fails: false,
+      retain: true,
+    },
+    {
       name: "guarded corrupt provider",
       table: "orchestration_v2_projection_provider_threads",
       column: "provider_thread_id",
@@ -771,6 +1145,22 @@ try {
           );
           for (const event of sampleEvents) yield* store.apply(event);
           yield* store.apply(test.event);
+          if (test.retain) {
+            yield* store.apply(
+              threadEvent("thread:retaining-fork", {
+                forkedFrom: { type: "run", threadId: "thread:main", runId: "run:main" },
+              }),
+            );
+            yield* store.apply(
+              makeEvent("context-transfer.created", {
+                ...jsonPayloads.contextTransfer,
+                id: "transfer:retaining-fork",
+                type: "fork",
+                sourceThreadId: "thread:main",
+                targetThreadId: "thread:retaining-fork",
+              }),
+            );
+          }
           // Historical damage can predate today's derived JSON indexes and FTS
           // triggers. Remove only those derived objects in this owned fixture so
           // the invalid row can be represented, without altering the read query.
@@ -837,7 +1227,7 @@ try {
     }
   }
   checks.push(
-    "Malformed user predicates and selected renders fail, while unrelated assistant/tool rows and json_valid-guarded runtime rows stay excluded",
+    "Malformed user predicates and selected renders fail, while fork-retained corrupt renders, unrelated rows and json_valid-guarded runtime rows stay unread",
   );
   NodeAssert.equal(hash(await NodeFSP.readFile(source)), sourceHash);
   await finishProof({
@@ -846,11 +1236,11 @@ try {
     proofPath,
     checks,
     sourceHash,
-    oracles: [oracle.source],
+    oracles: [oracle.source, continuationOracle.source],
     sourcePaths: [
       "apps/server/src/orchestration-v2/ProjectionStore.ts",
+      "packages/shared/src/orchestrationV2ManualContinuation.ts",
       "apps/server/src/orchestration-v2/ProjectionContextRows.ts",
-      "apps/server/src/orchestration-v2/SqliteProjectionContextRows.ts",
       "apps/server/src/orchestration-v2/NativeProjectionContextRows.ts",
       "apps/server/src/persistence/redb_projection_context.rs",
       "apps/server/src/persistence/redb_projection_window_index.rs",

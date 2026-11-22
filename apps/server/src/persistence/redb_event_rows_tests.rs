@@ -433,10 +433,10 @@ async fn index_preparation_and_statistics_do_not_require_a_whole_history_snapsho
 }
 
 #[tokio::test]
-async fn restored_non_string_prompts_keep_sqlite_types_or_fail_without_coercing_to_text() {
+async fn restored_non_string_prompts_match_sqlite_scalar_subquery() {
     for (value, expected) in [
-        ("[1, 2]", "[1,2]"),
-        ("{\"x\": 1}", "{\"x\":1}"),
+        ("[1, 2]", r#""[1,2]""#),
+        ("{\"x\": 1}", r#""{\"x\":1}""#),
         ("true", "1"),
         ("false", "0"),
         ("null", "null"),

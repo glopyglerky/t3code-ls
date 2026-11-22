@@ -11,11 +11,15 @@ import {
   BearerConnectionProfile,
   type ConnectionCatalogEntry,
   type ConnectionRoute,
+  type IrohPeer,
 } from "./catalog.ts";
 import { BearerConnectionTarget, type ConnectionTarget } from "./model.ts";
+import { mFallback, msg } from "gt-i18n";
+import type { MFunctionType } from "gt-i18n/types";
 
 export type ConnectionRouteKind =
   | "relay"
+  | "iroh"
   | "loopback"
   | "lan"
   | "tailnet"
@@ -68,7 +72,9 @@ export function routeEntry(
 export function routeHttpBaseUrl(route: ConnectionRoute): string | null {
   if (route.target._tag === "PrimaryConnectionTarget") return route.target.httpBaseUrl;
   const profile = Option.getOrNull(route.profile);
-  return profile?._tag === "BearerConnectionProfile" ? profile.httpBaseUrl : null;
+  return profile?._tag === "BearerConnectionProfile" && profile.iroh === undefined
+    ? profile.httpBaseUrl
+    : null;
 }
 
 function routeHostname(route: ConnectionRoute): string | null {
@@ -96,9 +102,10 @@ export function connectionRouteKind(route: ConnectionRoute): ConnectionRouteKind
       return "ssh";
     case "PrimaryConnectionTarget":
     case "BearerConnectionTarget": {
+      const profile = Option.getOrNull(route.profile);
+      if (profile?._tag === "BearerConnectionProfile" && profile.iroh !== undefined) return "iroh";
       const hostname = routeHostname(route);
       if (hostname === null) return "public";
-      const profile = Option.getOrNull(route.profile);
       return directAddressKind(
         hostname,
         profile?._tag === "BearerConnectionProfile" && profile.network === "tailscale",
@@ -115,7 +122,8 @@ export function connectionRouteKind(route: ConnectionRoute): ConnectionRouteKind
  */
 export function routeKeepsItsHost(route: ConnectionRoute): boolean {
   if (routeHttpBaseUrl(route)?.startsWith("https:") === true) return true;
-  return connectionRouteKind(route) === "loopback";
+  const kind = connectionRouteKind(route);
+  return kind === "loopback" || kind === "iroh";
 }
 
 /** A loopback or LAN host answers within a few seconds or is not there. */
@@ -130,12 +138,13 @@ export function isNearbyAddress(httpBaseUrl: string): boolean {
 
 const ROUTE_KIND_RANK: Record<ConnectionRouteKind, number> = {
   loopback: 0,
-  lan: 1,
-  tailnet: 2,
-  vpn: 2,
-  public: 3,
-  ssh: 4,
-  relay: 5,
+  iroh: 1,
+  lan: 2,
+  tailnet: 3,
+  vpn: 3,
+  public: 4,
+  ssh: 5,
+  relay: 6,
 };
 
 export function insertRoute(
@@ -178,6 +187,7 @@ function routeAddressKey(route: ConnectionRoute): string | null {
   const profile = Option.getOrNull(route.profile);
   switch (profile?._tag) {
     case "BearerConnectionProfile":
+      if (profile.iroh !== undefined) return `iroh:${profile.iroh.endpointId}`;
       return `bearer:${profile.httpBaseUrl.replace(/\/+$/, "")}`;
     case "SshConnectionProfile":
       return `ssh:${sshTargetKey(profile.target)}`;
@@ -186,16 +196,25 @@ function routeAddressKey(route: ConnectionRoute): string | null {
   }
 }
 
+const T3_CONNECT_NAME = "T3 Connect";
+
+/** The route's label in English. Display sites use `connectionRouteLabelText`. */
 export function connectionRouteLabel(route: ConnectionRoute): string {
   switch (connectionRouteKind(route)) {
     case "relay":
-      return "T3 Connect";
+      return T3_CONNECT_NAME;
+    case "iroh":
+      return msg("Iroh");
     case "loopback":
-      return "This device";
+      return msg("This device");
     case "lan":
       return "LAN";
     case "tailnet":
-      return "Tailscale";
+      // Tailscale Serve answers over HTTPS on the machine's name; the same machine's
+      // plain address is another route, so the two are told apart.
+      return routeHttpBaseUrl(route)?.startsWith("https:") === true
+        ? msg("Tailscale HTTPS")
+        : "Tailscale";
     case "vpn":
       return "VPN";
     case "ssh": {
@@ -205,7 +224,24 @@ export function connectionRouteLabel(route: ConnectionRoute): string {
         : "SSH";
     }
     case "public":
-      return routeHostname(route) ?? "Remote link";
+      return routeHostname(route) ?? msg("Remote link");
+  }
+}
+
+/** @public */
+export function connectionRouteLabelText(
+  route: ConnectionRoute,
+  resolve: MFunctionType = mFallback,
+): string {
+  switch (connectionRouteKind(route)) {
+    case "loopback":
+      return resolve(msg("This device"));
+    case "iroh":
+      return resolve(msg("Iroh"));
+    case "public":
+      return routeHostname(route) ?? resolve(msg("Remote link"));
+    default:
+      return connectionRouteLabel(route);
   }
 }
 
@@ -233,6 +269,7 @@ export function mergeLearnedRoutes(input: {
   readonly entry: ConnectionCatalogEntry;
   readonly activeRoute: ConnectionRoute;
   readonly reported: ReadonlyArray<ReportedEndpoint>;
+  readonly iroh?: IrohPeer;
   /** Plain HTTP routes are unusable from an HTTPS page (mixed content). */
   readonly allowInsecure: boolean;
 }): ReadonlyArray<ConnectionRoute> | null {
@@ -277,6 +314,17 @@ export function mergeLearnedRoutes(input: {
     }),
   );
   const kept = saved.flatMap((route): ReadonlyArray<ConnectionRoute> => {
+    const profile = Option.getOrNull(route.profile);
+    if (profile?._tag === "BearerConnectionProfile" && profile.iroh !== undefined) {
+      if (!isLearned(route)) return [route];
+      if (input.iroh?.endpointId !== profile.iroh.endpointId) return [];
+      return [
+        {
+          ...route,
+          profile: Option.some(new BearerConnectionProfile({ ...profile, iroh: input.iroh })),
+        },
+      ];
+    }
     const url = routeHttpBaseUrl(route);
     if (!isLearned(route)) {
       return [
@@ -327,12 +375,45 @@ export function mergeLearnedRoutes(input: {
       ),
     });
   }
+  const iroh = input.iroh;
+  if (
+    iroh !== undefined &&
+    activeProfile?._tag === "BearerConnectionProfile" &&
+    !next.some((route) => routeAddressKey(route) === "iroh:" + iroh.endpointId)
+  ) {
+    const { environmentId, label } = entry.target;
+    const connectionId = learnedConnectionId(
+      environmentId,
+      "iroh:" + iroh.endpointId,
+      sharedCredential,
+    );
+    next = insertRoute(next, {
+      target: new BearerConnectionTarget({ environmentId, label, connectionId }),
+      profile: Option.some(
+        new BearerConnectionProfile({
+          connectionId,
+          environmentId,
+          label,
+          httpBaseUrl: activeProfile.httpBaseUrl,
+          wsBaseUrl: activeProfile.wsBaseUrl,
+          learned: true,
+          ...(authorization === undefined ? {} : { authorization }),
+          iroh,
+        }),
+      ),
+    });
+  }
   const signature = (routes: ReadonlyArray<ConnectionRoute>) =>
     routes
-      .map(
-        (route) =>
-          `${connectionRouteId(route.target)} ${routeHttpBaseUrl(route) ?? ""} ${connectionRouteKind(route)}`,
-      )
+      .map((route) => {
+        const profile = Option.getOrNull(route.profile);
+        return JSON.stringify([
+          connectionRouteId(route.target),
+          routeHttpBaseUrl(route),
+          connectionRouteKind(route),
+          profile?._tag === "BearerConnectionProfile" ? profile.iroh : undefined,
+        ]);
+      })
       .join("\n");
   return signature(saved) === signature(next) ? null : next;
 }
@@ -364,7 +445,11 @@ export function sendsTokenInClear(
   tailscale?: boolean,
 ): boolean {
   const profile = Option.getOrNull(route.profile);
-  if (profile?._tag !== "BearerConnectionProfile" || profile.authorization === "t3-connect") {
+  if (
+    profile?._tag !== "BearerConnectionProfile" ||
+    profile.iroh !== undefined ||
+    profile.authorization === "t3-connect"
+  ) {
     return false;
   }
   if ((tailscale ?? profile.network === "tailscale") || !profile.httpBaseUrl.startsWith("http:")) {

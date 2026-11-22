@@ -21,6 +21,7 @@ import {
   withSqlite,
 } from "./redb-domain-fixture.mjs";
 import { jsonPayloads, sampleEvents, makeEvent, fixedTime } from "./redb-event-sink-fixtures.mjs";
+import { compareProjectionCounts } from "./redb-projection-count-fixture.mjs";
 
 const [executable, proofPath] = process.argv.slice(2);
 NodeAssert.ok(
@@ -42,7 +43,11 @@ async function withServices(kind, filename, use, target = fixture) {
     return withNative(executable, target, (client) =>
       Effect.gen(function* () {
         const store = yield* NativeProjectionStore.make;
-        return yield* use({ store, apply: store.apply, transaction: client.withTransaction });
+        return yield* use({
+          store,
+          apply: store.apply,
+          transaction: client.withTransaction,
+        });
       }),
     );
   return withSqlite(filename, (sql) =>
@@ -88,13 +93,21 @@ const seedIndexed = (malformed) =>
       ["thread:family-child", { lineage: family("thread:family-root", true) }],
       [
         "thread:family-other-path",
-        { lineage: family("thread:family-root", true), worktreePath: "/fixture/other" },
+        {
+          lineage: family("thread:family-root", true),
+          worktreePath: "/fixture/other",
+        },
       ],
       ["thread:other-root", {}],
+      ["thread:windows-worktree", { worktreePath: "  C:\\WorK\\Example\\\\  " }],
+      ["thread:posix-worktree", { worktreePath: "/fixture/Case/" }],
       ["thread:deleted-root", { deletedAt: fixedTime, worktreePath: "/fixture/deleted" }],
       [
         "thread:live-descendant",
-        { lineage: family("thread:deleted-root", true), worktreePath: "/fixture/deleted" },
+        {
+          lineage: family("thread:deleted-root", true),
+          worktreePath: "/fixture/deleted",
+        },
       ],
     ])
       yield* store.apply(makeEvent("thread.created", indexedThread(id, extra), { threadId: id }));
@@ -143,7 +156,10 @@ const assertIndexedPlans = Effect.fn("checkRedbProjectionShells.assertIndexedPla
 }) {
   if (sql === undefined) return;
   for (const [options, index] of [
-    [{ worktreePath: "/fixture/indexed" }, "orchestration_v2_projection_threads_worktree_path_idx"],
+    [
+      { worktreePath: "/fixture/indexed" },
+      "orchestration_v2_projection_threads_worktree_path_key_idx",
+    ],
     [{ familyOf: "thread:family-root" }, "orchestration_v2_projection_threads_root_thread_idx"],
   ]) {
     const statements = [];
@@ -222,6 +238,16 @@ const exerciseIndexed = (malformed) =>
     ]);
     NodeAssert.deepEqual(shellIds(result[JSON.stringify(queries[8])]), []);
     NodeAssert.deepEqual(shellIds(result[JSON.stringify(queries[9])]), []);
+    for (const [worktreePath, ids] of [
+      ["c:/work/example", ["thread:windows-worktree"]],
+      ["/fixture/Case", ["thread:posix-worktree"]],
+      ["/fixture/case", []],
+    ]) {
+      const options = { worktreePath };
+      const snapshot = yield* store.getShellSnapshot(options);
+      NodeAssert.deepEqual(shellIds(snapshot), ids);
+      result[JSON.stringify(options)] = snapshot;
+    }
     for (const snapshot of Object.values(result))
       for (const rows of [snapshot.threads, snapshot.archivedThreads]) {
         const ids = rows.map((row) => row.id);
@@ -261,14 +287,14 @@ const exerciseIndexed = (malformed) =>
       );
       NodeAssert.equal(
         result.worktrees.some((row) => row.threadId === id),
-        payloadArchive === null,
+        columnArchive === null,
       );
       NodeAssert.equal(
         result.pullThreads.some((row) => row.id === id),
         payloadArchive === null,
       );
-      NodeAssert.equal(result.subagents.includes(id), child && payloadArchive === null);
-      NodeAssert.equal(result.older.threadIds.includes(id), !child && payloadArchive === null);
+      NodeAssert.equal(result.subagents.includes(id), child && columnArchive === null);
+      NodeAssert.equal(result.older.threadIds.includes(id), !child && columnArchive === null);
     }
     const moved = indexedThread("thread:family-child", {
       lineage: family("thread:other-root", true),
@@ -306,7 +332,11 @@ const exerciseIndexed = (malformed) =>
                 ),
               );
               NodeAssert.deepEqual(
-                shellIds(yield* store.getShellSnapshot({ worktreePath: "/fixture/nested" })),
+                shellIds(
+                  yield* store.getShellSnapshot({
+                    worktreePath: "/fixture/nested",
+                  }),
+                ),
                 [moved.id],
               );
               return yield* Effect.fail("rollback shell index change");
@@ -402,15 +432,279 @@ const threadEvent = (id, extra = {}) =>
       ...jsonPayloads.thread,
       id,
       title: `Title ${id}`,
-      lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: id },
+      lineage: {
+        parentThreadId: null,
+        relationshipToParent: null,
+        rootThreadId: id,
+      },
       ...extra,
     },
     { threadId: id },
   );
+const awarenessSnooze = {
+  snoozedAt: "2026-11-10T11:00:00.000Z",
+  snoozedUntil: "2026-11-10T13:00:00.000Z",
+};
 const taskEvent = (id, type, status, ordinal, extra = {}) => {
   const { text: _text, streaming: _streaming, ...base } = jsonPayloads.turnItem;
-  return makeEvent("turn-item.updated", { ...base, id, type, status, ordinal, ...extra });
+  return makeEvent("turn-item.updated", {
+    ...base,
+    id,
+    type,
+    status,
+    ordinal,
+    ...extra,
+  });
 };
+
+const wakeCases = [
+  { name: "foreign-user", author: "user", foreign: true, sameRun: true, expected: false },
+  { name: "foreign-agent", author: "agent", foreign: true, sameRun: true, expected: true },
+  { name: "foreign-other-run", author: "user", foreign: true, sameRun: false, expected: true },
+  { name: "local-user", author: "user", foreign: false, sameRun: true, expected: false },
+  {
+    name: "foreign-first-user",
+    author: "user",
+    duplicateAuthor: "agent",
+    foreign: true,
+    sameRun: true,
+    expected: false,
+  },
+  {
+    name: "foreign-first-agent",
+    author: "agent",
+    duplicateAuthor: "user",
+    foreign: true,
+    sameRun: true,
+    expected: true,
+  },
+];
+const remoteChild = (extra = {}) => ({
+  environmentId: "environment:sidebar",
+  threadId: "thread:remote-sidebar",
+  label: "Sidebar fixture",
+  ...extra,
+});
+const remoteCases = [
+  {
+    name: "completed-stopped",
+    status: "completed",
+    children: [remoteChild({ stoppedThere: true })],
+    present: true,
+    open: false,
+  },
+  {
+    name: "cancelled-stopped",
+    status: "cancelled",
+    children: [remoteChild({ stoppedThere: true })],
+    present: true,
+    open: false,
+  },
+  {
+    name: "interrupted-unstopped",
+    status: "interrupted",
+    children: [remoteChild({ stoppedThere: false })],
+    present: true,
+    open: true,
+  },
+  {
+    name: "completed-unstopped",
+    status: "completed",
+    children: [remoteChild({ stoppedThere: false })],
+    present: true,
+    open: true,
+  },
+  {
+    name: "completed-no-stop",
+    status: "completed",
+    children: [remoteChild()],
+    present: true,
+    open: false,
+  },
+  { name: "null", status: "completed", children: [null], present: false, open: false },
+  { name: "array", status: "completed", children: [[]], present: false, open: false },
+  { name: "scalar", status: "completed", children: ["remote"], present: false, open: false },
+  {
+    name: "first-object",
+    status: "completed",
+    children: [remoteChild({ stoppedThere: true }), null],
+    present: true,
+    open: false,
+  },
+  {
+    name: "first-null",
+    status: "completed",
+    children: [null, remoteChild({ stoppedThere: true })],
+    present: false,
+    open: false,
+  },
+  {
+    name: "provider-native",
+    status: "completed",
+    children: [remoteChild({ stoppedThere: true })],
+    origin: "provider_native",
+    present: false,
+    open: false,
+  },
+  {
+    name: "local-child",
+    status: "completed",
+    children: [remoteChild({ stoppedThere: true })],
+    childThreadId: "thread:local-child",
+    present: false,
+    open: false,
+  },
+];
+
+const seedSidebarPredicates = Effect.fn("checkRedbProjectionShells.seedSidebarPredicates")(
+  function* (sql) {
+    const store = yield* oracle.module.ProjectionStoreV2.pipe(Effect.provide(oracle.module.layer));
+    yield* store.apply(threadEvent("thread:wake-author"));
+    for (const test of wakeCases) {
+      const threadId = `thread:wake:${test.name}`;
+      const runId = `run:wake:${test.name}`;
+      const messageId = `message:wake:${test.name}`;
+      yield* store.apply(threadEvent(threadId));
+      yield* store.apply(
+        makeEvent(
+          "run.created",
+          {
+            ...jsonPayloads.run,
+            id: runId,
+            threadId,
+            status: "completed",
+            completedAt: fixedTime,
+            userMessageId: messageId,
+          },
+          { threadId },
+        ),
+      );
+      yield* store.apply(
+        makeEvent(
+          "message.updated",
+          {
+            ...jsonPayloads.message,
+            id: messageId,
+            threadId,
+            runId,
+            role: "user",
+            createdBy: "agent",
+            creationSource: "server",
+            streaming: false,
+            notification: {
+              source: { kind: "background_command" },
+              outcome: "updated",
+              summary: "Background work changed",
+            },
+          },
+          { threadId },
+        ),
+      );
+      const authorThreadId = test.foreign ? "thread:wake-author" : threadId;
+      const authored = {
+        ...jsonPayloads.message,
+        id: `message:author:${test.name}`,
+        threadId: authorThreadId,
+        runId: test.sameRun ? runId : "run:unrelated",
+        role: "user",
+        createdBy: test.author,
+        creationSource: "web",
+        streaming: false,
+      };
+      yield* store.apply(makeEvent("message.updated", authored, { threadId: authorThreadId }));
+      if (test.duplicateAuthor !== undefined) {
+        const raw = `${JSON.stringify(authored).slice(0, -1)},"createdBy":${JSON.stringify(test.duplicateAuthor)}}`;
+        yield* sql`UPDATE orchestration_v2_projection_messages SET payload_json = ${raw} WHERE message_id = ${authored.id}`;
+      }
+    }
+    for (const test of remoteCases) {
+      const threadId = `thread:remote:${test.name}`;
+      const id = `subagent:remote:${test.name}`;
+      yield* store.apply(threadEvent(threadId));
+      const payload = {
+        ...jsonPayloads.subagent,
+        id,
+        threadId,
+        origin: test.origin ?? "app_owned",
+        childThreadId: test.childThreadId ?? null,
+        status: test.status,
+        result: "Task already has its result",
+        completedAt: fixedTime,
+      };
+      yield* store.apply(makeEvent("subagent.updated", payload, { threadId }));
+      // These historical raw JSON shapes exercise SQL json_type, including
+      // SQLite's first duplicate-member rule, before native import/preparation.
+      const raw =
+        JSON.stringify(payload).slice(0, -1) +
+        test.children.map((child) => `,"remoteChild":${JSON.stringify(child)}`).join("") +
+        "}";
+      yield* sql`UPDATE orchestration_v2_projection_subagents SET payload_json = ${raw} WHERE subagent_id = ${id}`;
+    }
+  },
+);
+
+const exerciseSidebarPredicates = Effect.fn("checkRedbProjectionShells.exerciseSidebarPredicates")(
+  function* ({ store }) {
+    const wakes = {};
+    for (const test of wakeCases) {
+      const shell = yield* store.getThreadShell(`thread:wake:${test.name}`);
+      NodeAssert.ok(shell, "The wake fixture must produce a real public thread shell");
+      NodeAssert.equal(shell.latestRunId, `run:wake:${test.name}`);
+      wakes[test.name] = shell.latestRunBackgroundWake;
+    }
+    const active = yield* store.listActiveShellIndex();
+    const open = yield* store.getOpenRemoteDelegatedTasks;
+    const remotes = {};
+    for (const test of remoteCases) {
+      const row = active.find((entry) => entry.id === `thread:remote:${test.name}`);
+      NodeAssert.ok(row, "Every remote predicate fixture must reach the active index");
+      remotes[test.name] = {
+        present: row.hasRemoteTasks,
+        open: open.some((task) => task.taskId === `subagent:remote:${test.name}`),
+      };
+    }
+    return { wakes, remotes };
+  },
+);
+
+async function compareSidebarPredicates() {
+  const target = await createFixture();
+  try {
+    const source = NodePath.join(target.root, "sidebar.sqlite");
+    await createMigratedSqlite(source, seedSidebarPredicates);
+    const sourceHash = hash(await NodeFSP.readFile(source));
+    const archive = NodePath.join(target.root, "sidebar.ndjson");
+    exportSqliteState({ source, destination: archive });
+    nativeRequest(executable, target, "initialize", {
+      operation: "import_sqlite_application",
+      path: archive,
+    });
+    const expected = await withServices("upstream", source, exerciseSidebarPredicates, target);
+    NodeAssert.deepEqual(
+      expected,
+      {
+        wakes: Object.fromEntries(wakeCases.map((test) => [test.name, test.expected])),
+        remotes: Object.fromEntries(
+          remoteCases.map((test) => [test.name, { present: test.present, open: test.open }]),
+        ),
+      },
+      "Immutable upstream witnesses global authored-message suppression and remote presence independently of openness",
+    );
+    NodeAssert.deepEqual(
+      await withServices("sqlite", source, exerciseSidebarPredicates, target),
+      expected,
+    );
+    const actual = await withServices("redb", source, exerciseSidebarPredicates, target);
+    NodeAssert.deepEqual(
+      actual,
+      expected,
+      "Native public shells and active index must preserve global run membership and exact remoteChild presence",
+    );
+    NodeAssert.equal(hash(await NodeFSP.readFile(source)), sourceHash);
+  } finally {
+    await target.close();
+  }
+}
 
 const exercise = Effect.fn("checkRedbProjectionShells.exercise")(function* ({
   store,
@@ -443,14 +737,50 @@ const exercise = Effect.fn("checkRedbProjectionShells.exercise")(function* ({
   NodeAssert.equal(yield* store.getThreadShell("missing"), null);
   result.awareness = yield* store.getAgentAwarenessSnapshot();
   result.awarenessOne = yield* store.getAgentAwarenessSnapshot("thread:side");
+  const awareness = normalized(result.awareness);
+  const idleAwareness = awareness.threads.find((thread) => thread.id === "thread:idle");
+  const sideAwareness = normalized(result.awarenessOne).threads[0];
+  const mainAwareness = awareness.threads.find((thread) => thread.id === "thread:main");
+  NodeAssert.ok(idleAwareness && sideAwareness && mainAwareness);
+  for (const thread of [idleAwareness, sideAwareness]) {
+    NodeAssert.equal(thread.snoozedAt, awarenessSnooze.snoozedAt);
+    NodeAssert.equal(thread.snoozedUntil, awarenessSnooze.snoozedUntil);
+  }
+  NodeAssert.equal(idleAwareness.pendingGuestMessageCount, 2);
+  NodeAssert.equal(sideAwareness.pendingGuestMessageCount, 0);
+  NodeAssert.equal(mainAwareness.pendingGuestMessageCount, 0);
+  NodeAssert.equal(mainAwareness.snoozedAt, null);
+  NodeAssert.equal(mainAwareness.snoozedUntil, null);
   result.pullSnapshot = yield* store.getPullRequestSnapshot({});
-  result.pullArchived = yield* store.getPullRequestSnapshot({ threadId: "thread:archived" });
-  result.pullUnsettled = yield* store.getPullRequestSnapshot({ unsettledOnly: true });
+  result.pullArchived = yield* store.getPullRequestSnapshot({
+    threadId: "thread:archived",
+  });
+  result.pullUnsettled = yield* store.getPullRequestSnapshot({
+    unsettledOnly: true,
+  });
   result.subagents = yield* store.listActiveSubagentThreadIds();
   result.count = yield* store.countThreads();
   result.activeIndex = yield* store.listActiveShellIndex();
+  result.activeThreads = yield* store.listActiveThreads();
+  result.projectActiveThreads = yield* store.listActiveThreads("project:second");
+  result.projectMainActiveThreads = yield* store.listActiveThreads("project:main");
+  result.missingProjectActiveThreads = yield* store.listActiveThreads("project:missing");
+  NodeAssert.ok(result.activeThreads.some((row) => row.id === "thread:subagent"));
+  NodeAssert.ok(result.activeThreads.some((row) => row.id === "thread:side"));
+  NodeAssert.ok(
+    !result.activeThreads.some(
+      (row) => row.id === "thread:deleted" || row.id === "thread:archived",
+    ),
+  );
+  NodeAssert.deepEqual(
+    result.projectActiveThreads.map((row) => row.id),
+    ["thread:settled-b"],
+  );
+  NodeAssert.deepEqual(result.missingProjectActiveThreads, []);
   result.worktrees = yield* store.getThreadWorktreePaths();
-  result.allWorktrees = yield* store.getThreadWorktreePaths({ includeArchived: true });
+  result.allWorktrees = yield* store.getThreadWorktreePaths({
+    includeArchived: true,
+  });
   result.remote = yield* store.getOpenRemoteDelegatedTasks;
   result.pullRequests = yield* store.getThreadsWithPullRequests();
   result.settlement = yield* store.getSettlementCandidates();
@@ -460,7 +790,10 @@ const exercise = Effect.fn("checkRedbProjectionShells.exercise")(function* ({
     { before: { settledAt: fixedTime }, limit: 10 },
     { before: { settledAt: "2026-11-11T00:00:00.000Z" }, limit: 1 },
     {
-      before: { settledAt: "2026-11-09T12:00:00.000Z", threadId: "thread:settled-a" },
+      before: {
+        settledAt: "2026-11-09T12:00:00.000Z",
+        threadId: "thread:settled-a",
+      },
       limit: 10,
     },
     { before: { settledAt: "2026-11-11T00:00:00.000Z" }, limit: 0 },
@@ -469,13 +802,21 @@ const exercise = Effect.fn("checkRedbProjectionShells.exercise")(function* ({
       projectIds: ["project:second"],
       limit: 0,
     },
-    { before: { settledAt: "2026-11-11T00:00:00.000Z" }, projectIds: [], limit: 10 },
+    {
+      before: { settledAt: "2026-11-11T00:00:00.000Z" },
+      projectIds: [],
+      limit: 10,
+    },
   ])
     result[`older:${JSON.stringify(input)}`] = yield* store.listOlderSettledThreads(input);
 
   // A failed run's terminal error wins over session errors; held queues are not presented.
   yield* apply(
-    makeEvent("run.updated", { ...jsonPayloads.run, status: "failed", completedAt: fixedTime }),
+    makeEvent("run.updated", {
+      ...jsonPayloads.run,
+      status: "failed",
+      completedAt: fixedTime,
+    }),
   );
   yield* apply(
     taskEvent("item:error", "error", "failed", 90, {
@@ -540,12 +881,30 @@ const exercise = Effect.fn("checkRedbProjectionShells.exercise")(function* ({
   );
   result.rolledBack = yield* store.getThreadShell("thread:main");
 
+  // A live fork still inherits run state after its source is deleted.
+  const beforeSourceDelete = yield* store.getThreadShell("thread:fork");
+  yield* apply(
+    makeEvent(
+      "thread.deleted",
+      {
+        ...jsonPayloads.thread,
+        deletedAt: fixedTime,
+      },
+      { id: "event:delete-fork-source" },
+    ),
+  );
+  NodeAssert.equal(yield* store.getThreadShell("thread:main"), null);
+  result.forkAfterSourceDelete = yield* store.getThreadShell("thread:fork");
+  NodeAssert.deepEqual(result.forkAfterSourceDelete, beforeSourceDelete);
+  result.afterSourceDelete = yield* store.getShellSnapshot();
+  NodeAssert.ok(!result.afterSourceDelete.threads.some((thread) => thread.id === "thread:main"));
+  const countBeforeRollback = yield* store.countThreads();
   const before = normalized(yield* store.getShellSnapshot());
   yield* failed(
     transaction(
       Effect.gen(function* () {
         yield* apply(threadEvent("thread:discarded"));
-        NodeAssert.equal(yield* store.countThreads(), result.count + 1);
+        NodeAssert.equal(yield* store.countThreads(), countBeforeRollback + 1);
         NodeAssert.ok((yield* store.getThreadShell("thread:discarded")) !== null);
         return yield* Effect.fail("rollback shell rows");
       }),
@@ -557,6 +916,10 @@ const exercise = Effect.fn("checkRedbProjectionShells.exercise")(function* ({
 });
 
 try {
+  await compareSidebarPredicates();
+  checks.push(
+    "Background wake suppression is global by run ID; active remote presence preserves first JSON members and remains distinct from open-task recovery",
+  );
   const source = NodePath.join(fixture.root, "source.sqlite");
   await createMigratedSqlite(source, (sql) =>
     Effect.gen(function* () {
@@ -569,13 +932,19 @@ try {
           "thread:idle",
           {
             worktreePath: "/fixture/one",
+            ...awarenessSnooze,
             guestShare: {
               id: "share:fixture",
               host: "fixture.test",
               createdAt: fixedTime,
               expiresAt: "2026-11-11T12:00:00.000Z",
               guestName: null,
-              messages: [],
+              messages: ["pending", "sent", "dismissed", "pending"].map((status, index) => ({
+                id: `guest-message:awareness:${index}`,
+                text: `Guest message ${index}`,
+                status,
+                submittedAt: fixedTime,
+              })),
             },
           },
         ],
@@ -594,6 +963,7 @@ try {
         [
           "thread:side",
           {
+            ...awarenessSnooze,
             lineage: {
               parentThreadId: "thread:main",
               relationshipToParent: "fork",
@@ -614,7 +984,11 @@ try {
         [
           "thread:fork",
           {
-            forkedFrom: { type: "run", threadId: "thread:main", runId: "run:main" },
+            forkedFrom: {
+              type: "run",
+              threadId: "thread:main",
+              runId: "run:main",
+            },
             lineage: {
               parentThreadId: "thread:main",
               relationshipToParent: "fork",
@@ -631,7 +1005,9 @@ try {
         }),
       );
       yield* store.apply(
-        taskEvent("item:search", "web_search", "running", 20, { query: "fixture" }),
+        taskEvent("item:search", "web_search", "running", 20, {
+          query: "fixture",
+        }),
       );
       yield* store.apply(
         makeEvent("message.updated", {
@@ -670,11 +1046,12 @@ try {
     "Native shell summaries match immutable SQLite",
   );
   checks.push(
-    "The complete NativeProjectionStore serves all fourteen shell/query methods with immutable upstream parity",
+    "The complete NativeProjectionStore serves all fifteen shell/query methods with immutable upstream parity",
     "Active/archive/project/family/worktree/list filters, fork inheritance, event snapshot sequence and deferred decode agree",
     "Settlement lists, compact active index, user-authored timestamps and older-settled cursors/counts agree",
     "Held queues, failed roots, silent compaction, rolled-back counts and pending tool work retain source presentation",
     "Shell reads inside a writer observe staged rows and rollback restores all summaries",
+    "Global and per-thread awareness preserve snooze timestamps, null defaults and only pending guest-message counts for relay decisions",
   );
   await withServices("redb", source, ({ store }) =>
     Effect.gen(function* () {
@@ -684,12 +1061,14 @@ try {
   checks.push("Shell summaries survive native helper restart");
   await compareIndexed(false);
   await compareIndexed(true);
+  const countProof = await compareProjectionCounts(executable);
   checks.push(
     "Indexed family/worktree intersections preserve duplicate and missing IDs, deleted roots, empty filters and stable ordering",
-    "Archive-column shell/index/pull-request filters and retained JSON-filter APIs agree despite deliberately inconsistent imported archive fields",
+    "Archive-column shell, index, worktree and subagent filters and retained JSON-filter APIs agree despite deliberately inconsistent imported archive fields",
     "Unrelated malformed payloads are excluded before narrow shell decoding; malformed selected or family-reference rows still fail",
     "SQLite worktree/family reads use expression indexes and shell counts use covering run-status indexes",
     "Family/worktree index changes follow staged updates, nested rollback, committed movement, deletion rollback and helper restart",
+    "Canonical aggregate counts preserve global cross-thread queued subtraction, signed results, dangling runs, NULL/empty keys, duplicate JSON members and unrelated malformed reasoning payloads",
   );
   NodeAssert.equal(hash(await NodeFSP.readFile(source)), sourceHash);
   await finishProof({
@@ -698,17 +1077,19 @@ try {
     proofPath,
     checks,
     sourceHash,
-    oracles: [oracle.source],
+    oracles: [oracle.source, countProof.migrationSource],
     sourcePaths: [
       "apps/server/src/orchestration-v2/ProjectionStore.ts",
       "apps/server/src/orchestration-v2/NativeProjectionStore.ts",
       "apps/server/src/orchestration-v2/ProjectionShellRows.ts",
-      "apps/server/src/orchestration-v2/SqliteProjectionShellRows.ts",
       "apps/server/src/orchestration-v2/NativeProjectionShellRows.ts",
       "apps/server/src/persistence/redb_projection_shell.rs",
       "apps/server/src/persistence/redb_projection_window_index.rs",
       "apps/server/src/persistence/redb_projection_read_index.rs",
       "apps/server/src/persistence/redb_projection_derived_indexes.rs",
+      "apps/server/src/persistence/redb_turn_item_counts.rs",
+      "apps/server/src/persistence/redb_schema_upgrade.rs",
+      "tools/redb-projection-count-fixture.mjs",
       "tools/check-redb-projection-shells.mjs",
     ],
   });

@@ -49,6 +49,7 @@ export const make = Effect.fn("NativeDatabaseMaintenance.make")(function* (execu
         reclaimableBytes: stats.reclaimable_bytes,
         incrementalVacuumEnabled: false,
         legacyDatabaseBytes: null,
+        legacyOnlyRecords: null,
       };
     },
     (effect, databasePath) =>

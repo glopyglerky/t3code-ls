@@ -7,7 +7,7 @@ import * as NativeLinkedThreads from "../pullRequest/NativeLinkedThreads.ts";
 import * as LinkedPullRequestThreads from "../pullRequest/linkedThreads.ts";
 import * as NativeProjectionStore from "../orchestration-v2/NativeProjectionStore.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
-import * as NativeProjectRows from "../orchestration-v2/NativeProjectRows.ts";
+import * as NativeProjectStore from "../orchestration-v2/NativeProjectStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as NativeThreadSearch from "../orchestration-v2/NativeThreadSearch.ts";
 import * as ThreadSearch from "../orchestration-v2/ThreadSearch.ts";
@@ -28,12 +28,21 @@ import * as NativeKnownWorkspaceRows from "../workspace/NativeKnownWorkspaceRows
 import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
 import * as NativeCodexUsageHistory from "../usage/NativeCodexUsageHistory.ts";
 import * as CodexUsageHistory from "../usage/CodexUsageHistory.ts";
+import * as NativeProviderSessionRuntime from "./NativeProviderSessionRuntime.ts";
+import * as ProviderSessionRuntime from "./ProviderSessionRuntime.ts";
 import * as NativeAuthSessions from "./NativeAuthSessions.ts";
 import * as AuthSessions from "./AuthSessions.ts";
+import * as AuthConnectDevices from "./AuthConnectDevices.ts";
+import * as NativeAuthConnectDevices from "./NativeAuthConnectDevices.ts";
 import * as NativeAuthPairingLinks from "./NativeAuthPairingLinks.ts";
 import * as AuthPairingLinks from "./AuthPairingLinks.ts";
 import * as NativeProjectionMaintenance from "../orchestration-v2/NativeProjectionMaintenance.ts";
 import * as ProjectionMaintenance from "../orchestration-v2/ProjectionMaintenance.ts";
+
+import * as IssueTrackerBindings from "./IssueTrackerBindings.ts";
+import * as LinkedIssueThreads from "../issue/linkedThreads.ts";
+import * as TaskFolderStore from "../workspace/TaskFolderStore.ts";
+import * as AcpRegistrySessionOwner from "../provider/AcpRegistrySessionOwner.ts";
 
 export const selection = applicationDatabase();
 /** Branches expose the same public service. Their private database requirements
@@ -51,8 +60,34 @@ const native = <A, E, R>(layer: Layer.Layer<A, E, R>) =>
 const sqlite = <A, E, R>(layer: Layer.Layer<A, E, R>) =>
   layer.pipe(Layer.provide(Sqlite.layerConfig));
 export const layerConfig = select(
-  native(Layer.mergeAll(PersistenceTransactions.redbLayer, NativeLinkedThreads.layer)),
-  sqlite(Layer.mergeAll(PersistenceTransactions.sqliteLayer, LinkedPullRequestThreads.layerSqlite)),
+  native(
+    Layer.mergeAll(
+      PersistenceTransactions.redbLayer,
+      NativeLinkedThreads.layer,
+      NativeProviderSessionRuntime.layer,
+      AcpRegistrySessionOwner.layerNative,
+    ),
+  ),
+  sqlite(
+    Layer.mergeAll(
+      PersistenceTransactions.sqliteLayer,
+      LinkedPullRequestThreads.layerSqlite,
+      ProviderSessionRuntime.layer,
+      AcpRegistrySessionOwner.layerSqlite,
+    ),
+  ),
+);
+export const issueTrackerBindings = select(
+  native(IssueTrackerBindings.layerNative),
+  sqlite(IssueTrackerBindings.layer),
+);
+export const linkedIssueThreads = select(
+  native(LinkedIssueThreads.layerNative),
+  sqlite(LinkedIssueThreads.layerSqlite),
+);
+export const taskFolders = select(
+  native(TaskFolderStore.layerNative),
+  sqlite(TaskFolderStore.layer),
 );
 export const auxiliaryReads = select(
   native(NativeAuxiliaryPersistenceReads.layer),
@@ -62,10 +97,7 @@ export const projections = select(
   native(NativeProjectionStore.layer),
   sqlite(ProjectionStore.layer),
 );
-export const projects = select(
-  native(ProjectStore.layerWithRows.pipe(Layer.provide(NativeProjectRows.layer))),
-  sqlite(ProjectStore.layer),
-);
+export const projects = select(native(NativeProjectStore.layer), sqlite(ProjectStore.layer));
 export const search = select(native(NativeThreadSearch.layer), sqlite(ThreadSearch.layer));
 export const settings = select(
   native(
@@ -114,8 +146,12 @@ export const knownWorkspaces = select(
 export const usage = select(native(NativeCodexUsageHistory.layer), sqlite(CodexUsageHistory.layer));
 export const authSessions = select(native(NativeAuthSessions.layer), sqlite(AuthSessions.layer));
 export const authPairing = select(
-  native(NativeAuthPairingLinks.layer),
-  sqlite(AuthPairingLinks.layer),
+  native(Layer.merge(NativeAuthPairingLinks.layer, NativeAuthConnectDevices.layer)),
+  sqlite(Layer.merge(AuthPairingLinks.layer, AuthConnectDevices.layer)),
+);
+export const authConnectDevices = select(
+  native(NativeAuthConnectDevices.layer),
+  sqlite(AuthConnectDevices.layer),
 );
 
 // CLI readers may share a current server's schema, but pending migrations need
@@ -123,9 +159,21 @@ export const authPairing = select(
 const sqliteCli = <A, E, R>(layer: Layer.Layer<A, E, R>) =>
   layer.pipe(Layer.provide(Sqlite.layerCliConfig));
 export const cliLayerConfig = select(
-  native(Layer.mergeAll(PersistenceTransactions.redbLayer, NativeLinkedThreads.layer)),
+  native(
+    Layer.mergeAll(
+      PersistenceTransactions.redbLayer,
+      NativeLinkedThreads.layer,
+      NativeProviderSessionRuntime.layer,
+      AcpRegistrySessionOwner.layerNative,
+    ),
+  ),
   sqliteCli(
-    Layer.mergeAll(PersistenceTransactions.sqliteLayer, LinkedPullRequestThreads.layerSqlite),
+    Layer.mergeAll(
+      PersistenceTransactions.sqliteLayer,
+      LinkedPullRequestThreads.layerSqlite,
+      ProviderSessionRuntime.layer,
+      AcpRegistrySessionOwner.layerSqlite,
+    ),
   ),
 );
 export const cliPeers = select(
@@ -145,6 +193,10 @@ export const cliAuthSessions = select(
   sqliteCli(AuthSessions.layer),
 );
 export const cliAuthPairing = select(
-  native(NativeAuthPairingLinks.layer),
-  sqliteCli(AuthPairingLinks.layer),
+  native(Layer.merge(NativeAuthPairingLinks.layer, NativeAuthConnectDevices.layer)),
+  sqliteCli(Layer.merge(AuthPairingLinks.layer, AuthConnectDevices.layer)),
+);
+export const cliAuthConnectDevices = select(
+  native(NativeAuthConnectDevices.layer),
+  sqliteCli(AuthConnectDevices.layer),
 );

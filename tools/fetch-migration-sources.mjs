@@ -32,8 +32,8 @@ export function planMigrationFetches(map, lock) {
     "Migration source history must end at the locked integrated upstream commit");
 
   return [
-    ...history.map((commit) => ({ remote: upstreamRemote, commit })),
-    { remote: "origin", commit: recoveryCommit },
+    { remote: upstreamRemote, commits: [...history] },
+    { remote: "origin", commits: [recoveryCommit] },
   ];
 }
 
@@ -43,12 +43,12 @@ if (process.argv[1] && NodeURL.pathToFileURL(NodePath.resolve(process.argv[1])).
     const map = JSON.parse(NodeFS.readFileSync(NodePath.join(repository, "port-map.json"), "utf8"));
     const lock = JSON.parse(NodeFS.readFileSync(NodePath.join(repository, "upstream.lock.json"), "utf8"));
     const plan = planMigrationFetches(map, lock);
-    for (const { remote, commit } of plan) {
+    for (const { remote, commits } of plan) {
       NodeChildProcess.execFileSync("git", [
-        "fetch", "--no-tags", "--no-write-fetch-head", "--depth=1", remote, commit,
+        "fetch", "--no-tags", "--no-write-fetch-head", "--depth=1", remote, ...commits,
       ], { cwd: repository, stdio: "inherit", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
     }
-    console.log(`Fetched ${plan.length - 1} immutable upstream revisions and the recovery source.`);
+    console.log(`Fetched ${plan[0].commits.length} immutable upstream revisions and the recovery source.`);
   } catch (error) {
     console.error(`Migration source fetch failed: ${error.message}`);
     process.exitCode = 1;

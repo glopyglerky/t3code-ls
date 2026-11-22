@@ -75,7 +75,12 @@ describe("connection routes", () => {
     expect(connectionRouteKind(PUBLIC)).toBe("public");
     expect(connectionRouteKind(direct("lo", "http://127.0.0.1:3773/"))).toBe("loopback");
     expect(connectionRouteKind(direct("ts6", "http://[fd7a:115c:a1e0::1]:3773/"))).toBe("tailnet");
-    expect(connectionRouteLabel(TAILNET)).toBe("Tailscale");
+    expect(connectionRouteLabel(direct("ts-ip", "http://[fd7a:115c:a1e0::1]:3773/"))).toBe(
+      "Tailscale",
+    );
+    expect(connectionRouteLabel(direct("ts-serve", "https://box.tail1234.ts.net/"))).toBe(
+      "Tailscale HTTPS",
+    );
     expect(connectionRouteLabel(RELAY)).toBe("T3 Connect");
   });
 
@@ -281,6 +286,32 @@ describe("learned routes", () => {
     const learned = routes.find((route) => connectionRouteKind(route) === "tailnet")!;
     expect(profileOf(learned)).not.toHaveProperty("authorization");
     expect(credentialConnectionId(connectionRouteId(learned.target))).toBe("lan");
+  });
+
+  it("learns a pinned encrypted route from an authenticated environment", () => {
+    const entry = entryWithRoutes(relayOnly, [PUBLIC, RELAY]);
+    const endpoint = {
+      endpointId: "e4".repeat(32),
+      addresses: ["192.0.2.12:3774"],
+      relay: null,
+    };
+    const advertised = { activeRoute: PUBLIC, reported: [], allowInsecure: false };
+    const routes = mergeLearnedRoutes({ entry, ...advertised, iroh: endpoint })!;
+    const tunnel = routes.find((route) => connectionRouteKind(route) === "iroh")!;
+    expect(profileOf(tunnel)).toMatchObject({
+      iroh: endpoint,
+      httpBaseUrl: "https://desk.example.com/",
+      wsBaseUrl: "wss://desk.example.com/",
+    });
+    expect(credentialConnectionId(connectionRouteId(tunnel.target))).toBe("public");
+    expect(sendsTokenInClear(routes, tunnel)).toBe(false);
+    expect(routesAfterRemoving(routes, "public")).toEqual([RELAY]);
+    const withTunnel = entryWithRoutes(entry, routes);
+    expect(mergeLearnedRoutes({ entry: withTunnel, ...advertised, iroh: endpoint })).toBeNull();
+    const moved = { ...endpoint, addresses: ["192.0.2.13:3774"] };
+    const refreshed = mergeLearnedRoutes({ entry: withTunnel, ...advertised, iroh: moved })!;
+    expect(profileOf(refreshed[0]!)).toMatchObject({ iroh: moved });
+    expect(mergeLearnedRoutes({ entry: withTunnel, ...advertised })).toEqual([PUBLIC, RELAY]);
   });
 
   it("keeps a token paired over HTTPS off plain HTTP addresses outside the tailnet", () => {

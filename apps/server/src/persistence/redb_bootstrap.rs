@@ -13,7 +13,7 @@ use std::time::Duration;
 mod upgrade;
 pub(crate) use upgrade::validate_import_lineage;
 
-#[derive(Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Migration {
     pub id: String,
     pub name: String,
@@ -97,10 +97,10 @@ impl Store {
             let catalog = decode_catalog(&bytes)?;
             tx.rollback().await?;
             if catalog.schema != definition.schema {
-                return self.upgrade_application_80(catalog, definition).await;
+                return self.upgrade_application_current(catalog, definition).await;
             }
             if self.application_migrations().await? != definition.migrations {
-                return self.upgrade_application_88(catalog, definition).await;
+                return self.upgrade_application_current(catalog, definition).await;
             }
             return Ok(BootstrapResult {
                 initialized: false,
@@ -156,7 +156,10 @@ mod tests {
         store.shutdown().await.unwrap();
         let before = std::fs::read(fixture.path()).unwrap();
         let read_only = Store::open_read_only(fixture.path()).await.unwrap();
-        assert_eq!(read_only.application_migrations().await.unwrap().len(), 89);
+        assert_eq!(
+            read_only.application_migrations().await.unwrap(),
+            definition().unwrap().migrations
+        );
         assert!(read_only.bootstrap_application().await.is_err());
         read_only.shutdown().await.unwrap();
         assert_eq!(std::fs::read(fixture.path()).unwrap(), before);
@@ -172,10 +175,13 @@ mod tests {
         let store = fixture.initialize().await;
         let first = store.bootstrap_application().await.unwrap();
         assert!(first.initialized);
-        assert_eq!(first.migrations.len(), 89);
+        assert_eq!(first.migrations, definition().unwrap().migrations);
         assert!(store.prepare_application_search().await.unwrap().prepared);
         assert!(!store.bootstrap_application().await.unwrap().initialized);
-        assert_eq!(store.application_migrations().await.unwrap().len(), 89);
+        assert_eq!(
+            store.application_migrations().await.unwrap(),
+            first.migrations
+        );
         while !store
             .prepare_application_message_rowids()
             .await

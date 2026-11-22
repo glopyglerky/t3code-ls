@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 
 /** Point queries shared by the retained SQL service and native projection reader. */
 export type ProjectionLookup =
+  | { readonly kind: "run_interrupt_request"; readonly thread_id: string; readonly run_id: string }
   | { readonly kind: "thread"; readonly thread_id: string }
   | { readonly kind: "thread_exists"; readonly thread_id: string }
   | { readonly kind: "plan"; readonly thread_id: string; readonly record_id: string }
@@ -20,6 +21,7 @@ export type ProjectionLookup =
   | { readonly kind: "can_start_queued_run"; readonly thread_id: string }
   | { readonly kind: "held_queued_runs"; readonly thread_id: string }
   | { readonly kind: "message_count"; readonly thread_id: string }
+  | { readonly kind: "run_count"; readonly thread_id: string }
   | { readonly kind: "subagent_count"; readonly thread_id: string }
   | { readonly kind: "app_owned_child_threads"; readonly thread_id: string }
   | { readonly kind: "next_turn_item_ordinal"; readonly thread_id: string }

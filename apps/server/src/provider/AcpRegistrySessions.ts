@@ -1,6 +1,7 @@
 import {
   AcpRegistryOperationError,
   CommandId,
+  ThreadId,
   type AcpRegistryImportSessionInput,
   type AcpRegistryImportSessionResult,
   type Project,
@@ -22,6 +23,7 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as AgentSessionImporter from "../project/AgentSessionImporter.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
+import { AcpRegistrySessionOwner } from "./AcpRegistrySessionOwner.ts";
 import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import * as ProviderRegistry from "./ProviderRegistry.ts";
 
@@ -47,6 +49,11 @@ export class AcpRegistrySessions extends Context.Service<
       },
       AcpRegistryOperationError
     >;
+    readonly findOwner: (input: {
+      readonly driver: ProviderDriverKind;
+      readonly instanceId: ProviderInstanceId;
+      readonly sessionId: string;
+    }) => Effect.Effect<ThreadId | null, AcpRegistryOperationError>;
     /**
      * Binds a native ACP session to a T3 thread and copies its history in. Importing a
      * session whose thread still lacks its history repairs that thread instead.
@@ -67,6 +74,7 @@ const make = Effect.gen(function* () {
   const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
   const agentSessionImporter = yield* AgentSessionImporter.AgentSessionImporter;
   const random = yield* SecureRandom.SecureRandom;
+  const { find: findOwner } = yield* AcpRegistrySessionOwner;
 
   const project = Effect.fn("AcpRegistrySessions.project")(function* (projectId: ProjectId) {
     const found = yield* projectService.getById(projectId).pipe(
@@ -128,6 +136,12 @@ const make = Effect.gen(function* () {
       instanceId: input.instanceId,
       sessionId: input.sessionId,
     });
+    const owner = yield* findOwner({
+      driver: instance.driverKind,
+      instanceId: input.instanceId,
+      sessionId: input.sessionId,
+    });
+    if (owner !== null && owner !== threadId) return { threadId: owner, imported: false } as const;
     const existing = yield* threadManagement.getThreadShell(threadId).pipe(
       Effect.mapError(
         (cause) =>
@@ -223,7 +237,7 @@ const make = Effect.gen(function* () {
     return { threadId, imported: true } as const;
   }, coordinator.withSessionMutation);
 
-  return AcpRegistrySessions.of({ project, sessionManager, importSession });
+  return AcpRegistrySessions.of({ project, sessionManager, findOwner, importSession });
 });
 
 export const layer = Layer.effect(AcpRegistrySessions, make);

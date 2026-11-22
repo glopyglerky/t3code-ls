@@ -49,6 +49,12 @@ export const make = Effect.gen(function* () {
         Effect.mapError(toPeerLinkRowsError("remove")),
       ),
     ),
+    recordExpiry: Effect.fn("PeerLinkRows.recordExpiry")((environmentId, expiresAt) =>
+      sql`
+        UPDATE peer_environment_links SET expires_at = ${expiresAt}
+        WHERE environment_id = ${environmentId} AND expires_at < ${expiresAt}
+      `.pipe(Effect.asVoid, Effect.mapError(toPeerLinkRowsError("recordExpiry"))),
+    ),
     recordOutcome: Effect.fn("PeerLinkRows.recordOutcome")((environmentId, error, reachedAt) =>
       (error === null
         ? sql`UPDATE peer_environment_links SET last_reached_at = ${reachedAt}, last_error = NULL WHERE environment_id = ${environmentId}`

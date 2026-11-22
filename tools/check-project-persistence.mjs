@@ -43,6 +43,7 @@ const imports = {
       "StoredProjectIcon",
       "ProjectId",
       "ProjectScript",
+      "ProjectTrackedFolders",
       "ThreadEnvMode",
     ].map((key) => [key, contracts[key]]),
   ),
@@ -79,6 +80,9 @@ const requiredScenarios = [
   "create supplies only upstream defaults",
   "no metadata changes still creates the update event",
   "all optional payloads and nested extensions survive",
+  "create carries tracked folders",
+  "update retains omitted tracked folders",
+  "update clears explicitly empty tracked folders",
   "delete active project with none workspace owner",
   "lifecycle step 2 project.meta.update",
   "lifecycle step 7 project.delete",
@@ -135,13 +139,14 @@ await Effect.runPromise(
         yield* sql`INSERT INTO projection_projects (
         project_id, title, has_custom_title, workspace_root, default_model_selection_json,
         default_thread_env_mode, auto_pull, favicon_path, project_icon_json,
-        scripts_json, pinned_at, archived_at, created_at, updated_at, deleted_at
+        scripts_json, tracked_folders_json, pinned_at, archived_at, created_at, updated_at, deleted_at
       ) VALUES (
         ${row.projectId}, ${row.title}, ${row.hasCustomTitle ? 1 : 0}, ${row.workspaceRoot},
         ${row.defaultModelSelection === null ? null : JSON.stringify(row.defaultModelSelection)},
         ${row.defaultThreadEnvMode}, ${row.autoPull ? 1 : 0}, ${row.faviconPath},
         ${row.projectIcon === null ? null : JSON.stringify(row.projectIcon)},
-        ${JSON.stringify(row.scripts)}, ${row.pinnedAt}, ${row.archivedAt},
+        ${JSON.stringify(row.scripts)}, ${JSON.stringify(row.trackedFolders)},
+        ${row.pinnedAt}, ${row.archivedAt},
         ${row.createdAt}, ${row.updatedAt}, ${row.deletedAt}
       )`;
       }

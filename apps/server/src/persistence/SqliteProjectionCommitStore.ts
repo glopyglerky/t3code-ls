@@ -11,6 +11,7 @@ import {
 import {
   ORCHESTRATION_V2_PROJECTION_SCHEMA_VERSION,
   ProjectionStoreV2,
+  writeThreadTouches,
 } from "../orchestration-v2/ProjectionStore.ts";
 
 const encodeTime = Schema.encodeEffect(Schema.DateTimeUtcFromString);
@@ -37,6 +38,10 @@ const make = Effect.gen(function* () {
       projections.getThreadRecords(threadId, ["runs"], { runIds: [runId] }).pipe(
         Effect.map((records) => records.runs[0]),
         Effect.mapError(toProjectionCommitStoreError("get-run")),
+      ),
+    flushThreadTouches: (touches) =>
+      writeThreadTouches(sql, touches).pipe(
+        Effect.mapError(toProjectionCommitStoreError("flush-thread-touches")),
       ),
     markApplied: Effect.fnUntraced(
       function* (sequence, updatedAt) {
@@ -119,6 +124,16 @@ const make = Effect.gen(function* () {
         return rows[0]?.payload_json === expectedJson;
       },
       Effect.mapError(toProjectionCommitStoreError("provider-thread-unchanged")),
+    ),
+    subagentUnchanged: Effect.fnUntraced(
+      function* (subagentId, expectedJson) {
+        const rows = yield* sql<{ readonly payload_json: string }>`
+        SELECT payload_json FROM orchestration_v2_projection_subagents
+        WHERE subagent_id = ${subagentId} LIMIT 1
+      `;
+        return rows[0]?.payload_json === expectedJson;
+      },
+      Effect.mapError(toProjectionCommitStoreError("subagent-unchanged")),
     ),
     turnItemUnchanged: Effect.fnUntraced(
       function* (turnItemId, expectedJson) {

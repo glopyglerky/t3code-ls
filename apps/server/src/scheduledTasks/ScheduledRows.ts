@@ -104,6 +104,7 @@ export type ScheduledWrite =
       readonly row: Row;
       readonly require_existing: boolean;
       readonly kept_schedule_json: string | null;
+      readonly unbound_thread_id?: string | null;
       readonly secret_changed: boolean;
     }
   | {

@@ -15,6 +15,7 @@ export const ProjectRecord = Schema.Struct({
   faviconPath: Schema.NullOr(Schema.String),
   projectIcon: Schema.NullOr(Schema.String),
   scripts: Schema.String,
+  trackedFolders: Schema.String,
   pinnedAt: Schema.NullOr(Schema.String),
   archivedAt: Schema.NullOr(Schema.String),
   createdAt: Schema.String,

@@ -58,6 +58,7 @@ import * as SqlitePersistence from "../apps/server/src/persistence/Sqlite.ts";
 import * as PreviewManager from "../apps/server/src/preview/Manager.ts";
 import * as ProcessRunner from "../apps/server/src/processRunner.ts";
 import * as ProviderRegistry from "../apps/server/src/provider/ProviderRegistry.ts";
+import * as DocumentText from "../apps/server/src/provider/DocumentText.ts";
 import * as ScheduledTaskService from "../apps/server/src/scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../apps/server/src/serverSettings.ts";
 import * as AnalyticsService from "../apps/server/src/telemetry/AnalyticsService.ts";
@@ -148,6 +149,7 @@ function serviceLayer(name, filename, copyCalls) {
           ),
         );
   return guestService.pipe(
+    Layer.provide(DocumentText.layer),
     Layer.provideMerge(CommandOutputHub.layer.pipe(Layer.provideMerge(orchestration))),
     Layer.provide(
       Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
@@ -683,8 +685,19 @@ const cleanup = Effect.gen(function* () {
     NodeAssert.equal(attachment.name, storedUnicodeName);
     const before = yield* storedFiles;
     NodeAssert.ok(before.some((entry) => entry.startsWith(attachment.id)));
-    if (action === "replace") yield* guestShares.create({ threadId: id });
-    else
+    if (action === "replace") {
+      const replacement = yield* Effect.exit(guestShares.create({ threadId: id }));
+      NodeAssert.ok(Exit.isFailure(replacement), "a waiting guest message prevents replacement");
+      NodeAssert.equal(Cause.squash(replacement.cause).reason, "thread_unavailable");
+      NodeAssert.deepEqual(yield* storedFiles, before);
+      yield* orchestrator.dispatch({
+        type: "thread.guest-message.dismiss",
+        commandId: CommandId.make("dismiss-before-replacement"),
+        threadId: id,
+        guestMessageId: (yield* projection(id)).thread.guestShare.messages[0].id,
+      });
+      yield* guestShares.create({ threadId: id });
+    } else
       yield* orchestrator.dispatch({
         type:
           action === "dismiss"

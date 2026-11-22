@@ -122,6 +122,7 @@ pub enum ScheduledWrite {
         row: Row,
         require_existing: bool,
         kept_schedule_json: Option<String>,
+        unbound_thread_id: Option<String>,
         secret_changed: bool,
     },
     PatchTask {
@@ -1117,6 +1118,7 @@ async fn write(
             mut row,
             require_existing,
             kept_schedule_json,
+            unbound_thread_id,
             secret_changed,
         } => {
             // The SQL settings INSERT never accepts execution ownership from its caller.
@@ -1147,7 +1149,11 @@ async fn write(
                     } else if incoming["project_id"] != old["project_id"] {
                         incoming["thread_id"].clone()
                     } else if incoming["thread_id"].is_null() {
-                        old["thread_id"].clone()
+                        if old["thread_id"].as_str() == unbound_thread_id.as_deref() {
+                            Value::Null
+                        } else {
+                            old["thread_id"].clone()
+                        }
                     } else {
                         incoming["thread_id"].clone()
                     },

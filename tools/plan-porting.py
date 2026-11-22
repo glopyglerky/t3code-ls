@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter, defaultdict
+import difflib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -15,7 +17,13 @@ import nightly
 
 
 POLICY_FILES = {"AGENTS.md", "CLAUDE.md", "README.md", "upstream-README.md", "LICENSE"}
-POLICY_PREFIXES = (".github/", ".agents/", ".claude/", ".cursor/", "tools/")
+POLICY_PREFIXES = (".github/", ".agents/", ".claude/", ".cursor/", ".repos/", "tools/")
+PERSISTENCE_PREFIX = "apps/server/src/persistence/"
+PERSISTENCE_CONSUMERS = {
+    "apps/server/src/issue/linkedThreads.ts",
+    "apps/server/src/orchestration-v2/ThreadIssueService.ts",
+    "apps/server/src/workspace/TaskFolderStore.ts",
+}
 BOUNDARY_FILES = {"package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ".pnpmfile.cjs",
                   "Cargo.toml", "Cargo.lock", "tsconfig.base.json", "tsconfig.effect.json",
                   "vite.config.ts"}
@@ -26,7 +34,7 @@ RUST_ROUTES = {"rust", "rust-backed-client"}
 def bounded_git(root: Path, *args: str, missing_ok: bool = False) -> bytes | None:
     try:
         result = subprocess.run(
-            ["git", "-C", str(root), *args], check=False, stdout=subprocess.PIPE,
+            ["git", "--no-replace-objects", "-C", str(root), *args], check=False, stdout=subprocess.PIPE,
             stderr=subprocess.PIPE, timeout=60,
             env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
         )
@@ -182,10 +190,18 @@ def build_plan(root: Path, upstream: dict) -> dict:
             owners[source["path"]].add(port["id"])
         for path in port.get("adapter_paths", []):
             owners[path].add(port["id"])
+    port_ids = {port["id"] for port in ports}
     removed_by_object = defaultdict(list)
     for change in changes:
-        if change["path"].startswith("packages/contracts/"):
-            owners[change["path"]].update(port["id"] for port in ports)
+        path = change["path"]
+        if path.startswith("packages/contracts/"):
+            owners[path].update(port_ids)
+        # New persistence files have no upstream_sources entry yet. They may
+        # change the native schema or require another adapter at startup.
+        if "redb-persistence" in port_ids and (
+            path.startswith(PERSISTENCE_PREFIX) or path in PERSISTENCE_CONSUMERS
+        ):
+            owners[path].add("redb-persistence")
         if change["status"] == "removed":
             source = change["before"]
             removed_by_object[(source["mode"], source["kind"], source["oid"])].append(change["path"])
@@ -249,6 +265,75 @@ def build_plan(root: Path, upstream: dict) -> dict:
     }
 
 
+def mechanical_metadata_patch(root: Path, plan: dict) -> str:
+    """Render a pin update for an exact staged, mechanically imported upstream merge."""
+    revisions = plan["revisions"]
+    fork = revisions["fork"]
+    base = revisions["integrated_upstream"]
+    head = revisions["trusted_upstream"]
+    merge_head = root / bounded_git(root, "rev-parse", "--git-path", "MERGE_HEAD").decode().strip()
+    if base == head or not merge_head.is_file() or merge_head.read_bytes() != f"{head}\n".encode():
+        raise nightly.TrackingError("Stage a merge from the exact planned upstream revision.")
+    bounded_git(root, "merge-base", "--is-ancestor", base, head)
+    if bounded_git(root, "diff", "--name-only", "-z"):
+        raise nightly.TrackingError("Resolve all unstaged changes before preparing merge metadata.")
+
+    expected = nightly.read_tree(root, fork)
+    for change in plan["changes"]:
+        entry = change["after"]
+        if (change["classification"] not in {"mechanical-import-candidate", "already-matches-upstream"}
+                or entry is None or entry["mode"] not in {"100644", "100755"}):
+            raise nightly.TrackingError("The upstream change requires explicit source review.")
+        expected[change["path"]] = entry
+    staged = bounded_git(root, "write-tree").decode().strip()
+    if nightly.read_tree(root, staged) != expected:
+        raise nightly.TrackingError("The staged merge differs from the planned upstream source.")
+
+    lock_path = "upstream.lock.json"
+    map_path = "port-map.json"
+    lock = committed_metadata(root, fork, lock_path)
+    mapping = committed_metadata(root, fork, map_path)
+    history = mapping.get("source_history")
+    if (not isinstance(history, list) or not history or history[-1] != base or head in history
+            or mapping.get("integrated_upstream_commit") != base
+            or any(port.get("reviewed_upstream_commit") != base for port in mapping["ports"])):
+        raise nightly.TrackingError("The port map needs explicit source history review.")
+
+    next_lock = nightly.manifest(root, {
+        **lock["upstream"], "commit": head,
+        "source_url": f"https://github.com/pingdotgg/t3code/commit/{head}",
+    }, head)
+    old_map = (root / map_path).read_text()
+    updated_map, replacements = re.subn(
+        rf'("(?:integrated_upstream_commit|reviewed_upstream_commit)"\s*:\s*)"{base}"',
+        lambda match: f'{match[1]}"{head}"', old_map,
+    )
+    updated_map, history_replacements = re.subn(
+        rf'("source_history"\s*:\s*\[[^\]]*?)(\s*)"{base}"(\s*\])',
+        lambda match: f'{match[1]}{match[2]}"{base}",{match[2]}"{head}"{match[3]}',
+        updated_map, count=1,
+    )
+    mapping["integrated_upstream_commit"] = head
+    history.append(head)
+    for port in mapping["ports"]:
+        port["reviewed_upstream_commit"] = head
+    if (replacements != len(mapping["ports"]) + 1 or history_replacements != 1
+            or json.loads(updated_map) != mapping):
+        raise nightly.TrackingError("Could not preserve the port map while updating its pins.")
+
+    updates = {
+        lock_path: json.dumps(next_lock, indent=2, ensure_ascii=True) + "\n",
+        map_path: updated_map,
+    }
+    return "".join(
+        line for path, updated in updates.items()
+        for line in difflib.unified_diff(
+            (root / path).read_text().splitlines(keepends=True),
+            updated.splitlines(keepends=True), fromfile=f"a/{path}", tofile=f"b/{path}",
+        )
+    )
+
+
 def markdown_summary(plan: dict) -> str:
     revisions = plan["revisions"]
     counts = plan["classification_counts"]
@@ -281,13 +366,18 @@ def main(argv: list[str] | None = None) -> int:
     selection.add_argument("--fetch-default", action="store_true", help="Resolve default HEAD once and fetch immutable tree metadata.")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--summary", type=Path, help="Optional Markdown job summary outside source.")
+    parser.add_argument("--mechanical-metadata-patch", type=Path,
+                        help="Write a Git patch for the metadata of an exact staged mechanical merge.")
     args = parser.parse_args(argv)
     try:
         root = args.repo_root.resolve()
         destination = output_path(root, args.output)
         summary = output_path(root, args.summary) if args.summary else None
-        if summary == destination:
-            raise nightly.TrackingError("JSON report and Markdown summary must use different files.")
+        patch_path = (output_path(root, args.mechanical_metadata_patch)
+                      if args.mechanical_metadata_patch else None)
+        outputs = [path for path in (destination, summary, patch_path) if path is not None]
+        if len(outputs) != len(set(outputs)):
+            raise nightly.TrackingError("Porting reports and the metadata patch need different files.")
         fork = nightly.require_sha(bounded_git(root, "rev-parse", "HEAD").decode().strip())
         lock = committed_metadata(root, fork, "upstream.lock.json")
         base = nightly.require_sha(lock.get("upstream", {}).get("commit"))
@@ -298,7 +388,11 @@ def main(argv: list[str] | None = None) -> int:
         for commit in dict.fromkeys([base, upstream["commit"]]):
             ensure_metadata(root, commit, args.fetch_default)
         plan = build_plan(root, upstream)
+        metadata_patch = mechanical_metadata_patch(root, plan) if patch_path else None
         nightly.write_json(destination, plan)
+        if patch_path:
+            patch_path.parent.mkdir(parents=True, exist_ok=True)
+            patch_path.write_text(metadata_patch)
         if summary:
             summary.parent.mkdir(parents=True, exist_ok=True)
             summary.write_text(markdown_summary(plan))

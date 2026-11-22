@@ -349,7 +349,12 @@ async fn restored_payload(
                     let parsed: Value =
                         serde_json::from_str(value).map_err(|_| Error::IncompatibleStore)?;
                     match parsed {
-                        Value::Array(_) | Value::Object(_) => compact_json(value),
+                        // SQLite returns compact JSON text for a compound prompt.
+                        // The scalar subquery passes it to json_set without a JSON subtype.
+                        Value::Array(_) | Value::Object(_) => {
+                            serde_json::to_string(&compact_json(value))
+                                .map_err(crate::json_error)?
+                        }
                         Value::Bool(value) => if value { "1" } else { "0" }.into(),
                         Value::Number(number) => {
                             // SQLite coerces a scalar JSON REAL through its SQL

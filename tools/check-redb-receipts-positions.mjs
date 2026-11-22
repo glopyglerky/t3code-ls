@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import * as Assert from "node:assert/strict";
-import * as FS from "node:fs/promises";
-import * as Path from "node:path";
-import * as Sqlite from "node:sqlite";
+import * as NodeAssert from "node:assert/strict";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
+import * as NodeSqlite from "node:sqlite";
 import * as Contracts from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Context from "effect/Context";
@@ -35,9 +35,14 @@ import {
   withSqlite,
 } from "./redb-domain-fixture.mjs";
 
+const decodeTurnItem = Schema.decodeUnknownSync(Contracts.OrchestrationV2TurnItem);
+
 const [executable, proofPath] = process.argv.slice(2);
-Assert.ok(executable && Path.isAbsolute(executable), "Pass an absolute native database executable");
-await FS.access(executable, FS.constants.X_OK);
+NodeAssert.ok(
+  executable && NodePath.isAbsolute(executable),
+  "Pass an absolute native database executable",
+);
+await NodeFSP.access(executable, NodeFSP.constants.X_OK);
 const at = "2026-11-10T12:00:00.000Z";
 const now = DateTime.makeUnsafe(at);
 const imports = {
@@ -92,38 +97,37 @@ const allocate = (id, fields = {}) => ({
 });
 const expectFailure = (effect) =>
   Effect.exit(effect).pipe(
-    Effect.tap((exit) => Effect.sync(() => Assert.ok(Exit.isFailure(exit)))),
+    Effect.tap((exit) => Effect.sync(() => NodeAssert.ok(Exit.isFailure(exit)))),
   );
 
 async function withServices(kind, filename, use) {
-  const construct = (transaction, client) =>
-    Effect.gen(function* () {
-      const receiptModule = kind === "upstream" ? receiptOracle.module : ApplicationReceipts;
-      const wrapperModule = kind === "upstream" ? wrapperOracle.module : CommandReceiptStore;
-      const positionModule = kind === "upstream" ? positionOracle.module : TurnItemPositionStore;
-      const applicationReceipts =
-        kind === "redb"
-          ? yield* NativeCommandReceipts.make
-          : Context.get(
-              yield* Layer.build(receiptModule.layer),
-              receiptModule.OrchestrationCommandReceiptRepository,
-            );
-      const context = yield* Layer.build(wrapperModule.layerFromApplicationReceipts).pipe(
-        Effect.provideService(
-          receiptModule.OrchestrationCommandReceiptRepository,
-          applicationReceipts,
-        ),
-      );
-      const receipts = Context.get(context, wrapperModule.CommandReceiptStoreV2);
-      const positions =
-        kind === "redb"
-          ? yield* NativeTurnItemPositionStore.make
-          : Context.get(
-              yield* Layer.build(positionModule.layer),
-              positionModule.TurnItemPositionStoreV2,
-            );
-      return yield* use({ applicationReceipts, receipts, positions, transaction, client });
-    });
+  const construct = Effect.fn("ReceiptPositionParity.construct")(function* (transaction, client) {
+    const receiptModule = kind === "upstream" ? receiptOracle.module : ApplicationReceipts;
+    const wrapperModule = kind === "upstream" ? wrapperOracle.module : CommandReceiptStore;
+    const positionModule = kind === "upstream" ? positionOracle.module : TurnItemPositionStore;
+    const applicationReceipts =
+      kind === "redb"
+        ? yield* NativeCommandReceipts.make
+        : Context.get(
+            yield* Layer.build(receiptModule.layer),
+            receiptModule.OrchestrationCommandReceiptRepository,
+          );
+    const context = yield* Layer.build(wrapperModule.layerFromApplicationReceipts).pipe(
+      Effect.provideService(
+        receiptModule.OrchestrationCommandReceiptRepository,
+        applicationReceipts,
+      ),
+    );
+    const receipts = Context.get(context, wrapperModule.CommandReceiptStoreV2);
+    const positions =
+      kind === "redb"
+        ? yield* NativeTurnItemPositionStore.make
+        : Context.get(
+            yield* Layer.build(positionModule.layer),
+            positionModule.TurnItemPositionStoreV2,
+          );
+    return yield* use({ applicationReceipts, receipts, positions, transaction, client });
+  });
   return kind === "redb"
     ? withNative(executable, fixture, (client) =>
         construct((body) => client.withTransaction(body), client),
@@ -131,193 +135,206 @@ async function withServices(kind, filename, use) {
     : withSqlite(filename, (sql) => construct((body) => sql.withTransaction(body)));
 }
 
-function exercise({ applicationReceipts, receipts, positions, transaction }) {
-  return Effect.gen(function* () {
-    const result = {};
-    result.importedThread = yield* receipts.getByCommandId("imported:thread");
-    result.importedProject = yield* receipts.getProjectByCommandId("imported:project");
-    Assert.ok(Option.isSome(result.importedThread));
-    Assert.ok(Option.isSome(result.importedProject));
-    Assert.equal(result.importedProject.value.error, "");
-    Assert.ok(Option.isNone(yield* receipts.getProjectByCommandId("imported:thread")));
-    Assert.ok(Option.isNone(yield* receipts.getByCommandId("imported:project")));
-    Assert.ok(Option.isNone(yield* receipts.getByCommandId("absent")));
-    result.importedPosition = yield* positions.allocate(
-      allocate("imported:item", { threadId: "thread:imported", runOrdinal: 99 }),
-    );
-    Assert.equal(result.importedPosition, 37);
-    result.transaction = yield* transaction(
-      Effect.gen(function* () {
-        Assert.equal(yield* receipts.insertIfAbsent(receipt("command:shared")), true);
-        Assert.equal(
-          yield* receipts.insertIfAbsent({
-            commandId: "command:shared",
-            projectId: "project:collision",
-            commandType: "project.create",
-            acceptedAt: now,
-            resultSequence: 99,
-            status: "rejected",
-            error: "unchanged",
-          }),
-          false,
-        );
-        Assert.ok(Option.isNone(yield* receipts.getProjectByCommandId("command:shared")));
-        yield* receipts.upsert(
-          receipt("command:shared", { resultSequence: 42, status: "rejected", error: "" }),
-        );
-        Assert.equal(yield* positions.allocate(allocate("first")), 1);
-        Assert.equal(yield* positions.allocate(allocate("second")), 2);
-        Assert.equal(
-          yield* positions.allocate(allocate("first", { runId: "run:seed", runOrdinal: 8 })),
-          1,
-        );
-        Assert.equal(yield* positions.allocate(allocate("run", { runId: "run:seed" })), 3_000_001);
-        Assert.equal(
-          yield* positions.allocate(allocate("supplied", { runId: "run:seed", runOrdinal: 4 })),
-          4_000_001,
-        );
-        Assert.equal(yield* positions.allocate(allocate("foreign", { runId: "run:foreign" })), 3);
-        yield* expectFailure(
-          transaction(
-            Effect.gen(function* () {
-              Assert.equal(
-                yield* positions.allocate(
-                  allocate("discarded-start", { runOrdinal: 3, placement: "run_start" }),
-                ),
-                3_000_000,
-              );
-              Assert.equal(
-                yield* positions.allocate(allocate("discarded-append", { runOrdinal: 3 })),
-                3_000_002,
-              );
-              return yield* Effect.fail("discard run start");
-            }),
-          ),
-        );
-        Assert.equal(
-          yield* positions.allocate(
-            allocate("run-start", { runOrdinal: 3, placement: "run_start" }),
-          ),
-          3_000_000,
-        );
-        Assert.equal(
-          yield* positions.allocate(
-            allocate("run-start-second", { runOrdinal: 3, placement: "run_start" }),
-          ),
-          3_000_002,
-        );
-        Assert.equal(
-          yield* positions.allocate(allocate("run-start", { runOrdinal: 99, placement: "append" })),
-          3_000_000,
-        );
-
-        yield* expectFailure(
-          transaction(
-            Effect.gen(function* () {
-              yield* receipts.upsert(receipt("command:shared", { resultSequence: 999 }));
-              Assert.equal(yield* positions.allocate(allocate("rolled-back")), 4);
-              return yield* Effect.fail("nested body failure");
-            }),
-          ),
-        );
-        const restored = yield* receipts.getByCommandId("command:shared");
-        Assert.equal(restored.value.resultSequence, 42);
-        Assert.equal(yield* positions.allocate(allocate("sibling")), 4);
-        yield* transaction(receipts.insertIfAbsent(receipt("command:nested")));
-        const item = Schema.decodeUnknownSync(Contracts.OrchestrationV2TurnItem)({
-          id: "item:normalize",
-          type: "reasoning",
-          threadId: "thread:normalize",
-          runId: null,
-          nodeId: null,
-          providerThreadId: null,
-          providerTurnId: null,
-          nativeItemRef: null,
-          parentItemId: null,
-          ordinal: 400,
-          status: "running",
-          title: null,
-          startedAt: now,
-          completedAt: null,
-          updatedAt: now,
-          text: "Preserve this item",
-          streaming: true,
-        });
-        const changed = yield* positions.normalize(item, 2);
-        Assert.equal(changed.ordinal, 2_000_001);
-        Assert.equal(changed.text, item.text);
-        Assert.strictEqual(yield* positions.normalize(changed, 9), changed);
-        const projectReceipt = {
-          commandId: "command:project",
-          projectId: "project:written",
+const exercise = Effect.fn("ReceiptPositionParity.exercise")(function* ({
+  applicationReceipts,
+  receipts,
+  positions,
+  transaction,
+}) {
+  const result = {};
+  result.importedThread = yield* receipts.getByCommandId("imported:thread");
+  result.importedProject = yield* receipts.getProjectByCommandId("imported:project");
+  NodeAssert.ok(Option.isSome(result.importedThread));
+  NodeAssert.ok(Option.isSome(result.importedProject));
+  NodeAssert.equal(result.importedProject.value.error, "");
+  NodeAssert.ok(Option.isNone(yield* receipts.getProjectByCommandId("imported:thread")));
+  NodeAssert.ok(Option.isNone(yield* receipts.getByCommandId("imported:project")));
+  NodeAssert.ok(Option.isNone(yield* receipts.getByCommandId("absent")));
+  result.importedPosition = yield* positions.allocate(
+    allocate("imported:item", { threadId: "thread:imported", runOrdinal: 99 }),
+  );
+  NodeAssert.equal(result.importedPosition, 99_000_001);
+  result.transaction = yield* transaction(
+    Effect.gen(function* () {
+      NodeAssert.equal(yield* receipts.insertIfAbsent(receipt("command:shared")), true);
+      NodeAssert.equal(
+        yield* receipts.insertIfAbsent({
+          commandId: "command:shared",
+          projectId: "project:collision",
           commandType: "project.create",
           acceptedAt: now,
-          resultSequence: 43,
-          status: "accepted",
-          error: null,
-        };
-        Assert.equal(yield* receipts.insertIfAbsent(projectReceipt), true);
-        return {
-          restored,
-          project: yield* receipts.getProjectByCommandId("command:project"),
-          normalized: changed,
-        };
-      }),
-    );
-    yield* expectFailure(
-      transaction(
-        Effect.gen(function* () {
-          yield* receipts.insertIfAbsent(receipt("command:discarded"));
-          yield* positions.allocate(allocate("discarded"));
-          return yield* Effect.die(new Error("outer defect"));
+          resultSequence: 99,
+          status: "rejected",
+          error: "unchanged",
         }),
-      ),
-    );
-    Assert.ok(Option.isNone(yield* receipts.getByCommandId("command:discarded")));
-    Assert.equal(yield* positions.allocate(allocate("after-rollback")), 5);
-    result.overflow = yield* transaction(
+        false,
+      );
+      NodeAssert.ok(Option.isNone(yield* receipts.getProjectByCommandId("command:shared")));
+      yield* receipts.upsert(
+        receipt("command:shared", { resultSequence: 42, status: "rejected", error: "" }),
+      );
+      NodeAssert.equal(yield* positions.allocate(allocate("first")), 1);
+      NodeAssert.equal(yield* positions.allocate(allocate("second")), 2);
+      NodeAssert.equal(
+        yield* positions.allocate(allocate("first", { runId: "run:seed", runOrdinal: 8 })),
+        8_000_001,
+      );
+      NodeAssert.equal(
+        yield* positions.allocate(allocate("run", { runId: "run:seed" })),
+        3_000_001,
+      );
+      NodeAssert.equal(
+        yield* positions.allocate(allocate("supplied", { runId: "run:seed", runOrdinal: 4 })),
+        4_000_001,
+      );
+      NodeAssert.equal(yield* positions.allocate(allocate("foreign", { runId: "run:foreign" })), 3);
+      yield* expectFailure(
+        transaction(
+          Effect.gen(function* () {
+            NodeAssert.equal(
+              yield* positions.allocate(
+                allocate("discarded-start", { runOrdinal: 3, placement: "run_start" }),
+              ),
+              3_000_000,
+            );
+            NodeAssert.equal(
+              yield* positions.allocate(allocate("discarded-append", { runOrdinal: 3 })),
+              3_000_002,
+            );
+            return yield* Effect.fail("discard run start");
+          }),
+        ),
+      );
+      NodeAssert.equal(
+        yield* positions.allocate(allocate("run-start", { runOrdinal: 3, placement: "run_start" })),
+        3_000_000,
+      );
+      NodeAssert.equal(
+        yield* positions.allocate(
+          allocate("run-start-second", { runOrdinal: 3, placement: "run_start" }),
+        ),
+        3_000_002,
+      );
+      NodeAssert.equal(
+        yield* positions.allocate(allocate("run-start", { runOrdinal: 99, placement: "append" })),
+        99_000_001,
+      );
+      NodeAssert.equal(
+        yield* positions.allocate(allocate("run-start", { runOrdinal: 100, keepExisting: true })),
+        99_000_001,
+      );
+
+      yield* expectFailure(
+        transaction(
+          Effect.gen(function* () {
+            yield* receipts.upsert(receipt("command:shared", { resultSequence: 999 }));
+            NodeAssert.equal(yield* positions.allocate(allocate("rolled-back")), 4);
+            return yield* Effect.fail("nested body failure");
+          }),
+        ),
+      );
+      const restored = yield* receipts.getByCommandId("command:shared");
+      NodeAssert.equal(restored.value.resultSequence, 42);
+      NodeAssert.equal(yield* positions.allocate(allocate("sibling")), 4);
+      yield* transaction(receipts.insertIfAbsent(receipt("command:nested")));
+      const item = decodeTurnItem({
+        id: "item:normalize",
+        type: "reasoning",
+        threadId: "thread:normalize",
+        runId: null,
+        nodeId: null,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 400,
+        status: "running",
+        title: null,
+        startedAt: now,
+        completedAt: null,
+        updatedAt: now,
+        text: "Preserve this item",
+        streaming: true,
+      });
+      const changed = yield* positions.normalize(item, 2);
+      NodeAssert.equal(changed.ordinal, 2_000_001);
+      NodeAssert.equal(changed.text, item.text);
+      const moved = yield* positions.normalize(changed, 9);
+      NodeAssert.equal(moved.ordinal, 9_000_001);
+      NodeAssert.equal(moved.text, item.text);
+      NodeAssert.strictEqual(yield* positions.normalize(moved, 9), moved);
+      const pending = { ...moved, status: "pending" };
+      NodeAssert.strictEqual(yield* positions.normalize(pending, 12), pending);
+      const projectReceipt = {
+        commandId: "command:project",
+        projectId: "project:written",
+        commandType: "project.create",
+        acceptedAt: now,
+        resultSequence: 43,
+        status: "accepted",
+        error: null,
+      };
+      NodeAssert.equal(yield* receipts.insertIfAbsent(projectReceipt), true);
+      return {
+        restored,
+        project: yield* receipts.getProjectByCommandId("command:project"),
+        normalized: moved,
+      };
+    }),
+  );
+  yield* expectFailure(
+    transaction(
       Effect.gen(function* () {
-        yield* expectFailure(
-          transaction(positions.allocate(allocate("conflict", { threadId: "thread:edge" }))),
-        );
-        const next = yield* positions.allocate(
-          allocate("next-range", { threadId: "thread:edge", runOrdinal: 1 }),
-        );
-        const overflow = yield* positions.allocate(
-          allocate("overflow", { threadId: "thread:edge", runOrdinal: 2 }),
-        );
-        const following = yield* positions.allocate(
-          allocate("following", { threadId: "thread:edge", runOrdinal: 3 }),
-        );
-        Assert.deepEqual([next, overflow, following], [1_000_001, 3_000_000, 3_000_001]);
-        return [next, overflow, following];
+        yield* receipts.insertIfAbsent(receipt("command:discarded"));
+        yield* positions.allocate(allocate("discarded"));
+        return yield* Effect.die(new Error("outer defect"));
       }),
-    );
-    const replaced = {
-      commandId: "command:shared",
-      aggregateKind: "project",
-      aggregateId: "project:replacement",
-      commandType: "project.delete",
-      acceptedAt: "2026-11-11T00:00:00.000Z",
-      resultSequence: 50,
-      status: "accepted",
-      error: null,
-    };
-    yield* applicationReceipts.upsert(replaced);
-    Assert.ok(Option.isNone(yield* receipts.getByCommandId("command:shared")));
-    result.replaced = yield* applicationReceipts.getByCommandId({ commandId: "command:shared" });
-    Assert.deepEqual(Option.getOrThrow(result.replaced), replaced);
-    return normalized(result);
-  });
-}
+    ),
+  );
+  NodeAssert.ok(Option.isNone(yield* receipts.getByCommandId("command:discarded")));
+  NodeAssert.equal(yield* positions.allocate(allocate("after-rollback")), 5);
+  result.overflow = yield* transaction(
+    Effect.gen(function* () {
+      yield* expectFailure(
+        transaction(positions.allocate(allocate("conflict", { threadId: "thread:edge" }))),
+      );
+      const next = yield* positions.allocate(
+        allocate("next-range", { threadId: "thread:edge", runOrdinal: 1 }),
+      );
+      const overflow = yield* positions.allocate(
+        allocate("overflow", { threadId: "thread:edge", runOrdinal: 2 }),
+      );
+      const following = yield* positions.allocate(
+        allocate("following", { threadId: "thread:edge", runOrdinal: 3 }),
+      );
+      NodeAssert.deepEqual([next, overflow, following], [1_000_001, 3_000_000, 3_000_001]);
+      return [next, overflow, following];
+    }),
+  );
+  const replaced = {
+    commandId: "command:shared",
+    aggregateKind: "project",
+    aggregateId: "project:replacement",
+    commandType: "project.delete",
+    acceptedAt: "2026-11-11T00:00:00.000Z",
+    resultSequence: 50,
+    status: "accepted",
+    error: null,
+  };
+  yield* applicationReceipts.upsert(replaced);
+  NodeAssert.ok(Option.isNone(yield* receipts.getByCommandId("command:shared")));
+  result.replaced = yield* applicationReceipts.getByCommandId({ commandId: "command:shared" });
+  NodeAssert.deepEqual(Option.getOrThrow(result.replaced), replaced);
+  return normalized(result);
+});
 
 try {
-  const source = Path.join(fixture.root, "source.sqlite");
-  const sqlitePath = Path.join(fixture.root, "sqlite.sqlite");
-  const upstreamPath = Path.join(fixture.root, "upstream.sqlite");
-  const exported = Path.join(fixture.root, "source.ndjson");
+  const source = NodePath.join(fixture.root, "source.sqlite");
+  const sqlitePath = NodePath.join(fixture.root, "sqlite.sqlite");
+  const upstreamPath = NodePath.join(fixture.root, "upstream.sqlite");
+  const exported = NodePath.join(fixture.root, "source.ndjson");
   await createMigratedSqlite(source);
-  const database = new Sqlite.DatabaseSync(source);
+  const database = new NodeSqlite.DatabaseSync(source);
   try {
     const insertReceipt = database.prepare(`INSERT INTO orchestration_command_receipts
       (command_id, aggregate_kind, aggregate_id, command_type, accepted_at, result_sequence, status, error)
@@ -344,9 +361,9 @@ try {
   } finally {
     database.close();
   }
-  const sourceHash = hash(await FS.readFile(source));
-  await FS.copyFile(source, sqlitePath);
-  await FS.copyFile(source, upstreamPath);
+  const sourceHash = hash(await NodeFSP.readFile(source));
+  await NodeFSP.copyFile(source, sqlitePath);
+  await NodeFSP.copyFile(source, upstreamPath);
   exportSqliteState({ source, destination: exported });
   nativeRequest(executable, fixture, "initialize", {
     operation: "import_sqlite_application",
@@ -355,12 +372,12 @@ try {
   const expected = await withServices("upstream", upstreamPath, exercise);
   const retained = await withServices("sqlite", sqlitePath, exercise);
   const actual = await withServices("redb", source, exercise);
-  Assert.deepEqual(
+  NodeAssert.deepEqual(
     retained,
     expected,
     "The retained SQLite implementations must match immutable upstream",
   );
-  Assert.deepEqual(
+  NodeAssert.deepEqual(
     actual,
     expected,
     "Native receipts and positions must match immutable upstream SQLite",
@@ -375,8 +392,8 @@ try {
   );
   await withServices("redb", source, ({ receipts, positions }) =>
     Effect.gen(function* () {
-      Assert.ok(Option.isSome(yield* receipts.getProjectByCommandId("command:shared")));
-      Assert.equal(yield* positions.allocate(allocate("reopened")), 6);
+      NodeAssert.ok(Option.isSome(yield* receipts.getProjectByCommandId("command:shared")));
+      NodeAssert.equal(yield* positions.allocate(allocate("reopened")), 6);
     }),
   );
   checks.push(
@@ -386,22 +403,25 @@ try {
     transaction(
       Effect.gen(function* () {
         const base = { threadId: "thread:domain", turnItemId: "existing", runId: null };
-        Assert.equal(yield* positions.allocate(base), 1);
+        NodeAssert.equal(yield* positions.allocate(base), 1);
         for (const runOrdinal of [-1, Number.MAX_SAFE_INTEGER + 1]) {
-          Assert.equal(yield* positions.allocate({ ...base, runOrdinal }), 1);
+          NodeAssert.equal(
+            yield* positions.allocate({ ...base, runOrdinal, keepExisting: true }),
+            1,
+          );
           const error = yield* transaction(
             positions.allocate({ ...base, turnItemId: `invalid:${runOrdinal}`, runOrdinal }),
           ).pipe(Effect.flip);
-          Assert.equal(error._tag, "TurnItemPositionStoreError");
-          Assert.equal(error.cause._tag, "NativeDatabaseRejected");
-          Assert.equal(error.cause.kind, "invalid_request");
+          NodeAssert.equal(error._tag, "TurnItemPositionStoreError");
+          NodeAssert.equal(error.cause._tag, "NativeDatabaseRejected");
+          NodeAssert.equal(error.cause.kind, "invalid_request");
         }
-        Assert.equal(yield* positions.allocate({ ...base, turnItemId: "sibling" }), 2);
+        NodeAssert.equal(yield* positions.allocate({ ...base, turnItemId: "sibling" }), 2);
       }),
     ),
   );
   checks.push(
-    "Native run ordinals require nonnegative safe integers after existing-item lookup; invalid values reject within their savepoint, while fractional inputs and REAL-cell coercion are outside the supported transport domain",
+    "Native run ordinals require nonnegative safe integers after explicitly kept existing-item lookup; invalid values reject within their savepoint, while fractional inputs and REAL-cell coercion are outside the supported transport domain",
   );
   let commits = 0;
   await withNative(
@@ -432,7 +452,7 @@ try {
             }),
           )
           .pipe(Effect.flip);
-        Assert.equal(failed._tag, "NativeDatabaseOutcomeUnknown");
+        NodeAssert.equal(failed._tag, "NativeDatabaseOutcomeUnknown");
       }),
     (database) =>
       NativeDatabase.NativeDatabase.of({
@@ -459,13 +479,13 @@ try {
           ),
       }),
   );
-  Assert.equal(commits, 1, "Unknown commits must not be retried");
+  NodeAssert.equal(commits, 1, "Unknown commits must not be retried");
   await withServices("redb", source, ({ applicationReceipts, positions }) =>
     Effect.gen(function* () {
-      Assert.ok(
+      NodeAssert.ok(
         Option.isSome(yield* applicationReceipts.getByCommandId({ commandId: "unknown:receipt" })),
       );
-      Assert.equal(
+      NodeAssert.equal(
         yield* positions.allocate({
           threadId: "thread:unknown",
           turnItemId: "unknown:item",
@@ -473,7 +493,7 @@ try {
         }),
         1,
       );
-      Assert.equal(
+      NodeAssert.equal(
         yield* positions.allocate({
           threadId: "thread:unknown",
           turnItemId: "unknown:next",
@@ -486,7 +506,7 @@ try {
   checks.push(
     "Loss of the actual commit acknowledgement stays unknown; reopening finds both durable rows and no duplicate allocation",
   );
-  Assert.equal(hash(await FS.readFile(source)), sourceHash);
+  NodeAssert.equal(hash(await NodeFSP.readFile(source)), sourceHash);
   await finishProof({
     executable,
     fixture,

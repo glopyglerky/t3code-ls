@@ -206,8 +206,7 @@ const restoreThreadAttachmentText = Effect.fn("NativeGuestShare.restoreThreadAtt
       return yield* new NativeGuestShareError({ stage: "response" });
     const messages = yield* Effect.forEach(share.messages, (message: unknown) =>
       Effect.gen(function* () {
-        if (!plainRecord(message))
-          return yield* new NativeGuestShareError({ stage: "response" });
+        if (!plainRecord(message)) return yield* new NativeGuestShareError({ stage: "response" });
         if (message.attachments === undefined) return message;
         if (!Array.isArray(message.attachments))
           return yield* new NativeGuestShareError({ stage: "response" });
@@ -387,7 +386,10 @@ function allowedRejection(
 ): boolean {
   switch (command.type) {
     case "thread.guest-share.open":
-      return error === "Archived threads cannot be shared.";
+      return (
+        error === "Archived threads cannot be shared." ||
+        error === "Answer or dismiss waiting guest messages before replacing this link."
+      );
     case "thread.guest-share.close":
       return false;
     case "thread.guest-share.redeem":

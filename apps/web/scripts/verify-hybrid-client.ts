@@ -2,14 +2,16 @@
 // Run from a clean CI checkout after installing Playwright Chromium and building the native helpers:
 // node apps/web/scripts/verify-hybrid-client.ts /absolute/path/to/proof [upstream|native|both]
 // The fixture and application state stay outside the checkout. They are retained for investigation.
-import * as Assert from "node:assert/strict";
-import * as ChildProcess from "node:child_process";
+import * as NodeAssert from "node:assert/strict";
+import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
-import { stripVTControlCharacters } from "node:util";
+import * as NodeUtil from "node:util";
+import * as Effect from "effect/Effect";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
   ORCHESTRATION_PROTOCOL_HEADER,
   ORCHESTRATION_PROTOCOL_VERSION_TEXT,
@@ -20,6 +22,7 @@ import * as Schema from "effect/Schema";
 import { chromium, type Browser, type Page } from "playwright";
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
 import { inspectNativeReplay } from "./hybrid-client-database.ts";
+import { startIrohFixture } from "./hybrid-client-iroh.ts";
 import {
   assertReplayTurnLinks,
   replayTurnIdentity,
@@ -51,7 +54,7 @@ if (
     "Usage: node apps/web/scripts/verify-hybrid-client.ts /absolute/proof-dir [upstream|native|both]",
   );
 }
-if (process.platform !== "linux") {
+if (Effect.runSync(HostProcess.Platform) !== "linux") {
   throw new Error(
     "This acceptance runner qualifies Linux only; other platforms require their own gate.",
   );
@@ -75,7 +78,10 @@ const runRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-hybrid
 outsideCheckout(NodeFS.realpathSync(runRoot));
 
 function redact(text: string): string {
-  return stripVTControlCharacters(text).replace(/([#?&]token=)[^\s&"'<>]+/giu, "$1[REDACTED]");
+  return NodeUtil.stripVTControlCharacters(text).replace(
+    /([#?&]token=)[^\s&"'<>]+/giu,
+    "$1[REDACTED]",
+  );
 }
 
 function writeJson(path: string, value: unknown): void {
@@ -86,7 +92,7 @@ function writeJson(path: string, value: unknown): void {
 }
 
 function git(args: string[], cwd = repoRoot): string {
-  return ChildProcess.execFileSync("git", args, {
+  return NodeChildProcess.execFileSync("git", args, {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
@@ -131,6 +137,8 @@ async function availablePorts(): Promise<number[]> {
 }
 
 let activeApplication: OwnedApplication | undefined;
+let activeIroh: Awaited<ReturnType<typeof startIrohFixture>> | undefined;
+const testIroh = process.env.T3_CODE_LS_CLIENT_TRANSPORT === "iroh";
 let browser: Browser | undefined;
 
 async function startApplication(
@@ -157,7 +165,7 @@ async function startApplication(
     NO_COLOR: "1",
   });
   NodeFS.writeFileSync(logPath, "");
-  const child = ChildProcess.spawn(
+  const child = NodeChildProcess.spawn(
     process.execPath,
     [
       "scripts/dev-runner.ts",
@@ -198,7 +206,7 @@ async function startApplication(
   });
 
   function consumeLine(raw: string): void {
-    const line = stripVTControlCharacters(raw);
+    const line = NodeUtil.stripVTControlCharacters(raw);
     NodeFS.appendFileSync(logPath, `${redact(line)}\n`);
     const candidate = line.match(/https?:\/\/[^\s"'<>]+\/pair#token=[^\s"'<>]+/u)?.[0];
     if (candidate) {
@@ -257,7 +265,7 @@ async function startApplication(
   activeApplication = application;
   try {
     await ready;
-    Assert.ok(pairingUrl);
+    NodeAssert.ok(pairingUrl);
     application.pairingUrl = pairingUrl;
     return application;
   } catch (error) {
@@ -313,10 +321,10 @@ async function readThreadSnapshot(
       timeout: timeoutMs,
     },
   );
-  Assert.ok(response.ok(), `Thread snapshot failed with HTTP ${response.status()}`);
+  NodeAssert.ok(response.ok(), `Thread snapshot failed with HTTP ${response.status()}`);
   const snapshot = decodeSnapshot(await response.json());
   snapshotMetadata.set(page, summarizeSnapshot(snapshot));
-  Assert.equal(snapshot.projection.thread.id, threadId);
+  NodeAssert.equal(snapshot.projection.thread.id, threadId);
   return snapshot;
 }
 
@@ -372,35 +380,39 @@ async function assertCompleted(page: Page, threadId: string, identity: ReplayTur
     .getByRole("button", { name: "Stop generation", exact: true })
     .waitFor({ state: "hidden", timeout: timeoutMs });
   const snapshot = await readThreadSnapshot(page, threadId);
-  Assert.equal(snapshot.projection.runs.length, 1, "Recovery must not create a second fixture run");
+  NodeAssert.equal(
+    snapshot.projection.runs.length,
+    1,
+    "Recovery must not create a second fixture run",
+  );
   const run = snapshot.projection.runs.find((item) => item.id === identity.runId);
   const attempt = snapshot.projection.attempts.find((item) => item.id === identity.attemptId);
   const providerTurn = snapshot.projection.providerTurns.find(
     (item) => item.id === identity.providerTurnId,
   );
-  Assert.ok(run, "The original replay run must still exist");
-  Assert.ok(attempt, "The original replay attempt must still exist");
-  Assert.ok(providerTurn, "The original replay provider turn must still exist");
-  Assert.equal(run.status, "completed", `Replay run ${run.id} did not complete`);
-  Assert.equal(attempt.status, "completed", `Replay attempt ${attempt.id} did not complete`);
-  Assert.equal(
+  NodeAssert.ok(run, "The original replay run must still exist");
+  NodeAssert.ok(attempt, "The original replay attempt must still exist");
+  NodeAssert.ok(providerTurn, "The original replay provider turn must still exist");
+  NodeAssert.equal(run.status, "completed", `Replay run ${run.id} did not complete`);
+  NodeAssert.equal(attempt.status, "completed", `Replay attempt ${attempt.id} did not complete`);
+  NodeAssert.equal(
     providerTurn.status,
     "completed",
     `Replay provider turn ${providerTurn.id} did not complete`,
   );
-  Assert.equal(attempt.runId, run.id);
-  Assert.equal(attempt.providerThreadId, run.providerThreadId);
-  Assert.equal(attempt.rootNodeId, run.rootNodeId);
+  NodeAssert.equal(attempt.runId, run.id);
+  NodeAssert.equal(attempt.providerThreadId, run.providerThreadId);
+  NodeAssert.equal(attempt.rootNodeId, run.rootNodeId);
   assertReplayTurnLinks(attempt, providerTurn);
-  Assert.ok(run.completedAt);
-  Assert.ok(attempt.completedAt);
-  Assert.ok(providerTurn.completedAt);
+  NodeAssert.ok(run.completedAt);
+  NodeAssert.ok(attempt.completedAt);
+  NodeAssert.ok(providerTurn.completedAt);
   const message = snapshot.projection.messages.find(
     (item) =>
       item.role === "assistant" && item.runId === run.id && item.text.includes(replayMarker),
   );
-  Assert.ok(message, "The completed replay text must belong to the recorded run");
-  Assert.equal(message.streaming, false);
+  NodeAssert.ok(message, "The completed replay text must belong to the recorded run");
+  NodeAssert.equal(message.streaming, false);
   return {
     ...identity,
     projectId: snapshot.projection.thread.projectId,
@@ -447,20 +459,22 @@ async function exercise(implementation: Implementation): Promise<void> {
     workspace,
   );
   const [serverPort, webPort] = await availablePorts();
-  Assert.ok(serverPort && webPort);
-  Assert.notEqual(serverPort, webPort, "Server and client need distinct ports");
-  Assert.ok(webPort > 5733, "The allocated web port must support the dev-runner offset");
+  NodeAssert.ok(serverPort && webPort);
+  NodeAssert.notEqual(serverPort, webPort, "Server and client need distinct ports");
+  NodeAssert.ok(webPort > 5733, "The allocated web port must support the dev-runner offset");
   const proof = {
     schemaVersion: 1,
     status: "running",
     implementation,
+    transport: testIroh ? "iroh-loopback" : "direct",
+    directRequests: [] as string[],
     scope:
       "Linux original web client; local project; free ACP showcase approval; reload; same-state server restart",
     startedAt: new Date().toISOString(),
     finishedAt: null as string | null,
     source,
-    platform: process.platform,
-    architecture: process.arch,
+    platform: Effect.runSync(HostProcess.Platform),
+    architecture: Effect.runSync(HostProcess.Architecture),
     node: process.version,
     browser: browser!.version(),
     stateDirectory,
@@ -494,7 +508,7 @@ async function exercise(implementation: Implementation): Promise<void> {
   const inspectPersistence = (checkpoint: string, closed = false) => {
     if (implementation !== "native") return;
     const expected = proof.completedSnapshots.at(-1);
-    Assert.ok(expected, "A completed client snapshot must precede native row verification");
+    NodeAssert.ok(expected, "A completed client snapshot must precede native row verification");
     proof.persistence.push({
       checkpoint,
       ...inspectNativeReplay({
@@ -516,6 +530,18 @@ async function exercise(implementation: Implementation): Promise<void> {
   function observePage(current: Page): void {
     current.setDefaultTimeout(timeoutMs);
     current.setDefaultNavigationTimeout(timeoutMs);
+    const observeRoute = (address: string) => {
+      if (!testIroh) return;
+      const url = new URL(address);
+      if (
+        ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) &&
+        [String(serverPort), String(webPort)].includes(url.port)
+      ) {
+        proof.directRequests.push(url.pathname);
+      }
+    };
+    current.on("request", (request) => observeRoute(request.url()));
+    current.on("websocket", (socket) => observeRoute(socket.url()));
     current.on("pageerror", (error) =>
       proof.browserErrors.push(redact(error.stack ?? error.message)),
     );
@@ -535,7 +561,17 @@ async function exercise(implementation: Implementation): Promise<void> {
     );
     proof.processGroups.push(application.pid);
     starting("initial setup");
-    await page.goto(application.pairingUrl, { waitUntil: "domcontentloaded" });
+    const pairingUrl = new URL(application.pairingUrl);
+    if (testIroh) {
+      activeIroh = await startIrohFixture(
+        process.env.T3_CODE_LS_IROH_FIXTURE ?? NodePath.join(repoRoot, "bin", "t3-code-ls"),
+        NodePath.join(runRoot, implementation),
+        webPort,
+      );
+      pairingUrl.port = activeIroh.port;
+      completed("Verified Iroh peer admission and a distinct local forwarding port");
+    }
+    await page.goto(pairingUrl.href, { waitUntil: "domcontentloaded" });
     await completeInitialSetup(page);
     completed(
       "Completed initial setup through the normal UI without agent sign-in or project import",
@@ -584,7 +620,7 @@ async function exercise(implementation: Implementation): Promise<void> {
       checkpoint: "client-reload",
       ...(await assertCompleted(page, threadId, turnIdentity)),
     });
-    Assert.equal(page.url(), proof.threadUrl);
+    NodeAssert.equal(page.url(), proof.threadUrl);
     inspectPersistence("client-reload");
     completed("Reconnected after a client reload with the same completed thread");
 
@@ -616,18 +652,19 @@ async function exercise(implementation: Implementation): Promise<void> {
       checkpoint: "server-restart",
       ...(await assertCompleted(page, threadId, turnIdentity)),
     });
-    Assert.equal(page.url(), proof.threadUrl);
+    NodeAssert.equal(page.url(), proof.threadUrl);
     inspectPersistence("server-restart");
     completed(
       "Recovered the same durable thread after server restart in a fresh client with the existing session",
     );
     await capture(page, directory, "completed");
     if (implementation === "native") {
-      Assert.equal(proof.persistence.length, 4);
+      NodeAssert.equal(proof.persistence.length, 4);
       completed(
         "Verified canonical omdb rows and event heads through read-only native inspection, with no application SQLite files",
       );
     }
+    NodeAssert.deepEqual(proof.directRequests, [], "The browser bypassed its tested Iroh route");
     proof.status = "passed";
   } catch (error) {
     proof.status = "failed";
@@ -665,6 +702,8 @@ async function exercise(implementation: Implementation): Promise<void> {
     saveProof();
     await activeApplication?.stop();
     activeApplication = undefined;
+    await activeIroh?.stop();
+    activeIroh = undefined;
     await context.close();
   }
 }
@@ -673,6 +712,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     void (async () => {
       await activeApplication?.stop();
+      await activeIroh?.stop();
       await browser?.close();
       process.exit(signal === "SIGINT" ? 130 : 143);
     })();
@@ -707,5 +747,6 @@ try {
 } finally {
   writeJson(NodePath.join(proofRoot, "summary.json"), run);
   await activeApplication?.stop();
+  await activeIroh?.stop();
   await browser?.close();
 }

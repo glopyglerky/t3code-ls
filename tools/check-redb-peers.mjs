@@ -126,6 +126,11 @@ const exerciseRows = Effect.fn("fixture.peerRows.exercise")(function* ({ rows, t
       NodeAssert.equal(result.error.last_reached_at, at);
       NodeAssert.equal(result.error.last_error, "unreachable");
       yield* rows.recordOutcome("written", null, later);
+      const priorExpiry = (yield* rows.get("written")).expires_at;
+      const newerExpiry = new Date(Date.parse(priorExpiry) + 60_000).toISOString();
+      yield* rows.recordExpiry("written", newerExpiry);
+      yield* rows.recordExpiry("written", priorExpiry);
+      NodeAssert.equal((yield* rows.get("written")).expires_at, newerExpiry);
       result.success = yield* rows.get("written");
       NodeAssert.equal(result.success.last_error, null);
       NodeAssert.equal(result.success.last_reached_at, later);

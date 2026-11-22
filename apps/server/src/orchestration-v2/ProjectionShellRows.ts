@@ -1,5 +1,5 @@
 import type * as Effect from "effect/Effect";
-import type { ThreadId, GuestShareId } from "@t3tools/contracts";
+import type { ThreadId, GuestShareId, ProjectId } from "@t3tools/contracts";
 import type {
   PersistenceTransactionError,
   PersistenceTransactionsShape,
@@ -29,7 +29,25 @@ export interface ActiveShellIndexRow {
   readonly pinned_at: string | null;
   readonly snoozed_until: string | null;
   readonly may_be_live: number;
+  readonly pin_order_key: string | null;
   readonly has_remote_tasks: number;
+}
+
+export interface ActiveThreadListRow {
+  readonly thread_id: string;
+  readonly project_id: string;
+  readonly title: string;
+  readonly updated_at: string;
+  readonly relationship_to_parent: string | null;
+  readonly parent_thread_id: string | null;
+  readonly root_thread_id: string;
+  readonly side_chat: number | null;
+  readonly delegated_from_environment_id: string | null;
+  readonly delegated_from_thread_id: string | null;
+  readonly delegated_from_title: string | null;
+  readonly settled_override: string | null;
+  readonly settled_at: string | null;
+  readonly snoozed_until: string | null;
 }
 
 /** Purpose-specific shell queries; never a SQL string or full-store snapshot boundary. */
@@ -37,7 +55,10 @@ export interface ProjectionShellRows {
   readonly withReadTransaction: PersistenceTransactionsShape["withReadTransaction"];
   readonly selectShellThreadRows: (
     threadId?: ThreadId,
-    options?: ShellSnapshotOptions & { readonly listedOnly?: boolean },
+    options?: ShellSnapshotOptions & {
+      readonly listedOnly?: boolean;
+      readonly includeDeleted?: boolean;
+    },
   ) => Read<ReadonlyArray<ShellThreadRow>>;
   readonly selectShellRunRows: (
     threadIds?: ReadonlyArray<ThreadId>,
@@ -61,7 +82,10 @@ export interface ProjectionShellRows {
   readonly selectRemoteDelegatedTasks: Read<
     ReadonlyArray<{ readonly thread_id: string; readonly subagent_id: string }>
   >;
-  readonly selectThreadsWithPullRequests: (threadId?: ThreadId) => Read<ReadonlyArray<PayloadRow>>;
+  readonly selectThreadsWithPullRequests: (
+    threadId?: ThreadId,
+    options?: { readonly includeArchived?: boolean },
+  ) => Read<ReadonlyArray<PayloadRow>>;
   readonly selectThreadWorktreePaths: (options?: {
     readonly includeArchived?: boolean;
   }) => Read<ReadonlyArray<{ readonly thread_id: string; readonly worktree_path: string }>>;
@@ -72,6 +96,7 @@ export interface ProjectionShellRows {
   ) => Read<ReadonlyArray<PayloadRow>>;
   readonly selectActiveSubagentThreads: Read<ReadonlyArray<{ readonly thread_id: string }>>;
   readonly countThreads: Read<ReadonlyArray<{ readonly count: number }>>;
+  readonly selectActiveThreads: (projectId?: ProjectId) => Read<ReadonlyArray<ActiveThreadListRow>>;
   readonly selectActiveShellIndex: Read<ReadonlyArray<ActiveShellIndexRow>>;
   readonly findGuestShareThread: (
     shareId: GuestShareId,

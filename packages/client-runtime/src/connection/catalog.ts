@@ -1,4 +1,8 @@
-import { DesktopSshEnvironmentTargetSchema, EnvironmentId } from "@t3tools/contracts";
+import {
+  DesktopSshEnvironmentTargetSchema,
+  EnvironmentId,
+  ServerIrohEndpoint,
+} from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
@@ -9,6 +13,9 @@ import {
   SshConnectionTarget,
   type ConnectionTarget,
 } from "./model.ts";
+
+export const IrohPeer = ServerIrohEndpoint;
+export type IrohPeer = typeof IrohPeer.Type;
 
 const ConnectionProfileBase = {
   connectionId: Schema.String,
@@ -22,6 +29,7 @@ export class BearerConnectionProfile extends Schema.TaggedClass<BearerConnection
     ...ConnectionProfileBase,
     httpBaseUrl: Schema.String,
     wsBaseUrl: Schema.String,
+    iroh: Schema.optionalKey(IrohPeer),
     learned: Schema.optionalKey(Schema.Literal(true)),
     authorization: Schema.optionalKey(Schema.Literal("t3-connect")),
     /**
@@ -64,7 +72,19 @@ export class BearerConnectionCredential extends Schema.TaggedClass<BearerConnect
   },
 ) {}
 
-export const ConnectionCredential = Schema.Union([BearerConnectionCredential]);
+/** A token bound to this device's DPoP key, which the host renews while the device uses it. */
+export class DpopConnectionCredential extends Schema.TaggedClass<DpopConnectionCredential>()(
+  "DpopConnectionCredential",
+  {
+    accessToken: Schema.String,
+    expiresAtEpochMs: Schema.Number,
+  },
+) {}
+
+export const ConnectionCredential = Schema.Union([
+  BearerConnectionCredential,
+  DpopConnectionCredential,
+]);
 export type ConnectionCredential = typeof ConnectionCredential.Type;
 
 export class PrimaryConnectionRegistration extends Schema.TaggedClass<PrimaryConnectionRegistration>()(
@@ -86,7 +106,7 @@ export class BearerConnectionRegistration extends Schema.TaggedClass<BearerConne
   {
     target: BearerConnectionTarget,
     profile: BearerConnectionProfile,
-    credential: BearerConnectionCredential,
+    credential: ConnectionCredential,
   },
 ) {}
 

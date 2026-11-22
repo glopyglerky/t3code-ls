@@ -16,6 +16,7 @@ pub struct ShellOptions {
     worktree_path: Option<String>,
     thread_ids: Option<Vec<String>>,
     listed_only: Option<bool>,
+    include_deleted: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -54,6 +55,7 @@ pub enum ProjectionShellQuery {
     RemoteTasks {},
     ThreadsWithPullRequests {
         thread_id: Option<String>,
+        include_archived: Option<bool>,
     },
     Worktrees {
         include_archived: bool,
@@ -65,6 +67,9 @@ pub enum ProjectionShellQuery {
     ActiveSubagents {},
     CountThreads {},
     ActiveIndex {},
+    ActiveThreads {
+        project_id: Option<String>,
+    },
     GuestShare {
         share_id: String,
     },
@@ -263,7 +268,13 @@ async fn filtered_threads(
     let candidates = if let Some(root) = &family {
         window::equal_metadata(session, THREADS, "_root_thread", root).await?
     } else if let Some(path) = &options.worktree_path {
-        window::equal_metadata(session, THREADS, "_worktree_path", &text_cell(path)).await?
+        window::equal_metadata(
+            session,
+            THREADS,
+            "_worktree_path_key",
+            &text_cell(&read_index::derived::worktree_key(path)),
+        )
+        .await?
     } else if let Some(id) = thread_id {
         window::read_metadata(session, THREADS, id)
             .await?
@@ -280,18 +291,23 @@ async fn filtered_threads(
     };
     let worktree_members = match (family.as_ref(), options.worktree_path.as_ref()) {
         (Some(_), Some(path)) => Some(
-            window::equal_metadata(session, THREADS, "_worktree_path", &text_cell(path))
-                .await?
-                .into_iter()
-                .map(|row| text(&row.row, "thread_id"))
-                .collect::<Result<BTreeSet<_>>>()?,
+            window::equal_metadata(
+                session,
+                THREADS,
+                "_worktree_path_key",
+                &text_cell(&read_index::derived::worktree_key(path)),
+            )
+            .await?
+            .into_iter()
+            .map(|row| text(&row.row, "thread_id"))
+            .collect::<Result<BTreeSet<_>>>()?,
         ),
         _ => None,
     };
     let mut rows = Vec::new();
     for row in candidates {
         let id = text(&row.row, "thread_id")?;
-        if nullable(&row.row, "deleted_at")?.is_some()
+        if (options.include_deleted != Some(true) && nullable(&row.row, "deleted_at")?.is_some())
             || thread_id.is_some_and(|selected| selected != id)
             || options
                 .project_id
@@ -321,7 +337,7 @@ async fn filtered_threads(
     }
     rows.retain(|row| {
         let lineage = row.p("lineage");
-        row.col("deleted_at").is_none()
+        (options.include_deleted == Some(true) || row.col("deleted_at").is_none())
             && options
                 .project_id
                 .as_deref()
@@ -361,11 +377,11 @@ impl ThreadData {
         sort_runs(&mut runs)?;
         Ok(Self {
             runs,
-            items: related(session, ITEMS, "thread_id", id).await?,
-            messages: related(session, MESSAGES, "thread_id", id).await?,
-            requests: related(session, REQUESTS, "thread_id", id).await?,
-            plans: related(session, PLANS, "thread_id", id).await?,
-            providers: related(session, PROVIDER_THREADS, "thread_id", id).await?,
+            items: related(session, ITEMS, "_shell_thread", id).await?,
+            messages: related(session, MESSAGES, "_shell_thread", id).await?,
+            requests: related(session, REQUESTS, "_shell_thread", id).await?,
+            plans: related(session, PLANS, "_shell_thread", id).await?,
+            providers: related(session, PROVIDER_THREADS, "_shell_thread", id).await?,
         })
     }
     async fn silent_runs(&self, session: &mut Session) -> Result<BTreeSet<String>> {
@@ -502,23 +518,64 @@ fn opt_p(row: Option<&Meta>, name: &str) -> Value {
     row.map_or(Value::Null, |row| row.p(name).clone())
 }
 
-async fn background_wake(
-    session: &mut Session,
-    data: &ThreadData,
-    run: Option<&Meta>,
-) -> Result<bool> {
+async fn background_wake(session: &mut Session, run: Option<&Meta>) -> Result<bool> {
     let Some(run) = run else {
         return Ok(false);
     };
     let Some(message_id) = run.pstr("userMessageId") else {
         return Ok(false);
     };
-    Ok(point(session, MESSAGES, message_id)
+    if !point(session, MESSAGES, message_id)
         .await?
         .is_some_and(|message| message.flag("nativeBackgroundWake"))
-        && !data.messages.iter().any(|message| {
-            message.col("run_id") == run.col("run_id") && message.pstr("createdBy") == Some("user")
-        }))
+    {
+        return Ok(false);
+    }
+    // The upstream NOT EXISTS is global by run_id, including messages whose
+    // thread differs. Read the canonical first JSON member, as json_extract
+    // does; compact metadata has already discarded duplicate-member order.
+    Ok(!read_index::any_equal(
+        session,
+        MESSAGES,
+        "run_id",
+        &text_cell(&run.id(RUNS)?),
+        |row| {
+            Ok(
+                read_index::derived::json_identity(&text(row, "payload_json")?, &["createdBy"])?
+                    == Some(text_cell("user")),
+            )
+        },
+    )
+    .await?)
+}
+
+async fn remote_presence(session: &mut Session) -> Result<BTreeSet<String>> {
+    let mut threads = BTreeSet::new();
+    for row in selected(session, SUBAGENTS, None).await? {
+        if row.col("origin") != Some("app_owned") || row.col("child_thread_id").is_some() {
+            continue;
+        }
+        // ActiveIndex asks whether a remote child exists, independently of the
+        // open-task recovery predicate. Preserve json_type's first duplicate
+        // member and its object/array/scalar/null distinction without changing
+        // prepared compact metadata or the persistent index format.
+        let fields =
+            crate::application_json::object_fields(&full(session, SUBAGENTS, &row).await?)?;
+        let child = fields
+            .as_ref()
+            .and_then(|fields| crate::application_json::field(fields, "remoteChild"));
+        if child
+            .map(crate::application_json::object_fields)
+            .transpose()?
+            .flatten()
+            .is_some()
+        {
+            if let Some(thread) = row.col("thread_id") {
+                threads.insert(thread.to_owned());
+            }
+        }
+    }
+    Ok(threads)
 }
 
 fn outlived_before_start(run: &Meta, data: &ThreadData, silent: &BTreeSet<String>) -> Result<bool> {
@@ -567,7 +624,11 @@ pub(super) async fn presented_run_id(
         .transpose()
 }
 
-async fn shell_thread(session: &mut Session, thread: &Meta) -> Result<Value> {
+async fn shell_thread(
+    session: &mut Session,
+    thread: &Meta,
+    include_worktree: bool,
+) -> Result<Value> {
     let id = thread.id(THREADS)?;
     let data = ThreadData::load(session, &id).await?;
     let silent = data.silent_runs(session).await?;
@@ -658,12 +719,22 @@ async fn shell_thread(session: &mut Session, thread: &Meta) -> Result<Value> {
                 .unwrap_or_else(|| opt_col(Some(run), "requested_at"))
         })
         .unwrap_or(Value::Null);
+    let payload_json = full(session, THREADS, thread).await?;
+    let worktree_path = if include_worktree {
+        match read_index::derived::json_identity(&payload_json, &["worktreePath"])? {
+            Some(cell) if cell["type"] == "text" => cell["value"].clone(),
+            Some(_) => return Err(Error::IncompatibleStore),
+            None => Value::Null,
+        }
+    } else {
+        Value::Null
+    };
     Ok(
-        json!({"thread_id":id,"payload_json":full(session,THREADS,thread).await?,"forked_from_run_source_thread_id":source,
-        "latest_run_id":opt_col(presented,"run_id"),"latest_run_status":opt_col(presented,"status"),"latest_run_requested_at":opt_col(presented,"requested_at"),"latest_run_started_at":opt_p(presented,"startedAt"),"latest_run_completed_at":opt_col(presented,"completed_at"),"latest_run_stop_requested":u8::from(stop_requested(&data,presented)),"latest_run_background_wake":u8::from(background_wake(session,&data,presented).await?),
+        json!({"thread_id":id,"payload_json":payload_json,"worktree_path":worktree_path,"forked_from_run_source_thread_id":source,
+        "latest_run_id":opt_col(presented,"run_id"),"latest_run_status":opt_col(presented,"status"),"latest_run_requested_at":opt_col(presented,"requested_at"),"latest_run_started_at":opt_p(presented,"startedAt"),"latest_run_completed_at":opt_col(presented,"completed_at"),"latest_run_stop_requested":u8::from(stop_requested(&data,presented)),"latest_run_background_wake":u8::from(background_wake(session,presented).await?),
         "active_run_id":opt_col(active_run,"run_id"),"active_run_status":opt_col(active_run,"status"),"activity_run_status":opt_col(activity,"status"),"activity_run_started_at":activity_started,"last_error":last_error,
         "terminal_failure_payload_json":optional_full(session,ITEMS,failure(&data,presented.filter(|run|run.col("status")==Some("failed")))?).await?,
-        "blocking_run_id":opt_col(blocked,"run_id"),"blocking_run_requested_at":opt_col(blocked,"requested_at"),"blocking_run_started_at":opt_p(blocked,"startedAt"),"blocking_run_completed_at":opt_col(blocked,"completed_at"),"blocking_run_stop_requested":u8::from(stop_requested(&data,blocked)),"blocking_run_background_wake":u8::from(background_wake(session,&data,blocked).await?),"blocking_failure_payload_json":optional_full(session,ITEMS,failure(&data,blocked)?).await?,
+        "blocking_run_id":opt_col(blocked,"run_id"),"blocking_run_requested_at":opt_col(blocked,"requested_at"),"blocking_run_started_at":opt_p(blocked,"startedAt"),"blocking_run_completed_at":opt_col(blocked,"completed_at"),"blocking_run_stop_requested":u8::from(stop_requested(&data,blocked)),"blocking_run_background_wake":u8::from(background_wake(session,blocked).await?),"blocking_failure_payload_json":optional_full(session,ITEMS,failure(&data,blocked)?).await?,
         "pending_request_payload_json":optional_full(session,REQUESTS,data.pending_request()).await?,"pending_secret_request_payload_json":optional_full(session,ITEMS,secret).await?,"pending_link_request_payload_json":optional_full(session,ITEMS,data.pending_link()).await?,
         "latest_user_message_at":opt_col(data.latest_message(false),"updated_at"),"latest_user_authored_message_at":opt_col(data.latest_message(true),"updated_at"),"has_actionable_proposed_plan":u8::from(data.plans.iter().any(|row|row.col("kind")==Some("proposed_plan")&&row.col("status")==Some("active")))}),
     )
@@ -724,62 +795,194 @@ async fn settlement(session: &mut Session, thread: &Meta) -> Result<Option<Value
     ))
 }
 
-async fn item_counts(session: &mut Session, ids: &[String], per_run: bool) -> Result<Value> {
-    let mut groups: BTreeMap<(String, Option<String>), (u64, u64)> = BTreeMap::new();
-    for item in selected(session, ITEMS, Some(ids)).await? {
-        let key = (
-            text(&item.row, "thread_id")?,
-            nullable(&item.row, "run_id")?,
-        );
-        let counts = groups.entry(key).or_default();
-        counts.0 += 1;
-        counts.1 += u64::from(
-            item.col("type") == Some("user_message")
-                && item.pstr("inputIntent") == Some("queued_turn"),
-        );
+async fn thread_item_totals(session: &mut Session, ids: &[String]) -> Result<Value> {
+    use crate::application_turn_item_counts as counts;
+    let mut totals = Vec::new();
+    for thread in ids.iter().collect::<BTreeSet<_>>() {
+        let thread_key = text_cell(thread);
+        let Some(total) = read_row(
+            &mut session.transaction,
+            &session.catalog,
+            counts::TOTALS,
+            &[thread_key.clone()],
+        )
+        .await?
+        else {
+            continue;
+        };
+        let mut visible = integer(&total.row, "item_count")?;
+        let hidden =
+            window::equal_metadata(session, RUNS, "_hidden_run_thread", &thread_key).await?;
+        for run in hidden {
+            let run_key = text(&run.row, "run_id")?;
+            let key = text_cell(&run_key);
+            let Some(group) = read_row(
+                &mut session.transaction,
+                &session.catalog,
+                counts::TABLE,
+                &[thread_key.clone(), key.clone()],
+            )
+            .await?
+            else {
+                continue;
+            };
+            let excluded = if text(&run.row, "status")? == "rolled_back" {
+                integer(&group.row, "item_count")?
+            } else {
+                read_index::count_matching(session, ITEMS, "run_id", &key, |row| {
+                    Ok(text(row, "type")? == "user_message"
+                        && read_index::derived::json_identity(
+                            &text(row, "payload_json")?,
+                            &["inputIntent"],
+                        )? == Some(text_cell("queued_turn")))
+                })
+                .await?
+            };
+            visible = visible
+                .checked_sub(excluded)
+                .ok_or(Error::IncompatibleStore)?;
+        }
+        let runless = read_row(
+            &mut session.transaction,
+            &session.catalog,
+            counts::TABLE,
+            &[thread_key, text_cell("")],
+        )
+        .await?;
+        let runless = runless
+            .as_ref()
+            .map(|row| integer(&row.row, "item_count"))
+            .transpose()?
+            .unwrap_or(0);
+        totals.push(json!({"thread_id":thread,"item_count":visible,"runless_item_count":runless}));
     }
-    let mut rows = Vec::new();
-    let mut totals: BTreeMap<String, (u64, u64)> = BTreeMap::new();
-    for ((thread, run), (count, queued)) in groups {
-        let mut visible_count = count;
-        let mut rolled_back = false;
-        let mut found = false;
-        if let Some(run_id) = &run {
-            if let Some(record) = point(session, RUNS, run_id).await? {
-                found = true;
-                rolled_back = record.col("status") == Some("rolled_back");
-                let cancelled_attempt = if per_run && rolled_back {
-                    related(session, ATTEMPTS, "run_id", run_id)
-                        .await?
-                        .iter()
-                        .any(|attempt| attempt.col("status") == Some("cancelled"))
+    Ok(json!(totals))
+}
+
+async fn item_counts(session: &mut Session, ids: &[String], per_run: bool) -> Result<Value> {
+    use crate::application_turn_item_counts as counts;
+
+    counts::ensure_ready(&mut session.transaction, &session.catalog).await?;
+    if !per_run && counts::has_totals(&session.catalog) {
+        return thread_item_totals(session, ids).await;
+    }
+    let mut rows = BTreeMap::new();
+    let mut totals = Vec::new();
+    for thread in ids.iter().collect::<BTreeSet<_>>() {
+        let expected_groups =
+            counts::expected_groups(&mut session.transaction, &session.catalog, thread).await?;
+        let mut visited_groups = 0_u64;
+        let mut after: Option<Vec<u8>> = None;
+        let mut total: Option<(i64, i64)> = None;
+        loop {
+            let page = counts::read_page(
+                &mut session.transaction,
+                &session.catalog,
+                thread,
+                after.as_deref(),
+            )
+            .await?;
+            for group in page.rows {
+                visited_groups = visited_groups
+                    .checked_add(1)
+                    .ok_or(Error::IncompatibleStore)?;
+                if visited_groups > expected_groups {
+                    return Err(Error::IncompatibleStore);
+                }
+                if per_run && group.run_key.is_empty() {
+                    continue;
+                }
+                // The SQL join is by run_id alone. A foreign-thread run can
+                // qualify a group; a missing nonempty run yields SQL NULL and
+                // contributes zero only to the total query, not the per-run one.
+                let run = read_row(
+                    &mut session.transaction,
+                    &session.catalog,
+                    RUNS,
+                    &[text_cell(&group.run_key)],
+                )
+                .await?;
+                let status = run
+                    .as_ref()
+                    .map(|row| nullable(&row.row, "status"))
+                    .transpose()?
+                    .flatten();
+                let included = per_run
+                    || group.run_key.is_empty()
+                    || status
+                        .as_deref()
+                        .is_some_and(|status| status != "rolled_back");
+                let cancelled_attempt = if per_run && status.as_deref() == Some("rolled_back") {
+                    read_index::any_equal(
+                        session,
+                        ATTEMPTS,
+                        "run_id",
+                        &text_cell(&group.run_key),
+                        |row| Ok(nullable(row, "status")?.as_deref() == Some("cancelled")),
+                    )
+                    .await?
                 } else {
                     false
                 };
-                if matches!(record.col("status"), Some("queued" | "cancelled")) || cancelled_attempt
+                let mut visible = if included { group.item_count } else { 0 };
+                if included
+                    && (matches!(status.as_deref(), Some("queued" | "cancelled"))
+                        || cancelled_attempt)
                 {
-                    visible_count -= queued;
+                    // Upstream deliberately counts queued input globally by run
+                    // ID, without a thread filter. A foreign group's subtraction
+                    // may exceed its item_count, so the result must stay signed.
+                    let queued = read_index::count_matching(
+                        session,
+                        ITEMS,
+                        "run_id",
+                        &text_cell(&group.run_key),
+                        |row| {
+                            Ok(text(row, "type")? == "user_message"
+                                && read_index::derived::json_identity(
+                                    &text(row, "payload_json")?,
+                                    &["inputIntent"],
+                                )? == Some(text_cell("queued_turn")))
+                        },
+                    )
+                    .await?;
+                    visible = visible
+                        .checked_sub(queued)
+                        .ok_or(Error::IncompatibleStore)?;
+                }
+                if per_run {
+                    rows.insert((group.thread_id, group.run_key), visible);
+                } else {
+                    let values = total.get_or_insert((0, 0));
+                    values.0 = values
+                        .0
+                        .checked_add(visible)
+                        .ok_or(Error::IncompatibleStore)?;
+                    if group.run_key.is_empty() {
+                        values.1 = values
+                            .1
+                            .checked_add(group.item_count)
+                            .ok_or(Error::IncompatibleStore)?;
+                    }
                 }
             }
+            match page.after {
+                Some(cursor) => after = Some(cursor),
+                None => break,
+            }
         }
-        if per_run {
-            if let Some(run) = run {
-                rows.push(json!({"thread_id":thread,"run_id":run,"item_count":visible_count}));
-            }
-        } else {
-            let total = totals.entry(thread).or_default();
-            if run.is_none() {
-                total.0 += count;
-                total.1 += count;
-            } else if found && !rolled_back {
-                total.0 += visible_count;
-            }
+        if visited_groups != expected_groups {
+            return Err(Error::IncompatibleStore);
+        }
+        if let Some((count, runless)) = total {
+            totals
+                .push(json!({"thread_id":thread,"item_count":count,"runless_item_count":runless}));
         }
     }
     if per_run {
-        Ok(json!(rows))
+        Ok(json!(rows.into_iter().map(|((thread,run),count)|json!({"thread_id":thread,"run_id":run,"item_count":count})).collect::<Vec<_>>()))
     } else {
-        Ok(json!(totals.into_iter().map(|(thread,(total,runless))|json!({"thread_id":thread,"item_count":total,"runless_item_count":runless})).collect::<Vec<_>>()))
+        Ok(json!(totals))
     }
 }
 
@@ -788,8 +991,18 @@ async fn pending_items(
     ids: Option<&[String]>,
     active_ids: &[String],
 ) -> Result<Value> {
-    let mut items = selected(session, ITEMS, ids).await?;
-    items.retain(pending_work);
+    let allowed = ids.map(|ids| ids.iter().map(String::as_str).collect::<BTreeSet<_>>());
+    let mut items = window::equal_metadata(session, ITEMS, "_shell_pending", &int_cell(1))
+        .await?
+        .into_iter()
+        .map(Meta::from_index)
+        .collect::<Result<Vec<_>>>()?;
+    items.retain(|item| {
+        pending_work(item)
+            && allowed
+                .as_ref()
+                .is_none_or(|ids| item.col("thread_id").is_some_and(|id| ids.contains(id)))
+    });
     items.sort_by(|a, b| {
         a.col("thread_id")
             .cmp(&b.col("thread_id"))
@@ -841,7 +1054,15 @@ async fn pending_items(
 async fn query(session: &mut Session, input: ProjectionShellQuery) -> Result<Value> {
     read_index::ensure_ready(session).await?;
     match input {
-        ProjectionShellQuery::Threads{thread_id,options}=>{let mut result=Vec::new();for thread in shell_threads(session,thread_id.as_deref(),&options.unwrap_or_default()).await?{result.push(shell_thread(session,&thread).await?);}Ok(json!(result))}
+        ProjectionShellQuery::Threads { thread_id, options } => {
+            let options = options.unwrap_or_default();
+            let include_worktree = options.worktree_path.is_some();
+            let mut result = Vec::new();
+            for thread in shell_threads(session, thread_id.as_deref(), &options).await? {
+                result.push(shell_thread(session, &thread, include_worktree).await?);
+            }
+            Ok(json!(result))
+        }
         ProjectionShellQuery::Runs{thread_ids}=>{let mut result=Vec::new();for run in selected(session,RUNS,thread_ids.as_deref()).await?{result.push(json!({"thread_id":run.col("thread_id"),"run_id":run.col("run_id"),"ordinal":run.number("ordinal")?,"rolled_back_at":if run.col("status")==Some("rolled_back"){opt_col(Some(&run),"completed_at")}else{Value::Null}}));}Ok(json!(result))}
         ProjectionShellQuery::RunItemCounts{thread_ids}=>item_counts(session,&thread_ids,true).await,
         ProjectionShellQuery::ItemCounts{thread_ids}=>item_counts(session,&thread_ids,false).await,
@@ -849,18 +1070,94 @@ async fn query(session: &mut Session, input: ProjectionShellQuery) -> Result<Val
         ProjectionShellQuery::PendingItems{thread_ids,active_run_ids}=>pending_items(session,thread_ids.as_deref(),&active_run_ids).await,
         ProjectionShellQuery::SettlementThreads{thread_id}=>{let mut result=Vec::new();for row in threads(session,thread_id.as_deref(),&ShellOptions::default()).await?{if let Some(row)=settlement(session,&row).await?{result.push(row);}}Ok(json!(result))}
         ProjectionShellQuery::RemoteTasks{}=>{Ok(json!(selected(session,SUBAGENTS,None).await?.into_iter().filter(|row|row.col("origin")==Some("app_owned")&&row.col("child_thread_id").is_none()&&row.flag("nativeOpenRemoteDelegatedTask")).map(|row|json!({"thread_id":row.col("thread_id"),"subagent_id":row.col("subagent_id")})).collect::<Vec<_>>()))}
-        ProjectionShellQuery::ThreadsWithPullRequests{thread_id}=>{let mut result=Vec::new();for row in threads(session,thread_id.as_deref(),&ShellOptions{location:Some("active".into()),..Default::default()}).await?{if row.flag("nativeHasPullRequests"){result.push(json!({"payload_json":full(session,THREADS,&row).await?}));}}Ok(json!(result))}
-        ProjectionShellQuery::Worktrees{include_archived}=>{let mut rows=threads(session,None,&ShellOptions{location:if include_archived{None}else{Some("active".into())},..Default::default()}).await?;rows.sort_by_key(|row|row.order);Ok(json!(rows.into_iter().filter_map(|row|row.pstr("worktreePath").map(|path|json!({"thread_id":row.col("thread_id"),"worktree_path":path}))).collect::<Vec<_>>()))}
+        ProjectionShellQuery::ThreadsWithPullRequests { thread_id, include_archived } => {
+            let options = ShellOptions {
+                location: (include_archived != Some(true)).then(|| "active".into()),
+                ..Default::default()
+            };
+            let mut selected = threads(session, thread_id.as_deref(), &options).await?;
+            selected.retain(|row| row.col("deleted_at").is_none() && row.flag("nativeHasPullRequests"));
+            selected.sort_by(|a,b| a.col("updated_at").cmp(&b.col("updated_at"))
+                .then_with(|| a.col("thread_id").cmp(&b.col("thread_id"))));
+            let mut result = Vec::new();
+            for row in selected {
+                result.push(json!({"payload_json":full(session, THREADS, &row).await?}));
+            }
+            Ok(json!(result))
+        }
+        ProjectionShellQuery::Worktrees { include_archived } => {
+            let options = ShellOptions {
+                location: (!include_archived).then(|| "active".into()),
+                ..Default::default()
+            };
+            let mut rows = shell_threads(session, None, &options).await?;
+            if include_archived {
+                // This SQL query walks the table in rowid order.
+                rows.sort_by_key(|row| row.order);
+            }
+            let worktrees: Vec<_> = rows.into_iter().filter_map(|row| {
+                row.pstr("worktreePath").map(|path| {
+                    json!({"thread_id":row.col("thread_id"),"worktree_path":path})
+                })
+            }).collect();
+            Ok(json!(worktrees))
+        }
         ProjectionShellQuery::PullRequestThreads{thread_id,unsettled_only}=>{let options=ShellOptions{location:if thread_id.is_none(){Some("active".into())}else{None},unsettled_only:Some(unsettled_only),..Default::default()};let mut result=Vec::new();for row in shell_threads(session,thread_id.as_deref(),&options).await?{result.push(json!({"payload_json":full(session,THREADS,&row).await?}));}Ok(json!(result))}
-        ProjectionShellQuery::ActiveSubagents{}=>{let mut rows=threads(session,None,&ShellOptions{location:Some("active".into()),..Default::default()}).await?;rows.sort_by_key(|row|row.order);Ok(json!(rows.into_iter().filter(|row|row.p("lineage").get("relationshipToParent").and_then(Value::as_str)==Some("subagent")).map(|row|json!({"thread_id":row.col("thread_id")})).collect::<Vec<_>>()))}
+        ProjectionShellQuery::ActiveSubagents {} => {
+            let options = ShellOptions {
+                location: Some("active".into()),
+                ..Default::default()
+            };
+            let ids: Vec<_> = shell_threads(session, None, &options).await?
+                .into_iter()
+                .filter(|row| row.p("lineage").get("relationshipToParent").and_then(Value::as_str)
+                    == Some("subagent"))
+                .map(|row| json!({"thread_id":row.col("thread_id")}))
+                .collect();
+            Ok(json!(ids))
+        }
         ProjectionShellQuery::CountThreads{}=>{
             let all=read_index::count_equal(session,THREADS,"all",&Value::Null).await?;
             let deleted=read_index::count_equal(session,THREADS,"_deleted",&int_cell(1)).await?;
             Ok(json!([{"count":all.checked_sub(deleted).ok_or(Error::IncompatibleStore)?}]))
         },
-        ProjectionShellQuery::ActiveIndex{}=>{let remote = selected(session,SUBAGENTS,None).await?.into_iter().filter(|row|row.col("origin")==Some("app_owned")&&row.col("child_thread_id").is_none()&&row.flag("nativeOpenRemoteDelegatedTask")).filter_map(|row|row.col("thread_id").map(str::to_owned)).collect::<BTreeSet<_>>();let mut result=Vec::new();for row in shell_threads(session,None,&ShellOptions{location:Some("active".into()),..Default::default()}).await?{let data=ThreadData::load(session,&row.id(THREADS)?).await?;let lineage=row.p("lineage");let side=lineage.get("sideChat").map(|value|if let Some(value)=value.as_bool(){json!(u8::from(value))}else{value.clone()}).unwrap_or(Value::Null);result.push(json!({"thread_id":row.col("thread_id"),"project_id":row.col("project_id"),"relationship_to_parent":lineage.get("relationshipToParent"),"parent_thread_id":lineage.get("parentThreadId"),"root_thread_id":lineage.get("rootThreadId"),"side_chat":side,"settled_override":row.p("settledOverride"),"settled_at":row.p("settledAt"),"pinned_at":row.p("pinnedAt"),"snoozed_until":row.p("snoozedUntil"),"may_be_live":u8::from(data.live(&row)),"has_remote_tasks":u8::from(row.col("thread_id").is_some_and(|id|remote.contains(id)))}));}Ok(json!(result))}
+        ProjectionShellQuery::ActiveThreads { project_id } => {
+            let mut result = Vec::new();
+            let by_project = project_id.is_some();
+            let mut active = shell_threads(session, None, &ShellOptions {
+                location: Some("active".into()), project_id, ..Default::default()
+            }).await?;
+            // SQLite's active index walks updated_at then thread_id. A project
+            // lookup uses the project/updated_at index, whose ties use rowid.
+            if by_project {
+                active.sort_by(|a, b| a.col("updated_at").cmp(&b.col("updated_at"))
+                    .then_with(|| a.order.cmp(&b.order)));
+            }
+            for row in active {
+                let payload: Value = serde_json::from_str(&full(session, THREADS, &row).await?)
+                    .map_err(|_| Error::IncompatibleStore)?;
+                let lineage = &payload["lineage"];
+                let side = lineage.get("sideChat").map(|value| if let Some(value) = value.as_bool() {
+                    json!(u8::from(value))
+                } else { value.clone() }).unwrap_or(Value::Null);
+                result.push(json!({
+                    "thread_id":row.col("thread_id"), "project_id":row.col("project_id"),
+                    "title":row.col("title"), "updated_at":row.col("updated_at"),
+                    "relationship_to_parent":lineage.get("relationshipToParent"),
+                    "parent_thread_id":lineage.get("parentThreadId"),
+                    "root_thread_id":lineage.get("rootThreadId"),"side_chat":side,
+                    "delegated_from_environment_id":payload.pointer("/delegatedFrom/environmentId"),
+                    "delegated_from_thread_id":payload.pointer("/delegatedFrom/threadId"),
+                    "delegated_from_title":payload.pointer("/delegatedFrom/title"),
+                    "settled_override":payload.get("settledOverride"),
+                    "settled_at":payload.get("settledAt"), "snoozed_until":payload.get("snoozedUntil")
+                }));
+            }
+            Ok(json!(result))
+        },
+        ProjectionShellQuery::ActiveIndex{}=>{let remote = remote_presence(session).await?;let mut result=Vec::new();for row in shell_threads(session,None,&ShellOptions{location:Some("active".into()),..Default::default()}).await?{let data=ThreadData::load(session,&row.id(THREADS)?).await?;let lineage=row.p("lineage");let side=lineage.get("sideChat").map(|value|if let Some(value)=value.as_bool(){json!(u8::from(value))}else{value.clone()}).unwrap_or(Value::Null);result.push(json!({"thread_id":row.col("thread_id"),"project_id":row.col("project_id"),"relationship_to_parent":lineage.get("relationshipToParent"),"parent_thread_id":lineage.get("parentThreadId"),"root_thread_id":lineage.get("rootThreadId"),"side_chat":side,"settled_override":row.p("settledOverride"),"settled_at":row.p("settledAt"),"pinned_at":row.p("pinnedAt"),"pin_order_key":row.p("pinOrderKey"),"snoozed_until":row.p("snoozedUntil"),"may_be_live":u8::from(data.live(&row)),"has_remote_tasks":u8::from(row.col("thread_id").is_some_and(|id|remote.contains(id)))}));}Ok(json!(result))}
         ProjectionShellQuery::GuestShare{share_id}=>{let rows=selected(session,THREADS,None).await?;Ok(json!(rows.into_iter().find(|row|row.pstr("nativeGuestShareId")==Some(share_id.as_str())).map(|row|json!({"thread_id":row.col("thread_id")})).into_iter().collect::<Vec<_>>()))}
-        ProjectionShellQuery::OlderSettled{before,project_ids,limit}=>{let mut rows=threads(session,None,&ShellOptions{location:Some("active".into()),listed_only:Some(true),..Default::default()}).await?;rows.retain(|row|row.pstr("settledOverride")==Some("settled")&&row.pstr("settledAt").is_some_and(|time|time<before.settled_at.as_str()||(time==before.settled_at&&before.thread_id.as_deref().is_some_and(|id|row.col("thread_id").is_some_and(|thread|thread>id))))&&project_ids.as_ref().is_none_or(|ids|row.col("project_id").is_some_and(|project|ids.iter().any(|id|id==project))));rows.sort_by(|a,b|b.pstr("settledAt").cmp(&a.pstr("settledAt")).then_with(||a.col("thread_id").cmp(&b.col("thread_id"))));if limit==0{let mut counts=BTreeMap::<String,u64>::new();for row in rows{*counts.entry(text(&row.row,"project_id")?).or_default()+=1;}Ok(json!({"pageRows":[],"countRows":counts.into_iter().map(|(project,count)|json!({"project_id":project,"count":count})).collect::<Vec<_>>()}))}else{Ok(json!({"pageRows":rows.into_iter().take(if limit<0{usize::MAX}else{limit as usize}).map(|row|json!({"thread_id":row.col("thread_id")})).collect::<Vec<_>>(),"countRows":[]}))}}
+        ProjectionShellQuery::OlderSettled{before,project_ids,limit}=>{let mut rows=shell_threads(session,None,&ShellOptions{location:Some("active".into()),listed_only:Some(true),..Default::default()}).await?;rows.retain(|row|row.pstr("settledOverride")==Some("settled")&&row.pstr("settledAt").is_some_and(|time|time<before.settled_at.as_str()||(time==before.settled_at&&before.thread_id.as_deref().is_some_and(|id|row.col("thread_id").is_some_and(|thread|thread>id))))&&project_ids.as_ref().is_none_or(|ids|row.col("project_id").is_some_and(|project|ids.iter().any(|id|id==project))));rows.sort_by(|a,b|b.pstr("settledAt").cmp(&a.pstr("settledAt")).then_with(||a.col("thread_id").cmp(&b.col("thread_id"))));if limit==0{let mut counts=BTreeMap::<String,u64>::new();for row in rows{*counts.entry(text(&row.row,"project_id")?).or_default()+=1;}Ok(json!({"pageRows":[],"countRows":counts.into_iter().map(|(project,count)|json!({"project_id":project,"count":count})).collect::<Vec<_>>()}))}else{Ok(json!({"pageRows":rows.into_iter().take(if limit<0{usize::MAX}else{limit as usize}).map(|row|json!({"thread_id":row.col("thread_id")})).collect::<Vec<_>>(),"countRows":[]}))}}
     }
 }
 
@@ -1064,7 +1361,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn archive_column_filters_do_not_change_json_based_worktree_queries() {
+    async fn active_queries_use_archive_columns_even_when_payloads_disagree() {
         let time = "2026-11-13T00:00:00.000Z";
         let raw = payload(
             "payload-archived",
@@ -1119,7 +1416,7 @@ mod tests {
             )
             .await
             .unwrap()),
-            ["column-archived"]
+            ["payload-archived"]
         );
         drop(app);
         store.shutdown().await.unwrap();

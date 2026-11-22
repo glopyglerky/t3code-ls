@@ -449,6 +449,7 @@ macro_rules! operation {
 operation!(outbox_enqueue, stage_enqueue_in, true, (effects: &[outbox::EnqueueEffect], now: &str) -> usize);
 operation!(outbox_get, stage_get_in, false, (effect_id: &str) -> Option<outbox::OutboxEffect>);
 operation!(outbox_list, stage_list_in, false, (command_id: &str) -> Vec<outbox::OutboxEffect>);
+operation!(outbox_first_steer, stage_first_steer_in, false, (thread_id: &str, message_id: &str) -> Option<outbox::OutboxEffect>);
 operation!(outbox_cancel, stage_cancel_unsettled_in, true, (input: &outbox::CancelUnsettled) -> Vec<String>);
 operation!(outbox_reconcile, stage_reconcile_in, true, (input: &outbox::Reconcile) -> outbox::ReconcileOutcome);
 operation!(outbox_claim_once, stage_claim_once_in, true, (input: &outbox::ClaimOnce) -> outbox::ClaimOutcome);
@@ -458,7 +459,28 @@ operation!(outbox_next_claimable_at_limited, stage_next_limited_in, false, (max_
 operation!(outbox_succeed, stage_succeed_in, true, (input: &outbox::Settle) -> bool);
 operation!(outbox_retry, stage_retry_in, true, (input: &outbox::Retry) -> bool);
 operation!(outbox_fail, stage_fail_in, true, (input: &outbox::Failure) -> bool);
-operation!(outbox_prune, stage_prune_in, true, (input: &outbox::Prune) -> usize);
+impl ApplicationTransactions {
+    pub async fn outbox_prune(&mut self, id: &str, input: &outbox::Prune) -> Result<usize> {
+        let mut session = self.take(id)?;
+        let result = async {
+            session.transaction.require_write()?;
+            ready(&mut session.transaction, &session.catalog).await?;
+            if crate::application_projections::has_run_projection(&session.catalog) {
+                crate::application_projections::read_index::ensure_ready(&mut session).await?;
+            }
+            let removed = outbox::stage_prune_in(
+                &mut session.transaction,
+                Repository::Application(&session.catalog),
+                input,
+            )
+            .await?;
+            crate::validate_response_bytes(&removed)?;
+            Ok(removed)
+        }
+        .await;
+        self.finish(id, session, result).await
+    }
+}
 
 #[cfg(test)]
 #[path = "redb_effect_outbox_tests.rs"]

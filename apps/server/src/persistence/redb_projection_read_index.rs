@@ -430,6 +430,14 @@ pub(super) async fn replace(
 }
 
 pub(crate) async fn is_prepared(session: &mut Session) -> Result<bool> {
+    session.transaction.ensure_active()?;
+    if session
+        .read_snapshot_validation
+        .as_ref()
+        .is_some_and(|validation| validation.projection_reads)
+    {
+        return Ok(true);
+    }
     let state: Option<ReadPreparation> = session
         .transaction
         .get(&location(&session.catalog, "preparation"))
@@ -448,6 +456,9 @@ pub(crate) async fn is_prepared(session: &mut Session) -> Result<bool> {
     }
     if state.ready {
         ready(session).await?;
+        if let Some(validation) = &mut session.read_snapshot_validation {
+            validation.projection_reads = true;
+        }
     }
     Ok(state.ready)
 }
@@ -466,9 +477,30 @@ async fn visit_equal_rows(
     column: &str,
     value: &Value,
     page_rows: usize,
-    mut visit: impl FnMut(IndexedRow) -> Result<bool>,
+    visit: impl FnMut(IndexedRow) -> Result<bool>,
 ) -> Result<()> {
     ensure_ready(session).await?;
+    visit_equal_rows_in(
+        &mut session.transaction,
+        &session.catalog,
+        name,
+        column,
+        value,
+        page_rows,
+        visit,
+    )
+    .await
+}
+
+pub(crate) async fn visit_equal_rows_in(
+    tx: &mut Transaction,
+    catalog: &ApplicationCatalog,
+    name: &str,
+    column: &str,
+    value: &Value,
+    page_rows: usize,
+    mut visit: impl FnMut(IndexedRow) -> Result<bool>,
+) -> Result<()> {
     if !SPECS.iter().any(|spec| spec.name == name)
         || !(column == "all"
             || RELATIONSHIPS.contains(&column)
@@ -476,29 +508,24 @@ async fn visit_equal_rows(
     {
         return Err(invalid("unsupported projection relationship index"));
     }
-    let prefix = index_prefix(&session.catalog, name, column, value);
+    let prefix = index_prefix(catalog, name, column, value);
     let end = prefix_end(&prefix);
     let mut cursor = prefix.clone();
     loop {
-        let page = session.transaction.scan(&cursor, &end, page_rows).await?;
+        let page = tx.scan(&cursor, &end, page_rows).await?;
         let count = page.len();
         for (key, bytes) in page {
             let witness: IndexRow = decode(&bytes)?;
             if witness.table != name
                 || witness.column != column
                 || &witness.value != value
-                || index_key(&session.catalog, &witness) != key
+                || index_key(catalog, &witness) != key
             {
                 return Err(Error::IncompatibleStore);
             }
-            let source = read_row(
-                &mut session.transaction,
-                &session.catalog,
-                name,
-                &witness.primary,
-            )
-            .await?
-            .ok_or(Error::IncompatibleStore)?;
+            let source = read_row(tx, catalog, name, &witness.primary)
+                .await?
+                .ok_or(Error::IncompatibleStore)?;
             if column != "all" {
                 let matches = if derived::COLUMNS.contains(&column) {
                     derived::values(name, &source.row)?
@@ -576,6 +603,25 @@ pub(crate) async fn any_equal(
     })
     .await?;
     Ok(found)
+}
+
+/// Count a selected relationship without retaining source rows or their payloads.
+pub(crate) async fn count_matching(
+    session: &mut Session,
+    name: &str,
+    column: &str,
+    value: &Value,
+    mut predicate: impl FnMut(&Map<String, Value>) -> Result<bool>,
+) -> Result<i64> {
+    let mut count = 0_i64;
+    visit_equal_rows(session, name, column, value, 128, |row| {
+        if predicate(&row.row)? {
+            count = count.checked_add(1).ok_or(Error::IncompatibleStore)?;
+        }
+        Ok(true)
+    })
+    .await?;
+    Ok(count)
 }
 
 pub(crate) async fn all_rows(session: &mut Session, name: &str) -> Result<Vec<IndexedRow>> {
@@ -690,6 +736,13 @@ impl Store {
         catalog: &ApplicationCatalog,
     ) -> Result<ProjectionPreparation> {
         self.db.require_exclusive()?;
+        let base = self.prepare_projections_for_catalog(catalog).await?;
+        if !base.prepared {
+            return Ok(ProjectionPreparation {
+                prepared: false,
+                indexed_rows: 0,
+            });
+        }
         let mut limit = PREPARE_ROWS;
         loop {
             match self
@@ -737,10 +790,21 @@ impl Store {
             return Err(Error::IncompatibleStore);
         }
         if state.ready {
-            tx.rollback().await?;
+            let (counts, changed) =
+                crate::application_turn_item_counts::prepare_batch(&mut tx, &catalog, limit)
+                    .await?;
+            let indexed_rows = state
+                .indexed_rows
+                .checked_add(counts.indexed_rows)
+                .ok_or(Error::IncompatibleStore)?;
+            if changed {
+                tx.commit().await?;
+            } else {
+                tx.rollback().await?;
+            }
             return Ok(ProjectionPreparation {
-                prepared: true,
-                indexed_rows: state.indexed_rows,
+                prepared: counts.prepared,
+                indexed_rows,
             });
         }
         let spec = &SPECS[state.table_index];
@@ -784,8 +848,180 @@ impl Store {
         tx.put(state_key, encode(&state)?).await?;
         tx.commit().await?;
         Ok(ProjectionPreparation {
-            prepared: state.ready,
+            // The next bounded batch also prepares the count-group index. An
+            // already-ready v1 relationship marker alone cannot activate it.
+            prepared: false,
             indexed_rows: state.indexed_rows,
         })
+    }
+}
+
+#[cfg(test)]
+mod readiness_tests {
+    use super::*;
+    use crate::application::ApplicationTransactionMode;
+    use crate::test_support::TestFixture;
+
+    async fn fixture() -> (TestFixture, Store, ApplicationTransactions) {
+        let fixture = TestFixture::start().await;
+        let store = fixture.initialize().await;
+        store.bootstrap_application().await.unwrap();
+        while !store
+            .prepare_application_projection_reads()
+            .await
+            .unwrap()
+            .prepared
+        {}
+        let application = ApplicationTransactions::new(store.clone());
+        (fixture, store, application)
+    }
+
+    async fn begin_read(application: &mut ApplicationTransactions, id: &str) {
+        application
+            .begin_mode(id, ApplicationTransactionMode::Read, None)
+            .await
+            .unwrap();
+    }
+
+    async fn count_threads(application: &mut ApplicationTransactions, id: &str) -> Result<Value> {
+        application
+            .projections_shell(id, ProjectionShellQuery::CountThreads {})
+            .await
+    }
+
+    async fn replace_marker(store: &Store, marker: &[u8], bytes: Vec<u8>) {
+        let mut transaction = store.db.begin().await.unwrap();
+        transaction.put(marker.to_vec(), bytes).await.unwrap();
+        transaction.commit().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn validated_read_snapshot_keeps_its_markers_while_new_snapshot_rejects_corruption() {
+        let (_fixture, store, mut application) = fixture().await;
+        let catalog =
+            decode_catalog(&store.db.read(&schema_key()).await.unwrap().unwrap()).unwrap();
+        let markers = [
+            managed_marker(&catalog, SPECS.last().unwrap().name),
+            super::super::key(&catalog, "preparation"),
+            location(&catalog, "preparation"),
+        ];
+        for (index, marker) in markers.into_iter().enumerate() {
+            let original = store.db.read(&marker).await.unwrap().unwrap();
+            begin_read(&mut application, "old").await;
+            assert_eq!(
+                count_threads(&mut application, "old").await.unwrap(),
+                json!([{"count":0}])
+            );
+            let invalid = if index == 0 {
+                encode(&"another-owner").unwrap()
+            } else {
+                let mut state: Value = decode(&original).unwrap();
+                state["version"] = json!(2);
+                encode(&state).unwrap()
+            };
+            replace_marker(&store, &marker, invalid).await;
+
+            // The existing reader still owns the original engine snapshot,
+            // including through a read savepoint; a later reader must revalidate.
+            application.savepoint("old", "nested").await.unwrap();
+            assert_eq!(
+                count_threads(&mut application, "old").await.unwrap(),
+                json!([{"count":0}])
+            );
+            application.rollback_to("old", "nested").await.unwrap();
+            application.release("old", "nested").await.unwrap();
+            begin_read(&mut application, "fresh").await;
+            assert!(matches!(
+                count_threads(&mut application, "fresh").await,
+                Err(Error::IncompatibleStore)
+            ));
+            assert!(matches!(
+                application.rollback("fresh").await,
+                Err(Error::Invalid(_))
+            ));
+
+            replace_marker(&store, &marker, original).await;
+            application.rollback("old").await.unwrap();
+            begin_read(&mut application, "repaired").await;
+            assert_eq!(
+                count_threads(&mut application, "repaired").await.unwrap(),
+                json!([{"count":0}])
+            );
+            application.rollback("repaired").await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn writer_revalidates_staged_markers_and_savepoint_restore() {
+        let (_fixture, store, mut application) = fixture().await;
+        let catalog =
+            decode_catalog(&store.db.read(&schema_key()).await.unwrap().unwrap()).unwrap();
+        let marker = managed_marker(&catalog, THREADS);
+        let original = store.db.read(&marker).await.unwrap().unwrap();
+        application.begin("writer").await.unwrap();
+        count_threads(&mut application, "writer").await.unwrap();
+        application.savepoint("writer", "nested").await.unwrap();
+        let mut session = application.take("writer").unwrap();
+        session
+            .transaction
+            .put(marker.clone(), encode(&"another-owner").unwrap())
+            .await
+            .unwrap();
+        assert!(matches!(
+            ensure_ready(&mut session).await,
+            Err(Error::IncompatibleStore)
+        ));
+        // Exercise restoration of the staged overlay before sending another
+        // public query; writers must never reuse the earlier readiness proof.
+        application.finish("writer", session, Ok(())).await.unwrap();
+        application.rollback_to("writer", "nested").await.unwrap();
+        application.release("writer", "nested").await.unwrap();
+        count_threads(&mut application, "writer").await.unwrap();
+
+        let mut session = application.take("writer").unwrap();
+        session
+            .transaction
+            .put(marker.clone(), encode(&"another-owner").unwrap())
+            .await
+            .unwrap();
+        application.finish("writer", session, Ok(())).await.unwrap();
+        assert!(matches!(
+            count_threads(&mut application, "writer").await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert!(!application.has_active_writer());
+        assert_eq!(store.db.read(&marker).await.unwrap().unwrap(), original);
+        begin_read(&mut application, "after-abort").await;
+        count_threads(&mut application, "after-abort")
+            .await
+            .unwrap();
+        application.rollback("after-abort").await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn oversized_corrupt_marker_batch_retains_terminal_rejection() {
+        let (_fixture, store, mut application) = fixture().await;
+        let catalog =
+            decode_catalog(&store.db.read(&schema_key()).await.unwrap().unwrap()).unwrap();
+        for spec in &SPECS[..2] {
+            replace_marker(
+                &store,
+                &managed_marker(&catalog, spec.name),
+                vec![b'x'; crate::MAX_BATCH_BYTES / 2 + 1],
+            )
+            .await;
+        }
+        begin_read(&mut application, "corrupt").await;
+        application.savepoint("corrupt", "nested").await.unwrap();
+        assert!(matches!(
+            count_threads(&mut application, "corrupt").await,
+            Err(Error::IncompatibleStore)
+        ));
+        // A recoverable batch-size error must not disguise corrupt ownership as
+        // a failed inner query that could continue using this transaction.
+        assert!(matches!(
+            application.rollback_to("corrupt", "nested").await,
+            Err(Error::Invalid(_))
+        ));
     }
 }

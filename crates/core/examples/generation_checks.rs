@@ -1,6 +1,6 @@
 use t3_code_ls_core::codex_generation::{
-    Model, Request, disabled_mcp_config, enabled_mcp_names, exec_launch_args, select,
-    tokenize_launch_args,
+    Model, Request, disabled_mcp_config, enabled_mcp_names, exec_launch_args, mcp_launch_args,
+    select, tokenize_launch_args,
 };
 use t3_code_ls_core::codex_generation_wire::parse;
 use t3_code_ls_core::json::Value;
@@ -44,9 +44,35 @@ fn preserves_cli_quote_escape_and_filter_semantics() {
             "-c=y"
         ])
     );
+    let flags = "-cfoo=1 -pprofile --enable plugins --enable=connectors --enable=apps --enable hooks --enable=codex_hooks --enable unrelated --disable hooks";
     assert_eq!(
-        tokenize_launch_args("a\u{feff}b\u{0085}c"),
-        strings(&["a", "b\u{0085}c"])
+        exec_launch_args(flags),
+        strings(&[
+            "-c=foo=1",
+            "-p=profile",
+            "--enable",
+            "unrelated",
+            "--disable",
+            "hooks"
+        ])
+    );
+    assert_eq!(
+        mcp_launch_args(flags),
+        strings(&[
+            "-c=foo=1",
+            "-p=profile",
+            "--enable",
+            "hooks",
+            "--enable=codex_hooks",
+            "--enable",
+            "unrelated",
+            "--disable",
+            "hooks"
+        ])
+    );
+    assert_eq!(
+        tokenize_launch_args("a\u{feff}b\u{0085}c d\\\u{00a0}e f\x0bg"),
+        strings(&["a\u{feff}b\u{0085}c", "d\u{00a0}e", "f", "g"])
     );
 }
 
@@ -102,7 +128,7 @@ fn first_option_and_environment_override_match_upstream() {
 fn mcp_configuration_preserves_names_and_disabled_rows() {
     let names = enabled_mcp_names(br#"[{"name":"a.b","enabled":true},{"name":"off","enabled":false},{"name":"quote\"name","enabled":true}]"#).unwrap().unwrap();
     assert_eq!(
-        disabled_mcp_config(&names),
+        disabled_mcp_config(&names[..]),
         Some("mcp_servers={\"a.b\"={enabled=false},\"quote\\\"name\"={enabled=false}}".to_owned())
     );
     assert_eq!(enabled_mcp_names(br#"[{"name":"x"}]"#).unwrap(), None);
@@ -138,8 +164,47 @@ fn requires_one_exact_request_and_bounded_data() {
     assert!(parse(&valid().replace("180000", "0")).is_err());
 }
 
+#[cfg_attr(test, test)]
+fn mcp_launch_overrides_cannot_reenable_generation_servers() {
+    let names = strings(&["plain", "a.b", "x=y"]);
+    let disabled = disabled_mcp_config(&names[..]).unwrap();
+    let mut input = request();
+    input.launch_args =
+        "--config 'mcp_servers={\"a.b\"={enabled=true}}' --config mcp_servers.plain.enabled=true"
+            .to_owned();
+    let selection = select(&input, None);
+    let args = t3_code_ls_core::codex_generation::exec_args(
+        &input,
+        &selection,
+        "schema.json",
+        "answer.json",
+        &names[..],
+    );
+    let prefix = strings(&["exec", "--config", &disabled]);
+    assert_eq!(&args[..3], &prefix[..]);
+    let overridden = args
+        .iter()
+        .position(|arg| arg == "mcp_servers.plain.enabled=true")
+        .unwrap();
+    let protected = args
+        .iter()
+        .position(|arg| arg == "mcp_servers.plain.enabled=false")
+        .unwrap();
+    assert!(protected > overridden);
+    assert_eq!(args.iter().filter(|arg| *arg == &disabled).count(), 2);
+    assert!(
+        !args
+            .iter()
+            .any(|arg| arg == "mcp_servers.a.b.enabled=false"
+                || arg == "mcp_servers.x=y.enabled=false"),
+        "MCP names with special characters require the table override"
+    );
+}
+
 fn main() {
     let mut passed = 0;
+    mcp_launch_overrides_cannot_reenable_generation_servers();
+    passed += 1;
     preserves_cli_quote_escape_and_filter_semantics();
     passed += 1;
     fallback_drops_options_but_family_and_custom_matches_keep_them();
@@ -151,7 +216,7 @@ fn main() {
     requires_one_exact_request_and_bounded_data();
     passed += 1;
     println!(
-        "{{\"schema\":1,\"kind\":\"summary\",\"build\":\"ok\",\"total\":5,\"passed\":{},\"failed\":0,\"timed_out\":0,\"ignored\":0,\"filtered_out\":0}}",
+        "{{\"schema\":1,\"kind\":\"summary\",\"build\":\"ok\",\"total\":6,\"passed\":{},\"failed\":0,\"timed_out\":0,\"ignored\":0,\"filtered_out\":0}}",
         passed
     );
 }

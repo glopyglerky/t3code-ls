@@ -73,7 +73,9 @@ def source_hashes() -> dict[str, str]:
               ROOT / "tools/server-test-runtime/package.json",
               ROOT / "tools/server-test-runtime/package-lock.json",
               ROOT / "upstream.lock.json", Path(__file__).resolve(), PIN_FILE]
-    files += [REPO / "apps/server/src/orchestration-v2/NativeDispatchFacts.ts",
+    files += [REPO / "apps/server/src/guest/guest_uploads.rs",
+              REPO / "apps/server/src/provider/provider_update_verification.rs",
+              REPO / "apps/server/src/orchestration-v2/NativeDispatchFacts.ts",
               REPO / "apps/server/src/orchestration-v2/NativeDispatchPolicy.ts",
               REPO / "apps/server/src/orchestration-v2/NativeCommandPolicy.ts",
               REPO / "apps/server/src/orchestration-v2/NativeGuestShare.ts",
@@ -88,6 +90,7 @@ def source_hashes() -> dict[str, str]:
               REPO / "apps/server/src/textGeneration/CodexTextGeneration.ts",
               REPO / "apps/server/src/textGeneration/NativeCodexTextGeneration.ts",
               REPO / "apps/server/src/provider/codexLaunchArgs.ts",
+              REPO / "apps/server/src/provider/CodexProvider.ts",
               REPO / "apps/server/src/codexModelOptions.ts",
               REPO / "packages/provider-core/src/server/textGenerationOperations.ts",
               REPO / "packages/provider-core/src/server/textGenerationUtils.ts",
@@ -127,6 +130,7 @@ def source_hashes() -> dict[str, str]:
                  "packages/provider-core/src/server/collectStreamText.ts",
                  "apps/server/src/textGeneration/CodexTextGeneration.ts",
                  "apps/server/src/provider/codexLaunchArgs.ts",
+                 "apps/server/src/provider/CodexProvider.ts",
                  "apps/server/src/codexModelOptions.ts",
                  "packages/provider-core/src/server/textGenerationOperations.ts",
                  "packages/provider-core/src/server/textGenerationUtils.ts",
@@ -141,6 +145,33 @@ def source_hashes() -> dict[str, str]:
                               capture_output=True, check=True).stdout
         hashes[f"git:{commit}:{path}"] = hashlib.sha256(blob).hexdigest()
     return hashes
+
+
+def render_unit_tests(output: Path) -> None:
+    # The Lust test frontend accepts a single source file. Keep module names
+    # and exact bodies so crate-relative imports retain their normal meaning.
+    library = ROOT / "crates/core/src/lib.rs"
+    declarations = re.findall(r'(?m)^(?:#\[path = "([^"]+)"\]\n)?pub mod (\w+);$',
+                              library.read_text())
+    sources = {
+        name: (library.parent / (relative or f"{name}.rs")).read_bytes()
+        for relative, name in declarations
+    }
+    needed = {name for name, body in sources.items() if re.search(rb"#\[\s*test\s*\]", body)}
+    if not needed:
+        raise RuntimeError("Core has no unit test modules")
+    pending = sorted(needed)
+    while pending:
+        module = pending.pop()
+        for reference in re.findall(rb"\bcrate::(\w+)", sources[module]):
+            dependency = reference.decode("ascii")
+            if dependency in sources and dependency not in needed:
+                needed.add(dependency)
+                pending.append(dependency)
+    output.write_bytes(b"".join(
+        f"mod {module} {{\n".encode() + sources[module] + b"\n}\n"
+        for module in sorted(needed)
+    ))
 
 
 def test_summary(output: str) -> dict:
@@ -232,17 +263,12 @@ def main() -> int:
             run([str(lust), "check", "crates/core/src/lib.rs", "--manifest-path",
                  "crates/core/Cargo.toml", "--lib", "--package", "t3_code_ls_core", "--json"],
                 cwd=ROOT, env=env, receipt=receipt, name="check core with Lust")
-            # Lust's test harness rejects file modules. Execute each original
-            # module containing inline unit tests, without rewriting the source.
-            test_files = [path for path in sorted((ROOT / "crates/core/src").rglob("*.rs"))
-                          if re.search(r"#\[\s*test\s*\]", path.read_text())]
-            if not test_files:
-                raise RuntimeError("Core has no unit test roots")
-            receipt["unit_tests"] = []
-            for path in test_files:
-                result = run([str(lust), "test", str(path), "--json"], cwd=ROOT, env=env,
-                             receipt=receipt, name=f"test {path.name} with Lust")
-                receipt["unit_tests"].append(test_summary(result.stdout))
+            unit_tests = work / "core-tests.rs"
+            render_unit_tests(unit_tests)
+            receipt["unit_test_source_sha256"] = sha256(unit_tests)
+            result = run([str(lust), "test", str(unit_tests), "--json"], cwd=ROOT,
+                         env=env, receipt=receipt, name="test core modules with Lust")
+            receipt["unit_tests"] = [test_summary(result.stdout)]
             generation_checks = work / "generation-checks-lust"
             run([str(lust), "build", "crates/core/examples/generation_checks.rs",
                  "--manifest-path", "crates/core/Cargo.toml", "--bin", "generation_checks",
@@ -251,15 +277,14 @@ def main() -> int:
             generation_result = run([str(generation_checks)], cwd=ROOT, env=env,
                                     receipt=receipt, name="execute every Lust generation assertion")
             generation_summary = test_summary(generation_result.stdout)
-            if generation_summary["total"] != 5:
-                raise RuntimeError("Lust did not execute all five generation assertion cases")
+            if generation_summary["total"] != 6:
+                raise RuntimeError("Lust did not execute all six generation assertion cases")
             receipt["generation_assertions"] = generation_summary
             receipt["generation_assertions_binary_sha256"] = sha256(generation_checks)
             receipt["compiler_test_harness_boundary"] = (
-                "The pinned single-file test harness cannot import sibling crate modules. "
-                "Five generation cases retain Cargo test coverage and run through an unchanged "
-                "Lustr-built example importing the real core; they are counted separately from "
-                "the test-harness unit cases."
+                "The single-file test harness compiles the original core module bodies in "
+                "their module scopes. The six generation cases run through the Lust-built "
+                "example importing the real core and are counted separately."
             )
             print(generation_result.stdout, end="")
             # --bin selects each example by its Cargo target name in this

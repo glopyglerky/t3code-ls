@@ -146,12 +146,24 @@ pub(crate) fn readable_search_text(text: &str) -> Option<String> {
             cursor = copied;
         }
     }
-    if copied == 0 {
-        None
-    } else {
-        output.push_str(&text[copied..]);
-        (output != text).then_some(output)
-    }
+    output.push_str(&text[copied..]);
+    // Match JavaScript's LINK_LABEL and its exact whitespace set. Only '*' and
+    // '_' escapes inside a complete markdown label are readable substitutions.
+    static LABEL: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let labels = LABEL.get_or_init(|| regex::Regex::new(
+        r"(!?\[)([^\]\n]*)(\]\([^\)\u{0009}-\u{000d}\u{0020}\u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]*\))"
+    ).expect("constant markdown label regex"));
+    let readable = labels
+        .replace_all(&output, |captures: &regex::Captures<'_>| {
+            format!(
+                "{}{}{}",
+                &captures[1],
+                captures[2].replace(r"\*", "*").replace(r"\_", "_"),
+                &captures[3]
+            )
+        })
+        .into_owned();
+    (readable != text).then_some(readable)
 }
 
 #[cfg(test)]

@@ -249,6 +249,7 @@ export const make = Effect.fn("Omdb.make")(
         client.prepareReceipts,
         client.preparePositions,
         client.prepareProjects,
+        client.prepareTaskFolders,
         client.prepareProjections,
         client.prepareOutbox,
         client.prepareViewedFiles,

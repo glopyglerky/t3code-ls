@@ -5,6 +5,7 @@ import type {
   OrchestrationV2Run,
   OrchestrationV2RuntimeRequest,
   OrchestrationV2TurnItem,
+  OrchestrationV2Subagent,
   ProviderThreadId,
   RunAttemptId,
   RunId,
@@ -45,6 +46,10 @@ export interface ProjectionCommitStoreShape {
     threadId: ThreadId,
     runId: RunId,
   ) => Effect.Effect<OrchestrationV2Run | undefined, ProjectionCommitStoreError>;
+  /** Flushes the SQLite batch's deferred thread projection writes. Native applies its own touches. */
+  readonly flushThreadTouches?: (
+    touches: ReadonlyMap<ThreadId, string>,
+  ) => Effect.Effect<void, ProjectionCommitStoreError>;
   readonly markApplied: (
     sequence: number,
     updatedAt: DateTime.Utc,
@@ -69,6 +74,10 @@ export interface ProjectionCommitStoreShape {
   }) => Effect.Effect<boolean, ProjectionCommitStoreError>;
   readonly providerThreadUnchanged: (
     providerThreadId: ProviderThreadId,
+    expectedJson: string,
+  ) => Effect.Effect<boolean, ProjectionCommitStoreError>;
+  readonly subagentUnchanged: (
+    subagentId: OrchestrationV2Subagent["id"],
     expectedJson: string,
   ) => Effect.Effect<boolean, ProjectionCommitStoreError>;
   readonly turnItemUnchanged: (

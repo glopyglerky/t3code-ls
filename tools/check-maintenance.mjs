@@ -11,8 +11,10 @@ import * as Cache from "effect/Cache";
 import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -175,8 +177,10 @@ function world(fixture) {
       Cache,
       Config,
       DateTime,
+      Deferred,
       Duration,
       Effect,
+      Exit,
       FileSystem,
       Option,
       Path,
@@ -196,6 +200,9 @@ function world(fixture) {
       "resolveMiseProviderMaintenance",
       "resolveHomebrewProviderMaintenance",
       "resolvePnpmGlobalLatestVersion",
+      "resolveNpmGlobalLatestVersion",
+      "resolveMacPortsOwner",
+      "isVoltaPackageInstall",
       "resolveBunGlobalLatestVersion",
       "resolveVitePlusInstallableLatestVersion",
       "parseChocolateyLatestVersion",
@@ -254,6 +261,7 @@ function request(fixture) {
           hostPlatform: fixture.hostPlatform,
           commandPlatform: fixture.commandPlatform ?? fixture.hostPlatform,
           chocolateyInstall: fixture.context.env.ChocolateyInstall ?? null,
+          ...(fixture.miseRoots === undefined ? {} : { miseRoots: fixture.miseRoots }),
         }
       : null,
     definition: {
@@ -304,6 +312,10 @@ function observe(fixture, state, input, observation) {
         "--installed",
         fixture.definition.mise.tool,
       ]);
+    case "miseAllListing":
+      return state.boundedProbe(mise(), ["ls", "--json", "--installed"]);
+    case "macPortsOwner":
+      return state.execute(state.module.resolveMacPortsOwner(context));
     case "miseInstallPaths":
       return observation.paths.map(state.realPath);
     case "miseToolPath":
@@ -312,18 +324,8 @@ function observe(fixture, state, input, observation) {
       const version = state.boundedProbe("pnpm", ["--version"]);
       return version !== null && semver.satisfiesSemverRange(version, ">=10.4.0");
     }
-    case "voltaPackage": {
-      const home = state.path.dirname(state.path.dirname(context.resolvedCommandPath));
-      return state.exists(
-        state.path.join(
-          home,
-          "tools",
-          "image",
-          "packages",
-          ...fixture.owner.packageName.split("/"),
-        ),
-      );
-    }
+    case "voltaPackage":
+      return state.execute(state.module.isVoltaPackageInstall(context, fixture.owner.packageName));
     case "npmShim": {
       const directory = state.path.dirname(context.resolvedCommandPath);
       return {
@@ -361,7 +363,11 @@ function hydrated(fixture, capabilities) {
     if (selector === "context") result.update.env = fixture.context.env;
     if (selector === "native") result.update.env = fixture.definition.nativeUpdate.env;
   }
-  if (latestLookup?.kind === "mise" || latestLookup?.kind === "vite-plus") {
+  if (
+    latestLookup?.kind === "mise" ||
+    latestLookup?.kind === "vite-plus" ||
+    latestLookup?.kind === "npm"
+  ) {
     const hash = NodeCrypto.createHash("sha256")
       .update(
         JSON.stringify(
@@ -372,7 +378,14 @@ function hydrated(fixture, capabilities) {
     result.latestVersionCacheKey =
       latestLookup.kind === "mise"
         ? ["mise", latestLookup.executable, latestLookup.tool, hash].join("\0")
-        : ["vite-plus-global", latestLookup.packageName, hash].join("\0");
+        : latestLookup.kind === "npm"
+          ? [
+              "npm-global",
+              latestLookup.prefix.replaceAll("\\", "/").toLowerCase(),
+              latestLookup.packageName,
+              hash,
+            ].join("\0")
+          : ["vite-plus-global", latestLookup.packageName, hash].join("\0");
   }
   return { ...clean(result), hasLatestLookup: latestLookup !== undefined };
 }
@@ -413,6 +426,14 @@ async function lookupLatest(fixture, state, lookup) {
     case "bun":
       return state.execute(
         module.resolveBunGlobalLatestVersion(lookup.packageName, fixture.context.env),
+      );
+    case "npm":
+      return state.execute(
+        module.resolveNpmGlobalLatestVersion(
+          lookup.packageName,
+          lookup.prefix,
+          fixture.context.env,
+        ),
       );
     case "pnpm":
       return state.execute(
@@ -466,7 +487,7 @@ async function nativeResolve(executable, fixture, state) {
       const observation = response.ok.request;
       input.observations.push({
         request: observation,
-        result: observe(fixture, state, input, observation),
+        result: await observe(fixture, state, input, observation),
       });
     }
     NodeAssert.notEqual(
@@ -566,6 +587,62 @@ for (const native of [false, true]) {
     "/nix/store/package-codex/bin/codex",
   );
   add(native ? nativeDefinition(fixture, { matches: null }) : fixture);
+}
+
+for (const [name, realPath] of [
+  ["codex", "/opt/local/libexec/codex/bin/codex"],
+  ["codex", "/opt/local/lib/node_modules/@openai/codex/bin/codex"],
+  ["bad;name", "/opt/local/libexec/codex/bin/codex"],
+  ["", "/opt/local/libexec/codex/bin/codex"],
+]) {
+  const fixture = commandPath(
+    nativeDefinition(base(`MacPorts owner ${name}/${realPath}`), {
+      matches: [realPath],
+    }),
+    "/opt/local/bin/codex",
+    realPath,
+  );
+  fixture.exists["/opt/local/bin/port"] = true;
+  probe(
+    fixture,
+    "/opt/local/bin/port",
+    ["provides", realPath],
+    name ? `${realPath} is provided by: ${name}\n` : "not provided by a port",
+  );
+  add(fixture);
+}
+
+for (const [name, outdated, listed, code] of [
+  ["eligible release", JSON.stringify({ [packageName]: { latest: "1.2.3" } }), "{}", 1],
+  [
+    "installed release during age hold",
+    "{}",
+    JSON.stringify({ dependencies: { [packageName]: { version: "1.0.0" } } }),
+    0,
+  ],
+  ["registry failure", JSON.stringify({ error: { code: "ENOTFOUND" } }), "{}", 1],
+  ["invalid registry output", "invalid-json", "{}", 1],
+]) {
+  const fixture = commandPath(
+    base(`npm release-age ${name}`),
+    "/usr/lib/node_modules/@openai/codex/bin/codex.js",
+  );
+  fixture.lookups.npm = "/fixture/bin/npm";
+  probe(
+    fixture,
+    fixture.lookups.npm,
+    ["outdated", "-g", "--prefix", "/usr", "--json", packageName],
+    outdated,
+    code,
+  );
+  probe(
+    fixture,
+    fixture.lookups.npm,
+    ["ls", "-g", "--prefix", "/usr", "--depth", "0", "--json", packageName],
+    listed,
+    1,
+  );
+  add(fixture);
 }
 
 for (const found of [false, true]) {
@@ -865,6 +942,31 @@ function miseFixture(label, changes = {}) {
   return fixture;
 }
 add(miseFixture("mise active latest"));
+for (const [name, configured] of [
+  [
+    "backend tool",
+    { "npm:@openai/codex": [{ install_path: "/home/a/mise/installs/codex/1.2.3" }] },
+  ],
+  ["unknown path falls back", { "npm:other": [{ install_path: "/other/install" }] }],
+  [
+    "invalid record falls back",
+    {
+      "npm:@openai/codex": [{ install_path: "/home/a/mise/installs/codex/1.2.3" }],
+      invalid: false,
+    },
+  ],
+  [
+    "integer key enumeration",
+    {
+      10: [{ install_path: "/home/a/mise/installs/codex/1.2.3" }],
+      2: [{ install_path: "/home/a/mise/installs/codex/1.2.3" }],
+    },
+  ],
+]) {
+  const fixture = miseFixture(`mise full configuration ${name}`);
+  probe(fixture, "/fixture/bin/mise", ["ls", "--json", "--installed"], JSON.stringify(configured));
+  add(fixture);
+}
 add(
   miseFixture("mise direct helper", {
     mode: "mise",
@@ -872,6 +974,19 @@ add(
   }),
 );
 add(base("mise direct non-owner returns null", { mode: "mise" }));
+for (const path of [
+  "/fixture/custom-tools/codex/bin/codex",
+  "/fixture/custom-tools/node/24/bin/codex",
+  "/fixture/custom-tools-other/codex",
+]) {
+  const fixture = commandPath(
+    base("mise custom install ownership " + path, { mode: "mise" }),
+    path,
+  );
+  fixture.context.env.MISE_INSTALLS_DIR = "/fixture/custom-tools/";
+  fixture.miseRoots = { install: ["/fixture/custom-tools"], other: [] };
+  add(fixture);
+}
 for (const mapping of [undefined, { tool: "codex", upgrade: false }]) {
   const fixture = miseFixture(`mise unsupported mapping ${JSON.stringify(mapping)}`);
   fixture.definition.mise = mapping;

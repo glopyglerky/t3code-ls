@@ -3,10 +3,13 @@ import { pipe } from "effect/Function";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Equal from "effect/Equal";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as RcMap from "effect/RcMap";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Schedule from "effect/Schedule";
@@ -40,7 +43,6 @@ import { codexAppServerArgs, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts
 import {
   CodexAppServerProcessConfigurationError,
   selectCodexAppServerCommand,
-  selectCodexAppServerExecutable,
 } from "./CodexAppServerProcess.ts";
 import {
   buildServerProvider,
@@ -65,7 +67,6 @@ const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnErro
 const isCodexAppServerProcessConfigurationError = Schema.is(
   CodexAppServerProcessConfigurationError,
 );
-const RATE_LIMITS_PROBE_TIMEOUT_MS = 3_000;
 
 type CodexRateLimitsProbe =
   | {
@@ -103,23 +104,36 @@ const CodexCyberAccessConfig = Schema.Struct({
 });
 const decodeCodexCyberAccessConfig = Schema.decodeUnknownOption(CodexCyberAccessConfig);
 
-function routesToNativeOpenai(config: unknown): boolean {
+// Null is Codex's auth-dependent OpenAI default; undefined is a route that cannot be read.
+function codexRouteBaseUrl(config: unknown): string | null | undefined {
   const decoded = decodeCodexRoutingConfig(config);
-  if (Option.isNone(decoded)) return false;
+  if (Option.isNone(decoded)) return undefined;
   const routing = decoded.value;
   const providerId = routing.model_provider ?? "openai";
+  if (providerId === "openai") return routing.openai_base_url || null;
   const provider = routing.model_providers?.[providerId];
-  if (providerId !== "openai" && !provider) return false;
-  const baseUrl =
-    providerId === "openai" ? routing.openai_base_url || undefined : provider?.base_url;
-  // A provider without an override uses Codex's auth-dependent OpenAI default.
-  if (baseUrl == null) return true;
+  return provider ? (provider.base_url ?? null) : undefined;
+}
+
+function routesToNativeOpenai(config: unknown): boolean {
+  const baseUrl = codexRouteBaseUrl(config);
+  if (baseUrl === undefined) return false;
+  if (baseUrl === null) return true;
   if (!URL.canParse(baseUrl)) return false;
   const url = new URL(baseUrl);
   return (
     url.protocol === "https:" &&
     (url.hostname === "api.openai.com" || url.hostname === "chatgpt.com")
   );
+}
+
+/** The origin of the custom endpoint Codex sends model requests to, if it uses one. */
+export function codexCustomEndpoint(config: unknown): string | undefined {
+  const baseUrl = codexRouteBaseUrl(config);
+  const url = baseUrl ? URL.parse(baseUrl) : null;
+  return url && /^https?:$/.test(url.protocol) && !routesToNativeOpenai(config)
+    ? url.origin
+    : undefined;
 }
 
 // A stored login does not mean this provider's traffic spends that login's quota.
@@ -149,6 +163,7 @@ const CODEX_PRESENTATION = {
 
 export interface CodexAppServerProviderSnapshot {
   readonly account: CodexSchema.V2GetAccountResponse;
+  readonly endpoint?: string | undefined;
   readonly nativeUsage?: boolean;
   readonly rateLimits?: CodexRateLimitsProbe;
   readonly version: string | undefined;
@@ -673,8 +688,47 @@ export const withCodexAppServerClient = Effect.fn("withCodexAppServerClient")(fu
   );
   const initialize = yield* client.request("initialize", buildCodexInitializeParams());
   yield* client.notify("initialized", undefined);
-  return { client, initialize };
+  return { client, initialize, pid: child.pid, wrapped: selectedCommand.wrapped };
 });
+
+// Codex runs git (ssh for ssh URLs) for plugin marketplaces at launch and exits without waiting
+// for it, so stopping a short probe mid-fetch strands ssh in an SSH-agent request.
+const CODEX_STARTUP_WORK_GRACE = Duration.minutes(1);
+
+const codexProcessGroupIsBusy = Effect.fn("codexProcessGroupIsBusy")(
+  function* (pid: number, wrapped: boolean) {
+    const { stdout } = yield* spawnAndCollect(
+      "pgrep",
+      ChildProcess.make("pgrep", ["-g", `${pid}`]),
+    );
+    const members = stdout
+      .trim()
+      .split(/\s+/)
+      .map(Number)
+      .filter((member) => member > 0 && member !== pid);
+    if (!wrapped || members.length !== 1) return members.length > 0;
+    const [member] = members;
+
+    // The native launcher supervises the app-server as its only direct child.
+    // Startup work runs below that child and keeps the same process group.
+    const children = yield* spawnAndCollect("pgrep", ChildProcess.make("pgrep", ["-P", `${pid}`]));
+    return !children.stdout
+      .trim()
+      .split(/\s+/)
+      .some((child) => Number(child) === member);
+  },
+  Effect.orElseSucceed(() => false),
+);
+
+const stopCodexAfterStartupWork = (
+  launch: { readonly pid: number; readonly wrapped: boolean },
+  processScope: Scope.Closeable,
+) =>
+  codexProcessGroupIsBusy(launch.pid, launch.wrapped).pipe(
+    Effect.repeat({ schedule: Schedule.spaced("500 millis"), while: (busy) => busy }),
+    Effect.timeoutOption(CODEX_STARTUP_WORK_GRACE),
+    Effect.ensuring(Scope.close(processScope, Exit.void)),
+  );
 
 // Usage is an enrichment: a failure or a slow answer degrades to "no usage this
 // probe" rather than costing the account and models.
@@ -682,11 +736,7 @@ const readCodexRateLimits = (
   client: CodexClient.CodexAppServerClient["Service"],
   deadlineMs: number,
 ) =>
-  withCodexDiscoveryDeadline(
-    client.request("account/rateLimits/read", null),
-    deadlineMs,
-    RATE_LIMITS_PROBE_TIMEOUT_MS,
-  ).pipe(
+  withCodexDiscoveryDeadline(client.request("account/rateLimits/read", null), deadlineMs).pipe(
     Effect.map((response): CodexRateLimitsProbe =>
       response
         ? {
@@ -714,7 +764,22 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   readonly skipNativeUsage?: boolean;
 }) {
   const spawnedAtMs = DateTime.toEpochMillis(yield* DateTime.now);
-  const { client, initialize } = yield* withCodexAppServerClient(input);
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const processScope = yield* Scope.make();
+  let launch: { readonly pid: number; readonly wrapped: boolean } | undefined;
+  // Returning the snapshot must not wait for Codex's own startup work.
+  yield* Effect.addFinalizer(() =>
+    launch === undefined
+      ? Scope.close(processScope, Exit.void)
+      : stopCodexAfterStartupWork(launch, processScope).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.forkDetach,
+          Effect.asVoid,
+        ),
+  );
+  const opened = yield* withCodexAppServerClient(input).pipe(Scope.provide(processScope));
+  launch = opened;
+  const { client, initialize } = opened;
 
   const versionMatch = initialize.userAgent.match(/\/([^\s]+)/);
   const version = versionMatch ? versionMatch[1] : undefined;
@@ -774,6 +839,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   const cyberAccess = Option.getOrUndefined(decodeCodexCyberAccessConfig(config));
   return {
     account: accountResponse,
+    endpoint: config ? codexCustomEndpoint(config) : undefined,
     nativeUsage,
     ...(rateLimits ? { rateLimits } : {}),
     version,
@@ -789,6 +855,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
 });
 
 // Old CLIs can exit before initialize reports the version needed for compatibility advice.
+const unknownCliVersion = { version: null, missing: false };
 const probeCodexCliVersion = Effect.fn("probeCodexCliVersion")(
   function* (input: {
     readonly binaryPath: string;
@@ -801,9 +868,15 @@ const probeCodexCliVersion = Effect.fn("probeCodexCliVersion")(
       env: environment,
       extendEnv: true,
     });
+    const launch = yield* selectCodexAppServerCommand({
+      command: spawnCommand.command,
+      args: spawnCommand.args,
+      cwd: input.cwd,
+      versionProbe: true,
+    });
     const result = yield* spawnAndCollect(
       input.binaryPath,
-      ChildProcess.make(spawnCommand.command, spawnCommand.args, {
+      ChildProcess.make(launch.command, launch.args, {
         cwd: input.cwd,
         env: environment,
         extendEnv: true,
@@ -811,8 +884,14 @@ const probeCodexCliVersion = Effect.fn("probeCodexCliVersion")(
         shell: spawnCommand.shell,
       }),
     );
-    if (result.code !== 0) return null;
-    return CODEX_CLI_VERSION_PATTERN.exec(result.stdout)?.[1] ?? null;
+    return {
+      version:
+        result.code === 0 ? (CODEX_CLI_VERSION_PATTERN.exec(result.stdout)?.[1] ?? null) : null,
+      missing:
+        launch.wrapped &&
+        result.code === 127 &&
+        result.stderr.trim() === "t3-code-ls-provider: version executable not found",
+    };
   },
   (effect, input) =>
     effect.pipe(
@@ -820,9 +899,16 @@ const probeCodexCliVersion = Effect.fn("probeCodexCliVersion")(
         resolveProviderProbeTimeoutMs("codex", DEFAULT_TIMEOUT_MS, input.environment),
       ),
     ),
-  Effect.map(Option.getOrNull),
+  Effect.map(Option.getOrElse(() => unknownCliVersion)),
   Effect.catch((cause) =>
-    Effect.logDebug("Codex --version fallback failed.", { cause }).pipe(Effect.as(null)),
+    Effect.logDebug("Codex --version query failed.", { cause }).pipe(
+      Effect.as({
+        version: null,
+        missing:
+          cause._tag === "ProviderCommandNotFoundError" ||
+          (cause._tag === "PlatformError" && cause.reason._tag === "NotFound"),
+      }),
+    ),
   ),
 );
 
@@ -839,6 +925,52 @@ export const probeCodexSkillsForCwd = Effect.fn("probeCodexSkillsForCwd")(functi
   });
   const skillsResponse = yield* client.request("skills/list", { cwds: [input.cwd] });
   return parseCodexSkillsListResponse(skillsResponse, input.cwd);
+});
+
+// Long enough for a burst of workspace switches; short because the helper holds the user's
+// binary open, and Windows refuses to overwrite or delete a running executable.
+const CODEX_SKILLS_HELPER_IDLE_TTL = "30 seconds";
+
+/** Reuses one app-server per launch identity; each read passes its cwd and rescans from disk. */
+export const makeCodexSkillsProbe = Effect.fn("makeCodexSkillsProbe")(function* () {
+  const helpers = yield* RcMap.make({
+    lookup: (launch: {
+      readonly binaryPath: string;
+      readonly homePath?: string;
+      readonly launchArgs?: string;
+      readonly environment: NodeJS.ProcessEnv;
+    }) =>
+      withCodexAppServerClient({ ...launch, cwd: process.cwd() }).pipe(
+        Effect.map(({ client }) => client),
+      ),
+    idleTimeToLive: CODEX_SKILLS_HELPER_IDLE_TTL,
+  });
+  return Effect.fn("CodexSkillsProbe.probe")(function* (input: {
+    readonly binaryPath: string;
+    readonly homePath?: string;
+    readonly launchArgs?: string;
+    readonly cwd: string;
+    readonly environment?: NodeJS.ProcessEnv;
+  }) {
+    const { cwd, ...rest } = input;
+    const launch = {
+      ...rest,
+      environment: providerProbeEnvironment(rest.environment ?? process.env),
+    };
+    // Retire helpers for a previous binary, home, credentials, or launch options.
+    const stale = Array.from(yield* RcMap.keys(helpers)).filter(
+      (key) => !Equal.equals(key, launch),
+    );
+    yield* Effect.forEach(stale, (key) => RcMap.invalidate(helpers, key), { discard: true });
+    const skillsResponse = yield* RcMap.get(helpers, launch).pipe(
+      Effect.flatMap((client) => client.request("skills/list", { cwds: [cwd], forceReload: true })),
+      Effect.scoped,
+      // RcMap keeps a failed spawn, and a dead helper keeps failing; drop it so the retry respawns.
+      Effect.onError(() => RcMap.invalidate(helpers, launch)),
+      Effect.retry({ times: 1 }),
+    );
+    return parseCodexSkillsListResponse(skillsResponse, cwd);
+  });
 });
 
 const emptyCodexModelsFromSettings = (codexSettings: CodexSettings): ServerProvider["models"] =>
@@ -968,9 +1100,6 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     });
   }
 
-  // Preserve the selected backend across failure handling; a failed native probe
-  // must not trigger a second process through the original implementation.
-  const nativeRuntimeSelected = (yield* selectCodexAppServerExecutable()) !== undefined;
   const probeTimeoutMs = resolveProviderProbeTimeoutMs(
     "codex",
     CODEX_AUTH_PROBE_TIMEOUT_MS,
@@ -994,16 +1123,17 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   if (Result.isFailure(probeResult)) {
     const error = probeResult.failure;
     const configurationFailed = isCodexAppServerProcessConfigurationError(error);
-    const installed = !isCodexAppServerSpawnError(error) && !configurationFailed;
-    const version =
-      installed && !nativeRuntimeSelected
-        ? yield* probeCodexCliVersion({
-            binaryPath: codexSettings.binaryPath,
-            homePath: codexSettings.homePath,
-            cwd: process.cwd(),
-            environment: resolvedEnvironment,
-          })
-        : null;
+    const started = !isCodexAppServerSpawnError(error) && !configurationFailed;
+    // Read the version of older CLIs whose app-server probe already ended.
+    const cli = started
+      ? yield* probeCodexCliVersion({
+          binaryPath: codexSettings.binaryPath,
+          homePath: codexSettings.homePath,
+          cwd: process.cwd(),
+          environment: resolvedEnvironment,
+        })
+      : unknownCliVersion;
+    const installed = started && !cli.missing;
     return buildServerProvider({
       presentation: CODEX_PRESENTATION,
       enabled: codexSettings.enabled,
@@ -1012,7 +1142,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       skills: [],
       probe: {
         installed,
-        version,
+        version: cli.version,
         status: "error",
         auth: { status: "unknown" },
         message: configurationFailed
@@ -1099,7 +1229,9 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
       installed: true,
       version: snapshot.version ?? null,
       status: snapshot.models === undefined ? "warning" : accountStatus.status,
-      auth: accountStatus.auth,
+      auth: snapshot.endpoint
+        ? { ...accountStatus.auth, endpoint: snapshot.endpoint }
+        : accountStatus.auth,
       ...(accountStatus.message
         ? { message: accountStatus.message }
         : snapshot.models === undefined

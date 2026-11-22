@@ -50,13 +50,7 @@ impl OwnerLock {
             .map_err(|_| Error::Database("ownership lock unavailable".into()))?;
         // Pinned omdb uses F_OFD_SETLK on Linux/Apple and LockFileEx on Windows.
         // Cover pending, reserved, and all shared bytes; these conflict with SQLite's fcntl/LockFileEx locks.
-        if !file
-            .try_lock_range(
-                Bound::Included(SQLITE_PENDING_BYTE),
-                Bound::Excluded(SQLITE_PENDING_BYTE + 512),
-            )
-            .map_err(|_| Error::Database("ownership byte-range lock unsupported".into()))?
-        {
+        if !try_lock(&file)? {
             return Err(Error::WriterBusy);
         }
         let current = same_file::Handle::from_path(path).map_err(|_| Error::IncompatibleStore)?;
@@ -69,6 +63,20 @@ impl OwnerLock {
             replaced_during_acquire,
         })
     }
+    pub fn held(path: &Path) -> Result<bool> {
+        if !path.is_absolute() {
+            return Err(Error::Invalid("ownership path must be absolute".into()));
+        }
+        let existing = match OpenOptions::new().read(true).write(true).open(path) {
+            Ok(existing) => existing,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(_) => return Err(Error::Database("ownership lock unavailable".into())),
+        };
+        let file = redb::backends::FileBackend::new(existing)
+            .map_err(|_| Error::Database("ownership lock unavailable".into()))?;
+        Ok(!try_lock(&file)?)
+    }
+
     pub fn owned(&self) -> Result<bool> {
         match same_file::Handle::from_path(&self.path) {
             Ok(identity) => Ok(identity == self.identity),
@@ -121,11 +129,20 @@ impl OwnerLock {
     }
 }
 
+fn try_lock(file: &redb::backends::FileBackend) -> Result<bool> {
+    file.try_lock_range(
+        Bound::Included(SQLITE_PENDING_BYTE),
+        Bound::Excluded(SQLITE_PENDING_BYTE + 512),
+    )
+    .map_err(|_| Error::Database("ownership byte-range lock unsupported".into()))
+}
+
 #[derive(Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
     OwnerAcquire,
     OwnerCheck,
+    OwnerProbe,
     OwnerActivate,
 }
 
@@ -161,6 +178,7 @@ pub fn run(path: &Path) -> io::Result<()> {
                     let result=json!({"owned":acquired.owned()?,"replaced_during_acquire":acquired.replaced_during_acquire});
                     owner=Some(acquired); Ok(result)
                 },
+                Request::OwnerProbe=>Ok(json!({"owned":OwnerLock::held(path)?})),
                 Request::OwnerCheck=>Ok(json!({"owned":owner.as_ref().ok_or_else(||Error::Invalid("ownership not acquired".into()))?.owned()?})),
                 Request::OwnerActivate=>{
                     owner.as_ref().ok_or_else(||Error::Invalid("ownership not acquired".into()))?.activate_native()?;
@@ -174,5 +192,30 @@ pub fn run(path: &Path) -> io::Result<()> {
         if count > 4096 {
             return Ok(());
         }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn probes_existing_lock_without_creating_or_updating_the_file() {
+        let fixture = tempfile::tempdir().unwrap();
+        let path = fixture.path().join("server-owner.sqlite");
+        assert!(!OwnerLock::held(&path).unwrap());
+        assert!(!path.exists());
+
+        let owner = OwnerLock::acquire(&path).unwrap();
+        owner.activate_native().unwrap();
+        let before = std::fs::read(&path).unwrap();
+        assert!(OwnerLock::held(&path).unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+
+        drop(owner);
+        assert!(!OwnerLock::held(&path).unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let owner = OwnerLock::acquire(&path).unwrap();
+        assert!(owner.owned().unwrap());
     }
 }

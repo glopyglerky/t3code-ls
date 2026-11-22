@@ -40,6 +40,7 @@ pub struct PositionAllocate {
     pub run_id: Option<String>,
     pub run_ordinal: Option<i64>,
     pub placement: Option<PositionPlacement>,
+    pub keep_existing: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -184,6 +185,64 @@ async fn index_position(
         .await?;
     }
     Ok(())
+}
+
+async fn remove_position_index(
+    tx: &mut Transaction,
+    catalog: &ApplicationCatalog,
+    previous: &Position,
+) -> Result<()> {
+    let encoded = ordinal_key(catalog, &previous.thread_id, previous.ordinal);
+    let stored: Position = decode(&tx.get(&encoded).await?.ok_or(Error::IncompatibleStore)?)?;
+    if stored != *previous {
+        return Err(Error::IncompatibleStore);
+    }
+    tx.delete(encoded).await?;
+    let bucket = previous.ordinal.div_euclid(RUN_RANGE);
+    if maximum(tx, catalog, &previous.thread_id, bucket)
+        .await?
+        .as_ref()
+        != Some(previous)
+    {
+        return Ok(());
+    }
+    let prefix = key(
+        catalog,
+        &format!("ordinal/{}/", request_digest(&json!([previous.thread_id]))),
+    );
+    let mut end = prefix.clone();
+    end.push(255);
+    let mut cursor = prefix;
+    let mut greatest: Option<Position> = None;
+    loop {
+        let page = tx.scan(&cursor, &end, 128).await?;
+        let count = page.len();
+        for (encoded, bytes) in page {
+            let candidate: Position = decode(&bytes)?;
+            if candidate.thread_id != previous.thread_id
+                || ordinal_key(catalog, &candidate.thread_id, candidate.ordinal) != encoded
+            {
+                return Err(Error::IncompatibleStore);
+            }
+            if candidate.ordinal.div_euclid(RUN_RANGE) == bucket
+                && greatest
+                    .as_ref()
+                    .is_none_or(|old| old.ordinal < candidate.ordinal)
+            {
+                greatest = Some(candidate);
+            }
+            cursor = encoded;
+            cursor.push(0);
+        }
+        if count < 128 {
+            break;
+        }
+    }
+    let encoded = maximum_key(catalog, &previous.thread_id, bucket);
+    match greatest {
+        Some(position) => tx.put(encoded, encode(&position)?).await,
+        None => tx.delete(encoded).await.map(|_| ()),
+    }
 }
 
 async fn ready(session: &mut Session) -> Result<()> {
@@ -370,16 +429,19 @@ impl ApplicationTransactions {
         let result = async {
             session.transaction.require_write()?;
             ready(&mut session).await?;
-            // Repeated streaming updates keep their first position, even after their run changes.
-            if let Some(row) = read_row(
+            let existing = read_row(
                 &mut session.transaction,
                 &session.catalog,
                 POSITIONS,
                 &[text_cell(&input.thread_id), text_cell(&input.turn_item_id)],
             )
             .await?
-            {
-                return Ok(Position::from_row(&row.row)?.ordinal);
+            .map(|row| Position::from_row(&row.row))
+            .transpose()?;
+            if input.keep_existing == Some(true) {
+                if let Some(current) = &existing {
+                    return Ok(current.ordinal);
+                }
             }
             if input
                 .run_ordinal
@@ -413,6 +475,14 @@ impl ApplicationTransactions {
             let lower = bucket
                 .checked_mul(RUN_RANGE)
                 .ok_or_else(|| invalid("turn-item ordinal exceeds integer range"))?;
+            if let Some(current) = &existing {
+                if input.keep_existing == Some(true)
+                    || run_ordinal.is_none()
+                    || (current.ordinal >= lower && current.ordinal <= lower + RUN_RANGE - 1)
+                {
+                    return Ok(current.ordinal);
+                }
+            }
             // Integer run ordinals make each SQL range exactly one disjoint million-item bucket.
             // The maximum cache includes imported rows and every allocation in this transaction.
             let previous = maximum(
@@ -438,7 +508,8 @@ impl ApplicationTransactions {
             } else {
                 lower
             };
-            let first_slot_unused = matches!(input.placement, Some(PositionPlacement::RunStart))
+            let first_slot_unused = existing.is_none()
+                && matches!(input.placement, Some(PositionPlacement::RunStart))
                 && session
                     .transaction
                     .get(&ordinal_key(&session.catalog, &input.thread_id, lower))
@@ -462,6 +533,10 @@ impl ApplicationTransactions {
             };
             // Deliberately retain SQL's range overflow behavior; the next ordinal's uniqueness
             // decides whether a full bucket may allocate its first position in the next range.
+            if let Some(previous) = existing {
+                remove_position_index(&mut session.transaction, &session.catalog, &previous)
+                    .await?;
+            }
             index_position(&mut session.transaction, &session.catalog, &position).await?;
             write_row(
                 &mut session.transaction,

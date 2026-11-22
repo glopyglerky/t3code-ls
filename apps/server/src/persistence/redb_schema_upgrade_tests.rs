@@ -6,6 +6,266 @@ use crate::test_support::TestFixture;
 const NOW: &str = "2026-11-13T00:00:00.000Z";
 const QUOTE: &str = "[Assistant quote](t3-citation://v1/env/thread/message?text=searchable+quoted+words&start=0&end=22&prefix=&suffix=&comment=review+this)";
 
+async fn assert_count_groups_ready(
+    tx: &mut Transaction,
+    catalog: &ApplicationCatalog,
+    run_count: i64,
+) {
+    use crate::application_turn_item_counts as counts;
+    crate::application_projections::validate_item_owner(tx, catalog)
+        .await
+        .unwrap();
+    counts::ensure_ready(tx, catalog).await.unwrap();
+    assert_eq!(
+        counts::expected_groups(tx, catalog, "thread")
+            .await
+            .unwrap(),
+        2
+    );
+    let page = counts::read_page(tx, catalog, "thread", None)
+        .await
+        .unwrap();
+    assert!(page.after.is_none());
+    let rows: std::collections::BTreeMap<_, _> = page
+        .rows
+        .into_iter()
+        .map(|row| (row.run_key, row.item_count))
+        .collect();
+    assert_eq!(
+        rows,
+        std::collections::BTreeMap::from([("".into(), 1), ("run".into(), run_count)])
+    );
+}
+
+async fn seed_legacy_projection_preparation(store: &Store, catalog: &ApplicationCatalog) {
+    let mut tx = store.db.begin().await.unwrap();
+    let names: Vec<_> = catalog
+        .schema
+        .tables
+        .iter()
+        .filter(|table| {
+            table.name.starts_with("orchestration_v2_projection_")
+                && table.name != crate::application_turn_item_counts::TABLE
+        })
+        .map(|table| &table.name)
+        .collect();
+    assert_eq!(names.len(), 18);
+    for name in names {
+        tx.put(
+            managed_marker(catalog, name),
+            encode(&"projection-commit-v1").unwrap(),
+        )
+        .await
+        .unwrap();
+    }
+    for (suffix, value) in [
+        (
+            "preparation",
+            json!({"version":1,"table_index":0,"after":null,"indexed_rows":0,"ready":false}),
+        ),
+        ("search-dirty", json!({"revision":0,"last_sequence":0})),
+    ] {
+        tx.put(
+            store_key(&format!(
+                "application/generation/{}/projections/v1/{suffix}",
+                catalog.generation
+            )),
+            encode(&value).unwrap(),
+        )
+        .await
+        .unwrap();
+    }
+    tx.commit().await.unwrap();
+}
+
+#[tokio::test]
+async fn staged_owner_claim_distinguishes_new_schema_80_count_table_from_missing_later_owner() {
+    for previous in [80, 88, 89] {
+        let (fixture, store, original) = fixture_80().await;
+        if previous == 80 {
+            seed_legacy_projection_preparation(&store, &original).await;
+        }
+        store.shutdown().await.unwrap();
+        let store = Store::open_exclusive(fixture.path()).await.unwrap();
+        if previous != 80 {
+            let current = if previous == 88 {
+                definition_88().unwrap()
+            } else {
+                definition_89().unwrap()
+            };
+            store
+                .upgrade_application_80(original, current)
+                .await
+                .unwrap();
+        }
+        let source = decode_catalog(&store.db.read(&schema_key()).await.unwrap().unwrap()).unwrap();
+        if previous != 80 {
+            let mut tx = store.db.begin().await.unwrap();
+            tx.delete(managed_marker(
+                &source,
+                crate::application_turn_item_counts::TABLE,
+            ))
+            .await
+            .unwrap();
+            tx.commit().await.unwrap();
+        }
+        let before = generation_bytes(&store, &source).await;
+        if previous == 80 {
+            store.bootstrap_application().await.unwrap();
+            let mut tx = store.db.begin_read_only().await.unwrap();
+            let target = decode_catalog(&tx.get(&schema_key()).await.unwrap().unwrap()).unwrap();
+            assert_count_groups_ready(&mut tx, &target, 2).await;
+            tx.rollback().await.unwrap();
+        } else {
+            assert!(matches!(
+                store.bootstrap_application().await,
+                Err(Error::IncompatibleStore)
+            ));
+            assert_eq!(
+                decode_catalog(&store.db.read(&schema_key()).await.unwrap().unwrap()).unwrap(),
+                source
+            );
+        }
+        assert_eq!(generation_bytes(&store, &source).await, before);
+        store.shutdown().await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn interrupted_schema_93_publication_requires_exact_lineage_before_claiming_owners() {
+    let (fixture, store, source) = fixture_80().await;
+    store.shutdown().await.unwrap();
+    let store = Store::open_exclusive(fixture.path()).await.unwrap();
+    store.bootstrap_application().await.unwrap();
+    let target = decode_catalog(&store.db.read(&schema_key()).await.unwrap().unwrap()).unwrap();
+    let mut tx = store.db.begin().await.unwrap();
+    for namespace in ["projections/v1/", "projection-shell-counts/v1/"] {
+        let prefix = store_key(&format!(
+            "application/generation/{}/{namespace}",
+            target.generation
+        ));
+        let mut after = prefix.clone();
+        loop {
+            let rows = tx.scan(&after, &end(&prefix), 128).await.unwrap();
+            let count = rows.len();
+            for (key, _) in rows {
+                tx.delete(key.clone()).await.unwrap();
+                after = key;
+                after.push(0);
+            }
+            if count < 128 {
+                break;
+            }
+        }
+    }
+    for table in &target.schema.tables {
+        if table.name.starts_with("orchestration_v2_projection_")
+            && table.name != crate::application_turn_item_counts::TABLE
+        {
+            tx.delete(managed_marker(&target, &table.name))
+                .await
+                .unwrap();
+        }
+    }
+    tx.commit().await.unwrap();
+    let lineage_key = lineage_93_key(&schema_93_source(&store, &target).await);
+    let lineage = store.db.read(&lineage_key).await.unwrap().unwrap();
+    let target_history =
+        row_key(&target.generation, "effect_sql_migrations", &[int_cell(93)]).unwrap();
+    let source_history =
+        row_key(&source.generation, "effect_sql_migrations", &[int_cell(80)]).unwrap();
+    let count_marker = managed_marker(&target, crate::application_turn_item_counts::TABLE);
+    for case in [
+        "version",
+        "generation",
+        "same-generation",
+        "missing-lineage",
+        "target-history",
+        "source-history",
+        "foreign-owner",
+    ] {
+        let key = match case {
+            "target-history" => target_history.clone(),
+            "source-history" => source_history.clone(),
+            "foreign-owner" => count_marker.clone(),
+            _ => lineage_key.clone(),
+        };
+        let before = store.db.read(&key).await.unwrap().unwrap();
+        let mut tx = store.db.begin().await.unwrap();
+        match case {
+            "version" | "generation" | "same-generation" => {
+                let mut altered: Value = serde_json::from_slice(&lineage).unwrap();
+                match case {
+                    "version" => altered["version"] = json!(2),
+                    "generation" => altered["source"]["generation"] = json!("unrelated"),
+                    _ => altered["source"]["generation"] = json!(target.generation),
+                }
+                tx.put(key.clone(), encode(&altered).unwrap())
+                    .await
+                    .unwrap();
+            }
+            "missing-lineage" => {
+                tx.delete(key.clone()).await.unwrap();
+            }
+            "foreign-owner" => tx
+                .put(key.clone(), encode(&"foreign").unwrap())
+                .await
+                .unwrap(),
+            _ => {
+                let mut altered: Value = serde_json::from_slice(&before).unwrap();
+                altered["row"]["name"] = text_cell("UnknownMigration");
+                tx.put(key.clone(), encode(&altered).unwrap())
+                    .await
+                    .unwrap();
+            }
+        }
+        tx.commit().await.unwrap();
+        assert!(
+            matches!(
+                store.prepare_application_projections().await,
+                Err(Error::IncompatibleStore)
+            ),
+            "{case}"
+        );
+        assert!(
+            store
+                .db
+                .read(&managed_marker(&target, ITEMS))
+                .await
+                .unwrap()
+                .is_none(),
+            "{case}"
+        );
+        assert!(
+            store
+                .db
+                .read(&store_key(&format!(
+                    "application/generation/{}/projections/v1/preparation",
+                    target.generation
+                )))
+                .await
+                .unwrap()
+                .is_none(),
+            "{case}"
+        );
+        let mut tx = store.db.begin().await.unwrap();
+        tx.put(key, before).await.unwrap();
+        tx.commit().await.unwrap();
+    }
+    let before_source = generation_bytes(&store, &source).await;
+    while !store
+        .prepare_application_projection_reads()
+        .await
+        .unwrap()
+        .prepared
+    {}
+    let mut tx = store.db.begin_read_only().await.unwrap();
+    assert_count_groups_ready(&mut tx, &target, 2).await;
+    tx.rollback().await.unwrap();
+    assert_eq!(generation_bytes(&store, &source).await, before_source);
+    store.shutdown().await.unwrap();
+}
+
 async fn fixture_80() -> (TestFixture, Store, ApplicationCatalog) {
     let fixture = TestFixture::start().await;
     let store = fixture.initialize().await;
@@ -180,7 +440,7 @@ async fn populated_80_upgrade_is_exclusive_atomic_and_preserves_original_rows() 
             .unwrap()
             .migrations
             .len(),
-        89
+        107
     );
     let mut tx = store.db.begin_read_only().await.unwrap();
     let target = decode_catalog(&tx.get(&schema_key()).await.unwrap().unwrap()).unwrap();
@@ -222,11 +482,12 @@ async fn populated_80_upgrade_is_exclusive_atomic_and_preserves_original_rows() 
         .unwrap();
         assert_eq!(integer(&count.row, "item_count").unwrap(), expected);
     }
+    assert_count_groups_ready(&mut tx, &target, 2).await;
     tx.rollback().await.unwrap();
     assert!(!store.bootstrap_application().await.unwrap().initialized);
     store.shutdown().await.unwrap();
     let reopened = fixture.connect().await;
-    assert_eq!(reopened.application_migrations().await.unwrap().len(), 89);
+    assert_eq!(reopened.application_migrations().await.unwrap().len(), 107);
     assert!(!reopened.bootstrap_application().await.unwrap().initialized);
     reopened.shutdown().await.unwrap();
 }
@@ -236,15 +497,8 @@ async fn interrupted_staging_retries_from_current_source_and_removes_stale_candi
     let (fixture, store, source) = fixture_80().await;
     store.shutdown().await.unwrap();
     let store = Store::open_exclusive(fixture.path()).await.unwrap();
-    let current = definition().unwrap();
-    let target = ApplicationCatalog {
-        generation: request_digest(&json!([
-            "native-schema-upgrade",
-            source.generation,
-            current.schema
-        ])),
-        schema: current.schema,
-    };
+    let current = definition_93().unwrap();
+    let target = target_93(&source, &current);
     store
         .upgrade_stage(&source, &target, Stage::Copy)
         .await
@@ -298,8 +552,128 @@ async fn interrupted_staging_retries_from_current_source_and_removes_stale_candi
     .unwrap()
     .unwrap();
     assert_eq!(integer(&count.row, "item_count").unwrap(), 1);
+    assert_count_groups_ready(&mut tx, &target, 1).await;
     tx.rollback().await.unwrap();
     store.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn migration_85_rejects_null_empty_group_collisions_without_publishing_or_repairing_source() {
+    for case in ["null-only", "empty-only", "collision"] {
+        let (fixture, store, source) = fixture_80().await;
+        let mut tx = store.db.begin().await.unwrap();
+        let template = read_row(&mut tx, &source, ITEMS, &[text_cell("item-1")])
+            .await
+            .unwrap()
+            .unwrap()
+            .row;
+        for index in 1..=3 {
+            crate::application_rows::delete_row(
+                &mut tx,
+                &source,
+                ITEMS,
+                &[text_cell(&format!("item-{index}"))],
+            )
+            .await
+            .unwrap();
+        }
+        let count = if case == "collision" { 65 } else { 3 };
+        let ids: Vec<_> = (0..count)
+            .map(|index| format!("count-origin-{index:03}"))
+            .collect();
+        // Put the conflicting empty cell after two committed bounded count
+        // batches, so detection must use the persisted staging witness.
+        let last = ids
+            .iter()
+            .max_by_key(|id| row_key(&source.generation, ITEMS, &[text_cell(id)]).unwrap())
+            .unwrap()
+            .clone();
+        for (index, id) in ids.iter().enumerate() {
+            let mut item = template.clone();
+            let run = (case == "empty-only" || (case == "collision" && *id == last)).then_some("");
+            item.insert("turn_item_id".into(), text_cell(id));
+            item.insert("run_id".into(), nullable_cell(run));
+            item.insert("ordinal".into(), int_cell(index as i64 + 1));
+            item.insert(
+                "payload_json".into(),
+                text_cell(
+                    &json!({"id":id,"threadId":"thread","runId":run,"text":"output"}).to_string(),
+                ),
+            );
+            write_row(&mut tx, &source, ITEMS, item).await.unwrap();
+        }
+        tx.commit().await.unwrap();
+        let original = generation_bytes(&store, &source).await;
+        store.shutdown().await.unwrap();
+        let store = Store::open_exclusive(fixture.path()).await.unwrap();
+        if case == "collision" {
+            for _ in 0..2 {
+                assert!(matches!(
+                    store.bootstrap_application().await,
+                    Err(Error::IncompatibleStore)
+                ));
+                let active =
+                    decode_catalog(&store.db.read(&schema_key()).await.unwrap().unwrap()).unwrap();
+                assert_eq!(active, source);
+                assert_eq!(store.application_migrations().await.unwrap().len(), 80);
+                assert_eq!(generation_bytes(&store, &source).await, original);
+            }
+            // A corrected original source must be recopied from scratch, not
+            // combined with the failed candidate's previously committed groups.
+            let mut tx = store.db.begin().await.unwrap();
+            let mut item = read_row(&mut tx, &source, ITEMS, &[text_cell(&last)])
+                .await
+                .unwrap()
+                .unwrap()
+                .row;
+            item.insert("run_id".into(), nullable_cell(None));
+            item.insert(
+                "payload_json".into(),
+                text_cell(
+                    &json!({"id":last,"threadId":"thread","runId":null,"text":"output"})
+                        .to_string(),
+                ),
+            );
+            write_row(&mut tx, &source, ITEMS, item).await.unwrap();
+            tx.commit().await.unwrap();
+        }
+        let source_before_success = generation_bytes(&store, &source).await;
+        store.bootstrap_application().await.unwrap();
+        assert_eq!(
+            generation_bytes(&store, &source).await,
+            source_before_success
+        );
+        let mut tx = store.db.begin_read_only().await.unwrap();
+        let target = decode_catalog(&tx.get(&schema_key()).await.unwrap().unwrap()).unwrap();
+        crate::application_turn_item_counts::ensure_ready(&mut tx, &target)
+            .await
+            .unwrap();
+        assert_eq!(
+            crate::application_turn_item_counts::expected_groups(&mut tx, &target, "thread")
+                .await
+                .unwrap(),
+            1
+        );
+        let page = crate::application_turn_item_counts::read_page(&mut tx, &target, "thread", None)
+            .await
+            .unwrap();
+        assert_eq!(page.rows.len(), 1);
+        assert_eq!(page.rows[0].run_key, "");
+        assert_eq!(page.rows[0].item_count, count as i64);
+        assert!(page.after.is_none());
+        let origin_prefix = store_key(&format!(
+            "application/generation/{}/upgrade-count-origins/v1/",
+            target.generation
+        ));
+        assert!(
+            tx.scan(&origin_prefix, &end(&origin_prefix), 1)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        tx.rollback().await.unwrap();
+        store.shutdown().await.unwrap();
+    }
 }
 
 #[tokio::test]
@@ -450,7 +824,16 @@ async fn imported_upgrade_retains_receipt_and_requires_exact_durable_lineage_on_
         .unwrap();
     assert_eq!(replayed, receipt);
     let target = decode_catalog(&store.db.read(&schema_key()).await.unwrap().unwrap()).unwrap();
-    let key = lineage_key(&target);
+    let chain: ImportLineage = serde_json::from_slice(
+        &store
+            .db
+            .read(&lineage_93_key(&schema_93_source(&store, &target).await))
+            .await
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    let key = lineage_key(&chain.source);
     let original = store.db.read(&key).await.unwrap().unwrap();
     let mut changed: Value = serde_json::from_slice(&original).unwrap();
     changed["source"]["generation"] = json!("unrelated");
@@ -480,7 +863,7 @@ async fn imported_upgrade_retains_receipt_and_requires_exact_durable_lineage_on_
     tx.put(key, original).await.unwrap();
     tx.commit().await.unwrap();
     assert_eq!(store.application_import().await.unwrap().unwrap(), receipt);
-    assert_eq!(store.application_migrations().await.unwrap().len(), 89);
+    assert_eq!(store.application_migrations().await.unwrap().len(), 107);
     store.shutdown().await.unwrap();
 }
 
@@ -606,10 +989,9 @@ async fn replace_thread(app: &mut ApplicationTransactions, transaction: &str, pa
 }
 
 #[tokio::test]
-async fn index_only_88_upgrade_rebuilds_after_interruption_preserves_counts_and_supports_live_writes()
- {
+async fn schema_88_upgrade_rebuilds_after_interruption_preserves_counts_and_supports_live_writes() {
     let (fixture, store, source) = fixture_88().await;
-    let current = definition().unwrap();
+    let current = definition_89().unwrap();
     let target = target_89(&source, &current);
     assert_ne!(source.generation, target.generation);
     assert!(
@@ -661,11 +1043,23 @@ async fn index_only_88_upgrade_rebuilds_after_interruption_preserves_counts_and_
             .unwrap()
             .migrations
             .len(),
-        89
+        107
     );
     assert_eq!(generation_bytes(&store, &source).await, before);
     let active = decode_catalog(&store.db.read(&schema_key()).await.unwrap().unwrap()).unwrap();
-    assert_eq!(active, target);
+    assert_eq!(
+        active,
+        target_latest_from_105(
+            &target_105(
+                &target_94(
+                    &target_93(&target, &definition_93().unwrap()),
+                    &definition_94().unwrap(),
+                ),
+                &definition_105().unwrap(),
+            ),
+            &definition().unwrap(),
+        )
+    );
     let mut tx = store.db.begin_read_only().await.unwrap();
     for (run, expected) in [("run", 2), ("", 1)] {
         let count = read_row(
@@ -679,6 +1073,7 @@ async fn index_only_88_upgrade_rebuilds_after_interruption_preserves_counts_and_
         .unwrap();
         assert_eq!(integer(&count.row, "item_count").unwrap(), expected);
     }
+    assert_count_groups_ready(&mut tx, &active, 2).await;
     tx.rollback().await.unwrap();
 
     let mut app = ApplicationTransactions::new(store.clone());
@@ -743,8 +1138,10 @@ async fn index_only_88_upgrade_rebuilds_after_interruption_preserves_counts_and_
 }
 
 #[tokio::test]
-async fn direct_88_import_and_80_88_89_chain_retain_the_original_receipt_and_exact_lineage() {
-    for original_version in [80, 88] {
+async fn direct_imports_and_historical_upgrade_chains_retain_original_receipts_and_exact_lineage() {
+    for (original_version, intermediate_version) in
+        [(80, 88), (80, 89), (88, 88), (88, 89), (89, 89)]
+    {
         let fixture = TestFixture::start().await;
         let store = fixture.initialize().await;
         let archive = fixture.path().with_extension("original.ndjson");
@@ -752,8 +1149,10 @@ async fn direct_88_import_and_80_88_89_chain_retain_the_original_receipt_and_exa
             &archive,
             if original_version == 80 {
                 previous_definition().unwrap()
-            } else {
+            } else if original_version == 88 {
                 definition_88().unwrap()
+            } else {
+                definition_89().unwrap()
             },
         );
         let original_archive = std::fs::read(&archive).unwrap();
@@ -770,10 +1169,27 @@ async fn direct_88_import_and_80_88_89_chain_retain_the_original_receipt_and_exa
         let store = Store::open_exclusive(fixture.path()).await.unwrap();
         if original_version == 80 {
             store
-                .upgrade_application_80(original.clone(), definition_88().unwrap())
+                .upgrade_application_80(
+                    original.clone(),
+                    if intermediate_version == 88 {
+                        definition_88().unwrap()
+                    } else {
+                        definition_89().unwrap()
+                    },
+                )
                 .await
                 .unwrap();
             // Read-only startup inspects this old receipt before requesting89.
+            assert_eq!(
+                store.application_import().await.unwrap().unwrap().summary,
+                imported.summary
+            );
+        }
+        if original_version == 88 && intermediate_version == 89 {
+            store
+                .upgrade_application_88(original.clone(), definition_89().unwrap())
+                .await
+                .unwrap();
             assert_eq!(
                 store.application_import().await.unwrap().unwrap().summary,
                 imported.summary
@@ -784,7 +1200,25 @@ async fn direct_88_import_and_80_88_89_chain_retain_the_original_receipt_and_exa
         let intermediate_rows = generation_bytes(&store, &intermediate).await;
         store.bootstrap_application().await.unwrap();
         let active = decode_catalog(&store.db.read(&schema_key()).await.unwrap().unwrap()).unwrap();
-        assert_eq!(active, target_89(&intermediate, &definition().unwrap()));
+        let retained_89 = if intermediate_version == 88 {
+            target_89(&intermediate, &definition_89().unwrap())
+        } else {
+            intermediate.clone()
+        };
+        assert_eq!(
+            active,
+            target_latest_from_105(
+                &target_105(
+                    &target_94(
+                        &target_93(&retained_89, &definition_93().unwrap()),
+                        &definition_94().unwrap(),
+                    ),
+                    &definition_105().unwrap(),
+                ),
+                &definition().unwrap(),
+            ),
+            "historical path {original_version} -> {intermediate_version} -> 93 -> 94 -> 105 -> 106 -> 107"
+        );
         assert_eq!(generation_bytes(&store, &original).await, original_rows);
         assert_eq!(
             generation_bytes(&store, &intermediate).await,
@@ -798,7 +1232,7 @@ async fn direct_88_import_and_80_88_89_chain_retain_the_original_receipt_and_exa
         let receipt = store.application_import().await.unwrap().unwrap();
         assert_eq!(receipt.generation, imported.generation);
         assert_eq!(receipt.summary, imported.summary);
-        let key = lineage_89_key(&active);
+        let key = lineage_93_key(&schema_93_source(&store, &active).await);
         let good = store.db.read(&key).await.unwrap().unwrap();
         let mut wrong: Value = serde_json::from_slice(&good).unwrap();
         wrong["source"]["generation"] = json!("unrelated");
@@ -891,4 +1325,196 @@ async fn exact_88_history_is_required_and_read_only_future_or_damaged_histories_
         );
         store.shutdown().await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn schema_89_to_93_retries_from_source_and_preserves_authentication_rows() {
+    let (fixture, store, original) = fixture_80().await;
+    store.shutdown().await.unwrap();
+    let store = Store::open_exclusive(fixture.path()).await.unwrap();
+    store
+        .upgrade_application_80(original, definition_89().unwrap())
+        .await
+        .unwrap();
+    let mut tx = store.db.begin().await.unwrap();
+    let source = decode_catalog(&tx.get(&schema_key()).await.unwrap().unwrap()).unwrap();
+    let mut row: Map<String, Value> = table(&source, "auth_sessions")
+        .unwrap()
+        .columns
+        .iter()
+        .map(|column| (column.clone(), nullable_cell(None)))
+        .collect();
+    for (column, value) in [
+        ("session_id", "kept"),
+        ("subject", "owner"),
+        ("scopes", "[]"),
+        ("method", "one-time-token"),
+        ("client_device_type", "phone"),
+        ("issued_at", "2026"),
+        ("expires_at", "2030"),
+    ] {
+        row.insert(column.into(), text_cell(value));
+    }
+    write_row(&mut tx, &source, "auth_sessions", row.clone())
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let current = definition_93().unwrap();
+    let target = target_93(&source, &current);
+    // Simulate cancellation after a partially transformed candidate.
+    for stage in [Stage::Clear, Stage::Copy, Stage::AuthSessions] {
+        store.upgrade_stage(&source, &target, stage).await.unwrap();
+    }
+    let mut tx = store.db.begin().await.unwrap();
+    row.insert("subject".into(), text_cell("newer-source-write"));
+    write_row(&mut tx, &source, "auth_sessions", row)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    assert!(!store.bootstrap_application().await.unwrap().initialized);
+    assert_eq!(store.application_migrations().await.unwrap().len(), 107);
+    let mut tx = store.db.begin().await.unwrap();
+    let active = decode_catalog(&tx.get(&schema_key()).await.unwrap().unwrap()).unwrap();
+    assert_eq!(
+        active,
+        target_latest_from_105(
+            &target_105(
+                &target_94(&target, &definition_94().unwrap()),
+                &definition_105().unwrap(),
+            ),
+            &definition().unwrap(),
+        )
+    );
+    let kept = read_row(&mut tx, &active, "auth_sessions", &[text_cell("kept")])
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(text(&kept.row, "subject").unwrap(), "newer-source-write");
+    assert_eq!(nullable(&kept.row, "proof_key_thumbprint").unwrap(), None);
+    let old = read_row(&mut tx, &source, "auth_sessions", &[text_cell("kept")])
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!old.row.contains_key("proof_key_thumbprint"));
+    tx.rollback().await.unwrap();
+    while !store.prepare_application_auth().await.unwrap().prepared {}
+    assert!(!store.bootstrap_application().await.unwrap().initialized);
+}
+
+fn target_latest_from_105(source: &ApplicationCatalog, current: &Definition) -> ApplicationCatalog {
+    target_107(&target_106(source, &definition_106().unwrap()), current)
+}
+
+// Historical 93 lineage must be checked in its retained source generation;
+// copying its bytes into the new 94 generation does not establish ownership.
+async fn schema_93_source(store: &Store, active: &ApplicationCatalog) -> ApplicationCatalog {
+    let stage_106 = if let Some(bytes) = store.db.read(&lineage_107_key(active)).await.unwrap() {
+        serde_json::from_slice::<ImportLineage>(&bytes)
+            .unwrap()
+            .source
+    } else {
+        active.clone()
+    };
+    let stage_105 = if let Some(bytes) = store.db.read(&lineage_106_key(&stage_106)).await.unwrap()
+    {
+        serde_json::from_slice::<ImportLineage>(&bytes)
+            .unwrap()
+            .source
+    } else {
+        stage_106
+    };
+    let stage_94 = if let Some(bytes) = store.db.read(&lineage_105_key(&stage_105)).await.unwrap() {
+        serde_json::from_slice::<ImportLineage>(&bytes)
+            .unwrap()
+            .source
+    } else {
+        stage_105
+    };
+    let bytes = store
+        .db
+        .read(&lineage_94_key(&stage_94))
+        .await
+        .unwrap()
+        .unwrap();
+    serde_json::from_slice::<ImportLineage>(&bytes)
+        .unwrap()
+        .source
+}
+
+#[tokio::test]
+async fn schema_93_index_only_upgrade_retries_current_source_and_preserves_lineage_and_counts() {
+    let (fixture, store, original) = fixture_80().await;
+    store.shutdown().await.unwrap();
+    let store = Store::open_exclusive(fixture.path()).await.unwrap();
+    store
+        .upgrade_application_93(original.clone(), definition_93().unwrap())
+        .await
+        .unwrap();
+    let source = decode_catalog(&store.db.read(&schema_key()).await.unwrap().unwrap()).unwrap();
+    assert_eq!(
+        store.application_migrations().await.unwrap(),
+        definition_93().unwrap().migrations
+    );
+    let schema_94 = definition_94().unwrap();
+    assert_eq!(schema_94.schema, definition_93().unwrap().schema);
+    let target = target_94(&source, &schema_94);
+    let current = definition().unwrap();
+    for stage in [Stage::Clear, Stage::Copy] {
+        store.upgrade_stage(&source, &target, stage).await.unwrap();
+    }
+    assert_eq!(store.application_migrations().await.unwrap().len(), 93);
+    let mut tx = store.db.begin().await.unwrap();
+    let mut row = read_row(&mut tx, &source, PROJECTS, &[text_cell("project")])
+        .await
+        .unwrap()
+        .unwrap()
+        .row;
+    row.insert("title".into(), text_cell("newer schema 93 native write"));
+    write_row(&mut tx, &source, PROJECTS, row).await.unwrap();
+    tx.commit().await.unwrap();
+    let before = generation_bytes(&store, &source).await;
+    store.bootstrap_application().await.unwrap();
+    assert_eq!(generation_bytes(&store, &source).await, before);
+    assert_eq!(
+        store.application_migrations().await.unwrap(),
+        current.migrations
+    );
+    let mut tx = store.db.begin_read_only().await.unwrap();
+    let active = decode_catalog(&tx.get(&schema_key()).await.unwrap().unwrap()).unwrap();
+    assert_eq!(
+        active,
+        target_latest_from_105(&target_105(&target, &definition_105().unwrap()), &current)
+    );
+    assert_count_groups_ready(&mut tx, &active, 2).await;
+    let row = read_row(&mut tx, &active, PROJECTS, &[text_cell("project")])
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        text(&row.row, "title").unwrap(),
+        "newer schema 93 native write"
+    );
+    assert_eq!(text(&row.row, "tracked_folders_json").unwrap(), "[]");
+    let inline = read_row(&mut tx, &active, ITEMS, &[text_cell("item-1")])
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(
+        integer(&inline.row, "inline_work_output").unwrap(),
+        0 | 1
+    ));
+    validate_import_lineage(
+        &mut tx,
+        &active,
+        &original.generation,
+        original.schema.tables.len() as u64,
+    )
+    .await
+    .unwrap();
+    tx.rollback().await.unwrap();
+    store.shutdown().await.unwrap();
+    let store = fixture.connect().await;
+    assert_eq!(store.application_migrations().await.unwrap().len(), 107);
+    assert!(!store.bootstrap_application().await.unwrap().initialized);
+    assert_eq!(generation_bytes(&store, &source).await, before);
 }

@@ -42,4 +42,18 @@ export const make = Effect.fn("NativeServerOwnershipLock.make")(function* (execu
     }, Effect.mapError(error)),
   });
 });
+export const isHeld = Effect.fn("NativeServerOwnershipLock.isHeld")(function* (
+  executable: string,
+  lockPath: string,
+) {
+  const database = yield* NativeDatabase.make({
+    executable,
+    databasePath: lockPath,
+    mode: "owner-lock",
+    reconnect: false,
+  });
+  const { owned } = yield* database.request({ operation: "owner_probe" }, Owned);
+  return owned;
+}, Effect.scoped);
+
 export const layer = (executable: string) => Layer.effect(ServerOwnershipLock, make(executable));

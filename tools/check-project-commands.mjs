@@ -54,6 +54,7 @@ export function projectRow(overrides = {}) {
     faviconPath: null,
     projectIcon: null,
     scripts: [],
+    trackedFolders: [],
     pinnedAt: null,
     archivedAt: null,
     createdAt: "2025-12-01T00:00:00.000Z",
@@ -149,6 +150,35 @@ const other = projectRow({ projectId: "project:other" });
 const monogram = (text) => ({ kind: "monogram", text, color: "indigo" });
 
 add("create supplies only upstream defaults", create(), absent, { runtime: true });
+const trackedFolder = { path: "/fixture/extra", name: "Extra workspace", discovered: true };
+add(
+  "create omits an explicitly empty tracked folder list",
+  create({ trackedFolders: [] }),
+  absent,
+  {
+    runtime: true,
+  },
+);
+add("create carries tracked folders", create({ trackedFolders: [trackedFolder] }), absent, {
+  runtime: true,
+});
+const projectWithTrackedFolder = { project: projectRow({ trackedFolders: [trackedFolder] }) };
+add(
+  "update retains omitted tracked folders",
+  update({ title: "Renamed" }),
+  projectWithTrackedFolder,
+  {
+    runtime: true,
+  },
+);
+add(
+  "update clears explicitly empty tracked folders",
+  update({ trackedFolders: [] }),
+  projectWithTrackedFolder,
+  {
+    runtime: true,
+  },
+);
 add("create keeps an explicitly empty script list", create({ scripts: [] }), absent, {
   runtime: true,
 });

@@ -3,6 +3,7 @@ import {
   type OrchestrationV2Run,
   OrchestrationV2DomainEvent,
   type OrchestrationV2ProviderThread,
+  type OrchestrationV2Subagent,
   type OrchestrationV2TurnItem,
   OrchestrationV2StoredEvent,
   ProviderThreadId,
@@ -14,6 +15,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as ProviderCommitBatch from "./ProviderCommitBatch.ts";
+import * as ThreadViewers from "./ThreadViewers.ts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -73,6 +75,8 @@ export type EventSinkV2Error = typeof EventSinkV2Error.Type;
 
 interface ProviderBatchPublication {
   readonly publish: Array<Effect.Effect<void>>;
+  readonly projection: ProjectionStore.ProviderBatchProjection | undefined;
+  projectedSequence: number | undefined;
   eventCount: number;
   nativePublishedWrites: number;
 }
@@ -81,6 +85,14 @@ const CurrentProviderBatch = Context.Reference<ProviderBatchPublication | undefi
   { defaultValue: () => undefined },
 );
 
+// Projecting `provider-thread.updated` also rewrites its app thread's row.
+const projectedThreadIds = (events: ReadonlyArray<OrchestrationV2DomainEvent>) =>
+  events.flatMap((event) =>
+    event.type === "provider-thread.updated" && event.payload.appThreadId !== null
+      ? [event.threadId, event.payload.appThreadId]
+      : [event.threadId],
+  );
+
 export interface EventSinkV2Shape {
   /** Items that are not provider snapshots, such as a consumer's own control items, never batch. */
   readonly consumeProviderEvents: <A extends { readonly type: string }, E, R, E2, R2>(
@@ -88,6 +100,7 @@ export interface EventSinkV2Shape {
     process: (event: A) => Effect.Effect<void, E2, R2>,
     after: Effect.Effect<boolean, E2, R2>,
     canBatch: Effect.Effect<boolean, never, R2>,
+    priority?: ProviderCommitBatch.StreamPriority,
   ) => Effect.Effect<
     void,
     E | E2 | ProviderCommitBatch.CommitBatchError | Schema.SchemaError,
@@ -183,6 +196,17 @@ export interface EventSinkV2Shape {
     },
     EventSinkV2Error
   >;
+  /** Commits only if the stored subagent still equals expected. */
+  readonly writeIfSubagentUnchanged: (input: {
+    readonly expected: OrchestrationV2Subagent;
+    readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
+  }) => Effect.Effect<
+    {
+      readonly committed: boolean;
+      readonly storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>;
+    },
+    EventSinkV2Error
+  >;
   readonly commitCommand: (input: {
     readonly commandId: CommandId;
     readonly threadId: ThreadId;
@@ -258,10 +282,12 @@ const layerBase: Layer.Layer<
   | ProjectStore.ProjectStoreV2
   | PersistenceTransactions.PersistenceTransactions
   | TurnItemPositionStore.TurnItemPositionStoreV2
+  | ThreadViewers.ThreadViewers
 > = Layer.effect(
   EventSinkV2,
   Effect.gen(function* () {
     const transactions = yield* PersistenceTransactions.PersistenceTransactions;
+    const threadViewers = yield* ThreadViewers.ThreadViewers;
     const commandReceipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
     const effectOutbox = yield* EffectOutbox.EffectOutboxV2;
     const eventStore = yield* EventStore.EventStoreV2;
@@ -416,7 +442,9 @@ const layerBase: Layer.Layer<
         });
         const sequence = storedEvents.at(-1)?.sequence;
         if (sequence !== undefined) {
-          yield* projectionStore.markApplied(sequence, yield* DateTime.now);
+          const batch = yield* CurrentProviderBatch;
+          if (batch?.projection !== undefined) batch.projectedSequence = sequence;
+          else yield* projectionStore.markApplied(sequence, yield* DateTime.now);
         }
         // Read lineage here, on the connection this transaction holds; see makeRunOutcomeRecorder.
         return yield* runOutcomes.prepare(storedEvents);
@@ -453,6 +481,7 @@ const layerBase: Layer.Layer<
       const batch = yield* CurrentProviderBatch;
       if (batch !== undefined) batch.eventCount += input.events.length;
       const { committed } = yield* commitThenPublish(
+        projectedThreadIds(input.events),
         Effect.gen(function* () {
           // Check ownership in the same transaction that claims the native session.
           const imported = input.unlessNativeThreadOwned;
@@ -500,6 +529,7 @@ const layerBase: Layer.Layer<
         });
 
         return yield* commitThenPublish(
+          [input.threadId, ...projectedThreadIds(input.events)],
           Effect.gen(function* () {
             if (!(yield* projectionStore.runCurrent(input))) {
               return {
@@ -558,6 +588,7 @@ const layerBase: Layer.Layer<
       });
 
       return yield* commitThenPublish(
+        projectedThreadIds(input.events),
         Effect.gen(function* () {
           if (!(yield* projectionStore.providerThreadOwner(input))) {
             return {
@@ -591,6 +622,7 @@ const layerBase: Layer.Layer<
       events: ReadonlyArray<OrchestrationV2DomainEvent>,
     ) =>
       commitThenPublish(
+        projectedThreadIds(events),
         Effect.gen(function* () {
           if (!(yield* matchesStoredPayload)) {
             return {
@@ -638,6 +670,20 @@ const layerBase: Layer.Layer<
       );
     });
 
+    const writeIfSubagentUnchangedEffect = Effect.fn(
+      "orchestrationV2.EventSink.writeIfSubagentUnchanged",
+    )(function* (input: Parameters<EventSinkV2Shape["writeIfSubagentUnchanged"]>[0]) {
+      yield* Effect.annotateCurrentSpan({
+        "orchestration_v2.event_count": input.events.length,
+        "orchestration_v2.subagent_id": input.expected.id,
+      });
+      const expectedJson = yield* ProjectionStore.encodeSubagentPayload(input.expected);
+      return yield* writeIfStoredPayloadMatches(
+        projectionStore.subagentUnchanged(input.expected.id, expectedJson),
+        input.events,
+      );
+    });
+
     const existingCommandResult =
       /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
       Effect.fnUntraced(function* (commandId: CommandId) {
@@ -658,6 +704,7 @@ const layerBase: Layer.Layer<
       input: Parameters<EventSinkV2Shape["commitCommand"]>[0],
     ) {
       const result = yield* commitThenPublish(
+        [input.threadId, ...projectedThreadIds(input.events)],
         Effect.gen(function* () {
           const reserved = yield* commandReceipts.insertIfAbsent({
             commandId: input.commandId,
@@ -671,6 +718,35 @@ const layerBase: Layer.Layer<
           if (!reserved) {
             const existing = yield* existingCommandResult(input.commandId);
             return { ...existing, committed: false as const, cancelledEffectIds: [] };
+          }
+
+          // Planning does not lock the source. Once deletion commits, maintenance
+          // can remove its checkpoints, so a new fork must not revive that history.
+          if (input.commandType === "thread.fork") {
+            for (const event of input.events) {
+              if (event.type !== "thread.created" || event.payload.forkedFrom?.type !== "run")
+                continue;
+              const sourceId = event.payload.forkedFrom.threadId;
+              const source = yield* projectionStore.getThread(sourceId);
+              if (source === undefined || source.deletedAt !== null) {
+                const receipt: CommandReceiptStore.CommandReceiptV2 = {
+                  commandId: input.commandId,
+                  threadId: input.threadId,
+                  commandType: input.commandType,
+                  acceptedAt: input.acceptedAt,
+                  resultSequence: yield* eventStore.latestSequence({ threadId: input.threadId }),
+                  status: "rejected",
+                  error: "Cannot fork a missing or deleted thread.",
+                };
+                yield* commandReceipts.upsert(receipt);
+                return {
+                  receipt,
+                  storedEvents: [],
+                  committed: false as const,
+                  cancelledEffectIds: [],
+                };
+              }
+            }
           }
 
           const runId = input.updateDelegatedCompletionOnlyRunId;
@@ -771,6 +847,7 @@ const layerBase: Layer.Layer<
     const commitProjectCommandEffect = Effect.fn("orchestrationV2.EventSink.commitProjectCommand")(
       function* (input: Parameters<EventSinkV2Shape["commitProjectCommand"]>[0]) {
         const result = yield* commitThenPublish(
+          [],
           Effect.gen(function* () {
             const reserved: CommandReceiptStore.ProjectCommandReceiptV2 = {
               commandId: input.commandId,
@@ -900,6 +977,7 @@ const layerBase: Layer.Layer<
     };
 
     const commitThenPublish = <A, E, R>(
+      threadIds: ReadonlyArray<ThreadId>,
       transaction: Effect.Effect<A, E, R>,
       publish: (committed: A) => Effect.Effect<void>,
     ) =>
@@ -908,7 +986,7 @@ const layerBase: Layer.Layer<
           ? Effect.flatMap(transactions.isInTransaction, (existing) =>
               existing
                 ? commitThenPublishNow(transaction, publish)
-                : coordinator.barrier(commitThenPublishNow(transaction, publish)),
+                : coordinator.barrier(commitThenPublishNow(transaction, publish), threadIds),
             )
           : transaction.pipe(
               Effect.tap((committed) =>
@@ -933,8 +1011,14 @@ const layerBase: Layer.Layer<
       "orchestrationV2.EventSink.providerBatch",
     )(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
       if ((yield* CurrentProviderBatch) !== undefined) return yield* effect;
+      const flushThreadTouches = projectionStore.flushThreadTouches;
       const batch: ProviderBatchPublication = {
         publish: [],
+        projection:
+          flushThreadTouches === undefined
+            ? undefined
+            : { nodeReads: new Map(), threadTouches: new Map() },
+        projectedSequence: undefined,
         eventCount: 0,
         nativePublishedWrites: 0,
       };
@@ -942,7 +1026,33 @@ const layerBase: Layer.Layer<
       const result = yield* commitThenPublishNow(
         Effect.sync(() => {
           started = true;
-        }).pipe(Effect.andThen(Effect.provideService(effect, CurrentProviderBatch, batch))),
+        }).pipe(
+          Effect.andThen(
+            effect.pipe(
+              Effect.provideService(CurrentProviderBatch, batch),
+              Effect.provideService(ProjectionStore.ProviderBatchProjectionState, batch.projection),
+              Effect.tap(() => {
+                if (batch.projection === undefined || flushThreadTouches === undefined)
+                  return Effect.void;
+                return flushThreadTouches(batch.projection.threadTouches).pipe(
+                  Effect.andThen(
+                    Effect.gen(function* () {
+                      if (batch.projectedSequence !== undefined) {
+                        yield* projectionStore.markApplied(
+                          batch.projectedSequence,
+                          yield* DateTime.now,
+                        );
+                      }
+                    }),
+                  ),
+                  Effect.mapError(
+                    (cause) => new EventSinkWriteError({ eventCount: batch.eventCount, cause }),
+                  ),
+                );
+              }),
+            ),
+          ),
+        ),
         () => Effect.forEach(batch.publish, (publish) => publish, { discard: true }),
       ).pipe(
         // Normalization mutates run-local state, so only retry before its transaction body starts.
@@ -980,12 +1090,22 @@ const layerBase: Layer.Layer<
         const batch = yield* CurrentProviderBatch;
         const publicationCount = batch?.publish.length ?? 0;
         const eventCount = batch?.eventCount ?? 0;
+        const projectedSequence = batch?.projectedSequence;
+        const threadTouches =
+          batch?.projection === undefined ? undefined : new Map(batch.projection.threadTouches);
         return yield* transactions.withTransaction(work).pipe(
           Effect.onError(() =>
             Effect.sync(() => {
               if (batch !== undefined) {
                 batch.publish.length = publicationCount;
                 batch.eventCount = eventCount;
+                batch.projectedSequence = projectedSequence;
+                if (batch.projection !== undefined && threadTouches !== undefined) {
+                  batch.projection.nodeReads.clear();
+                  batch.projection.threadTouches.clear();
+                  for (const [threadId, updatedAt] of threadTouches)
+                    batch.projection.threadTouches.set(threadId, updatedAt);
+                }
               }
             }),
           ),
@@ -996,6 +1116,7 @@ const layerBase: Layer.Layer<
           ),
         );
       }),
+      threadViewers.isViewed,
     );
 
     return EventSinkV2.of({
@@ -1053,6 +1174,12 @@ const layerBase: Layer.Layer<
         ),
       writeIfTurnItemUnchanged: (input) =>
         writeIfTurnItemUnchangedEffect(input).pipe(
+          Effect.mapError(
+            (cause) => new EventSinkWriteError({ eventCount: input.events.length, cause }),
+          ),
+        ),
+      writeIfSubagentUnchanged: (input) =>
+        writeIfSubagentUnchangedEffect(input).pipe(
           Effect.mapError(
             (cause) => new EventSinkWriteError({ eventCount: input.events.length, cause }),
           ),
@@ -1130,9 +1257,9 @@ const layerBase: Layer.Layer<
 );
 
 /** Share the worker's outbox instance: enqueue wakeups are in-memory. */
-export const layerFromPersistence = layerBase;
+export const layerFromPersistence = layerBase.pipe(Layer.provide(ThreadViewers.layer));
 
-export const layerFromStores = layerBase.pipe(
+export const layerFromStores = layerFromPersistence.pipe(
   Layer.provide(
     Layer.mergeAll(PersistenceTransactions.sqliteLayer, SqliteProjectionCommitStore.layer),
   ),

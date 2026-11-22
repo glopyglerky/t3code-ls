@@ -41,7 +41,8 @@ function execute(input, args = []) {
     maxBuffer: 20 * 1024 * 1024,
     timeout: 15_000,
   });
-  NodeAssert.ifError(result.error);
+  // The helper can reject arguments before the parent finishes sending stdin.
+  if (args.length === 0 || result.error?.code !== "EPIPE") NodeAssert.ifError(result.error);
   NodeAssert.equal(result.signal, null);
   return result;
 }

@@ -28,6 +28,7 @@ import * as RedbClient from "../apps/server/src/persistence/RedbClient.ts";
 import { at, oracleSource, upstream } from "./check-outbox-runtime.mjs";
 import { createFixture } from "./database-fixture.mjs";
 import { exportSqliteState } from "./export-sqlite-state.mjs";
+import { createMigratedSqlite } from "./redb-domain-fixture.mjs";
 
 const [executable, proofPath] = process.argv.slice(2);
 NodeAssert.ok(
@@ -118,10 +119,12 @@ const requests = [
 ];
 NodeAssert.equal(requests.length, 16);
 
-function createSource(filename, seed = true) {
+async function createSource(filename, seed = true) {
+  if (seed) await createMigratedSqlite(filename);
   const database = new NodeSqlite.DatabaseSync(filename);
   try {
-    database.exec(`CREATE TABLE ${table} (
+    if (!seed)
+      database.exec(`CREATE TABLE ${table} (
       effect_id TEXT PRIMARY KEY, command_id TEXT NOT NULL, thread_id TEXT NOT NULL,
       effect_type TEXT NOT NULL, payload_json TEXT NOT NULL,
       status TEXT NOT NULL CHECK(status IN ('pending','running','succeeded','failed','cancelled')),
@@ -131,8 +134,8 @@ function createSource(filename, seed = true) {
     );
     CREATE INDEX outbox_claim ON ${table}(status, available_at, lease_expires_at, created_at);
     CREATE INDEX outbox_command ON ${table}(command_id, effect_id);
-    CREATE INDEX outbox_thread ON ${table}(thread_id, status, effect_type);
-    CREATE TABLE other (id TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+    CREATE INDEX outbox_thread ON ${table}(thread_id, status, effect_type);`);
+    database.exec("CREATE TABLE other (id TEXT PRIMARY KEY, value TEXT NOT NULL)");
     if (!seed) return;
     const insert = database.prepare(
       `INSERT INTO ${table} VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -172,6 +175,27 @@ function createSource(filename, seed = true) {
     }
     for (let index = 0; index < 501; index++)
       row(`prune:${index}`, "command:prune", `prune:${index}`, cleanup, "succeeded");
+    const run = database.prepare(`
+      INSERT INTO orchestration_v2_projection_runs
+        (run_id, thread_id, ordinal, provider, status, requested_at, payload_json)
+      VALUES (?, ?, 1, 'codex', ?, ?, ?)
+    `);
+    for (const [status, thread, source] of [
+      ["queued", "thread:0:succeeded", "run:source"],
+      ["waiting", "thread:0:cancelled", "run:source"],
+      ["completed", "thread:ended", "run:source"],
+      ["running", "thread:other-source", "run:different"],
+    ]) {
+      run.run(
+        `run:${thread}`,
+        thread,
+        status,
+        iso(),
+        JSON.stringify({ restartContinuationOfRunId: source }),
+      );
+    }
+    row("ended-recovery", "command:ended", "thread:ended", requests[0], "succeeded");
+    row("different-recovery", "command:different", "thread:other-source", requests[0], "succeeded");
     database.exec("COMMIT");
   } finally {
     database.close();
@@ -380,6 +404,15 @@ const exercise = Effect.fn("checkRedbApplicationOutbox.exercise")(function* ({
   }));
   observed.matrix = yield* outbox.listByCommandId("command:matrix");
   NodeAssert.equal(observed.matrix.length, 80);
+  const firstSteer = sourceRows.find(
+    (row) => JSON.parse(row.payload_json).type === "provider-turn.steer",
+  );
+  const messageId = JSON.parse(firstSteer.payload_json).messageId;
+  NodeAssert.equal(
+    requireSome(yield* outbox.firstSteer(firstSteer.thread_id, messageId)).id,
+    firstSteer.effect_id,
+  );
+  NodeAssert.ok(Option.isNone(yield* outbox.firstSteer("missing", messageId)));
   NodeAssert.ok(Option.isNone(yield* outbox.get("missing")));
   yield* outbox.awaitSettled("missing");
   NodeAssert.ok(Option.isNone(yield* fixed(0, outbox.claimNext({ workerId: "worker" }))));
@@ -518,6 +551,10 @@ const exercise = Effect.fn("checkRedbApplicationOutbox.exercise")(function* ({
   }));
   observed.pruned = yield* fixed(10 * day, outbox.pruneSettled);
   NodeAssert.ok(observed.pruned > 500, "prune must finish multiple batches");
+  NodeAssert.ok(Option.isSome(yield* outbox.get("matrix:0:succeeded")));
+  NodeAssert.ok(Option.isSome(yield* outbox.get("matrix:0:cancelled")));
+  NodeAssert.ok(Option.isNone(yield* outbox.get("ended-recovery")));
+  NodeAssert.ok(Option.isNone(yield* outbox.get("different-recovery")));
   NodeAssert.equal(requireSome(yield* outbox.get("a-imported")).status, "failed");
   observed.finalRows = yield* snapshot;
   return normalized(observed);
@@ -528,7 +565,7 @@ async function emptyFixture(run) {
   try {
     const source = NodePath.join(fixture.root, "source.sqlite");
     const exported = NodePath.join(fixture.root, "source.ndjson");
-    createSource(source, false);
+    await createSource(source, false);
     exportSqliteState({ source, destination: exported });
     cli(fixture, "initialize", { operation: "import_sqlite_application", path: exported });
     return await run(fixture, source);
@@ -542,11 +579,14 @@ try {
   const source = NodePath.join(fixture.root, "source.sqlite");
   const oracle = NodePath.join(fixture.root, "oracle.sqlite");
   const exported = NodePath.join(fixture.root, "source.ndjson");
-  createSource(source);
+  await createSource(source);
   const sourceHash = hash(await NodeFSP.readFile(source));
   await NodeFSP.copyFile(source, oracle);
   exportSqliteState({ source, destination: exported });
   cli(fixture, "initialize", { operation: "import_sqlite_application", path: exported });
+  while (
+    !cli(fixture, "initialize", { operation: "application_projection_reads_prepare" }).prepared
+  ) {}
   const expected = await withBackend("sqlite", fixture, oracle, exercise);
   const actual = await withBackend("redb", fixture, source, exercise);
   NodeAssert.deepEqual(
@@ -559,7 +599,7 @@ try {
     `All ${requests.length} effect types and five lifecycle statuses retain decoded requests and raw imported payload/lease cells`,
     "Imported FIFO order is independent of IDs; title lanes, retry backoff, owner checks and process-loss policies agree",
     "Enqueue and cancellation share other application writes, savepoints and rollback; notifications remain explicit after commit",
-    "Pruning spans more than 500 rows and retains failed effects",
+    "Pruning spans more than 500 rows and retains failed effects and live continuation budgets",
   );
   const reopened = await withBackend("redb", fixture, source, ({ outbox, snapshot }) =>
     Effect.gen(function* () {

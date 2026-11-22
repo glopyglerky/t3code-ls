@@ -4,10 +4,25 @@ const adapters = [
   ["command-and-dispatch-policy", "policy", "check-policy-adapter.mjs", "policy-tsconfig.json"],
   ["project-commands", "project", "check-project-adapter.mjs", "project-tsconfig.json"],
   ["provider-recovery", "recovery", "check-recovery-adapter.mjs", "recovery-tsconfig.json"],
-  ["guest-share-decisions", "guest-share", "check-guest-share-adapter.mjs", "guest-share-tsconfig.json"],
+  [
+    "guest-share-decisions",
+    "guest-share",
+    "check-guest-share-adapter.mjs",
+    "guest-share-tsconfig.json",
+  ],
   ["codex-process-runtime", "provider", "check-provider-adapter.mjs", "provider-tsconfig.json"],
-  ["provider-maintenance", "maintenance", "check-maintenance-adapter.mjs", "maintenance-tsconfig.json"],
-  ["codex-structured-generation", "generate", "check-generation-adapter.mjs", "generation-tsconfig.json"],
+  [
+    "provider-maintenance",
+    "maintenance",
+    "check-maintenance-adapter.mjs",
+    "maintenance-tsconfig.json",
+  ],
+  [
+    "codex-structured-generation",
+    "generate",
+    "check-generation-adapter.mjs",
+    "generation-tsconfig.json",
+  ],
 ];
 
 export const adapterPortIds = Object.freeze(adapters.map(([port]) => port));
@@ -43,8 +58,10 @@ export function parseHybridArguments(args) {
       requested = rest[++index];
       Assert.notEqual(requested, undefined, "--ports requires comma-separated port IDs");
     } else {
-      Assert.ok(!value.startsWith("--") && proofDirectory === undefined,
-        `Unexpected qualification argument: ${value}`);
+      Assert.ok(
+        !value.startsWith("--") && proofDirectory === undefined,
+        `Unexpected qualification argument: ${value}`,
+      );
       proofDirectory = value;
     }
   }
@@ -58,23 +75,26 @@ export function parseHybridArguments(args) {
 export function planAdapterChecks(selectedPorts) {
   // Revalidate callers as well as CLI selections before creating a command plan.
   const selected = selectAdapterPorts(selectedPorts.join(","));
-  const checks = adapters.filter(([port]) => selected.includes(port)).map(([port, component, script, project]) => ({
-    port,
-    component,
-    name: `${component} production adapter`,
-    script: `tools/${script}`,
-    proofFile: `${component}-adapter.json`,
-    typecheckProject: `tools/${project}`,
-    extraArguments: [],
-  }));
-  if (selected.includes("command-and-dispatch-policy")) checks.push({
-    port: "command-and-dispatch-policy",
-    component: "policy",
-    name: "Production dispatch and goal policy",
-    script: "tools/check-dispatch.mjs",
-    proofFile: "dispatch.json",
-    extraArguments: ["--service"],
-  });
+  const checks = adapters
+    .filter(([port]) => selected.includes(port))
+    .map(([port, component, script, project]) => ({
+      port,
+      component,
+      name: `${component} production adapter`,
+      script: `tools/${script}`,
+      proofFile: `${component}-adapter.json`,
+      typecheckProject: `tools/${project}`,
+      extraArguments: [],
+    }));
+  if (selected.includes("command-and-dispatch-policy"))
+    checks.push({
+      port: "command-and-dispatch-policy",
+      component: "policy",
+      name: "Production dispatch and goal policy",
+      script: "tools/check-dispatch.mjs",
+      proofFile: "dispatch.json",
+      extraArguments: ["--service"],
+    });
   return checks;
 }
 
@@ -83,7 +103,30 @@ export function applicationChecks() {
     {
       name: "Fork native-executable selection contract",
       program: "pnpm",
-      arguments: ["exec", "vp", "test", "run", "--maxWorkers", "2", "packages/shared/src/nativeExecutable.test.ts"],
+      arguments: [
+        "exec",
+        "vp",
+        "test",
+        "run",
+        "--maxWorkers",
+        "2",
+        "packages/shared/src/nativeExecutable.test.ts",
+      ],
+    },
+    {
+      name: "Verify authenticated Iroh route discovery and connection fallback",
+      program: "pnpm",
+      arguments: [
+        "exec",
+        "vp",
+        "test",
+        "run",
+        "--maxWorkers",
+        "2",
+        "apps/server/src/ws.test.ts",
+        "packages/client-runtime/src/connection/driver.test.ts",
+        "packages/client-runtime/src/connection/routes.test.ts",
+      ],
     },
     {
       name: "Build the client for Rust integration",

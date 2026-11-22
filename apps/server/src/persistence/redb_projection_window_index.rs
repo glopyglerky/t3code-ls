@@ -12,11 +12,54 @@ struct Metadata {
     row: Map<String, Value>,
 }
 
+pub(crate) fn inline_work_output(type_name: &str, raw: &str) -> bool {
+    if type_name != "dynamic_tool" {
+        return false;
+    }
+    let lower = raw.to_ascii_lowercase();
+    let delegate = lower.find("\"toolname\":\"").is_some_and(|offset| {
+        let suffix = &lower[offset + "\"toolname\":\"".len()..];
+        // The upstream LIKE pattern leaves '_' unescaped, so it
+        // matches one Unicode character, not only an underscore.
+        suffix.match_indices("delegate").any(|(offset, prefix)| {
+            let tail = &suffix[offset + prefix.len()..];
+            tail.chars()
+                .next()
+                .is_some_and(|character| tail[character.len_utf8()..].starts_with("task\""))
+        })
+    });
+    let send_to_user = lower.find("\"toolname\":\"").is_some_and(|offset| {
+        let suffix = &lower[offset + "\"toolname\":\"".len()..];
+        suffix.match_indices("send").any(|(offset, prefix)| {
+            let tail = &suffix[offset + prefix.len()..];
+            tail.chars().next().is_some_and(|first| {
+                let tail = &tail[first.len_utf8()..];
+                tail.strip_prefix("to").is_some_and(|tail| {
+                    tail.chars()
+                        .next()
+                        .is_some_and(|second| tail[second.len_utf8()..].starts_with("user\""))
+                })
+            })
+        })
+    });
+    lower.contains("htmlrender")
+        || lower.contains("t3mcpapp")
+        || lower.contains("\"viewedimagepath\"")
+        || delegate
+        || send_to_user
+        || lower.contains("sentmessage")
+}
+
 fn key(catalog: &ApplicationCatalog, name: &str, primary: &[Value]) -> Vec<u8> {
     location(
         catalog,
         &format!("window-meta/{name}/{}", request_digest(&json!(primary))),
     )
+}
+
+pub(super) fn whitespace(ch: char) -> bool {
+    matches!(ch, '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}'
+                | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}')
 }
 
 fn compact(name: &str, row: &Map<String, Value>, order: RowOrder) -> Result<Metadata> {
@@ -27,7 +70,10 @@ fn compact(name: &str, row: &Map<String, Value>, order: RowOrder) -> Result<Meta
             .and_then(Value::as_str)
             .ok_or(Error::IncompatibleStore)?;
         if name == ITEMS {
-            slim.insert("_native_payload_bytes".into(), int_cell(raw.len().try_into().map_err(|_| Error::IncompatibleStore)?));
+            slim.insert(
+                "_native_payload_bytes".into(),
+                int_cell(raw.len().try_into().map_err(|_| Error::IncompatibleStore)?),
+            );
             // This selection is SQL LIKE over raw bytes, not json_extract.
             // Keep it even if JSON is unreadable so matching corrupt render
             // rows reach the original decoder instead of disappearing.
@@ -68,6 +114,7 @@ fn compact(name: &str, row: &Map<String, Value>, order: RowOrder) -> Result<Meta
         let mut retained = Map::new();
         for field in [
             "rootNodeId",
+            "freshContext",
             "startedAt",
             "inputIntent",
             "createdBy",
@@ -87,6 +134,7 @@ fn compact(name: &str, row: &Map<String, Value>, order: RowOrder) -> Result<Meta
             "settledAt",
             "settledOverride",
             "pinnedAt",
+            "pinOrderKey",
             "autoSettleDisabledAt",
             "snoozedUntil",
             "worktreePath",
@@ -100,21 +148,47 @@ fn compact(name: &str, row: &Map<String, Value>, order: RowOrder) -> Result<Meta
                 retained.insert(field.into(), value.clone());
             }
         }
+        if name == ITEMS && text(row, "type")? == "user_message" {
+            let compact = payload
+                .get("text")
+                .and_then(Value::as_str)
+                .is_some_and(|value| {
+                    value
+                        .trim_matches(whitespace)
+                        .eq_ignore_ascii_case("/compact")
+                })
+                && payload["attachments"].as_array().is_none_or(Vec::is_empty);
+            retained.insert("nativeCompactionPrompt".into(), json!(compact));
+        }
         if name == MESSAGES {
-            retained.insert("nativeBackgroundWake".into(), json!(
-                payload["notification"]["source"]["kind"].as_str().is_some_and(|kind| ["background_task", "background_command", "command", "monitor"].contains(&kind))
-                && payload["notification"]["source"]["work"].is_null()
-                && payload["notification"]["outcome"] == "updated"
-                && payload["delegatedCompletion"].is_null()
-            ));
+            retained.insert(
+                "nativeBackgroundWake".into(),
+                json!(
+                    payload["notification"]["source"]["kind"]
+                        .as_str()
+                        .is_some_and(|kind| [
+                            "background_task",
+                            "background_command",
+                            "command",
+                            "monitor"
+                        ]
+                        .contains(&kind))
+                        && payload["notification"]["source"]["work"].is_null()
+                        && payload["notification"]["outcome"] == "updated"
+                        && payload["delegatedCompletion"].is_null()
+                ),
+            );
             retained.insert(
                 "nativeMonitorNotification".into(),
                 json!(payload["notification"]["source"]["kind"] == "monitor"),
             );
-            let whitespace = |ch: char| {
-                matches!(ch, '\u{0009}'..='\u{000d}' | '\u{0020}' | '\u{00a0}' | '\u{1680}'
-                | '\u{2000}'..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}' | '\u{feff}')
-            };
+            retained.insert(
+                "nativeDelegatedTaskMessage".into(),
+                json!(
+                    payload["notification"]["source"]["kind"] == "monitor"
+                        || !payload["delegatedCompletion"].is_null()
+                ),
+            );
             let idle = text(row, "role")? == "user"
                 && payload
                     .get("text")
@@ -338,27 +412,12 @@ fn compact(name: &str, row: &Map<String, Value>, order: RowOrder) -> Result<Meta
                         || lower.contains("preview_recording_stop")
                 ),
             );
-            let delegate = lower.find("\"toolname\":\"").is_some_and(|offset| {
-                let suffix = &lower[offset + "\"toolname\":\"".len()..];
-                // The upstream LIKE pattern leaves '_' unescaped, so it
-                // matches one Unicode character, not only an underscore.
-                suffix.match_indices("delegate").any(|(offset, prefix)| {
-                    let tail = &suffix[offset + prefix.len()..];
-                    tail.chars()
-                        .next()
-                        .is_some_and(|character| tail[character.len_utf8()..].starts_with("task\""))
-                })
-            });
-            retained.insert(
-                "nativeInlineWorkOutput".into(),
-                json!(
-                    text(row, "type")? == "dynamic_tool"
-                        && (lower.contains("htmlrender")
-                            || lower.contains("t3mcpapp")
-                            || lower.contains("\"viewedimagepath\"")
-                            || delegate)
-                ),
-            );
+            let inline = if row.contains_key("inline_work_output") {
+                integer(row, "inline_work_output")? == 1
+            } else {
+                inline_work_output(&text(row, "type")?, raw)
+            };
+            retained.insert("nativeInlineWorkOutput".into(), json!(inline));
         }
         slim.insert(
             "payload_json".into(),

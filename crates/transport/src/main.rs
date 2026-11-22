@@ -57,6 +57,9 @@ enum Command {
         /// Explicit loopback IP:port of an authenticated T3 server.
         #[arg(long)]
         target: SocketAddr,
+        /// Bind the Iroh UDP endpoint to a stable address and port.
+        #[arg(long)]
+        udp_bind: Option<SocketAddr>,
         /// Endpoint ID to grant. Repeat for each client; empty means deny everyone.
         #[arg(long, conflicts_with = "allow_file")]
         allow: Vec<EndpointId>,
@@ -96,6 +99,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Serve {
             identity,
             target,
+            udp_bind,
             allow,
             allow_file,
             routing,
@@ -112,8 +116,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 admission.reconcile(&allow)?;
                 None
             };
-            let host =
-                Host::bind(key, routing.network(), HostConfig::new(target, admission)).await?;
+            let mut config = HostConfig::new(target, admission);
+            config.udp_bind = udp_bind;
+            let host = Host::bind(key, routing.network(), config).await?;
             if routing.uses_relay() {
                 host.online(Duration::from_secs(30)).await?;
             }

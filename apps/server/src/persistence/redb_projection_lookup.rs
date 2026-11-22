@@ -47,6 +47,11 @@ pub enum ProjectionLookup {
     PendingDelegatedCompletion {
         thread_id: String,
     },
+    DelegatedChildRuns {
+        thread_id: String,
+        task_ids: Vec<String>,
+        window_size: i64,
+    },
     CanStartQueuedRun {
         thread_id: String,
     },
@@ -54,6 +59,9 @@ pub enum ProjectionLookup {
         thread_id: String,
     },
     MessageCount {
+        thread_id: String,
+    },
+    RunCount {
         thread_id: String,
     },
     SubagentCount {
@@ -72,10 +80,19 @@ pub enum ProjectionLookup {
     ThreadMetadata {
         thread_ids: Vec<String>,
     },
+    RunInterruptRequest {
+        thread_id: String,
+        run_id: String,
+    },
     UnpairedInterrupt {
         thread_id: String,
         request_id: String,
         result_id: String,
+    },
+    AcpSessionOwner {
+        driver: String,
+        instance_id: String,
+        session_id: String,
     },
     WorkspacePaths {},
 }
@@ -87,6 +104,8 @@ struct LookupResult {
     metadata: Vec<Value>,
     workspaces: Vec<Value>,
     ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    floor_run_id: Option<String>,
     count: i64,
     found: bool,
 }
@@ -281,6 +300,92 @@ async fn query(session: &mut Session, query: ProjectionLookup) -> Result<LookupR
         ProjectionLookup::Run { thread_id, run_id } => {
             return required_payload(session, RUNS, &thread_id, &run_id).await;
         }
+        ProjectionLookup::DelegatedChildRuns {
+            thread_id,
+            task_ids,
+            window_size,
+        } => {
+            let requested: BTreeSet<_> = task_ids.iter().map(String::as_str).collect();
+            let mut all = Vec::new();
+            let mut executed = Vec::new();
+            for row in read_index::window::equal_metadata(
+                session,
+                RUNS,
+                "thread_id",
+                &text_cell(&thread_id),
+            )
+            .await?
+            {
+                let run_id = text(&row.row, "run_id")?;
+                let status = text(&row.row, "status")?;
+                let completed = nullable(&row.row, "completed_at")?;
+                let run: Value = serde_json::from_str(&text(&row.row, "payload_json")?)
+                    .map_err(|_| Error::IncompatibleStore)?;
+                if status != "queued" && !(status == "cancelled" && run["startedAt"].is_null()) {
+                    executed.push((
+                        completed.is_none(),
+                        completed.clone(),
+                        integer(&row.row, "ordinal")?,
+                        run_id.clone(),
+                    ));
+                }
+                let wanted = run["delegatedTaskId"]
+                    .as_str()
+                    .is_some_and(|id| requested.contains(id));
+                all.push((run_id, status, completed, wanted));
+            }
+            executed.sort_unstable_by(|left, right| right.cmp(left));
+            let limit = usize::try_from(window_size).unwrap_or(usize::MAX);
+            let full_window = window_size < 0 || executed.len() >= limit;
+            executed.truncate(limit);
+            if full_window {
+                if let Some((_, end, _, run_id)) = executed.last() {
+                    if let Some(end) = end {
+                        result.floor_run_id = Some(run_id.clone());
+                        let selected: BTreeSet<_> =
+                            executed.iter().map(|(_, _, _, id)| id.as_str()).collect();
+                        result.ids = all
+                            .into_iter()
+                            .filter_map(|(id, status, completed, wanted)| {
+                                (wanted
+                                    || selected.contains(id.as_str())
+                                    || matches!(
+                                        status.as_str(),
+                                        "preparing" | "queued" | "starting" | "running" | "waiting"
+                                    )
+                                    || (status == "cancelled"
+                                        && completed
+                                            .as_ref()
+                                            .is_none_or(|completed| completed >= end)))
+                                .then_some(id)
+                            })
+                            .collect();
+                        return Ok(result);
+                    }
+                    // The cutoff falls in unfinished work. No bound can be inferred.
+                    result.ids = all.into_iter().map(|(id, _, _, _)| id).collect();
+                    return Ok(result);
+                }
+            }
+            let selected: BTreeSet<_> = executed.iter().map(|(_, _, _, id)| id.as_str()).collect();
+            result.ids = all
+                .into_iter()
+                .filter_map(|(id, status, _, wanted)| {
+                    (wanted
+                        || selected.contains(id.as_str())
+                        || matches!(
+                            status.as_str(),
+                            "preparing"
+                                | "queued"
+                                | "starting"
+                                | "running"
+                                | "waiting"
+                                | "cancelled"
+                        ))
+                    .then_some(id)
+                })
+                .collect();
+        }
         ProjectionLookup::PendingDelegatedCompletion { thread_id } => {
             for task in read_index::equal_rows(
                 session,
@@ -427,6 +532,12 @@ async fn query(session: &mut Session, query: ProjectionLookup) -> Result<LookupR
             )
             .map_err(|_| Error::IncompatibleStore)?;
         }
+        ProjectionLookup::RunCount { thread_id } => {
+            result.count = i64::try_from(
+                read_index::count_equal(session, RUNS, "thread_id", &text_cell(&thread_id)).await?,
+            )
+            .map_err(|_| Error::IncompatibleStore)?;
+        }
         ProjectionLookup::SubagentCount { thread_id } => {
             result.count = i64::try_from(
                 read_index::count_equal(session, SUBAGENTS, "thread_id", &text_cell(&thread_id))
@@ -477,6 +588,17 @@ async fn query(session: &mut Session, query: ProjectionLookup) -> Result<LookupR
                 }
             }
         }
+        ProjectionLookup::RunInterruptRequest { thread_id, run_id } => {
+            result.owner_exists = owns_row(session, THREADS, &thread_id, &thread_id).await?;
+            if result.owner_exists {
+                result.found =
+                    read_index::any_equal(session, ITEMS, "run_id", &text_cell(&run_id), |row| {
+                        Ok(text(row, "thread_id")? == thread_id
+                            && text(row, "type")? == "run_interrupt_request")
+                    })
+                    .await?;
+            }
+        }
         ProjectionLookup::UnpairedInterrupt {
             thread_id,
             request_id,
@@ -524,6 +646,15 @@ async fn query(session: &mut Session, query: ProjectionLookup) -> Result<LookupR
                     .payloads
                     .extend(owned_payload(session, ITEMS, &id, Some(&thread_id)).await?);
             }
+        }
+        ProjectionLookup::AcpSessionOwner {
+            driver,
+            instance_id,
+            session_id,
+        } => {
+            result
+                .ids
+                .extend(find_acp_session_owner(session, [driver, instance_id, session_id]).await?);
         }
         ProjectionLookup::WorkspacePaths {} => {
             result.workspaces = read_index::workspace_paths(session).await?;

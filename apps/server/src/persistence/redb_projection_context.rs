@@ -12,6 +12,8 @@ use std::collections::{BTreeMap, BTreeSet};
 #[serde(deny_unknown_fields)]
 pub struct ProjectionContextQuery {
     pub kind: String,
+    pub include_shown_by_live_fork: Option<bool>,
+    pub render_ids: Option<Vec<RenderAttachment>>,
     pub thread_id: String,
     pub run_id: Option<String>,
     pub record_id: Option<String>,
@@ -21,6 +23,12 @@ pub struct ProjectionContextQuery {
     pub provider_thread_id: Option<String>,
     pub provider_turn_id: Option<String>,
     pub attempt_id: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RenderAttachment {
+    pub turn_item_id: String,
+    pub id: String,
 }
 fn copy(row: &IndexedRow) -> IndexedRow {
     IndexedRow {
@@ -231,51 +239,337 @@ fn keep(
     Ok(out)
 }
 
-async fn unshared_attachments(
+// Follow transfer-backed run forks, retaining the source boundary through deleted
+// intermediates. UNION's visited identity also makes malformed cycles finite.
+async fn shown_runs(
     session: &mut Session,
-    thread: &str,
-    rows: Vec<IndexedRow>,
-) -> Result<Vec<IndexedRow>> {
-    let mut fork_ordinal: Option<i64> = None;
-    for fork in equal_metadata(session, THREADS, "all", &Value::Null).await? {
-        let payload = p(&fork)?;
-        let source = &payload["forkedFrom"];
-        if optional(&fork, "deleted_at")?.is_some()
-            || source["type"] != "run"
-            || source["threadId"] != thread
+    source: &str,
+    leaving: &str,
+) -> Result<(Option<i64>, Option<i64>)> {
+    let mut pending = vec![(source.to_owned(), None)];
+    let mut seen = BTreeSet::new();
+    let mut with = None::<i64>;
+    let mut without = None::<i64>;
+    while let Some((parent, through)) = pending.pop() {
+        for transfer in related(session, TRANSFERS, "source_thread_id", &parent).await? {
+            if string(&transfer, "type")? != "fork" {
+                continue;
+            }
+            let target = string(&transfer, "target_thread_id")?;
+            let Some(fork) = point(session, THREADS, Some(&target), None).await?.pop() else {
+                continue;
+            };
+            let payload = p(&fork)?;
+            if payload["forkedFrom"]["type"] != "run"
+                || payload["forkedFrom"]["threadId"] != parent
+                || payload["lineage"]["sideChat"] == true
+                || payload["lineage"]["sideChat"].as_i64() == Some(1)
+            {
+                continue;
+            }
+            let boundary = match through {
+                Some(ordinal) => ordinal,
+                None => {
+                    let Some(run) = point(
+                        session,
+                        RUNS,
+                        payload["forkedFrom"]["runId"].as_str(),
+                        Some(source),
+                    )
+                    .await?
+                    .pop() else {
+                        continue;
+                    };
+                    integer(&run.row, "ordinal")?
+                }
+            };
+            if !seen.insert((target.clone(), boundary)) {
+                continue;
+            }
+            if optional(&fork, "deleted_at")?.is_none() {
+                with = Some(with.map_or(boundary, |old| old.max(boundary)));
+                if target != leaving {
+                    without = Some(without.map_or(boundary, |old| old.max(boundary)));
+                }
+            }
+            pending.push((target, Some(boundary)));
+        }
+    }
+    Ok((with, without))
+}
+
+async fn deleted_sources(session: &mut Session, thread: &str) -> Result<Vec<String>> {
+    let mut current = thread.to_owned();
+    let mut seen = BTreeSet::new();
+    let mut result = Vec::new();
+    while seen.insert(current.clone()) {
+        let Some(row) = point(session, THREADS, Some(&current), None).await?.pop() else {
+            break;
+        };
+        let payload = p(&row)?;
+        if payload["forkedFrom"]["type"] != "run"
             || payload["lineage"]["sideChat"] == true
             || payload["lineage"]["sideChat"].as_i64() == Some(1)
         {
-            continue;
+            break;
         }
-        let Some(run_id) = source["runId"].as_str() else {
-            continue;
+        let Some(parent) = payload["forkedFrom"]["threadId"].as_str() else {
+            break;
         };
-        if let Some(run) = point(session, RUNS, Some(run_id), Some(thread))
-            .await?
-            .first()
-        {
-            let ordinal = integer(&run.row, "ordinal")?;
-            fork_ordinal = Some(fork_ordinal.map_or(ordinal, |previous| previous.max(ordinal)));
+        let Some(row) = point(session, THREADS, Some(parent), None).await?.pop() else {
+            break;
+        };
+        if optional(&row, "deleted_at")?.is_none() {
+            break;
         }
+        result.push(parent.to_owned());
+        current = parent.to_owned();
     }
-    let Some(boundary) = fork_ordinal else {
-        return Ok(rows);
-    };
+    // The recursive SQL UNION is traversed in discovery order, nearest source first.
+    Ok(result)
+}
+
+async fn in_run_range(
+    session: &mut Session,
+    rows: Vec<IndexedRow>,
+    from: i64,
+    through: i64,
+) -> Result<Vec<IndexedRow>> {
     let mut result = Vec::new();
     for row in rows {
-        let Some(run_id) = optional(&row, "run_id")? else {
-            continue;
-        };
-        let shared = match point(session, RUNS, Some(&run_id), None).await?.first() {
-            Some(run) => integer(&run.row, "ordinal")? <= boundary,
-            None => false,
-        };
-        if !shared {
+        let run = point(session, RUNS, optional(&row, "run_id")?.as_deref(), None)
+            .await?
+            .pop();
+        let ordinal = run
+            .as_ref()
+            .map(|run| integer(&run.row, "ordinal"))
+            .transpose()?
+            .unwrap_or(-1);
+        if (from..=through).contains(&ordinal) {
             result.push(row);
         }
     }
     Ok(result)
+}
+
+async fn run_files(
+    session: &mut Session,
+    thread: &str,
+    from: i64,
+    through: i64,
+    renders: &[RenderAttachment],
+) -> Result<Vec<Value>> {
+    let messages = thread_rows(session, MESSAGES, thread).await?;
+    let messages = in_run_range(session, messages, from, through).await?;
+    let mut result = attachment_values(
+        sorted(messages, &["created_at", "message_id"])?,
+        "nativeContextAttachmentIds",
+    )?
+    .as_array()
+    .ok_or(Error::IncompatibleStore)?
+    .iter()
+    .map(|row| row["id"].clone())
+    .collect::<Vec<_>>();
+    let items = thread_rows(session, ITEMS, thread).await?;
+    let items = sorted(in_run_range(session, items, from, through).await?, &[])?;
+    let answers = keep(items.iter().map(copy).collect(), |row| {
+        Ok(string(row, "type")? == "user_input_request")
+    })?;
+    result.extend(
+        attachment_values(answers, "nativeAnswerAttachmentIds")?
+            .as_array()
+            .ok_or(Error::IncompatibleStore)?
+            .iter()
+            .map(|row| row["id"].clone()),
+    );
+    for row in items {
+        if string(&row, "type")? == "dynamic_tool"
+            && integer(&row.row, "_native_attachment_render")? == 1
+        {
+            let item_id = id(&row, ITEMS)?;
+            result.extend(
+                renders
+                    .iter()
+                    .filter(|render| render.turn_item_id == item_id)
+                    .map(|render| json!(render.id)),
+            );
+        }
+    }
+    Ok(result)
+}
+
+async fn unshown_files(
+    session: &mut Session,
+    thread: &str,
+    from: i64,
+    through: i64,
+    renders: &[RenderAttachment],
+) -> Result<Vec<Value>> {
+    let mut candidates = run_files(session, thread, from, through, renders).await?;
+    if from > -1 && !candidates.is_empty() {
+        let retained = run_files(session, thread, -1, from - 1, renders).await?;
+        candidates.retain(|id| !retained.contains(id));
+    }
+    Ok(candidates)
+}
+
+async fn attachment_ids(session: &mut Session, q: &ProjectionContextQuery) -> Result<Value> {
+    let t = &q.thread_id;
+    let sources = deleted_sources(session, t).await?;
+    let include = q.include_shown_by_live_fork == Some(true);
+    let renders = q.render_ids.as_deref().unwrap_or_default();
+    let (own, _) = shown_runs(session, t, t).await?;
+    let after = |ordinal: Option<i64>| ordinal.map_or(-1, |v| v.saturating_add(1));
+    let mut released = Vec::new();
+    if !include {
+        for source in sources {
+            let (with, without) = shown_runs(session, &source, t).await?;
+            if let Some(through) = with {
+                released.extend(
+                    unshown_files(session, &source, after(without), through, renders).await?,
+                );
+            }
+        }
+    }
+    let mut files = unshown_files(
+        session,
+        t,
+        if include { -1 } else { after(own) },
+        9_007_199_254_740_991,
+        renders,
+    )
+    .await?;
+    files.extend(
+        attachment_values(
+            point(session, THREADS, Some(t), None).await?,
+            "nativeGuestAttachmentIds",
+        )?
+        .as_array()
+        .ok_or(Error::IncompatibleStore)?
+        .iter()
+        .map(|row| row["id"].clone()),
+    );
+    files.extend(released);
+    let mut distinct = Vec::new();
+    for id in files {
+        if !distinct.contains(&id) {
+            distinct.push(id);
+        }
+    }
+    Ok(json!(
+        distinct
+            .into_iter()
+            .map(|id| json!({"id":id}))
+            .collect::<Vec<_>>()
+    ))
+}
+
+// Decode only renders that the original range read would touch. Retained
+// ranges are needed only after a candidate actually contains file identities.
+async fn attachment_renders(
+    session: &mut Session,
+    q: &ProjectionContextQuery,
+    retained: bool,
+) -> Result<Value> {
+    let t = &q.thread_id;
+    let include = q.include_shown_by_live_fork == Some(true);
+    let (own, _) = shown_runs(session, t, t).await?;
+    let after = |ordinal: Option<i64>| ordinal.map_or(-1, |v| v.saturating_add(1));
+    let mut ranges = vec![(
+        t.clone(),
+        if include { -1 } else { after(own) },
+        9_007_199_254_740_991,
+    )];
+    if !include {
+        for source in deleted_sources(session, t).await? {
+            let (with, without) = shown_runs(session, &source, t).await?;
+            if let Some(through) = with {
+                ranges.push((source, after(without), through));
+            }
+        }
+    }
+    let mut result = Vec::new();
+    for (thread, from, through) in ranges {
+        let (from, through) = if retained {
+            if from <= -1
+                || run_files(
+                    session,
+                    &thread,
+                    from,
+                    through,
+                    q.render_ids.as_deref().unwrap_or_default(),
+                )
+                .await?
+                .is_empty()
+            {
+                continue;
+            }
+            (-1, from - 1)
+        } else {
+            (from, through)
+        };
+        let rows = thread_rows(session, ITEMS, &thread).await?;
+        for row in sorted(in_run_range(session, rows, from, through).await?, &[])? {
+            if string(&row, "type")? == "dynamic_tool"
+                && integer(&row.row, "_native_attachment_render")? == 1
+            {
+                let item_id = id(&row, ITEMS)?;
+                let raw = payloads(session, ITEMS, vec![row]).await?;
+                result.push(json!({"thread_id":thread,"turn_item_id":item_id,"payload_json":raw[0]["payload_json"]}));
+            }
+        }
+    }
+    Ok(json!(result))
+}
+
+async fn manual_scopes(session: &mut Session, thread_id: &str) -> Result<Vec<IndexedRow>> {
+    keep(thread_rows(session, SCOPES, thread_id).await?, |row| {
+        Ok(string(row, "kind")? == "manual")
+    })
+}
+
+async fn manual_scope_ids(session: &mut Session, thread_id: &str) -> Result<BTreeSet<String>> {
+    manual_scopes(session, thread_id)
+        .await?
+        .iter()
+        .map(|row| id(row, SCOPES))
+        .collect()
+}
+
+async fn turn_transfers(session: &mut Session, thread: &str) -> Result<Vec<IndexedRow>> {
+    let mut transfers = keep(
+        related(session, TRANSFERS, "target_thread_id", thread).await?,
+        |row| Ok(string(row, "type")? == "fork"),
+    )?;
+    let handoffs = thread_rows(session, HANDOFFS, thread).await?;
+    let mut references = BTreeSet::new();
+    for handoff in handoffs {
+        let primary = [text_cell(&id(&handoff, HANDOFFS)?)];
+        let source = read_row(
+            &mut session.transaction,
+            &session.catalog,
+            HANDOFFS,
+            &primary,
+        )
+        .await?
+        .ok_or(Error::IncompatibleStore)?;
+        let payload = text(&source.row, "payload_json")?;
+        if let Some(cell) = read_index::derived::json_identity(&payload, &["transferId"])? {
+            if let Some(transfer) = cell.get("value").and_then(Value::as_str) {
+                references.insert(transfer.to_owned());
+            }
+        }
+    }
+    for reference in references {
+        transfers.extend(point(session, TRANSFERS, Some(&reference), None).await?);
+    }
+    sorted(unique(TRANSFERS, transfers)?, &[])
+}
+
+fn preserves_checkpoint(row: &IndexedRow) -> Result<bool> {
+    let status = string(row, "status")?;
+    Ok(status == "ready"
+        || matches!(status.as_str(), "missing" | "error") && optional(row, "run_id")?.is_some())
 }
 
 async fn select(session: &mut Session, q: ProjectionContextQuery) -> Result<Value> {
@@ -284,20 +578,45 @@ async fn select(session: &mut Session, q: ProjectionContextQuery) -> Result<Valu
     let (name,rows)=match q.kind.as_str(){
         "thread"=>(THREADS,point(session,THREADS,Some(t),None).await?),
         "thread_exists"=>return Ok(json!(point(session,THREADS,Some(t),None).await?.iter().map(|_|json!({"thread_id":t})).collect::<Vec<_>>())),
-        "side_chat"=>return Ok(json!(point(session,THREADS,Some(t),None).await?.iter().map(|row|Ok(json!({"side_chat":sql_json(p(row)?.get("lineage").and_then(|p|p.get("sideChat")))?}))).collect::<Result<Vec<_>>>()?)),
+        "side_chat" => {
+            let rows = point(session, THREADS, Some(t), None).await?;
+            let fields = rows.iter().map(|row| {
+                let payload = p(row)?;
+                Ok(json!({
+                    "side_chat": sql_json(payload.get("lineage").and_then(|p| p.get("sideChat")))?,
+                    "project_id": string(row, "project_id")?,
+                    "worktree_path": sql_json(payload.get("worktreePath"))?,
+                }))
+            }).collect::<Result<Vec<_>>>()?;
+            return Ok(json!(fields));
+        },
         "turn_runs"=>(RUNS,sorted(thread_rows(session,RUNS,t).await?,&["ordinal"])?),
         "turn_attempts"=>(ATTEMPTS,sorted(thread_rows(session,ATTEMPTS,t).await?,&["run_id","attempt_ordinal"])?),
         "turn_nodes"=>{let run=point(session,RUNS,Some(required(&q.run_id)?),Some(t)).await?;let node=run.first().map(p).transpose()?.and_then(|p|p.get("rootNodeId").and_then(Value::as_str).map(str::to_owned));(NODES,point(session,NODES,node.as_deref(),Some(t)).await?)},
-        "turn_subagents"=>(SUBAGENTS,sorted(keep(thread_rows(session,SUBAGENTS,t).await?,|row|Ok(!one_of(row,"status",&["interrupted","failed","cancelled"])?))?,&["subagent_id"])?),
+        "turn_subagents" => {
+            let rows = keep(thread_rows(session, SUBAGENTS, t).await?, |row| {
+                Ok(optional(row, "origin")?.as_deref() == Some("provider_native")
+                    && optional(row, "status")?.as_deref() == Some("completed"))
+            })?;
+            (SUBAGENTS, sorted(rows, &["subagent_id"])?)
+        },
         "turn_provider_threads"=>(PROVIDER_THREADS,sorted(thread_rows(session,PROVIDER_THREADS,t).await?,&["first_run_ordinal","provider_thread_id"])?),
         "turn_provider_turns"=>(TURNS,sorted(thread_rows(session,TURNS,t).await?,&["provider_thread_id","ordinal"])?),
         "turn_scopes"=>(SCOPES,sorted(keep(thread_rows(session,SCOPES,t).await?,|row|Ok(selected_ids(&q.ids,&id(row,SCOPES)?)))?,&["ordinal_within_parent","scope_id"])?),
         "turn_handoffs"=>(HANDOFFS,sorted(thread_rows(session,HANDOFFS,t).await?,&[])?),
-        "turn_transfers"=>{let mut rows=related(session,TRANSFERS,"source_thread_id",t).await?;rows.extend(related(session,TRANSFERS,"target_thread_id",t).await?);(TRANSFERS,sorted(unique(TRANSFERS,rows)?,&[])?)},
+        "turn_transfers" => (TRANSFERS, turn_transfers(session, t).await?),
         "turn_items"=>(ITEMS,sorted(keep(related(session,ITEMS,"run_id",required(&q.run_id)?).await?,|row|Ok(string(row,"thread_id")?==*t))?,&["ordinal","turn_item_id"])?),
         "turn_sessions"=>(SESSIONS,sorted(bound_sessions(session,t).await?,&["updated_at","provider_session_id"])?),
-        "turn_messages"=>{let run=point(session,RUNS,Some(required(&q.run_id)?),Some(t)).await?;let user=run.first().map(p).transpose()?.and_then(|p|p.get("userMessageId").and_then(Value::as_str).map(str::to_owned));
-            (MESSAGES,sorted(keep(thread_rows(session,MESSAGES,t).await?,|row|Ok(user.as_deref()==Some(id(row,MESSAGES)?.as_str())||string(row,"role")?=="user"&&(flag(row,"nativeCompactCommand")?||flag(row,"nativeGoalCommand")?)))?,&["created_at","message_id"])?)},
+        "turn_messages" => {
+            let mut rows = related(session, MESSAGES, "_deferred_slash_thread", t).await?;
+            for row in &rows {
+                p(row)?;
+            }
+            for id in q.ids.as_deref().unwrap_or_default().iter().flatten() {
+                rows.extend(point(session, MESSAGES, Some(id), Some(t)).await?);
+            }
+            (MESSAGES, sorted(unique(MESSAGES, rows)?, &["created_at", "message_id"])?)
+        },
         "turn_conversation" => {
             let mut present = false;
             for row in thread_rows(session, MESSAGES, t).await? {
@@ -313,9 +632,25 @@ async fn select(session: &mut Session, q: ProjectionContextQuery) -> Result<Valu
         "checkpoint"=>(CHECKPOINTS,point(session,CHECKPOINTS,q.record_id.as_deref(),Some(t)).await?),
         "provider"=>(PROVIDER_THREADS,accessible_provider(session,t,q.record_id.as_deref()).await?),
         "checkpoint_runs"=>return Ok(json!(sorted(thread_rows(session,RUNS,t).await?,&["ordinal"])?.iter().map(|row|Ok(json!({"id":id(row,RUNS)?,"ordinal":integer(&row.row,"ordinal")?,"status":string(row,"status")?}))).collect::<Result<Vec<_>>>()?)),
-        "checkpoint_scopes"=>return Ok(json!(sorted(thread_rows(session,SCOPES,t).await?,&["ordinal_within_parent","scope_id"])?.iter().map(|row|Ok(json!({"id":id(row,SCOPES)?,"runId":optional(row,"run_id")?,"kind":string(row,"kind")?,"cwd":sql_json(p(row)?.get("cwd"))?}))).collect::<Result<Vec<_>>>()?)),
+        "checkpoint_scopes"=>return Ok(json!(sorted(thread_rows(session,SCOPES,t).await?,&["ordinal_within_parent","scope_id"])?.iter().map(|row|Ok(json!({"id":id(row,SCOPES)?,"runId":optional(row,"run_id")?,"kind":string(row,"kind")?,"cwd":sql_json(p(row)?.get("cwd"))?,"label":sql_json(p(row)?.get("label"))?,"repositoryPath":sql_json(p(row)?.get("repositoryPath"))?}))).collect::<Result<Vec<_>>>()?)),
         "checkpoint_records"=>return Ok(json!(sorted(thread_rows(session,CHECKPOINTS,t).await?,&["scope_id","ordinal_within_scope"])?.iter().map(|row|Ok(json!({"scopeId":string(row,"scope_id")?,"runId":optional(row,"run_id")?,"ordinalWithinScope":integer(&row.row,"ordinal_within_scope")?,"appRunOrdinal":cell_json(row,"app_run_ordinal")?,"status":string(row,"status")?,"ref":sql_json(p(row)?.get("ref"))?}))).collect::<Result<Vec<_>>>()?)),
-        "preserved_ordinals"=>return Ok(json!(sorted(keep(thread_rows(session,CHECKPOINTS,t).await?,|row|Ok(string(row,"scope_id")?==required(&q.scope_id)?&&(string(row,"status")?=="ready"||(string(row,"status")?=="missing"&&optional(row,"run_id")?.is_some()))))?,&[])?.iter().map(|row|Ok(json!({"ordinal":integer(&row.row,"ordinal_within_scope")?}))).collect::<Result<Vec<_>>>()?)),
+        "repository_scopes" => (SCOPES, sorted(manual_scopes(session, t).await?, &["scope_id"])?),
+        "repository_baselines" => {
+            let scope_ids = manual_scope_ids(session, t).await?;
+            let ordinal = required_ordinal(q.ordinal)?;
+            let mut baselines = Vec::new();
+            for row in sorted(thread_rows(session, CHECKPOINTS, t).await?, &[])? {
+                let scope_id = string(&row, "scope_id")?;
+                if scope_ids.contains(&scope_id)
+                    && integer(&row.row, "ordinal_within_scope")? == ordinal
+                    && preserves_checkpoint(&row)?
+                {
+                    baselines.push(json!({"scope_id": scope_id}));
+                }
+            }
+            return Ok(json!(baselines));
+        },
+        "preserved_ordinals"=>return Ok(json!(sorted(keep(thread_rows(session,CHECKPOINTS,t).await?,|row|Ok(string(row,"scope_id")?==required(&q.scope_id)?&&preserves_checkpoint(row)?))?,&[])?.iter().map(|row|Ok(json!({"ordinal":integer(&row.row,"ordinal_within_scope")?}))).collect::<Result<Vec<_>>>()?)),
         "rollback_target_attempt"=>{let ordinal=required_ordinal(q.ordinal)?;let mut out=Vec::new();for run in thread_rows(session,RUNS,t).await?{if integer(&run.row,"ordinal")?!=ordinal||string(&run,"status")?=="rolled_back"{continue;}let payload=p(&run)?;if let Some(attempt)=point(session,ATTEMPTS,payload.get("activeAttemptId").and_then(Value::as_str),Some(t)).await?.pop(){out.push(json!({"id":id(&attempt,ATTEMPTS)?,"providerTurnId":optional(&attempt,"provider_turn_id")?}));}}return Ok(json!(out));},
         "rollback_runs"=>(RUNS,sorted(keep(thread_rows(session,RUNS,t).await?,|row|Ok(integer(&row.row,"ordinal")?>required_ordinal(q.ordinal)?&&one_of(row,"status",&["completed","interrupted","failed","cancelled"])?))?,&["ordinal"])?),
         "bound_session"=>{let id=q.record_id.as_deref();let rows=keep(bound_sessions(session,t).await?,|row|Ok(id==Some(string(row,"provider_session_id")?.as_str())))?;(SESSIONS,rows)},
@@ -339,13 +674,33 @@ async fn select(session: &mut Session, q: ProjectionContextQuery) -> Result<Valu
             }
             return Ok(json!(out));
         },
-        "stale_checkpoints"=>(CHECKPOINTS,sorted(keep(thread_rows(session,CHECKPOINTS,t).await?,|row|Ok(string(row,"scope_id")?==required(&q.scope_id)?&&string(row,"status")?=="ready"&&cell_json(row,"app_run_ordinal")?.as_i64().is_some_and(|v|q.ordinal.is_some_and(|n|v>n))))?,&["ordinal_within_scope"])?),
+        "stale_checkpoints" => {
+            let scope = required(&q.scope_id)?;
+            let ordinal = required_ordinal(q.ordinal)?;
+            let scopes = manual_scope_ids(session, t).await?;
+            let rows = keep(thread_rows(session, CHECKPOINTS, t).await?, |row| {
+                let scope_id = string(row, "scope_id")?;
+                Ok(string(row, "status")? == "ready"
+                    && ((scope_id == scope && cell_json(row, "app_run_ordinal")?.as_i64().is_some_and(|value| value > ordinal))
+                        || (scopes.contains(&scope_id) && integer(&row.row, "ordinal_within_scope")? > ordinal)))
+            })?;
+            let mut primary = Vec::new();
+            let mut others = Vec::new();
+            for row in sorted(rows, &["scope_id", "ordinal_within_scope"])? {
+                if string(&row, "scope_id")? == scope {
+                    primary.push(row);
+                } else {
+                    others.push(row);
+                }
+            }
+            primary.extend(others);
+            (CHECKPOINTS, primary)
+        },
         "rollback_nodes"=>{let mut rows=Vec::new();for id in q.ids.as_ref().ok_or_else(||invalid("context node identities are required"))?.iter().flatten().collect::<BTreeSet<_>>(){rows.extend(point(session,NODES,Some(id),Some(t)).await?);}(NODES,sorted(rows,&["node_id"])?)},
         "rollback_turns"=>(TURNS,sorted(keep(thread_rows(session,TURNS,t).await?,|row|Ok(optional(row,"provider_thread_id")?.as_deref()==q.provider_thread_id.as_deref()||q.provider_turn_id.as_ref().is_some_and(|id|id==&string(row,"provider_turn_id").unwrap_or_default())||q.attempt_id.as_ref().is_some_and(|id|optional(row,"run_attempt_id").ok().flatten().as_ref()==Some(id))))?,&["provider_thread_id","ordinal"])?),
-        "attachment_messages"=>{let rows=thread_rows(session,MESSAGES,t).await?;return attachment_values(sorted(unshared_attachments(session,t,rows).await?,&["created_at","message_id"])?,"nativeContextAttachmentIds");},
-        "attachment_answers"=>{let rows=keep(thread_rows(session,ITEMS,t).await?,|row|Ok(string(row,"type")?=="user_input_request"))?;return attachment_values(sorted(unshared_attachments(session,t,rows).await?,&[])?,"nativeAnswerAttachmentIds");},
-        "attachment_guests"=>return attachment_values(point(session,THREADS,Some(t),None).await?,"nativeGuestAttachmentIds"),
-        "attachment_renders"=>{let rows=keep(thread_rows(session,ITEMS,t).await?,|row|Ok(string(row,"type")?=="dynamic_tool"&&integer(&row.row,"_native_attachment_render")?==1))?;(ITEMS,sorted(unshared_attachments(session,t,rows).await?,&[])?)},
+        "attachment_ids"=>return attachment_ids(session,&q).await,
+        "attachment_render_candidates"=>return attachment_renders(session,&q,false).await,
+        "attachment_retained_render_candidates"=>return attachment_renders(session,&q,true).await,
         "runtime_recovery"=>return runtime_recovery(session,t).await,
         _=>return Err(invalid("unknown projection context query")),
     };
@@ -478,7 +833,18 @@ async fn runtime_recovery(session: &mut Session, t: &str) -> Result<Value> {
         let provider_id = id(provider, PROVIDER_THREADS)?;
         let candidates = keep(all_runs.iter().map(copy).collect(), |run| {
             if optional(run, "provider_thread_id")?.as_deref() != Some(&provider_id)
-                || one_of(run, "status", &["queued", "rolled_back"])?
+                || one_of(
+                    run,
+                    "status",
+                    &[
+                        "queued",
+                        "preparing",
+                        "starting",
+                        "running",
+                        "waiting",
+                        "rolled_back",
+                    ],
+                )?
             {
                 return Ok(false);
             }

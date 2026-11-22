@@ -105,7 +105,7 @@ pub fn tokenize_launch_args(input: &str) -> Vec<String> {
         } else if matches!(character, '\'' | '"') {
             quote = Some(character);
             quoted = true;
-        } else if js_space(character) {
+        } else if matches!(character, ' ' | '\t' | '\n' | '\r' | '\x0c' | '\x0b') {
             if !current.is_empty() || quoted {
                 tokens.push(current);
                 current = String::new();
@@ -132,7 +132,21 @@ fn filter_launch_args(input: &str, mcp: bool) -> Vec<String> {
     let mut result = Vec::new();
     let mut index = 0;
     while index < tokens.len() {
-        let token = &tokens[index];
+        let raw = &tokens[index];
+        let normalized = if let Some(value) = raw.strip_prefix("-c")
+            && !value.is_empty()
+            && !value.starts_with('=')
+        {
+            Some(format!("-c={value}"))
+        } else if let Some(value) = raw.strip_prefix("-p")
+            && !value.is_empty()
+            && !value.starts_with('=')
+        {
+            Some(format!("-p={value}"))
+        } else {
+            None
+        };
+        let token = normalized.as_ref().unwrap_or(raw);
         let switch = !mcp && matches!(token.as_str(), "--strict-config" | "--oss");
         let value_flag = matches!(
             token.as_str(),
@@ -164,7 +178,25 @@ fn filter_launch_args(input: &str, mcp: bool) -> Vec<String> {
         }
         index += 1;
     }
+    // Codex can apply explicit enables after trailing config overrides.
     result
+        .iter()
+        .enumerate()
+        .filter_map(|(index, arg)| {
+            let disabled = |feature: &str| {
+                matches!(feature, "apps" | "connectors" | "plugins")
+                    || (!mcp && matches!(feature, "hooks" | "codex_hooks"))
+            };
+            let omit = if let Some(feature) = arg.strip_prefix("--enable=") {
+                disabled(feature)
+            } else if arg == "--enable" {
+                result.get(index + 1).is_some_and(|next| disabled(next))
+            } else {
+                index > 0 && result[index - 1] == "--enable" && disabled(arg)
+            };
+            if omit { None } else { Some(arg.clone()) }
+        })
+        .collect()
 }
 
 pub fn exec_launch_args(input: &str) -> Vec<String> {
@@ -260,8 +292,7 @@ pub fn select(request: &Request, environment_launch_args: Option<&str>) -> Selec
             .map(str::to_owned)
     };
     let raw_args = environment_launch_args
-        .map(js_trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| !js_trim(value).is_empty())
         .unwrap_or_else(|| js_trim(&request.launch_args));
     Selection {
         model: model.to_owned(),
@@ -274,6 +305,8 @@ pub fn select(request: &Request, environment_launch_args: Option<&str>) -> Selec
 
 fn plugin_args(args: &mut Vec<String>) {
     for value in [
+        "--config",
+        "features.connectors=false",
         "--config",
         "features.plugins=false",
         "--config",
@@ -311,13 +344,37 @@ pub fn exec_args(
     selection: &Selection,
     schema_path: &str,
     output_path: &str,
-    disabled_mcp: Option<&str>,
+    enabled_mcp_names: &[String],
 ) -> Vec<String> {
     let mut args = vec!["exec".to_owned()];
+    let disabled_mcp = disabled_mcp_config(enabled_mcp_names);
+    if let Some(config) = &disabled_mcp {
+        args.extend(["--config".to_owned(), config.clone()]);
+    }
     args.extend(selection.launch_args.clone());
     plugin_args(&mut args);
-    if let Some(config) = disabled_mcp {
-        args.extend(["--config".to_owned(), config.to_owned()]);
+    let launch_sets_mcp_table = selection.launch_args.iter().any(|arg| {
+        arg.match_indices("mcp_servers").any(|(offset, name)| {
+            let boundary = offset == 0
+                || !arg[..offset]
+                    .chars()
+                    .next_back()
+                    .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+            boundary && js_trim(&arg[offset + name.len()..]).starts_with('=')
+        })
+    });
+    if launch_sets_mcp_table {
+        if let Some(config) = &disabled_mcp {
+            args.extend(["--config".to_owned(), config.clone()]);
+        }
+    }
+    for name in enabled_mcp_names {
+        if !name.contains('.') && !name.contains('=') {
+            args.extend([
+                "--config".to_owned(),
+                format!("mcp_servers.{name}.enabled=false"),
+            ]);
+        }
     }
     for value in [
         "--ephemeral",
@@ -334,6 +391,13 @@ pub fn exec_args(
         "model_reasoning_effort=\"{}\"",
         selection.reasoning
     ));
+    // Current Codex gives hooks precedence over the historical codex_hooks alias.
+    args.extend([
+        "--config".to_owned(),
+        "features.codex_hooks=false".to_owned(),
+        "--config".to_owned(),
+        "features.hooks=false".to_owned(),
+    ]);
     if let Some(tier) = &selection.service_tier {
         args.extend(["--config".to_owned(), format!("service_tier=\"{tier}\"")]);
     }
@@ -758,14 +822,7 @@ pub mod process {
             .output
             .to_str()
             .ok_or_else(|| Error::new("io", "Generation temporary path is not UTF-8."))?;
-        let disabled = super::disabled_mcp_config(&names);
-        let args = super::exec_args(
-            request,
-            &selection,
-            schema_path,
-            output_path,
-            disabled.as_deref(),
-        );
+        let args = super::exec_args(request, &selection, schema_path, output_path, &names);
         let result = capture(
             request,
             &args,

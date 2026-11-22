@@ -5,6 +5,8 @@ import * as Schema from "effect/Schema";
 import { RedbClient } from "./RedbClient.ts";
 import {
   AuxiliaryPersistenceReads,
+  ScheduledThreadRow,
+  DeletedCheckpointTargetRow,
   toAuxiliaryReadError,
   ProviderHistoryRow,
   LegacyProjectSettingsRow,
@@ -22,6 +24,21 @@ export const make = Effect.gen(function* () {
   while (!(yield* client.prepareOutbox).prepared) yield* Effect.yieldNow;
   while (!(yield* client.prepareAuxiliary).prepared) yield* Effect.yieldNow;
   return AuxiliaryPersistenceReads.of({
+    enabledScheduledThreadIds: client
+      .request(
+        "application_auxiliary_read",
+        { query: { kind: "enabled_scheduled_thread_ids" } },
+        Schema.Array(ScheduledThreadRow),
+      )
+      .pipe(Effect.mapError(toAuxiliaryReadError("enabledScheduledThreadIds"))),
+    deletedCheckpointTargets: client
+      .request(
+        "application_auxiliary_read",
+        { query: { kind: "deleted_checkpoint_targets" } },
+        Schema.Array(DeletedCheckpointTargetRow),
+      )
+      .pipe(Effect.mapError(toAuxiliaryReadError("deletedCheckpointTargets"))),
+
     hasActiveRun: client
       .request("application_auxiliary_read", { query: { kind: "active_runs" } }, Schema.Boolean)
       .pipe(Effect.mapError(toAuxiliaryReadError("hasActiveRun"))),

@@ -345,7 +345,7 @@ for (const changes of [
   { projection: { nodes: [], subagents: [], turnItems: [] } },
 ])
   rejected("invalid envelope or required field", JSON.stringify({ ...empty, ...changes }) + "\n");
-rejected("unsupported command arguments", valid + "\n", "invalid request", ["unexpected"]);
+rejected("unsupported command arguments", undefined, "invalid request", ["unexpected"]);
 rejected("duplicate envelope keys", valid.slice(0, -1) + ',"version":1}\n', "duplicate object key");
 rejected(
   "escaped duplicate keys",

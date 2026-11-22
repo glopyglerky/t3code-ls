@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-import * as Assert from "node:assert/strict";
-import * as Crypto from "node:crypto";
-import * as FS from "node:fs/promises";
-import * as Path from "node:path";
-import * as Sqlite from "node:sqlite";
+import * as NodeAssert from "node:assert/strict";
+import * as NodeCrypto from "node:crypto";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
+import * as NodeSqlite from "node:sqlite";
 import * as Contracts from "@t3tools/contracts";
-import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as PlatformCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -31,6 +31,8 @@ import * as ThreadLaunchService from "../apps/server/src/orchestration-v2/Thread
 import * as ManagedProjectFolders from "../apps/server/src/project/ManagedProjectFolders.ts";
 import * as Metrics from "../apps/server/src/observability/Metrics.ts";
 import * as ThreadManagementService from "../apps/server/src/orchestration-v2/ThreadManagementService.ts";
+import { OrchestratorDispatchError } from "../apps/server/src/orchestration-v2/Orchestrator.ts";
+import { userFacingDispatchErrorMessage } from "../apps/server/src/orchestration-v2/UserFacingErrors.ts";
 import * as SecretRequests from "../apps/server/src/secrets/SecretRequests.ts";
 import * as ManagedPolicy from "../apps/server/src/policy/ManagedPolicy.ts";
 import * as DueHint from "../apps/server/src/scheduling/DueHint.ts";
@@ -58,13 +60,17 @@ import {
 } from "./redb-domain-fixture.mjs";
 
 const [executable, proofPath] = process.argv.slice(2);
-Assert.ok(executable && Path.isAbsolute(executable), "Pass an absolute native database executable");
-await FS.access(executable, FS.constants.X_OK);
+NodeAssert.ok(
+  executable && NodePath.isAbsolute(executable),
+  "Pass an absolute native database executable",
+);
+await NodeFSP.access(executable, NodeFSP.constants.X_OK);
 const at = "2026-11-10T12:00:00.000Z";
+const decodeScheduledTaskInput = Schema.decodeUnknownEffect(Contracts.ScheduledTaskUpsertInput);
 const originalDedupe = loadUpstream(
   "apps/server/src/scheduledTasks/webhookDedupe.ts",
   {
-    NodeCrypto: Crypto,
+    NodeCrypto,
     ...Contracts,
     Effect,
     Schema,
@@ -81,9 +87,16 @@ const originalDedupe = loadUpstream(
     "dedupeError",
   ],
 );
+const citations = loadUpstream(
+  "packages/shared/src/assistantCitations.ts",
+  { ...Contracts, Option, Schema },
+  ["splitsSurrogatePair"],
+);
 const original = loadUpstream(
   "apps/server/src/scheduledTasks/ScheduledTaskService.ts",
   {
+    OrchestratorDispatchError,
+    userFacingDispatchErrorMessage,
     ...Contracts,
     Cause,
     Context,
@@ -118,6 +131,7 @@ const original = loadUpstream(
     ...originalDedupe.module,
     ...WebhookFilter,
     ...WebhookVerification,
+    ...citations.module,
   },
   ["layer", "ScheduledTaskService"],
 );
@@ -139,19 +153,18 @@ function serviceScenario(kind) {
     sleep: () => Effect.never,
   };
   const dependencies = Layer.mergeAll(
-    NodeCrypto.layerDigest,
-    NodeCrypto.layerMac,
+    PlatformCrypto.layerDigest,
+    PlatformCrypto.layerMac,
     Layer.succeed(SecureRandom.SecureRandom, {
       randomBytes: (count) => Effect.sync(() => new Uint8Array(count).fill(++random)),
       uuidV4: () =>
         Effect.sync(() => `00000000-0000-4000-8000-${String(++random).padStart(12, "0")}`),
     }),
     Layer.succeed(Scheduler.Scheduler, {
-      register: (name, work) =>
-        Effect.gen(function* () {
-          const context = yield* Effect.context();
-          workers.set(name, work.pipe(Effect.provideContext(context)));
-        }),
+      register: Effect.fn("ScheduledFixture.register")(function* (name, work) {
+        const context = yield* Effect.context();
+        workers.set(name, work.pipe(Effect.provideContext(context)));
+      }),
     }),
     Layer.succeed(ThreadLaunchService.ThreadLaunchService, {
       launch: (input) =>
@@ -185,7 +198,7 @@ function serviceScenario(kind) {
           )
         : ScheduledTaskService.layer;
   const input = (commandId, overrides = {}) =>
-    Schema.decodeUnknownEffect(Contracts.ScheduledTaskUpsertInput)({
+    decodeScheduledTaskInput({
       commandId,
       title: "Fixture task",
       prompt: "Read {{body.value}}",
@@ -204,7 +217,7 @@ function serviceScenario(kind) {
     const service = yield* serviceTag;
     const result = {};
     result.initial = yield* service.list();
-    Assert.equal(result.initial.tasks.length, 2);
+    NodeAssert.equal(result.initial.tasks.length, 2);
     const saved = yield* service.upsert(yield* input("create"));
     result.created = saved;
     result.edited = yield* service.upsert(
@@ -213,18 +226,26 @@ function serviceScenario(kind) {
     result.disabled = yield* service.setEnabled({ id: saved.task.id, enabled: false });
     result.enabled = yield* service.setEnabled({ id: saved.task.id, enabled: true });
     result.ran = yield* service.runNow({ id: saved.task.id });
-    Assert.equal(result.ran.task.runCount, 1);
+    NodeAssert.equal(result.ran.task.runCount, 1);
     result.afterRun = yield* service.upsert(yield* input("create", { title: "After run" }));
-    Assert.equal(result.afterRun.task.runCount, 1);
+    NodeAssert.equal(result.afterRun.task.runCount, 1);
     const bound = yield* service.upsert(
       yield* input("bound", { threadId: "bound:thread", threadMode: "continue" }),
     );
     yield* service.moveThreadTasks({ threadIds: ["bound:thread"], projectId: "project:moved" });
     result.moved = (yield* service.list()).tasks.find((t) => t.id === bound.task.id);
     yield* service.deleteForThread("bound:thread");
-    Assert.ok(!(yield* service.list()).tasks.some((t) => t.id === bound.task.id));
+    NodeAssert.ok(!(yield* service.list()).tasks.some((t) => t.id === bound.task.id));
+    const promptLimit = 64 * 1024;
+    const frameOpen = "<webhook-data-000000000000>".length;
+    const text = `${"a".repeat(promptLimit - 1 - frameOpen)}😀 tail`;
+    const assertPromptBoundary = ({ delivery }) => {
+      NodeAssert.equal(delivery.renderedPrompt.length, promptLimit - 1);
+      NodeAssert.equal(delivery.renderedPrompt.slice(-3), "aaa");
+    };
     const hook = (yield* service.upsert(
       yield* input("hook", {
+        prompt: "{{body.value}}",
         schedule: {
           type: "webhook",
           dedupe: {
@@ -235,9 +256,9 @@ function serviceScenario(kind) {
         },
       }),
     )).task;
-    const request = (delivery, value) => ({
-      hookId: hook.id,
-      token: hook.webhook.path.split("/").at(-1),
+    const request = (delivery, value, task = hook) => ({
+      hookId: task.id,
+      token: task.webhook.path.split("/").at(-1),
       method: "POST",
       path: "/",
       query: "",
@@ -246,12 +267,12 @@ function serviceScenario(kind) {
       body: new TextEncoder().encode(JSON.stringify({ group: "same", value })),
       relayDeliveryId: delivery,
     });
-    result.accepted = yield* service.triggerWebhook(request("first", "one"));
-    result.coalesced = yield* service.triggerWebhook(request("second", "two"));
-    result.duplicate = yield* service.triggerWebhook(request("second", "two"));
-    Assert.equal(result.accepted.outcome, "accepted");
-    Assert.equal(result.coalesced.outcome, "coalesced");
-    Assert.equal(result.duplicate.outcome, "duplicate");
+    result.accepted = yield* service.triggerWebhook(request("first", text));
+    result.coalesced = yield* service.triggerWebhook(request("second", text));
+    result.duplicate = yield* service.triggerWebhook(request("second", text));
+    NodeAssert.equal(result.accepted.outcome, "accepted");
+    NodeAssert.equal(result.coalesced.outcome, "coalesced");
+    NodeAssert.equal(result.duplicate.outcome, "duplicate");
     result.pendingLog = yield* service.listWebhookDeliveries({
       id: hook.id,
       acceptAnyOutcome: true,
@@ -264,8 +285,8 @@ function serviceScenario(kind) {
       if (completed.lastRunStatus === "succeeded" && completed.runCount === 1) break;
       yield* Effect.yieldNow;
     }
-    Assert.equal(completed.runCount, 1);
-    Assert.equal(completed.lastRunStatus, "succeeded");
+    NodeAssert.equal(completed.runCount, 1);
+    NodeAssert.equal(completed.lastRunStatus, "succeeded");
     result.completed = completed;
     result.finalLogs = yield* service.listWebhookDeliveries({
       id: hook.id,
@@ -276,11 +297,31 @@ function serviceScenario(kind) {
       deliveryId: "delivery:relay:first",
       acceptAnyOutcome: true,
     });
+    assertPromptBoundary(result.delivery);
+    const immediate = (yield* service.upsert(
+      yield* input("immediate-hook", { prompt: "{{body.value}}", schedule: { type: "webhook" } }),
+    )).task;
+    result.immediate = yield* service.triggerWebhook(request("immediate", text, immediate));
+    NodeAssert.equal(result.immediate.outcome, "accepted");
+    result.immediateLog = yield* service.getWebhookDelivery({
+      id: immediate.id,
+      deliveryId: "delivery:relay:immediate",
+      acceptAnyOutcome: true,
+    });
+    assertPromptBoundary(result.immediateLog);
+    let immediateResult;
+    for (let attempt = 0; attempt < 500; attempt++) {
+      immediateResult = (yield* service.list()).tasks.find((task) => task.id === immediate.id);
+      if (immediateResult.runCount === 1 && immediateResult.lastRunStatus === "succeeded") break;
+      yield* Effect.yieldNow;
+    }
+    NodeAssert.equal(immediateResult.runCount, 1);
+    NodeAssert.equal(immediateResult.lastRunStatus, "succeeded");
     const rotated = yield* service.rotateWebhookToken({ id: hook.id });
-    Assert.notEqual(rotated.task.webhook.path, hook.webhook.path);
+    NodeAssert.notEqual(rotated.task.webhook.path, hook.webhook.path);
     result.rotated = rotated;
     result.deleted = yield* service.delete({ id: hook.id });
-    Assert.equal(
+    NodeAssert.equal(
       (yield* service.listWebhookDeliveries({ id: hook.id, acceptAnyOutcome: true })).deliveries
         .length,
       0,
@@ -300,7 +341,7 @@ function rowScenario(rows, transaction) {
   return Effect.gen(function* () {
     const result = {};
     result.initial = yield* read({ kind: "deliveries", task_id: "seed:a" });
-    Assert.deepEqual(
+    NodeAssert.deepEqual(
       result.initial.map((r) => r.delivery_id),
       ["third", "first", "last"],
     );
@@ -330,8 +371,8 @@ function rowScenario(rows, transaction) {
           secret_changed: false,
         });
         result.preserved = yield* read({ kind: "tasks", task_id: "seed:a" });
-        Assert.equal(result.preserved[0].webhook_token, "rotated");
-        Assert.equal(result.preserved[0].last_run_status, "running");
+        NodeAssert.equal(result.preserved[0].webhook_token, "rotated");
+        NodeAssert.equal(result.preserved[0].last_run_status, "running");
         result.stale = yield* write({
           kind: "patch_task",
           task_id: "seed:a",
@@ -340,7 +381,7 @@ function rowScenario(rows, transaction) {
           patch: { last_run_status: "failed" },
           increment_run_count: true,
         });
-        Assert.deepEqual(result.stale, []);
+        NodeAssert.deepEqual(result.stale, []);
         result.claim = yield* write({
           kind: "claim_relay",
           relay_delivery_id: "same",
@@ -353,11 +394,11 @@ function rowScenario(rows, transaction) {
           task_id: "seed:a",
           seen_at: at,
         });
-        Assert.equal(result.claim.length, 1);
-        Assert.equal(result.replay.length, 0);
+        NodeAssert.equal(result.claim.length, 1);
+        NodeAssert.equal(result.replay.length, 0);
         yield* write({ kind: "prune_deliveries", task_id: "seed:a", bucket: "main", limit: 1 });
         result.retained = yield* read({ kind: "deliveries", task_id: "seed:a" });
-        Assert.deepEqual(
+        NodeAssert.deepEqual(
           result.retained.map((r) => r.delivery_id),
           ["third"],
         );
@@ -369,8 +410,8 @@ function rowScenario(rows, transaction) {
             }),
           ),
         );
-        Assert.ok(Exit.isFailure(exit));
-        Assert.equal((yield* read({ kind: "tasks", task_id: "seed:a" })).length, 1);
+        NodeAssert.ok(Exit.isFailure(exit));
+        NodeAssert.equal((yield* read({ kind: "tasks", task_id: "seed:a" })).length, 1);
       }),
     );
     return normalized(result);
@@ -378,10 +419,10 @@ function rowScenario(rows, transaction) {
 }
 
 try {
-  const source = Path.join(fixture.root, "source.sqlite"),
-    exported = Path.join(fixture.root, "source.ndjson");
+  const source = NodePath.join(fixture.root, "source.sqlite"),
+    exported = NodePath.join(fixture.root, "source.ndjson");
   await createMigratedSqlite(source);
-  const database = new Sqlite.DatabaseSync(source);
+  const database = new NodeSqlite.DatabaseSync(source);
   try {
     for (const id of ["seed:z", "seed:a"])
       database
@@ -398,26 +439,27 @@ try {
   } finally {
     database.close();
   }
-  const sourceHash = hash(await FS.readFile(source));
+  const sourceHash = hash(await NodeFSP.readFile(source));
   exportSqliteState({ source, destination: exported });
   nativeRequest(executable, fixture, "initialize", {
     operation: "import_sqlite_application",
     path: exported,
   });
-  const upstreamPath = Path.join(fixture.root, "upstream.sqlite"),
-    sqlitePath = Path.join(fixture.root, "retained.sqlite");
-  await FS.copyFile(source, upstreamPath);
-  await FS.copyFile(source, sqlitePath);
+  const upstreamPath = NodePath.join(fixture.root, "upstream.sqlite"),
+    sqlitePath = NodePath.join(fixture.root, "retained.sqlite");
+  await NodeFSP.copyFile(source, upstreamPath);
+  await NodeFSP.copyFile(source, sqlitePath);
   const expected = await withSqlite(upstreamPath, () => serviceScenario("upstream"));
   const retained = await withSqlite(sqlitePath, () => serviceScenario("sqlite"));
   const actual = await withNative(executable, fixture, () => serviceScenario("native"));
-  Assert.deepEqual(retained, expected, "Retained SQLite service matches immutable upstream");
-  Assert.deepEqual(actual, expected, "Native scheduled service matches immutable upstream");
+  NodeAssert.deepEqual(retained, expected, "Retained SQLite service matches immutable upstream");
+  NodeAssert.deepEqual(actual, expected, "Native scheduled service matches immutable upstream");
   checks.push(
     "Real ScheduledTaskService matches immutable upstream and retained SQLite for CRUD, due scheduling, run counters, thread moves and deletion",
   );
   checks.push(
     "Real webhook path preserves relay claims, replay dedupe, coalescing, request replacement, dispatch, log detail, token rotation and deletion",
+    "Immediate and coalesced delivery logs keep complete Unicode characters at the prompt limit",
   );
   const sqlRows = await withSqlite(sqlitePath, (sql) =>
     Effect.gen(function* () {
@@ -433,7 +475,7 @@ try {
       );
     }),
   );
-  Assert.deepEqual(nativeRows, sqlRows);
+  NodeAssert.deepEqual(nativeRows, sqlRows);
   checks.push(
     "Imported rowid tie order, settings/run CAS, token races, retention buckets, repeat claims and nested rollback agree between SQLite and native rows",
   );
@@ -441,8 +483,8 @@ try {
     Effect.gen(function* () {
       const rows = yield* NativeScheduledRows.make;
       const tasks = yield* rows.read({ kind: "tasks", task_id: "seed:a" }, Rows.TaskRows);
-      Assert.equal(tasks[0].webhook_token, "rotated");
-      Assert.equal(tasks[0].last_run_status, "running");
+      NodeAssert.equal(tasks[0].webhook_token, "rotated");
+      NodeAssert.equal(tasks[0].last_run_status, "running");
     }),
   );
   checks.push(
@@ -453,7 +495,7 @@ try {
     fixture,
     proofPath,
     checks,
-    oracles: [original.source, originalDedupe.source],
+    oracles: [original.source, originalDedupe.source, citations.source],
     sourceHash,
     sourcePaths: [
       "apps/server/src/scheduledTasks/ScheduledTaskService.ts",
@@ -462,6 +504,7 @@ try {
       "apps/server/src/scheduledTasks/SqliteScheduledRows.ts",
       "apps/server/src/scheduledTasks/NativeScheduledRows.ts",
       "apps/server/src/scheduledTasks/redb_scheduled_rows.rs",
+      "packages/shared/src/assistantCitations.ts",
     ],
   });
 } finally {

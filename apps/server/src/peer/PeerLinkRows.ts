@@ -36,6 +36,10 @@ export class PeerLinkRows extends Context.Service<
       label: string,
     ) => Effect.Effect<void, PeerLinkRowsError>;
     readonly remove: (environmentId: string) => Effect.Effect<string | null, PeerLinkRowsError>;
+    readonly recordExpiry: (
+      environmentId: string,
+      expiresAt: string,
+    ) => Effect.Effect<void, PeerLinkRowsError>;
     readonly recordOutcome: (
       environmentId: string,
       error: string | null,

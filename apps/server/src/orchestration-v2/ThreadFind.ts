@@ -13,6 +13,7 @@ import { htmlRenderFromToolItem, mcpAppFromToolItem } from "@t3tools/shared/tool
 import * as Cache from "effect/Cache";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as RcRef from "effect/RcRef";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -43,6 +44,10 @@ interface FindDocument extends FindRow {
   readonly runId: OrchestrationV2TurnItem["runId"];
   readonly count: number;
 }
+interface RenderedDocument extends Omit<FindDocument, "count"> {
+  readonly segments: readonly string[];
+  readonly sourceLength: number;
+}
 type CompletedScans = Map<
   string,
   {
@@ -51,6 +56,17 @@ type CompletedScans = Map<
     sourceThreadIds: readonly ThreadId[];
   }
 >;
+// Segments may retain slices of their source text, so the budget includes both.
+interface RenderedSnapshot {
+  current:
+    | {
+        key: string;
+        sequence: number;
+        documents: readonly RenderedDocument[];
+        sourceThreadIds: readonly ThreadId[];
+      }
+    | undefined;
+}
 class TextKey extends Data.Class<{
   text: string;
   role: "user" | "assistant" | "plan";
@@ -58,12 +74,14 @@ class TextKey extends Data.Class<{
   hasContext: boolean;
   cwd: string | undefined;
   skills: NonNullable<OrchestrationV2SearchThreadInput["skills"]>;
+  theme: OrchestrationV2SearchThreadInput["theme"];
 }> {}
 
 function textKey(
   item: OrchestrationV2TurnItem,
   cwd: string | undefined,
   skills: TextKey["skills"],
+  theme: TextKey["theme"],
 ) {
   return new TextKey({
     text:
@@ -78,12 +96,13 @@ function textKey(
     hasContext: item.type === "user_message" && item.context !== undefined,
     cwd,
     skills,
+    theme,
   });
 }
 
 function parseText(key: TextKey): readonly string[] {
   return key.role === "plan"
-    ? searchablePlanSegments(key.text, key.cwd)
+    ? searchablePlanSegments(key.text, key.cwd, key.theme)
     : (searchableMessageSegments(
         {
           role: key.role,
@@ -93,6 +112,7 @@ function parseText(key: TextKey): readonly string[] {
         },
         key.cwd,
         key.skills,
+        key.theme,
       ) ?? []);
 }
 
@@ -236,21 +256,23 @@ const makeSqliteThreadFindRows = Effect.gen(function* () {
       `;
       return revision[0]?.sequence ?? 0;
     }),
+    isInTransaction: Effect.serviceOption(sql.transactionService).pipe(Effect.map(Option.isSome)),
     withReadTransaction: (effect) => sql.withTransaction(effect).pipe(NodeSqliteClient.readOnly),
   } satisfies ThreadFindRows;
 });
 
 export const makeThreadFindWithRows = Effect.fn("makeThreadFindWithRows")(function* (
   readIndex: ReadThreadFindIndex,
-  rows: ThreadFindRows,
+  reader: ThreadFindRows,
 ) {
   const encodeCacheKey = Schema.encodeEffect(
     Schema.fromJsonString(
       Schema.Struct({
         threadId: ThreadId,
         cwd: Schema.optional(Schema.String),
-        query: Schema.String,
+        query: Schema.optional(Schema.String),
         skills: OrchestrationV2SearchThreadInput.fields.skills,
+        theme: OrchestrationV2SearchThreadInput.fields.theme,
       }),
     ),
   );
@@ -263,7 +285,7 @@ export const makeThreadFindWithRows = Effect.fn("makeThreadFindWithRows")(functi
     wanted: readonly FindRow[],
   ) {
     if (wanted.length === 0) return [];
-    const payloads = yield* rows
+    const payloads = yield* reader
       .payloads(wanted.map((row) => ({ threadId: row.sourceThreadId, id: row.sourceItemId })))
       .pipe(Effect.mapError((cause) => new ProjectionStoreReadError({ threadId, cause })));
     const byThread = new Map<string, Map<string, (typeof payloads)[number]>>();
@@ -298,13 +320,18 @@ export const makeThreadFindWithRows = Effect.fn("makeThreadFindWithRows")(functi
       // Bounded separately because each entry can hold a large body; typing reuses the parse.
       largeText: makeTextCache(32),
       scans: Effect.sync((): CompletedScans => new Map()),
+      rendered: Effect.sync((): RenderedSnapshot => ({ current: undefined })),
     }),
     idleTimeToLive: "1 minute",
   });
   const snapshot = Effect.fn("ThreadFind.snapshot")(
-    function* (input: OrchestrationV2SearchThreadInput, scans: CompletedScans) {
-      const { threadId } = input;
-      const active = yield* rows.activeThread(threadId);
+    function* (
+      input: OrchestrationV2SearchThreadInput,
+      scans: CompletedScans,
+      renderedSnapshot: RenderedSnapshot,
+    ) {
+      const { threadId, theme } = input;
+      const active = yield* reader.activeThread(threadId);
       if (!active[0]) return yield* new ProjectionStoreThreadNotFoundError({ threadId });
       const cwd = active[0].cwd ?? undefined;
       const cacheKey = yield* encodeCacheKey({
@@ -312,17 +339,38 @@ export const makeThreadFindWithRows = Effect.fn("makeThreadFindWithRows")(functi
         cwd,
         query: input.query,
         skills: input.skills ?? [],
+        ...(theme === undefined ? {} : { theme }),
       });
       const cached = scans.get(cacheKey);
-      if (cached && cached.sequence === (yield* rows.revision(cached.sourceThreadIds))) {
+      if (cached && cached.sequence === (yield* reader.revision(cached.sourceThreadIds))) {
         const selected = selectMatch(cached.documents, input);
         scans.delete(cacheKey);
         scans.set(cacheKey, cached);
         return { result: resultForSelection(selected, cached.documents, cached.sequence) };
       }
+      const documentKey = yield* encodeCacheKey({
+        threadId,
+        cwd,
+        skills: input.skills ?? [],
+        ...(theme === undefined ? {} : { theme }),
+      });
+      const rendered = renderedSnapshot.current;
+      if (
+        rendered?.key === documentKey &&
+        rendered.sequence === (yield* reader.revision(rendered.sourceThreadIds))
+      ) {
+        return {
+          rendered: rendered.documents,
+          cwd,
+          sequence: rendered.sequence,
+          cacheKey,
+          documentKey,
+          sourceThreadIds: rendered.sourceThreadIds,
+        };
+      }
       const index = yield* readIndex(threadId);
       const sourceThreadIds = [...new Set([threadId, ...index.map((row) => row.sourceThreadId)])];
-      const sequence = yield* rows.revision(sourceThreadIds);
+      const sequence = yield* reader.revision(sourceThreadIds);
       const candidates = index
         .map((row, position) => ({ ...row, position }))
         .filter((row) =>
@@ -356,9 +404,9 @@ export const makeThreadFindWithRows = Effect.fn("makeThreadFindWithRows")(functi
               emptyReplyRunIds.has(row.item.runId),
           ),
       );
-      return { payloads, toolPayloads, cwd, sequence, cacheKey, sourceThreadIds };
+      return { payloads, toolPayloads, cwd, sequence, cacheKey, documentKey, sourceThreadIds };
     },
-    (effect) => rows.withReadTransaction(effect),
+    (effect) => reader.withReadTransaction(effect),
     (effect, input) =>
       effect.pipe(
         Effect.mapError((cause) =>
@@ -371,11 +419,23 @@ export const makeThreadFindWithRows = Effect.fn("makeThreadFindWithRows")(functi
   const searchThreadStream = (input: OrchestrationV2SearchThreadInput) =>
     Stream.unwrap(
       Effect.gen(function* () {
+        const {
+          scans: sharedScans,
+          rendered: sharedRendered,
+          ...textCache
+        } = yield* RcRef.get(findCaches);
+        // An ambient transaction can roll back and reuse its event sequence.
+        const isolated = yield* reader.isInTransaction;
+        const scans: CompletedScans = isolated ? new Map() : sharedScans;
+        const renderedSnapshot: RenderedSnapshot = isolated
+          ? { current: undefined }
+          : sharedRendered;
         // Release the read transaction before decoding and parsing. Both frames describe one snapshot.
-        const { scans, ...textCache } = yield* RcRef.get(findCaches);
-        const data = yield* snapshot(input, scans);
+        const data = yield* snapshot(input, scans, renderedSnapshot);
         if (data.result) return Stream.succeed(data.result);
-        const { payloads, toolPayloads, cwd, sequence, cacheKey, sourceThreadIds } = data;
+        const { cwd, sequence, cacheKey, documentKey, sourceThreadIds } = data;
+        const payloads = data.payloads ?? [];
+        const toolPayloads = data.toolPayloads ?? [];
         const decode = (row: FindPayload) =>
           decodeItem(row.payload).pipe(
             Effect.map((item) => ({ ...row, item })),
@@ -402,31 +462,38 @@ export const makeThreadFindWithRows = Effect.fn("makeThreadFindWithRows")(functi
           )
             embeddedResultRunIds.add(item.runId);
         }
-        const rows = payloads.filter(
-          (row) =>
-            row.type !== "user_input_request" &&
-            !(row.type === "user_message" && foldedAnswerRunIds.get(row.entryId) === row.runId),
-        );
-        const documents = new Map<number, FindDocument>();
-        const count = Effect.fnUntraced(function* (row: FindPayload) {
+        const rows =
+          data.rendered ??
+          payloads.filter(
+            (row) =>
+              row.type !== "user_input_request" &&
+              !(row.type === "user_message" && foldedAnswerRunIds.get(row.entryId) === row.runId),
+          );
+        const documents = new Map<number, FindDocument & RenderedDocument>();
+        const count = Effect.fnUntraced(function* (row: FindPayload | RenderedDocument) {
           const cached = documents.get(row.position);
           if (cached) return cached;
-          const decoded = yield* decode(row);
-          if (
-            decoded.item.type === "assistant_message" &&
-            decoded.item.text === "" &&
-            embeddedResultRunIds.has(decoded.item.runId)
-          ) {
-            const document = documentFor(decoded, 0);
-            documents.set(row.position, document);
-            return document;
+          let rendered: RenderedDocument;
+          if ("segments" in row) {
+            rendered = row;
+          } else {
+            const decoded = yield* decode(row);
+            const key = textKey(decoded.item, cwd, input.skills ?? [], input.theme);
+            const segments =
+              decoded.item.type === "assistant_message" &&
+              decoded.item.text === "" &&
+              embeddedResultRunIds.has(decoded.item.runId)
+                ? []
+                : yield* Cache.get(
+                    key.text.length <= 32_768 ? textCache.text : textCache.largeText,
+                    key,
+                  );
+            rendered = { ...documentFor(decoded, 0), segments, sourceLength: key.text.length };
           }
-          const key = textKey(decoded.item, cwd, input.skills ?? []);
-          const segments = yield* Cache.get(
-            key.text.length <= 32_768 ? textCache.text : textCache.largeText,
-            key,
-          );
-          const document = documentFor(decoded, countSegments(segments, input.query));
+          const document = {
+            ...rendered,
+            count: countSegments(rendered.segments, input.query),
+          };
           documents.set(row.position, document);
           yield* Effect.yieldNow;
           return document;
@@ -434,8 +501,23 @@ export const makeThreadFindWithRows = Effect.fn("makeThreadFindWithRows")(functi
         const finish = Effect.gen(function* () {
           for (const row of rows) yield* count(row);
           const ordered = rows.map((row) => documents.get(row.position)!);
+          renderedSnapshot.current =
+            ordered.length <= 8192 &&
+            ordered.reduce(
+              (size, doc) =>
+                size + doc.sourceLength + doc.segments.reduce((sum, text) => sum + text.length, 0),
+              0,
+            ) <= 2_097_152
+              ? { key: documentKey, sequence, documents: ordered, sourceThreadIds }
+              : undefined;
           scans.delete(cacheKey);
-          scans.set(cacheKey, { sequence, documents: ordered, sourceThreadIds });
+          scans.set(cacheKey, {
+            sequence,
+            documents: ordered.map(
+              ({ segments: _segments, sourceLength: _sourceLength, ...document }) => document,
+            ),
+            sourceThreadIds,
+          });
           if (scans.size > 8) {
             const oldest = scans.keys().next().value;
             if (oldest !== undefined) scans.delete(oldest);

@@ -1,0 +1,94 @@
+name: Build the embedded Apple Iroh component
+
+on:
+  push:
+    branches: [main, "ci/*"]
+    paths:
+      - ".github/workflows/apple-iroh-component.yml"
+      - ".cargo/config.toml"
+      - "Cargo.toml"
+      - "apps/mobile/modules/t3-iroh/**"
+      - "crates/core/**"
+      - "crates/transport/**"
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    runs-on: xcode-27
+    timeout-minutes: 35
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      GIT_TERMINAL_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Build and validate device and simulator libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest=apps/mobile/modules/t3-iroh/Cargo.toml
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/iroh-target" IPHONEOS_DEPLOYMENT_TARGET=18.0
+          rustup toolchain install 1.99.1 --profile minimal --target aarch64-apple-ios,aarch64-apple-ios-sim
+          rustc +1.99.1 --version --verbose
+          xcodebuild -version
+          git rev-parse HEAD
+          cargo +1.99.1 test --locked --release --manifest-path "$manifest" --lib
+          for target in aarch64-apple-ios aarch64-apple-ios-sim; do
+            sdk=iphoneos
+            if test "$target" = aarch64-apple-ios-sim; then sdk=iphonesimulator; fi
+            SDKROOT="$(xcrun --sdk "$sdk" --show-sdk-path)" cargo +1.99.1 rustc \
+              --locked --release --manifest-path "$manifest" --target "$target" --lib --crate-type staticlib
+          done
+          cargo +1.99.1 build --locked --release --manifest-path "$manifest" --lib
+          cargo +1.99.1 run --locked --release --manifest-path "$manifest" --features bindgen --bin bindgen -- \
+            generate --library "$CARGO_TARGET_DIR/release/libt3_iroh_apple.dylib" --language swift \
+            --out-dir "$RUNNER_TEMP/bindings"
+          mkdir -p "$RUNNER_TEMP/iroh-headers" "$RUNNER_TEMP/iroh-result/Generated"
+          cp "$RUNNER_TEMP/bindings/t3_iroh_appleFFI.h" "$RUNNER_TEMP/iroh-headers/"
+          cp "$RUNNER_TEMP/bindings/t3_iroh_appleFFI.modulemap" "$RUNNER_TEMP/iroh-headers/module.modulemap"
+          cp "$RUNNER_TEMP/bindings/t3_iroh_apple.swift" "$RUNNER_TEMP/iroh-result/Generated/"
+          cat >"$RUNNER_TEMP/bindings/Smoke.swift" <<'SWIFT'
+          import Foundation
+
+          @main
+          struct Smoke {
+              static func main() throws {
+                  let seed = Data(repeating: 0x41, count: 32)
+                  let endpoint = try deviceEndpointId(secretKey: seed)
+                  precondition(endpoint.count == 64)
+              }
+          }
+          SWIFT
+          for target in aarch64-apple-ios aarch64-apple-ios-sim; do
+            sdk=iphoneos
+            swift_target=arm64-apple-ios18.0
+            if test "$target" = aarch64-apple-ios-sim; then
+              sdk=iphonesimulator
+              swift_target=arm64-apple-ios18.0-simulator
+            fi
+            sdk_path="$(xcrun --sdk "$sdk" --show-sdk-path)"
+            SDKROOT="$sdk_path" xcrun --sdk "$sdk" swiftc \
+              -target "$swift_target" -sdk "$sdk_path" -module-cache-path "$RUNNER_TEMP/iroh-swift-cache" \
+              -I "$RUNNER_TEMP/iroh-headers" "$RUNNER_TEMP/bindings/t3_iroh_apple.swift" \
+              "$RUNNER_TEMP/bindings/Smoke.swift" "$CARGO_TARGET_DIR/$target/release/libt3_iroh_apple.a" \
+              -framework Network -framework Security -framework SystemConfiguration -lresolv \
+              -o "$RUNNER_TEMP/$target-link-check"
+          done
+          xcodebuild -create-xcframework \
+            -library "$CARGO_TARGET_DIR/aarch64-apple-ios/release/libt3_iroh_apple.a" -headers "$RUNNER_TEMP/iroh-headers" \
+            -library "$CARGO_TARGET_DIR/aarch64-apple-ios-sim/release/libt3_iroh_apple.a" -headers "$RUNNER_TEMP/iroh-headers" \
+            -output "$RUNNER_TEMP/iroh-result/Generated/T3IrohApple.xcframework"
+          cd "$RUNNER_TEMP/iroh-result"
+          find Generated -type f -print0 | sort -z | xargs -0 shasum -a 256 >SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: apple-iroh-xcframework
+          path: ${{ runner.temp }}/iroh-result
+          if-no-files-found: error
+          retention-days: 7

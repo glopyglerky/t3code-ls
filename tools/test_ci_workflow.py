@@ -1,0 +1,147 @@
+"""Artifact wiring must survive both all-job and failed-job reruns."""
+
+from pathlib import Path
+import re
+import unittest
+
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def artifact_names(workflow: str, action: str) -> list[str]:
+    names = []
+    for step in re.split(r"(?m)^      - ", workflow):
+        if f"uses: actions/{action}-artifact@" not in step:
+            continue
+        match = re.search(r"(?m)^          name: (.+)$", step)
+        if match is None:
+            raise AssertionError(f"{action} step has no exact artifact name")
+        names.append(match[1])
+    return names
+
+
+def resolve(name: str, attempt: int, plan: int, native: int, performance: int) -> str:
+    values = {
+        "github.run_attempt": str(attempt),
+        "steps.plan.outputs.artifact_name": f"ci-plan-{attempt}",
+        "steps.scope.outputs.native_artifact": f"hybrid-native-binaries-{attempt}",
+        "steps.scope.outputs.iroh_fixture": f"hybrid-iroh-fixture-{attempt}",
+        "needs.plan.outputs.plan_artifact": f"ci-plan-{plan}",
+        "needs.native.outputs.native_artifact": f"hybrid-native-binaries-{native}",
+        "needs.native.outputs.iroh_fixture": f"hybrid-iroh-fixture-{native}",
+        "needs.performance.outputs.proof_run_attempt": str(performance),
+    }
+    return re.sub(r"\$\{\{ ([^}]+) \}\}", lambda match: values[match[1]], name)
+
+
+class WorkflowArtifactWiring(unittest.TestCase):
+    def setUp(self):
+        self.hybrid = (ROOT / ".github/workflows/hybrid.yml").read_text()
+        self.native = (ROOT / ".github/workflows/native.yml").read_text()
+
+    def test_every_node_job_follows_the_upstream_package_engine(self):
+        for workflow in (self.hybrid, self.native):
+            setup_steps = workflow.count("uses: actions/setup-node@")
+            self.assertGreater(setup_steps, 0)
+            self.assertEqual(workflow.count("node-version-file: package.json"), setup_steps)
+            self.assertNotRegex(workflow, r"(?m)^\s+node-version:")
+
+    def test_rerun_all_keeps_every_prior_plan_binary_and_failure_artifact(self):
+        uploads = artifact_names(self.hybrid, "upload") + artifact_names(self.native, "upload")
+        self.assertEqual(len(uploads), 9)
+        attempts = [{resolve(name, attempt, attempt, attempt, attempt) for name in uploads}
+                    for attempt in (1, 2)]
+        self.assertEqual(len(attempts[0]), len(uploads))
+        self.assertTrue(attempts[0].isdisjoint(attempts[1]))
+        self.assertNotRegex(self.hybrid + self.native, r"overwrite:\s*true")
+
+    def test_rerun_failed_consumers_select_the_successful_producer_artifacts(self):
+        downloads = artifact_names(self.hybrid, "download")
+        names = [resolve(name, 2, 1, 1, 1) for name in downloads]
+        self.assertEqual(names.count("hybrid-native-binaries-1"), 3)
+        self.assertEqual(names.count("ci-plan-1"), 2)
+        self.assertEqual(names.count("hybrid-performance-proof-1"), 1)
+        self.assertEqual(names.count("hybrid-iroh-fixture-1"), 1)
+        self.assertEqual(len(names), 7)
+        names = [resolve(name, 2, 1, 1, 2) for name in downloads]
+        self.assertIn("hybrid-performance-proof-2", names)
+        self.assertNotIn("hybrid-native-binaries-2", names)
+        self.assertNotIn("hybrid-iroh-fixture-2", names)
+
+    def test_producer_outputs_are_exported_through_the_reusable_workflow(self):
+        self.assertIn('echo "artifact_name=ci-plan-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"', self.hybrid)
+        self.assertIn("plan_artifact: ${{ steps.plan.outputs.artifact_name }}", self.hybrid)
+        self.assertIn('echo "native_artifact=hybrid-native-binaries-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"', self.native)
+        self.assertIn("native_artifact: ${{ steps.scope.outputs.native_artifact }}", self.native)
+        self.assertIn("value: ${{ jobs.qualify.outputs.native_artifact }}", self.native)
+        self.assertIn('echo "iroh_fixture=hybrid-iroh-fixture-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"', self.native)
+        self.assertIn("iroh_fixture: ${{ steps.scope.outputs.iroh_fixture }}", self.native)
+        self.assertIn("value: ${{ jobs.qualify.outputs.iroh_fixture }}", self.native)
+        self.assertIn("proof_run_attempt: ${{ steps.proof.outputs.proof_run_attempt }}", self.hybrid)
+
+    def test_performance_installs_the_same_frozen_production_graph_as_the_application(self):
+        plan = self.hybrid.split("\n  plan:", 1)[1].split("\n  native:", 1)[0]
+        application = self.hybrid.split("\n  application:", 1)[1].split("\n  performance:", 1)[0]
+        performance = self.hybrid.split("\n  performance:", 1)[1].split("\n  qualification:", 1)[0]
+        self.assertIn("tools/performance-compiler.test.mjs", plan)
+        self.assertNotIn("pnpm install", plan)
+        for job in (application, performance):
+            self.assertIn("node-version-file: package.json", job)
+            self.assertIn("npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund", job)
+            self.assertIn("run: pnpm install --frozen-lockfile", job)
+            self.assertIn("hashFiles('pnpm-lock.yaml')", job)
+        self.assertNotIn("install-server-tests.mjs", performance)
+        self.assertNotIn("cache-dependency-path: tools/server-test-runtime", performance)
+        self.assertLess(performance.index("run: pnpm install --frozen-lockfile"),
+                        performance.index("run: node tools/link-performance-runtime.mjs"))
+        self.assertLess(performance.index("run: node tools/link-performance-runtime.mjs"),
+                        performance.index("node tools/performance-persistence.mjs"))
+        self.assertIn("run: node --test tools/performance-runtime.test.mjs", performance)
+
+    def test_application_checks_upstream_graphql_generation_with_the_frozen_install(self):
+        application = self.hybrid.split("\n  application:", 1)[1].split("\n  performance:", 1)[0]
+        for package in ("@t3tools/source-control-github", "t3", "@t3tools/issue-tracker-linear"):
+            command = f"pnpm exec vp run --filter {package} generate --check"
+            self.assertIn(command, application)
+            self.assertLess(application.index("pnpm install --frozen-lockfile"), application.index(command))
+
+    def test_application_checks_the_same_run_iroh_fixture(self):
+        application = self.hybrid.split("\n  application:", 1)[1].split("\n  performance:", 1)[0]
+        self.assertIn("stage_iroh: ${{ needs.plan.outputs.application == 'true' }}", self.hybrid)
+        self.assertIn("- name: Build the Iroh browser fixture\n        if: inputs.stage_iroh", self.native)
+        self.assertIn("-p t3-code-ls-transport --bin t3-code-ls", self.native)
+        self.assertIn("name: ${{ needs.native.outputs.iroh_fixture }}", application)
+        self.assertLess(application.index("sha256sum --strict --check SHA256SUMS"),
+                        application.index('T3_CODE_LS_IROH_FIXTURE="$RUNNER_TEMP/iroh-fixture/t3-code-ls"'))
+        self.assertIn("T3_CODE_LS_CLIENT_TRANSPORT: iroh", application)
+        self.assertIn("${{ runner.temp }}/hybrid-proof/client-iroh/", application)
+
+    def test_failed_performance_reaches_the_receipt_rejection_without_an_empty_artifact_download(self):
+        qualification = self.hybrid.split("\n  qualification:", 1)[1]
+        selected_success = "needs.plan.outputs.performance == 'true' && needs.performance.result == 'success'"
+        self.assertIn("if: " + selected_success, qualification)
+        plan_download = qualification.split("- uses: actions/download-artifact@", 1)[1].split("- name:", 1)[0]
+        self.assertIn("if: needs.plan.result == 'success'", plan_download)
+        self.assertIn("CI_PERFORMANCE: ${{ " + selected_success + " }}", qualification)
+        self.assertIn("- name: Require every planned gate and its evidence to pass\n        if: always()", qualification)
+        self.assertIn("name: hybrid-performance-proof-${{ needs.performance.outputs.proof_run_attempt }}", qualification)
+        self.assertIn("- name: Retain raw samples, failures and comparison decisions\n        if: always()", self.hybrid)
+
+    def test_full_normal_hooks_are_required_before_application_and_retained_after_failure(self):
+        application = self.hybrid.split("\n  application:", 1)[1].split("\n  performance:", 1)[0]
+        self.assertIn("fetch-depth: 2", application)
+        self.assertIn('test "$(git rev-parse HEAD)" = "$GITHUB_SHA"', application)
+        self.assertIn('git checkout --detach "$GITHUB_SHA"', application)
+        invocation = 'python3 tools/ci_commit_hooks.py --output "$RUNNER_TEMP/commit-hook-proof/proof.json"'
+        self.assertIn(invocation, application)
+        self.assertLess(application.index("pnpm install --frozen-lockfile"), application.index(invocation))
+        self.assertLess(application.index(invocation), application.index("node tools/check-hybrid.mjs --verify-binaries"))
+        self.assertIn("${{ runner.temp }}/commit-hook-proof/", application)
+        self.assertIn("- name: Retain application evidence\n        if: always()", application)
+        hook_step = application.split("- name: Run the normal candidate hooks", 1)[1].split("- uses:", 1)[0]
+        self.assertNotIn("continue-on-error", hook_step)
+        self.assertNotIn("if:", hook_step)
+
+
+if __name__ == "__main__":
+    unittest.main()

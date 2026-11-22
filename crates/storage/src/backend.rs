@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::fs::OpenOptions;
 use std::io;
@@ -29,7 +30,72 @@ fn storage_error(_: impl std::fmt::Display) -> Error {
 }
 
 fn worker_error(_: tokio::task::JoinError) -> Error {
+    read_worker_error()
+}
+
+fn read_worker_error() -> Error {
     Error::Database("database worker failed".into())
+}
+
+thread_local! {
+    static INLINE_READS: Cell<bool> = const { Cell::new(false) };
+}
+
+struct InlineReadScope(bool);
+
+impl InlineReadScope {
+    fn enter() -> Self {
+        Self(INLINE_READS.replace(true))
+    }
+}
+
+impl Drop for InlineReadScope {
+    fn drop(&mut self) {
+        INLINE_READS.set(self.0);
+    }
+}
+
+/// Run the serial database dispatcher on a joined, owned OS thread. Only its
+/// direct calls may execute bounded engine reads inline; Tokio tasks and normal
+/// library callers continue offloading those reads. Writer reservation, commit,
+/// and lifecycle operations always retain their separate workers.
+///
+/// This blocks the caller until `run` returns and is intended for synchronous
+/// process entrypoints. The owned thread has an explicit 8 MiB stack for the
+/// helper's bounded request parser, rather than the smaller spawned default.
+pub fn run_on_database_thread<F, T>(run: F) -> io::Result<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let worker = std::thread::Builder::new()
+        .name("t3-db-dispatch".into())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(move || {
+            let _scope = InlineReadScope::enter();
+            run()
+        })?;
+    match worker.join() {
+        Ok(output) => Ok(output),
+        Err(panic) => std::panic::resume_unwind(panic),
+    }
+}
+
+async fn execute_read<F, T>(read: F) -> Result<T>
+where
+    F: FnOnce() -> Result<T> + Send + 'static,
+    T: Send + 'static,
+{
+    // A spawned task can be polled on an otherwise permitted thread (for
+    // example by a LocalSet). Never let that task inherit the caller's scope.
+    if INLINE_READS.get() && tokio::task::try_id().is_none() {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(read))
+            .map_err(|_| read_worker_error())?
+    } else {
+        tokio::task::spawn_blocking(read)
+            .await
+            .map_err(worker_error)?
+    }
 }
 
 #[derive(Clone)]
@@ -705,7 +771,9 @@ impl Backend {
 
     pub(crate) fn require_exclusive(&self) -> Result<()> {
         if !self.handles.exclusive || self.handles.read_only {
-            return Err(Error::Invalid("native schema upgrade requires an exclusive offline handle".into()));
+            return Err(Error::Invalid(
+                "native schema upgrade requires an exclusive offline handle".into(),
+            ));
         }
         self.handles.verify_identity()
     }
@@ -909,13 +977,12 @@ impl Transaction {
         }
         let owned_key = key.to_vec();
         let snapshot = self.snapshot.clone();
-        let value = tokio::task::spawn_blocking(move || {
+        let value = execute_read(move || {
             let table = snapshot.open_table(TABLE).map_err(storage_error)?;
             let value = table.get(owned_key.as_slice()).map_err(storage_error)?;
             value.map(|value| bounded_copy(value.value())).transpose()
         })
-        .await
-        .map_err(worker_error)??;
+        .await?;
         // A read-only transaction owns one immutable engine snapshot and cannot
         // commit mutations. Retaining every read as conflict evidence only
         // duplicates that snapshot and makes bounded paged queries exhaust a
@@ -992,13 +1059,12 @@ impl Transaction {
         }
         let snapshot = self.snapshot.clone();
         let owned_key = key.to_vec();
-        let observed = tokio::task::spawn_blocking(move || {
+        let observed = execute_read(move || {
             let table = snapshot.open_table(TABLE).map_err(storage_error)?;
             let value = table.get(owned_key.as_slice()).map_err(storage_error)?;
             Ok::<_, Error>(value.map(|value| fingerprint(value.value())))
         })
-        .await
-        .map_err(worker_error)??;
+        .await?;
         self.observe_size(
             key.len()
                 .saturating_add(observed.as_ref().map_or(0, |_| 40)),
@@ -1017,7 +1083,7 @@ impl Transaction {
             }
             let snapshot = self.snapshot.clone();
             let keys = keys.to_vec();
-            return tokio::task::spawn_blocking(move || {
+            return execute_read(move || {
                 let table = snapshot.open_table(TABLE).map_err(storage_error)?;
                 let mut total = 0usize;
                 let mut result = Vec::with_capacity(keys.len());
@@ -1033,8 +1099,7 @@ impl Transaction {
                 }
                 Ok(result)
             })
-            .await
-            .map_err(worker_error)?;
+            .await;
         }
         let missing: std::collections::BTreeSet<_> = keys
             .iter()
@@ -1043,7 +1108,7 @@ impl Transaction {
             .collect();
         if !missing.is_empty() {
             let snapshot = self.snapshot.clone();
-            let loaded = tokio::task::spawn_blocking(move || {
+            let loaded = execute_read(move || {
                 let table = snapshot.open_table(TABLE).map_err(storage_error)?;
                 let mut total = 0usize;
                 let mut loaded = Vec::with_capacity(missing.len());
@@ -1059,8 +1124,7 @@ impl Transaction {
                 }
                 Ok(loaded)
             })
-            .await
-            .map_err(worker_error)??;
+            .await?;
             let bytes = loaded.iter().fold(0usize, |total, (key, value)| {
                 total
                     .saturating_add(key.len())
@@ -1103,12 +1167,11 @@ impl Transaction {
         let owned_start = start.to_vec();
         let owned_end = end.to_vec();
         let snapshot = self.snapshot.clone();
-        let rows = tokio::task::spawn_blocking(move || {
+        let rows = execute_read(move || {
             let table = snapshot.open_table(TABLE).map_err(storage_error)?;
             scan_table(&table, &owned_start, &owned_end, fetch_limit)
         })
-        .await
-        .map_err(worker_error)??;
+        .await?;
         if self.read_only {
             // No overlay is possible: require_write rejects every mutation.
             // scan_table still bounds this page's bytes and requested row count.
@@ -1482,6 +1545,457 @@ fn commit_error(error: redb::CommitError) -> Error {
 }
 
 #[cfg(test)]
+mod read_snapshot_tests {
+    use super::*;
+    use crate::test_support::TestFixture;
+
+    fn engine(backend: &Backend) -> Arc<Database> {
+        backend
+            .handles
+            .writer
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .clone()
+    }
+
+    #[tokio::test]
+    async fn read_snapshot_preserves_rows_and_catalog_across_later_commits() {
+        let fixture = TestFixture::start().await;
+        let store = fixture.initialize().await;
+        let key = crate::store_key("read-table/value");
+        let mut end = key.clone();
+        end.push(0);
+        let mut seed = store.db.begin().await.unwrap();
+        seed.put(key.clone(), b"before".to_vec()).await.unwrap();
+        seed.commit().await.unwrap();
+
+        let mut old = store.db.begin_read_only().await.unwrap();
+        assert_eq!(old.get(&key).await.unwrap(), Some(b"before".to_vec()));
+        let mut writer = store.db.begin().await.unwrap();
+        writer.put(key.clone(), b"after".to_vec()).await.unwrap();
+        writer.commit().await.unwrap();
+        assert_eq!(
+            old.get_many(std::slice::from_ref(&key)).await.unwrap(),
+            vec![Some(b"before".to_vec())]
+        );
+        assert_eq!(
+            old.scan(&key, &end, 1).await.unwrap(),
+            vec![(key.clone(), b"before".to_vec())]
+        );
+        let mut current = store.db.begin_read_only().await.unwrap();
+        assert_eq!(current.get(&key).await.unwrap(), Some(b"after".to_vec()));
+        current.rollback().await.unwrap();
+
+        // Change the real engine table's types, which must invalidate a fresh
+        // application snapshot without changing a previously captured root.
+        let database = engine(&store.db);
+        let incompatible: TableDefinition<u64, u64> = TableDefinition::new(TABLE.name());
+        let writer = database.begin_write().unwrap();
+        writer.delete_table(TABLE).unwrap();
+        writer
+            .open_table(incompatible)
+            .unwrap()
+            .insert(1, 2)
+            .unwrap();
+        writer.commit().unwrap();
+        assert_eq!(old.get(&key).await.unwrap(), Some(b"before".to_vec()));
+
+        let mut rejected = store.db.begin_read_only().await.unwrap();
+        assert!(matches!(
+            rejected.scan(&key, &key, 1).await,
+            Err(Error::Invalid(_))
+        ));
+        assert!(matches!(rejected.get(&key).await, Err(Error::Database(_))));
+        assert!(matches!(
+            rejected.get_many(std::slice::from_ref(&key)).await,
+            Err(Error::Database(_))
+        ));
+
+        let writer = database.begin_write().unwrap();
+        writer.delete_table(incompatible).unwrap();
+        writer
+            .open_table(TABLE)
+            .unwrap()
+            .insert(key.as_slice(), b"repaired".as_slice())
+            .unwrap();
+        writer.commit().unwrap();
+        // Retrying an open cannot silently move an existing transaction to the
+        // repaired table. Only a new transaction sees the new catalog.
+        assert!(matches!(rejected.get(&key).await, Err(Error::Database(_))));
+        let mut repaired = store.db.begin_read_only().await.unwrap();
+        assert_eq!(
+            repaired.get(&key).await.unwrap(),
+            Some(b"repaired".to_vec())
+        );
+        repaired.rollback().await.unwrap();
+        rejected.rollback().await.unwrap();
+        old.rollback().await.unwrap();
+        drop(database);
+        store.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn read_snapshots_preserve_partial_batch_limits_order_and_writer_savepoints() {
+        let fixture = TestFixture::start().await;
+        let store = fixture.initialize().await;
+        let first = crate::store_key("read-table/budget/a");
+        let second = crate::store_key("read-table/budget/b");
+        let small = crate::store_key("read-table/budget/c");
+        let missing = crate::store_key("read-table/budget/missing");
+        let end = crate::store_key("read-table/budget0");
+        let large = vec![7u8; MAX_BATCH_BYTES / 2 + 1];
+        let database = engine(&store.db);
+        let writer = database.begin_write().unwrap();
+        {
+            let mut table = writer.open_table(TABLE).unwrap();
+            table.insert(first.as_slice(), large.as_slice()).unwrap();
+            table.insert(second.as_slice(), large.as_slice()).unwrap();
+            table.insert(small.as_slice(), b"small".as_slice()).unwrap();
+        }
+        writer.commit().unwrap();
+        drop(database);
+
+        let mut reader = store.db.begin_read_only().await.unwrap();
+        let too_many = vec![Vec::new(); MAX_BATCH_RECORDS + 1];
+        assert!(matches!(
+            reader.get_many(&too_many).await,
+            Err(Error::ResourceLimit(ResourceLimit::ReadBytes))
+        ));
+        assert!(matches!(
+            reader.get_many(&[first.clone(), second.clone()]).await,
+            Err(Error::ResourceLimit(ResourceLimit::ReadBytes))
+        ));
+        assert_eq!(reader.get(&first).await.unwrap(), Some(large.clone()));
+        assert_eq!(
+            reader
+                .get_many(&[small.clone(), missing.clone(), first.clone()])
+                .await
+                .unwrap(),
+            vec![Some(b"small".to_vec()), None, Some(large.clone())]
+        );
+        assert_eq!(
+            reader.scan(&first, &end, 1).await.unwrap(),
+            vec![(first.clone(), large)]
+        );
+        assert!(matches!(
+            reader.scan(&first, &end, 2).await,
+            Err(Error::ResourceLimit(ResourceLimit::ScanBytes))
+        ));
+        assert_eq!(
+            reader.scan(&small, &end, 4).await.unwrap(),
+            vec![(small.clone(), b"small".to_vec())]
+        );
+
+        let mut writer = store.db.begin().await.unwrap();
+        writer.put(small.clone(), b"staged".to_vec()).await.unwrap();
+        let checkpoint = writer.checkpoint();
+        writer.delete(small.clone()).await.unwrap();
+        writer.restore(&checkpoint);
+        assert_eq!(
+            writer.get_many(&[missing, small.clone()]).await.unwrap(),
+            vec![None, Some(b"staged".to_vec())]
+        );
+        assert_eq!(
+            writer.scan(&small, &end, 1).await.unwrap(),
+            vec![(small.clone(), b"staged".to_vec())]
+        );
+        writer.commit().await.unwrap();
+        assert_eq!(reader.get(&small).await.unwrap(), Some(b"small".to_vec()));
+        reader.rollback().await.unwrap();
+        assert_eq!(
+            store.db.read(&small).await.unwrap(),
+            Some(b"staged".to_vec())
+        );
+        store.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn read_snapshot_guards_are_released_by_every_read_transaction_end() {
+        for ending in ["rollback", "commit", "drop"] {
+            let fixture = TestFixture::start().await;
+            let store = fixture.initialize().await;
+            let mut reader = store.db.begin_read_only().await.unwrap();
+            reader
+                .get(&crate::store_key("meta/state"))
+                .await
+                .unwrap()
+                .unwrap();
+            let retained = Arc::downgrade(&reader.snapshot);
+            store.shutdown().await.unwrap();
+            match ending {
+                "rollback" => reader.rollback().await.unwrap(),
+                "commit" => reader.commit().await.unwrap(),
+                _ => drop(reader),
+            }
+            assert!(retained.upgrade().is_none());
+            // An actual exclusive reopen verifies that no engine transaction
+            // or file lock survived the application transaction.
+            Backend::open_exclusive(fixture.path())
+                .await
+                .unwrap()
+                .shutdown()
+                .await
+                .unwrap();
+            let backend = Backend::open_read_only(fixture.path()).await.unwrap();
+            let mut strict = backend.begin().await.unwrap();
+            strict
+                .get(&crate::store_key("meta/state"))
+                .await
+                .unwrap()
+                .unwrap();
+            strict.rollback().await.unwrap();
+            backend.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn cancelled_offloaded_read_cannot_move_to_another_snapshot() {
+        let fixture = TestFixture::start().await;
+        let store = fixture.initialize().await;
+        let key = crate::store_key("read-table/cancelled");
+        let mut writer = store.db.begin().await.unwrap();
+        writer.put(key.clone(), b"before".to_vec()).await.unwrap();
+        writer.commit().await.unwrap();
+        let reader = store.db.begin_read_only().await.unwrap();
+        let snapshot = reader.snapshot.clone();
+        let retained = Arc::downgrade(&snapshot);
+        let worker_key = key.clone();
+        let (entered, entering) = oneshot::channel();
+        let (release, released) = mpsc::sync_channel(1);
+        let (complete, completed) = oneshot::channel();
+        let task = tokio::spawn(async move {
+            execute_read(move || {
+                entered.send(()).unwrap();
+                released.recv().unwrap();
+                let result = (|| {
+                    let table = snapshot.open_table(TABLE).map_err(storage_error)?;
+                    table
+                        .get(worker_key.as_slice())
+                        .map_err(storage_error)?
+                        .map(|value| bounded_copy(value.value()))
+                        .transpose()
+                })();
+                drop(snapshot);
+                complete.send(result).unwrap();
+                Ok(())
+            })
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(2), entering)
+            .await
+            .unwrap()
+            .unwrap();
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        drop(reader);
+
+        let mut writer = store.db.begin().await.unwrap();
+        writer.put(key.clone(), b"after".to_vec()).await.unwrap();
+        writer.commit().await.unwrap();
+        let mut current = store.db.begin_read_only().await.unwrap();
+        assert_eq!(current.get(&key).await.unwrap(), Some(b"after".to_vec()));
+        release.send(()).unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(2), completed)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap(),
+            Some(b"before".to_vec())
+        );
+        assert!(retained.upgrade().is_none());
+        assert_eq!(current.get(&key).await.unwrap(), Some(b"after".to_vec()));
+        current.rollback().await.unwrap();
+        store.shutdown().await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod execution_scope_tests {
+    use super::*;
+    use crate::test_support::TestFixture;
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn normal_library_calls_keep_reads_off_the_calling_thread() {
+        let caller = std::thread::current().id();
+        runtime().block_on(async {
+            let reader = execute_read(|| Ok(std::thread::current().id()))
+                .await
+                .unwrap();
+            assert_ne!(reader, caller);
+        });
+    }
+
+    #[test]
+    fn owned_dispatcher_scope_does_not_leak_to_spawned_or_local_tasks() {
+        let caller = std::thread::current().id();
+        run_on_database_thread(move || {
+            let owner = std::thread::current().id();
+            assert_ne!(owner, caller);
+            runtime().block_on(async {
+                assert_eq!(
+                    execute_read(|| Ok(std::thread::current().id()))
+                        .await
+                        .unwrap(),
+                    owner
+                );
+                tokio::spawn(async {
+                    let task = std::thread::current().id();
+                    assert!(tokio::task::try_id().is_some());
+                    assert_ne!(
+                        execute_read(|| Ok(std::thread::current().id()))
+                            .await
+                            .unwrap(),
+                        task
+                    );
+                })
+                .await
+                .unwrap();
+                tokio::task::LocalSet::new()
+                    .run_until(async {
+                        tokio::task::spawn_local(async move {
+                            assert_eq!(std::thread::current().id(), owner);
+                            assert!(tokio::task::try_id().is_some());
+                            assert_ne!(
+                                execute_read(|| Ok(std::thread::current().id()))
+                                    .await
+                                    .unwrap(),
+                                owner
+                            );
+                        })
+                        .await
+                        .unwrap();
+                    })
+                    .await;
+                assert_eq!(
+                    execute_read(|| Ok(std::thread::current().id()))
+                        .await
+                        .unwrap(),
+                    owner
+                );
+            });
+        })
+        .unwrap();
+        runtime().block_on(async {
+            assert_ne!(
+                execute_read(|| Ok(std::thread::current().id()))
+                    .await
+                    .unwrap(),
+                caller
+            );
+        });
+    }
+
+    fn check_read_failures() {
+        runtime().block_on(async {
+            assert!(matches!(
+                execute_read(|| Err::<(), _>(Error::IncompatibleStore)).await,
+                Err(Error::IncompatibleStore)
+            ));
+            assert!(matches!(
+                execute_read(|| Err::<(), _>(Error::ResourceLimit(ResourceLimit::ReadBytes))).await,
+                Err(Error::ResourceLimit(ResourceLimit::ReadBytes))
+            ));
+            let panic = execute_read::<_, ()>(|| panic!("controlled read failure")).await;
+            assert!(matches!(
+                panic,
+                Err(Error::Database(message)) if message == "database worker failed"
+            ));
+            assert_eq!(execute_read(|| Ok(7)).await.unwrap(), 7);
+        });
+    }
+
+    #[test]
+    fn inline_and_offloaded_reads_preserve_errors_and_panic_classification() {
+        check_read_failures();
+        run_on_database_thread(check_read_failures).unwrap();
+    }
+
+    #[test]
+    fn owned_dispatcher_preserves_snapshots_writer_rollback_and_reservation_release() {
+        run_on_database_thread(|| {
+            runtime().block_on(async {
+                let fixture = TestFixture::start().await;
+                let store = fixture.initialize().await;
+                let key = crate::store_key("execution-scope/value");
+                let mut end = key.clone();
+                end.push(0);
+                let mut seed = store.db.begin().await.unwrap();
+                seed.put(key.clone(), b"before".to_vec()).await.unwrap();
+                seed.commit().await.unwrap();
+                let mut snapshot = store.db.begin_read_only().await.unwrap();
+                assert_eq!(snapshot.get(&key).await.unwrap(), Some(b"before".to_vec()));
+
+                let acquire = || {
+                    store
+                        .db
+                        .begin_reserved(Duration::from_millis(100), Duration::from_secs(2))
+                };
+                let mut writer = acquire().await.unwrap();
+                writer.put(key.clone(), b"staged".to_vec()).await.unwrap();
+                let checkpoint = writer.checkpoint();
+                writer
+                    .put(key.clone(), b"rolled-back".to_vec())
+                    .await
+                    .unwrap();
+                writer.restore(&checkpoint);
+                assert_eq!(
+                    writer.get_many(std::slice::from_ref(&key)).await.unwrap(),
+                    vec![Some(b"staged".to_vec())]
+                );
+                assert_eq!(
+                    writer.scan(&key, &end, 1).await.unwrap(),
+                    vec![(key.clone(), b"staged".to_vec())]
+                );
+                assert!(matches!(
+                    store
+                        .db
+                        .begin_reserved(Duration::from_millis(5), Duration::from_secs(2))
+                        .await,
+                    Err(Error::WriterBusy)
+                ));
+                // Dropping a cancelled owner must still disconnect the separate
+                // reservation worker and abort every staged mutation.
+                drop(writer);
+                let mut replacement = acquire().await.unwrap();
+                assert_eq!(
+                    replacement.get(&key).await.unwrap(),
+                    Some(b"before".to_vec())
+                );
+                replacement
+                    .put(key.clone(), b"after".to_vec())
+                    .await
+                    .unwrap();
+                replacement.commit().await.unwrap();
+                assert_eq!(
+                    snapshot.get_many(std::slice::from_ref(&key)).await.unwrap(),
+                    vec![Some(b"before".to_vec())]
+                );
+                assert_eq!(
+                    snapshot.scan(&key, &end, 1).await.unwrap(),
+                    vec![(key.clone(), b"before".to_vec())]
+                );
+                snapshot.rollback().await.unwrap();
+                let mut current = store.db.begin_read_only().await.unwrap();
+                assert_eq!(current.get(&key).await.unwrap(), Some(b"after".to_vec()));
+                current.rollback().await.unwrap();
+            });
+        })
+        .unwrap();
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::io;
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -1607,6 +2121,153 @@ mod tests {
             [(second, b"buffered".to_vec())]
         );
         buffered.rollback().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn identical_writes_still_validate_point_range_and_fingerprint_observations() {
+        for conflict in ["point", "range", "fingerprint"] {
+            let fixture = TestFixture::start().await;
+            let store = fixture.initialize().await;
+            let peer = fixture.connect().await;
+            let same = store_key("no-op/point");
+            let blind = store_key("no-op/blind");
+            let phantom = store_key("no-op/range/a");
+            let start = store_key("no-op/range/");
+            let end = store_key("no-op/range0");
+            let mut seed = store.db.begin().await.unwrap();
+            seed.put(same.clone(), b"before".to_vec()).await.unwrap();
+            seed.put(blind.clone(), b"before".to_vec()).await.unwrap();
+            seed.commit().await.unwrap();
+
+            let mut stale = store.db.begin().await.unwrap();
+            assert_eq!(stale.get(&same).await.unwrap(), Some(b"before".to_vec()));
+            stale.put(same.clone(), b"before".to_vec()).await.unwrap();
+            match conflict {
+                "range" => assert!(stale.scan(&start, &end, 1).await.unwrap().is_empty()),
+                "fingerprint" => {
+                    stale.put(blind.clone(), b"before".to_vec()).await.unwrap();
+                    assert!(!stale.reads.contains_key(&blind));
+                    assert!(stale.mutation_reads.contains_key(&blind));
+                }
+                _ => (),
+            }
+            let changed = match conflict {
+                "range" => phantom.clone(),
+                "fingerprint" => blind.clone(),
+                _ => same.clone(),
+            };
+            let mut fresh = peer.db.begin().await.unwrap();
+            fresh.put(changed.clone(), b"after".to_vec()).await.unwrap();
+            fresh.commit().await.unwrap();
+            assert!(
+                matches!(stale.commit().await, Err(Error::TransactionConflict)),
+                "an identical point write bypassed its {conflict} conflict"
+            );
+            assert_eq!(
+                store.db.read(&changed).await.unwrap(),
+                Some(b"after".to_vec())
+            );
+            if conflict != "point" {
+                assert_eq!(
+                    store.db.read(&same).await.unwrap(),
+                    Some(b"before".to_vec())
+                );
+            }
+            peer.shutdown().await.unwrap();
+            store.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn identical_writes_preserve_savepoints_mixed_changes_and_durable_reopen() {
+        for reserved in [false, true] {
+            let fixture = TestFixture::start().await;
+            let store = fixture.initialize().await;
+            let same = store_key("no-op/same");
+            let changed = store_key("no-op/changed");
+            let blind = store_key("no-op/blind");
+            let absent = store_key("no-op/absent");
+            let mut seed = store.db.begin().await.unwrap();
+            for key in [&same, &changed, &blind] {
+                seed.put(key.clone(), b"before".to_vec()).await.unwrap();
+            }
+            seed.commit().await.unwrap();
+            let mut writer = if reserved {
+                store
+                    .db
+                    .begin_reserved(Duration::from_millis(100), Duration::from_secs(2))
+                    .await
+                    .unwrap()
+            } else {
+                store.db.begin().await.unwrap()
+            };
+            assert_eq!(writer.get(&same).await.unwrap(), Some(b"before".to_vec()));
+            assert_eq!(writer.get(&absent).await.unwrap(), None);
+            writer.delete(same.clone()).await.unwrap();
+            writer.put(same.clone(), b"before".to_vec()).await.unwrap();
+            writer.delete(absent.clone()).await.unwrap();
+            writer.put(blind.clone(), b"before".to_vec()).await.unwrap();
+            writer
+                .put(changed.clone(), b"after".to_vec())
+                .await
+                .unwrap();
+            assert!(!writer.reads.contains_key(&blind));
+            assert!(writer.mutation_reads.contains_key(&blind));
+            let saved = writer.checkpoint();
+            writer.delete(same.clone()).await.unwrap();
+            writer
+                .put(changed.clone(), b"discarded".to_vec())
+                .await
+                .unwrap();
+            writer.restore(&saved);
+            assert_eq!(
+                writer
+                    .get_many(&[same.clone(), changed.clone(), absent.clone()])
+                    .await
+                    .unwrap(),
+                vec![Some(b"before".to_vec()), Some(b"after".to_vec()), None]
+            );
+            writer.commit().await.unwrap();
+            store.shutdown().await.unwrap();
+            let reopened = fixture.connect().await;
+            for (key, expected) in [
+                (same, Some(b"before".to_vec())),
+                (changed, Some(b"after".to_vec())),
+                (blind, Some(b"before".to_vec())),
+                (absent, None),
+            ] {
+                assert_eq!(reopened.db.read(&key).await.unwrap(), expected);
+            }
+            reopened.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn identical_staged_values_keep_mutation_and_observation_budgets() {
+        let fixture = TestFixture::start().await;
+        let store = fixture.initialize().await;
+        let first = store_key("no-op/budget/first");
+        let second = store_key("no-op/budget/second");
+        let large = vec![17u8; MAX_BATCH_BYTES / 2];
+        for key in [&first, &second] {
+            let mut seed = store.db.begin().await.unwrap();
+            seed.put(key.clone(), large.clone()).await.unwrap();
+            seed.commit().await.unwrap();
+        }
+        let mut writer = store.db.begin().await.unwrap();
+        assert_eq!(writer.get(&first).await.unwrap(), Some(large.clone()));
+        writer.put(first.clone(), large.clone()).await.unwrap();
+        assert!(matches!(
+            writer.put(second.clone(), large.clone()).await,
+            Err(Error::ResourceLimit(ResourceLimit::MutationBytes))
+        ));
+        assert!(matches!(
+            writer.get(&second).await,
+            Err(Error::ResourceLimit(ResourceLimit::ObservationBudget))
+        ));
+        writer.rollback().await.unwrap();
+        assert_eq!(store.db.read(&first).await.unwrap(), Some(large));
+        store.shutdown().await.unwrap();
     }
 
     #[tokio::test]
@@ -1842,47 +2503,86 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn real_engine_flush_failure_has_an_unknown_commit_outcome() {
-        let fail = Arc::new(AtomicBool::new(false));
-        let control = fail.clone();
-        let database = tokio::task::spawn_blocking(move || {
-            let database = Database::builder()
-                .create_with_backend(FailingSync {
-                    inner: redb::backends::InMemoryBackend::new(),
-                    fail: control,
-                })
-                .unwrap();
-            let transaction = database.begin_write().unwrap();
-            transaction.open_table(TABLE).unwrap();
-            transaction.commit().unwrap();
-            database
-        })
-        .await
-        .unwrap();
-        let backend = Backend {
-            handles: Arc::new(DatabaseHandles {
-                path: PathBuf::new(),
-                exclusive: false,
-                read_only: false,
-                identity: None,
-                reader: None,
-                writer: Mutex::new(Some(Arc::new(database))),
-                opening: Mutex::new(()),
-            }),
-        };
-        let mut transaction = backend.begin().await.unwrap();
-        transaction
-            .put(b"receipt".to_vec(), b"possibly committed".to_vec())
+    async fn assert_durable_flush_failure(unchanged: bool, changed: bool) {
+        for reserved in [false, true] {
+            let fail = Arc::new(AtomicBool::new(false));
+            let control = fail.clone();
+            let database = tokio::task::spawn_blocking(move || {
+                let database = Database::builder()
+                    .create_with_backend(FailingSync {
+                        inner: redb::backends::InMemoryBackend::new(),
+                        fail: control,
+                    })
+                    .unwrap();
+                let transaction = database.begin_write().unwrap();
+                transaction.open_table(TABLE).unwrap();
+                transaction.commit().unwrap();
+                database
+            })
             .await
             .unwrap();
-        fail.store(true, Ordering::SeqCst);
-        assert!(matches!(
-            transaction.commit().await,
-            Err(Error::UnknownCommit)
-        ));
-        fail.store(false, Ordering::SeqCst);
-        // redb retains the earlier I/O failure; explicit close must report it too.
-        assert!(matches!(backend.shutdown().await, Err(Error::Database(_))));
+            let backend = Backend {
+                handles: Arc::new(DatabaseHandles {
+                    path: PathBuf::new(),
+                    exclusive: false,
+                    read_only: false,
+                    identity: None,
+                    reader: None,
+                    writer: Mutex::new(Some(Arc::new(database))),
+                    opening: Mutex::new(()),
+                }),
+            };
+            let same = b"same-value".to_vec();
+            if unchanged {
+                let mut seed = backend.begin().await.unwrap();
+                seed.put(same.clone(), b"before".to_vec()).await.unwrap();
+                seed.commit().await.unwrap();
+            }
+            let mut transaction = if reserved {
+                backend
+                    .begin_reserved(Duration::from_millis(100), Duration::from_secs(2))
+                    .await
+                    .unwrap()
+            } else {
+                backend.begin().await.unwrap()
+            };
+            if unchanged {
+                assert_eq!(
+                    transaction.get(&same).await.unwrap(),
+                    Some(b"before".to_vec())
+                );
+                transaction.put(same, b"before".to_vec()).await.unwrap();
+            }
+            if changed {
+                transaction
+                    .put(b"receipt".to_vec(), b"possibly committed".to_vec())
+                    .await
+                    .unwrap();
+            }
+            fail.store(true, Ordering::SeqCst);
+            assert!(
+                matches!(transaction.commit().await, Err(Error::UnknownCommit)),
+                "durable flush failure must stay uncertain (reserved={reserved})"
+            );
+            fail.store(false, Ordering::SeqCst);
+            // The real engine retains the I/O failure, including an all-identical
+            // batch. Explicit close must still report it rather than hide it.
+            assert!(matches!(backend.shutdown().await, Err(Error::Database(_))));
+        }
+    }
+
+    #[tokio::test]
+    async fn real_engine_flush_failure_has_an_unknown_commit_outcome() {
+        assert_durable_flush_failure(false, true).await;
+    }
+
+    #[tokio::test]
+    async fn mixed_identical_writes_still_require_a_durable_commit() {
+        assert_durable_flush_failure(true, true).await;
+    }
+
+    #[tokio::test]
+    async fn all_identical_writes_still_require_a_durable_commit() {
+        assert_durable_flush_failure(true, false).await;
     }
 }

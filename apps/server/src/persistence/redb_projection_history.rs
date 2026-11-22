@@ -12,6 +12,7 @@ use crate::application_events::{EventRead, read_events};
 pub enum ProjectionHistoryQuery {
     CodexUsage { native_turn_ids: Vec<String> },
     LinkedPullRequests { number: i64 },
+    LinkedIssueThreads { key: String },
 }
 
 fn payload(row: &Map<String, Value>) -> Result<Value> {
@@ -200,6 +201,68 @@ async fn linked_pull_requests(session: &mut Session, number: i64) -> Result<Vec<
     Ok(matches.into_iter().map(|(_, _, row)| row).collect())
 }
 
+async fn linked_issue_threads(session: &mut Session, key: &str) -> Result<Vec<Value>> {
+    // The retained read evaluates json_each on every live thread.
+    for row in super::read_index::window::equal_metadata(
+        session,
+        THREADS,
+        "_unreadable_payload",
+        &int_cell(1),
+    )
+    .await?
+    {
+        if nullable(&row.row, "deleted_at")?.is_none() {
+            payload(&row.row)?;
+        }
+    }
+    let mut matches = Vec::new();
+    for indexed in equal_rows(session, THREADS, "issue_key", &text_cell(key)).await? {
+        let row = indexed.row;
+        if nullable(&row, "deleted_at")?.is_some() {
+            continue;
+        }
+        let thread = payload(&row)?;
+        if thread
+            .get("lineage")
+            .and_then(|lineage| lineage.get("sideChat"))
+            .and_then(sqlite_integer)
+            == Some(1)
+        {
+            continue;
+        }
+        let settled = thread
+            .get("settledAt")
+            .is_some_and(|value| !value.is_null())
+            || thread["settledOverride"] == "settled";
+        let id = text(&row, "thread_id")?;
+        let updated_at = text(&row, "updated_at")?;
+        if let Some(issues) = thread["issues"].as_array() {
+            for link in issues
+                .iter()
+                .filter(|link| link["key"].as_str() == Some(key))
+            {
+                matches.push((
+                    updated_at.clone(),
+                    id.clone(),
+                    json!({
+                        "id": id,
+                        "projectId": text(&row, "project_id")?,
+                        "title": text(&row, "title")?,
+                        "archivedAt": nullable(&row, "archived_at")?,
+                        "settled": i64::from(settled),
+                        "tracker": extracted(link.get("tracker")),
+                        "host": extracted(link.get("host")),
+                        "scope": extracted(link.get("scope")),
+                        "key": key,
+                    }),
+                ));
+            }
+        }
+    }
+    matches.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+    Ok(matches.into_iter().map(|(_, _, row)| row).collect())
+}
+
 impl ApplicationTransactions {
     pub async fn projections_history(
         &mut self,
@@ -215,6 +278,9 @@ impl ApplicationTransactions {
                 }
                 ProjectionHistoryQuery::LinkedPullRequests { number } => {
                     linked_pull_requests(&mut session, number).await?
+                }
+                ProjectionHistoryQuery::LinkedIssueThreads { key } => {
+                    linked_issue_threads(&mut session, &key).await?
                 }
             };
             crate::validate_response_bytes(&rows)?;

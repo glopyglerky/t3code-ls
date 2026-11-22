@@ -21,6 +21,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
+import { codexAppServerEnvironment } from "../provider/CodexProvider.ts";
 import type { CodexEffectiveRuntime } from "../provider/CodexManagedRuntime.ts";
 
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
@@ -158,7 +159,7 @@ export const make = Effect.fn("NativeCodexTextGeneration.make")(function* (input
       const environment = resolved?.environment ?? input.environment;
       const models = yield* input.getModels;
       const env = {
-        ...environment,
+        ...codexAppServerEnvironment(environment),
         ...(config.homePath
           ? { CODEX_HOME: expandHomePath(config.homePath, yield* HostProcess.HomeDirectory) }
           : {}),

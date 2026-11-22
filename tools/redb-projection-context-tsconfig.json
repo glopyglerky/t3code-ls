@@ -4,7 +4,6 @@
   "files": [
     "../apps/server/src/orchestration-v2/ProjectionStore.ts",
     "../apps/server/src/orchestration-v2/ProjectionContextRows.ts",
-    "../apps/server/src/orchestration-v2/SqliteProjectionContextRows.ts",
     "../apps/server/src/orchestration-v2/NativeProjectionContextRows.ts"
   ]
 }

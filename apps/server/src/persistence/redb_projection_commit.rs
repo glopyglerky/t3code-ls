@@ -38,8 +38,31 @@ const HANDOFFS: &str = "orchestration_v2_projection_context_handoffs";
 const TRANSFERS: &str = "orchestration_v2_projection_context_transfers";
 const METADATA: &str = "orchestration_v2_projection_metadata";
 const OWNER: &str = "projection-commit-v1";
+const ITEMS_OWNER: &str = "projection-commit-v2";
 const PREPARE_ROWS: usize = 32;
 const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
+
+fn expected_owner(name: &str) -> &'static str {
+    if name == ITEMS { ITEMS_OWNER } else { OWNER }
+}
+
+pub(crate) async fn validate_item_owner(
+    tx: &mut Transaction,
+    catalog: &ApplicationCatalog,
+) -> Result<()> {
+    if tx
+        .get(&managed_marker(catalog, ITEMS))
+        .await?
+        .as_deref()
+        .map(decode::<String>)
+        .transpose()?
+        .as_deref()
+        != Some(ITEMS_OWNER)
+    {
+        return Err(Error::IncompatibleStore);
+    }
+    Ok(())
+}
 
 #[path = "redb_projection_lookup.rs"]
 mod lookup;
@@ -88,8 +111,18 @@ async fn write_row(
             .await?;
         }
     }
+    if name == RUNS && previous.is_none() {
+        crate::application_turn_item_counts::adjust_run(tx, catalog, &text(&row, "run_id")?, true)
+            .await?;
+    }
     if name == ITEMS {
-        crate::application_turn_item_counts::replace(tx, catalog, previous.as_ref().map(|old| &old.row), Some(&row)).await?;
+        crate::application_turn_item_counts::replace(
+            tx,
+            catalog,
+            previous.as_ref().map(|old| &old.row),
+            Some(&row),
+        )
+        .await?;
     }
     read_index::replace(
         tx,
@@ -125,12 +158,64 @@ async fn delete_row(
                 .await?;
             }
         }
+        if name == RUNS {
+            crate::application_turn_item_counts::adjust_run(
+                tx,
+                catalog,
+                &text(&previous.row, "run_id")?,
+                false,
+            )
+            .await?;
+        }
         if name == ITEMS {
-            crate::application_turn_item_counts::replace(tx, catalog, Some(&previous.row), None).await?;
+            crate::application_turn_item_counts::replace(tx, catalog, Some(&previous.row), None)
+                .await?;
         }
         read_index::replace(tx, catalog, name, Some(&previous.row), None).await?;
     }
     delete_application_row(tx, catalog, name, primary).await
+}
+
+pub(crate) fn has_run_projection(catalog: &ApplicationCatalog) -> bool {
+    catalog.schema.tables.iter().any(|table| table.name == RUNS)
+}
+
+// The indexed lookup and the caller's deletion share the same write transaction.
+pub(crate) async fn has_live_restart_continuation(
+    tx: &mut Transaction,
+    catalog: &ApplicationCatalog,
+    thread_id: &str,
+    source_run_id: &str,
+) -> Result<bool> {
+    let mut found = false;
+    read_index::visit_equal_rows_in(
+        tx,
+        catalog,
+        RUNS,
+        "thread_id",
+        &text_cell(thread_id),
+        32,
+        |row| {
+            if matches!(
+                text(&row.row, "status")?.as_str(),
+                "queued" | "preparing" | "starting" | "running" | "waiting"
+            ) {
+                let payload = text(&row.row, "payload_json")?;
+                let fields = object_fields(&payload)?;
+                if let Some(value) = fields
+                    .as_deref()
+                    .and_then(|fields| field(fields, "restartContinuationOfRunId"))
+                {
+                    let value: Value =
+                        serde_json::from_str(value).map_err(|_| Error::IncompatibleStore)?;
+                    found = value.as_str() == Some(source_run_id);
+                }
+            }
+            Ok(!found)
+        },
+    )
+    .await?;
+    Ok(found)
 }
 
 /// Retention metadata uses the same row owner while preserving schema_version
@@ -218,6 +303,10 @@ pub enum ProjectionGuard {
     },
     ProviderThreadUnchanged {
         provider_thread_id: String,
+        expected_json: String,
+    },
+    SubagentUnchanged {
+        subagent_id: String,
         expected_json: String,
     },
     TurnItemUnchanged {
@@ -785,7 +874,15 @@ fn spec(name: &str) -> &'static TableSpec {
 fn validate_schema(catalog: &ApplicationCatalog) -> Result<()> {
     crate::application_turn_item_counts::validate(catalog)?;
     for spec in SPECS {
-        let columns: Vec<_> = spec.columns.iter().map(|(name, _)| *name).collect();
+        let mut columns: Vec<_> = spec.columns.iter().map(|(name, _)| *name).collect();
+        if spec.name == ITEMS
+            && table(catalog, ITEMS)?
+                .columns
+                .iter()
+                .any(|name| name == "inline_work_output")
+        {
+            columns.push("inline_work_output");
+        }
         validate_table(catalog, spec.name, &columns, spec.primary)?;
     }
     Ok(())
@@ -903,6 +1000,14 @@ struct SearchDirty {
 }
 
 async fn ready(session: &mut Session) -> Result<()> {
+    session.transaction.ensure_active()?;
+    if session
+        .read_snapshot_validation
+        .as_ref()
+        .is_some_and(|validation| validation.projection_indexes)
+    {
+        return Ok(());
+    }
     let state: Preparation = decode(
         &session
             .transaction
@@ -916,19 +1021,48 @@ async fn ready(session: &mut Session) -> Result<()> {
     if !state.ready || state.table_index != SPECS.len() {
         return Err(invalid("projection indexes are not prepared"));
     }
-    for spec in SPECS {
-        if session
-            .transaction
-            .get(&managed_marker(&session.catalog, spec.name))
-            .await?
-            .as_deref()
-            .map(decode::<String>)
-            .transpose()?
-            .as_deref()
-            != Some(OWNER)
-        {
-            return Err(Error::IncompatibleStore);
+    let markers: Vec<_> = SPECS
+        .iter()
+        .map(|spec| managed_marker(&session.catalog, spec.name))
+        .collect();
+    let validate_owner = |name: &str, bytes: Option<&[u8]>| -> Result<()> {
+        if bytes.map(decode::<String>).transpose()?.as_deref() != Some(expected_owner(name)) {
+            Err(Error::IncompatibleStore)
+        } else {
+            Ok(())
         }
+    };
+    if session.read_snapshot_validation.is_some() {
+        match session.transaction.get_many(&markers).await {
+            Ok(values) => {
+                for (spec, value) in SPECS.iter().zip(values) {
+                    validate_owner(spec.name, value.as_deref())?;
+                }
+            }
+            Err(Error::ResourceLimit(crate::ResourceLimit::ReadBytes)) => {
+                // Valid owner markers are tiny. Preserve ordered corruption rejection
+                // if malformed marker bytes exceed the bounded batch allocation.
+                for (spec, marker) in SPECS.iter().zip(markers) {
+                    validate_owner(
+                        spec.name,
+                        session.transaction.get(&marker).await?.as_deref(),
+                    )?;
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    } else {
+        // Writers must observe and validate each marker in order: a later
+        // observation-budget failure must not mask an earlier corrupt owner.
+        for (spec, marker) in SPECS.iter().zip(markers) {
+            validate_owner(
+                spec.name,
+                session.transaction.get(&marker).await?.as_deref(),
+            )?;
+        }
+    }
+    if let Some(validation) = &mut session.read_snapshot_validation {
+        validation.projection_indexes = true;
     }
     Ok(())
 }
@@ -1034,6 +1168,77 @@ fn unreadable_owner_prefix(catalog: &ApplicationCatalog, driver: &str, instance:
             request_digest(&json!([driver, instance]))
         ),
     )
+}
+
+async fn find_acp_session_owner(
+    session: &mut Session,
+    identity: [String; 3],
+) -> Result<Option<String>> {
+    ready(session).await?;
+    let unreadable = unreadable_owner_prefix(&session.catalog, &identity[0], &identity[1]);
+    if !session
+        .transaction
+        .scan(&unreadable, &prefix_end(&unreadable), 1)
+        .await?
+        .is_empty()
+    {
+        return Err(Error::IncompatibleStore);
+    }
+    let prefix = native_prefix(&session.catalog, &identity);
+    let end = prefix_end(&prefix);
+    let mut cursor = prefix;
+    let mut latest = None;
+    loop {
+        let rows = session.transaction.scan(&cursor, &end, 128).await?;
+        let count = rows.len();
+        for (key, bytes) in rows {
+            let witness: NativeOwner = decode(&bytes)?;
+            if witness.identity != identity || owner_key(&session.catalog, &witness) != key {
+                return Err(Error::IncompatibleStore);
+            }
+            let source = read_row(
+                &mut session.transaction,
+                &session.catalog,
+                PROVIDER_THREADS,
+                &[text_cell(&witness.provider_thread_id)],
+            )
+            .await?
+            .ok_or(Error::IncompatibleStore)?;
+            let owner = native_owner(&source.row)?.ok_or(Error::IncompatibleStore)?;
+            if owner.identity != witness.identity
+                || owner.thread_id != witness.thread_id
+                || owner.provider_thread_id != witness.provider_thread_id
+            {
+                return Err(Error::IncompatibleStore);
+            }
+            cursor = key;
+            cursor.push(0);
+            let Some(thread_id) = witness.thread_id else {
+                continue;
+            };
+            let Some(thread) = read_row(
+                &mut session.transaction,
+                &session.catalog,
+                THREADS,
+                &[text_cell(&thread_id)],
+            )
+            .await?
+            else {
+                continue;
+            };
+            if nullable(&thread.row, "deleted_at")?.is_some() {
+                continue;
+            }
+            let updated = text(&thread.row, "updated_at")?;
+            if latest.as_ref().is_none_or(|(time, _)| updated > *time) {
+                latest = Some((updated, thread_id));
+            }
+        }
+        if count < 128 {
+            break;
+        }
+    }
+    Ok(latest.map(|(_, thread_id)| thread_id))
 }
 
 async fn prepare_native_owner(
@@ -1158,25 +1363,72 @@ impl Store {
     pub async fn prepare_application_projections(&self) -> Result<ProjectionPreparation> {
         let mut limit = PREPARE_ROWS;
         loop {
-            match self.prepare_projection_batch(limit).await {
+            match self.prepare_projection_batch(limit, None).await {
                 Err(Error::ResourceLimit(_)) if limit > 1 => limit = (limit / 2).max(1),
                 result => return result,
             }
         }
     }
 
-    async fn prepare_projection_batch(&self, limit: usize) -> Result<ProjectionPreparation> {
+    pub(crate) async fn prepare_projections_for_catalog(
+        &self,
+        catalog: &ApplicationCatalog,
+    ) -> Result<ProjectionPreparation> {
+        self.db.require_exclusive()?;
+        let mut limit = PREPARE_ROWS;
+        loop {
+            match self.prepare_projection_batch(limit, Some(catalog)).await {
+                Err(Error::ResourceLimit(_)) if limit > 1 => limit = (limit / 2).max(1),
+                result => return result,
+            }
+        }
+    }
+
+    async fn prepare_projection_batch(
+        &self,
+        limit: usize,
+        target: Option<&ApplicationCatalog>,
+    ) -> Result<ProjectionPreparation> {
         let mut tx = self
             .db
             .begin_reserved(Duration::from_secs(5), Duration::from_secs(300))
             .await?;
-        let catalog = decode_catalog(
+        let active = decode_catalog(
             &tx.get(&schema_key())
                 .await?
                 .ok_or_else(|| invalid("application schema is not initialized"))?,
         )?;
+        let new_count_table = target.is_some()
+            && !active
+                .schema
+                .tables
+                .iter()
+                .any(|table| table.name == crate::application_turn_item_counts::TABLE);
+        let staged_totals = target.is_some_and(|catalog| {
+            crate::application_turn_item_counts::has_totals(catalog)
+                && !crate::application_turn_item_counts::has_totals(&active)
+        });
+        let catalog = match target {
+            Some(catalog) if *catalog != active => catalog.clone(),
+            Some(_) => return Err(Error::IncompatibleStore),
+            None => active,
+        };
         validate_schema(&catalog)?;
         let state = tx.get(&key(&catalog, "preparation")).await?;
+        crate::application_turn_item_counts::prepare_totals_owner(
+            &mut tx,
+            &catalog,
+            state.is_none() && !staged_totals,
+        )
+        .await?;
+        let count_marker = managed_marker(&catalog, crate::application_turn_item_counts::TABLE);
+        let count_owner = tx
+            .get(&count_marker)
+            .await?
+            .as_deref()
+            .map(decode::<String>)
+            .transpose()?;
+        let mut transitioned = false;
         let mut state = if let Some(bytes) = state {
             let state: Preparation = decode(&bytes)?;
             if state.version != 1
@@ -1185,29 +1437,64 @@ impl Store {
             {
                 return Err(Error::IncompatibleStore);
             }
+            if count_owner.is_none() && new_count_table {
+                tx.put(count_marker.clone(), encode(&OWNER)?).await?;
+                transitioned = true;
+            } else if count_owner.as_deref() != Some(OWNER) {
+                return Err(Error::IncompatibleStore);
+            }
             for spec in SPECS {
-                if tx
+                let found = tx
                     .get(&managed_marker(&catalog, spec.name))
                     .await?
                     .as_deref()
                     .map(decode::<String>)
-                    .transpose()?
-                    .as_deref()
-                    != Some(OWNER)
-                {
+                    .transpose()?;
+                if spec.name == ITEMS && found.as_deref() == Some(OWNER) {
+                    transitioned = true;
+                } else if found.as_deref() != Some(expected_owner(spec.name)) {
                     return Err(Error::IncompatibleStore);
                 }
             }
+            if transitioned {
+                if target.is_none() {
+                    crate::application_turn_item_counts::require_unprepared_namespace(
+                        &mut tx, &catalog,
+                    )
+                    .await?;
+                }
+                // Every older projection writer observes this marker before
+                // changing items. Reserved writers finish before this fence;
+                // optimistic writers with the old observation must conflict.
+                tx.put(managed_marker(&catalog, ITEMS), encode(&ITEMS_OWNER)?)
+                    .await?;
+            }
             state
         } else {
-            tx.put(managed_marker(&catalog, crate::application_turn_item_counts::TABLE), encode(&OWNER)?).await?;
+            if target.is_none() {
+                crate::application_turn_item_counts::require_unprepared_namespace(
+                    &mut tx, &catalog,
+                )
+                .await?;
+            }
+            match count_owner.as_deref() {
+                None => (),
+                Some(OWNER) if target.is_some() => (),
+                Some(OWNER)
+                    if Self::published_projection_count_owner(&mut tx, &catalog).await? =>
+                {
+                    ()
+                }
+                _ => return Err(Error::IncompatibleStore),
+            }
             for spec in SPECS {
                 let marker = managed_marker(&catalog, spec.name);
                 if tx.get(&marker).await?.is_some() {
                     return Err(Error::IncompatibleStore);
                 }
-                tx.put(marker, encode(&OWNER)?).await?;
+                tx.put(marker, encode(&expected_owner(spec.name))?).await?;
             }
+            tx.put(count_marker, encode(&OWNER)?).await?;
             // SQLite FTS shadow tables are deliberately excluded from imports.
             // A future native search reader must rebuild from these source rows.
             tx.put(
@@ -1227,7 +1514,11 @@ impl Store {
             }
         };
         if state.ready {
-            tx.rollback().await?;
+            if transitioned {
+                tx.commit().await?;
+            } else {
+                tx.rollback().await?;
+            }
             return Ok(ProjectionPreparation {
                 prepared: true,
                 indexed_rows: state.indexed_rows,
@@ -1303,9 +1594,11 @@ fn thread_event(event: &str) -> bool {
             | "thread.active-reordered"
             | "thread.tags-updated"
             | "thread.visited"
+            | "thread.visit-recorded"
             | "thread.marked-unread"
             | "thread.metadata-updated"
             | "thread.pull-request-synced"
+            | "thread.issue-synced"
             | "thread.runtime-mode-updated"
             | "thread.interaction-mode-updated"
             | "thread.model-selection-updated"
@@ -1418,11 +1711,19 @@ async fn upsert_projection(
     if let Some(old) = &old {
         let previous = text(&old.row, "payload_json")?;
         payload_json = match name {
-            RUNS => keep_omitted_fields(
-                &payload_json,
-                &previous,
-                &["delegatedCompletion", "restartCancelledBackgroundWork"],
-            )?,
+            RUNS => {
+                let updated = keep_omitted_fields(
+                    &payload_json,
+                    &previous,
+                    &["delegatedCompletion", "restartCancelledBackgroundWork"],
+                )?;
+                let fields = object_fields(&previous)?.ok_or(Error::IncompatibleStore)?;
+                if let Some(output) = field(&fields, "output") {
+                    set_payload_field(&updated, "output", output.into())?
+                } else {
+                    updated
+                }
+            }
             SUBAGENTS => keep_omitted_fields(&payload_json, &previous, &["completionDelivery"])?,
             TURNS => keep_turn_usage(&payload_json, normalized.unwrap_or(&previous))?,
             _ => payload_json,
@@ -1456,8 +1757,20 @@ async fn upsert_projection(
         };
         row.insert((*column).into(), value);
     }
+    if name == ITEMS
+        && table(&session.catalog, ITEMS)?
+            .columns
+            .iter()
+            .any(|name| name == "inline_work_output")
+    {
+        let inline =
+            read_index::window::inline_work_output(payload_string(payload, "type")?, &payload_json);
+        row.insert("inline_work_output".into(), int_cell(i64::from(inline)));
+    }
     if name == MESSAGES {
-        let search_text = payload.get("text").and_then(Value::as_str)
+        let search_text = payload
+            .get("text")
+            .and_then(Value::as_str)
             .and_then(crate::application_message_search_text::readable_search_text);
         row.insert("search_text".into(), nullable_cell(search_text.as_deref()));
     }
@@ -1576,6 +1889,7 @@ async fn normalization_context(
     payload: &Map<String, Value>,
 ) -> Result<Option<ProjectionNormalization>> {
     let (name, id, kind) = match event.event_type.as_str() {
+        "thread.visit-recorded" => (THREADS, event.thread_id.as_str(), "thread"),
         "provider-turn.updated" if !payload.contains_key("tokenUsage") => {
             (TURNS, payload_string(payload, "id")?, "provider_turn")
         }
@@ -1636,6 +1950,33 @@ async fn apply_event(session: &mut Session, event: ProjectionApply) -> Result<()
     let context = normalization_context(session, &event, payload).await?;
     let normalized = normalized_payload(&event, context.as_ref())?;
     match event.event_type.as_str() {
+        "thread.visit-recorded" => {
+            let previous = normalized
+                .as_deref()
+                .ok_or_else(|| invalid("projection thread does not exist"))?;
+            let fields = object_fields(&event.payload_json)?.ok_or(Error::IncompatibleStore)?;
+            let visited = field(&fields, "lastVisitedAt")
+                .ok_or_else(|| invalid("thread visit timestamp is missing"))?;
+            let mut updated = set_payload_field(previous, "lastVisitedAt", visited.into())?;
+            if let Some(opens) = field(&fields, "opens") {
+                updated = set_payload_field(&updated, "opens", opens.into())?;
+            }
+            let value: Value = serde_json::from_str(&updated).map_err(crate::json_error)?;
+            let updated_event = ProjectionApply {
+                event_type: "thread.visited".into(),
+                payload_json: updated,
+                normalization: None,
+                ..event.clone()
+            };
+            upsert_projection(
+                session,
+                &updated_event,
+                value.as_object().ok_or(Error::IncompatibleStore)?,
+                THREADS,
+                None,
+            )
+            .await?;
+        }
         "provider-session.detached" => {
             let id = payload_string(payload, "providerSessionId")?;
             delete_row(
@@ -1646,7 +1987,12 @@ async fn apply_event(session: &mut Session, event: ProjectionApply) -> Result<()
             )
             .await?;
         }
-        "run.background-work-cancelled" => {
+        "run.background-work-cancelled" | "run.output-submitted" => {
+            let field_name = if event.event_type == "run.output-submitted" {
+                "output"
+            } else {
+                "restartCancelledBackgroundWork"
+            };
             let run_id = payload_string(payload, "runId")?;
             if let Some(mut run) = read_row(
                 &mut session.transaction,
@@ -1659,11 +2005,11 @@ async fn apply_event(session: &mut Session, event: ProjectionApply) -> Result<()
                 if text(&run.row, "thread_id")? == event.thread_id {
                     let fields =
                         object_fields(&event.payload_json)?.ok_or(Error::IncompatibleStore)?;
-                    let work = field(&fields, "restartCancelledBackgroundWork")
-                        .ok_or_else(|| invalid("cancelled run work is missing"))?;
+                    let work = field(&fields, field_name)
+                        .ok_or_else(|| invalid("run patch value is missing"))?;
                     let updated = set_payload_field(
                         &text(&run.row, "payload_json")?,
-                        "restartCancelledBackgroundWork",
+                        field_name,
                         work.into(),
                     )?;
                     run.row.insert("payload_json".into(), text_cell(&updated));
@@ -1851,14 +2197,33 @@ async fn guard(session: &mut Session, guard: ProjectionGuard) -> Result<bool> {
             };
             Ok(text(&provider.row, "payload_json")? == expected_json)
         }
-        ProjectionGuard::TurnItemUnchanged { turn_item_id, expected_json } => {
-            let Some(item) = read_row(tx, catalog, ITEMS, &[text_cell(&turn_item_id)]).await? else {
+        ProjectionGuard::SubagentUnchanged {
+            subagent_id,
+            expected_json,
+        } => {
+            let Some(row) = read_row(tx, catalog, SUBAGENTS, &[text_cell(&subagent_id)]).await?
+            else {
+                return Ok(false);
+            };
+            Ok(text(&row.row, "payload_json")? == expected_json)
+        }
+        ProjectionGuard::TurnItemUnchanged {
+            turn_item_id,
+            expected_json,
+        } => {
+            let Some(item) = read_row(tx, catalog, ITEMS, &[text_cell(&turn_item_id)]).await?
+            else {
                 return Ok(false);
             };
             Ok(text(&item.row, "payload_json")? == expected_json)
         }
-        ProjectionGuard::InterruptPending { thread_id, request_id, result_id } => {
-            let Some(request) = read_row(tx, catalog, ITEMS, &[text_cell(&request_id)]).await? else {
+        ProjectionGuard::InterruptPending {
+            thread_id,
+            request_id,
+            result_id,
+        } => {
+            let Some(request) = read_row(tx, catalog, ITEMS, &[text_cell(&request_id)]).await?
+            else {
                 return Ok(false);
             };
             if text(&request.row, "thread_id")? != thread_id {
@@ -1918,6 +2283,12 @@ impl ApplicationTransactions {
                         .as_deref()
                         .ok_or_else(|| invalid("projection record id is required"))?,
                 ),
+                "provider_thread" => (
+                    PROVIDER_THREADS,
+                    read.record_id
+                        .as_deref()
+                        .ok_or_else(|| invalid("projection record id is required"))?,
+                ),
                 "runtime_request" => (
                     REQUESTS,
                     read.record_id
@@ -1926,7 +2297,7 @@ impl ApplicationTransactions {
                 ),
                 _ => return Err(invalid("unknown projection read")),
             };
-            if name != THREADS {
+            if name != THREADS && name != PROVIDER_THREADS {
                 // Both original control reads require the owning thread even
                 // when the requested child record has not been written yet.
                 let thread = read_row(
@@ -1951,7 +2322,7 @@ impl ApplicationTransactions {
             else {
                 return Ok(None);
             };
-            if text(&row.row, "thread_id")? != read.thread_id {
+            if name != PROVIDER_THREADS && text(&row.row, "thread_id")? != read.thread_id {
                 return Ok(None);
             }
             text(&row.row, "payload_json").map(Some)

@@ -2,6 +2,7 @@ import {
   OrchestrationV2AppThreadJson,
   OrchestrationV2DomainEventJson,
   OrchestrationV2ProviderTurnJson,
+  OrchestrationV2ProviderThreadJson,
   OrchestrationV2RunJson,
   OrchestrationV2RuntimeRequestJson,
 } from "@t3tools/contracts";
@@ -16,6 +17,7 @@ import {
   toProjectionCommitStoreError,
   type ProjectionCommitStoreShape,
 } from "../orchestration-v2/ProjectionCommitStore.ts";
+import { attributePendingBackgroundTasks, encodeProviderThreadPayload } from "../orchestration-v2/ProjectionStore.ts";
 import { RedbClient } from "./RedbClient.ts";
 
 const encodeEvent = Schema.encodeEffect(OrchestrationV2DomainEventJson);
@@ -30,6 +32,12 @@ const decodeRequest = Schema.decodeUnknownEffect(
 );
 const ThreadPayload = Schema.fromJsonString(OrchestrationV2AppThreadJson);
 const TurnPayload = Schema.fromJsonString(OrchestrationV2ProviderTurnJson);
+const decodeThreadPayload = Schema.decodeEffect(ThreadPayload);
+const encodeThreadPayload = Schema.encodeEffect(ThreadPayload);
+const decodeProviderThread = Schema.decodeEffect(Schema.fromJsonString(OrchestrationV2ProviderThreadJson));
+const decodeTurnPayload = Schema.decodeEffect(TurnPayload);
+const encodeTurnPayload = Schema.encodeEffect(TurnPayload);
+
 const Normalization = Schema.NullOr(
   Schema.Struct({
     kind: Schema.Literals(["thread", "provider_turn"]),
@@ -50,38 +58,61 @@ export const make = Effect.gen(function* () {
           occurred_at: encoded.occurredAt,
           payload_json: yield* encodeJson(encoded.payload),
         };
-        if (event.type !== "provider-thread.updated" && event.type !== "provider-turn.updated") {
+        if (
+          event.type !== "provider-thread.updated" &&
+          event.type !== "provider-turn.updated" &&
+          event.type !== "thread.visit-recorded"
+        ) {
           return yield* client
             .request("application_projections_apply", { event: input }, Schema.Null)
             .pipe(Effect.asVoid);
         }
         yield* client.withTransaction(
           Effect.gen(function* () {
+            const prepared = { ...input };
+            if (
+              event.type === "provider-thread.updated" &&
+              event.payload.pendingBackgroundTasks?.some((task) => task.runId === undefined)
+            ) {
+              const stored = yield* client.request(
+                "application_projections_read",
+                { read: {
+                  kind: "provider_thread",
+                  thread_id: event.threadId,
+                  record_id: event.payload.id,
+                } },
+                Schema.NullOr(Schema.String),
+              );
+              const previous = stored === null ? undefined : yield* decodeProviderThread(stored);
+              prepared.payload_json = yield* encodeProviderThreadPayload(
+                attributePendingBackgroundTasks(event.payload, previous, event.runId),
+              );
+            }
             const context = yield* client.request(
               "application_projections_normalization",
-              { event: input },
+              { event: prepared },
               Normalization,
             );
             if (context === null) {
               return yield* client
-                .request("application_projections_apply", { event: input }, Schema.Null)
+                .request("application_projections_apply", { event: prepared }, Schema.Null)
                 .pipe(Effect.asVoid);
             }
             // This is the same codec round trip performed by the SQLite writer.
             // Rust chooses the old row and owns every merge and column mutation.
             const payloadJson =
               context.kind === "thread"
-                ? yield* Schema.decodeEffect(ThreadPayload)(context.payload_json).pipe(
-                    Effect.flatMap(Schema.encodeEffect(ThreadPayload)),
+                ? yield* decodeThreadPayload(context.payload_json).pipe(
+                    Effect.flatMap(encodeThreadPayload),
                   )
-                : yield* Schema.decodeEffect(TurnPayload)(context.payload_json).pipe(
-                    Effect.flatMap(Schema.encodeEffect(TurnPayload)),
+                : yield* decodeTurnPayload(context.payload_json).pipe(
+                    Effect.flatMap(encodeTurnPayload),
                   );
             yield* client.request(
               "application_projections_apply",
               {
                 event: {
-                  ...input,
+                  ...prepared,
                   normalization: {
                     expected_payload_json: context.payload_json,
                     payload_json: payloadJson,
@@ -230,6 +261,20 @@ export const make = Effect.gen(function* () {
           Schema.Boolean,
         )
         .pipe(Effect.mapError(toProjectionCommitStoreError("provider-thread-unchanged"))),
+    subagentUnchanged: (subagentId, expectedJson) =>
+      client
+        .request(
+          "application_projections_guard",
+          {
+            guard: {
+              kind: "subagent_unchanged",
+              subagent_id: subagentId,
+              expected_json: expectedJson,
+            },
+          },
+          Schema.Boolean,
+        )
+        .pipe(Effect.mapError(toProjectionCommitStoreError("subagent-unchanged"))),
     turnItemUnchanged: (turnItemId, expectedJson) =>
       client
         .request(

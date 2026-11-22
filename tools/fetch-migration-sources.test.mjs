@@ -29,9 +29,8 @@ NodeTest.test("fetch plan contains all integrated history and recovery, never th
   const { map, lock } = fixture();
   const before = JSON.stringify({ map, lock });
   NodeAssert.deepEqual(planMigrationFetches(map, lock), [
-    { remote: "https://github.com/pingdotgg/t3code.git", commit: initial },
-    { remote: "https://github.com/pingdotgg/t3code.git", commit: integrated },
-    { remote: "origin", commit: recovery },
+    { remote: "https://github.com/pingdotgg/t3code.git", commits: [initial, integrated] },
+    { remote: "origin", commits: [recovery] },
   ]);
   NodeAssert.equal(JSON.stringify({ map, lock }), before);
 });
@@ -40,7 +39,7 @@ NodeTest.test("the initial single-revision history remains valid", () => {
   const { map, lock } = fixture([initial]);
   map.integrated_upstream_commit = initial;
   lock.upstream.commit = initial;
-  NodeAssert.equal(planMigrationFetches(map, lock).length, 2);
+  NodeAssert.deepEqual(planMigrationFetches(map, lock)[0].commits, [initial]);
 });
 
 NodeTest.test("malformed, moving, duplicate and incomplete source histories fail", () => {
@@ -107,8 +106,7 @@ NodeTest.test("the CLI validates the entire plan before issuing immutable git fe
     NodeAssert.equal(valid.status, 0, valid.stderr);
     const calls = NodeFS.readFileSync(log, "utf8").trim().split("\n").map((line) => JSON.parse(line));
     NodeAssert.deepEqual(calls, [
-      ["fetch", "--no-tags", "--no-write-fetch-head", "--depth=1", "https://github.com/pingdotgg/t3code.git", initial],
-      ["fetch", "--no-tags", "--no-write-fetch-head", "--depth=1", "https://github.com/pingdotgg/t3code.git", integrated],
+      ["fetch", "--no-tags", "--no-write-fetch-head", "--depth=1", "https://github.com/pingdotgg/t3code.git", initial, integrated],
       ["fetch", "--no-tags", "--no-write-fetch-head", "--depth=1", "origin", recovery],
     ]);
   } finally {

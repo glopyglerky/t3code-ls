@@ -23,7 +23,11 @@ import {
   makeEvent,
 } from "./redb-event-sink-fixtures.mjs";
 import { inspectNativeReplay } from "../apps/web/scripts/hybrid-client-database.ts";
-import { verifyNativeSchemaUpgrade } from "./omdb-schema-upgrade-fixture.mjs";
+import {
+  verifyNativeSchemaUpgrade,
+  verifyNativeSchema88Upgrade,
+  verifyNativeSchema89Upgrade,
+} from "./omdb-schema-upgrade-fixture.mjs";
 
 const [executable, proofPath] = process.argv.slice(2);
 NodeAssert.ok(executable && NodePath.isAbsolute(executable));
@@ -40,8 +44,12 @@ const Config = await import("../apps/server/src/config.ts");
 const Projection = await import("../apps/server/src/orchestration-v2/ProjectionStore.ts");
 const Sink = await import("../apps/server/src/orchestration-v2/EventSink.ts");
 const Search = await import("../apps/server/src/orchestration-v2/ThreadSearch.ts");
+const TaskFolders = await import("../apps/server/src/workspace/TaskFolderStore.ts");
 const Sessions = await import("../apps/server/src/persistence/AuthSessions.ts");
 const decodeCreateAuthSessionInput = Schema.decodeUnknownSync(Sessions.CreateAuthSessionInput);
+const Pairing = await import("../apps/server/src/auth/PairingGrantStore.ts");
+const PairingLinks = await import("../apps/server/src/persistence/AuthPairingLinks.ts");
+const decodeCreatePairingLink = Schema.decodeUnknownSync(PairingLinks.CreateAuthPairingLinkInput);
 const EnvironmentAuth = await import("../apps/server/src/auth/EnvironmentAuth.ts");
 const ServerEnvironment = await import("../apps/server/src/environment/ServerEnvironment.ts");
 const ServerSecretStore = await import("../apps/server/src/auth/ServerSecretStore.ts");
@@ -79,6 +87,7 @@ const graph = Layer.mergeAll(
   Runtime.layerEventSink,
   Selected.projections,
   Selected.projects,
+  Selected.taskFolders,
   Selected.search,
   Selected.authSessions,
   Selected.authPairing,
@@ -108,6 +117,8 @@ try {
     Effect.gen(function* () {
       const config = Context.get(context, Config.ServerConfig);
       NodeAssert.equal(config.dbPath, NodePath.join(fixture.root, "userdata", "statev2.omdb"));
+      const folders = Context.get(context, TaskFolders.TaskFolderStore);
+      NodeAssert.equal(yield* folders.findContaining(fixture.root), null);
       const sink = Context.get(context, Sink.EventSinkV2);
       yield* sink.commitProjectCommand({
         commandId: "production:project",
@@ -201,12 +212,54 @@ try {
           expiresAt: "2099-01-01T00:00:00.000Z",
         }),
       );
+      const grants = yield* Pairing.PairingGrantStore.pipe(
+        Effect.provide(Pairing.layerFromRepository),
+      );
+      for (const separator of ["-", " ", "\t"]) {
+        const code = yield* grants.issueOneTimeToken();
+        const grant = yield* grants.consume(
+          code.credential
+            .match(/.{1,4}/g)
+            .join(separator)
+            .toLowerCase(),
+        );
+        NodeAssert.equal(grant.method, "one-time-token");
+        NodeAssert.equal((yield* Effect.exit(grants.consume(code.credential)))._tag, "Failure");
+      }
+      const links = Context.get(context, PairingLinks.AuthPairingLinkRepository);
+      yield* links.create(
+        decodeCreatePairingLink({
+          id: "production:opaque",
+          credential: "opaque-Ab Cd-ef",
+          method: "one-time-token",
+          scopes: ["orchestration:read"],
+          subject: "owner",
+          label: null,
+          proofKeyThumbprint: null,
+          createdAt: fixedTime,
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        }),
+      );
+      NodeAssert.equal((yield* Effect.exit(grants.consume("opaqueAbCdef")))._tag, "Failure");
+      NodeAssert.equal((yield* grants.consume("opaque-Ab Cd-ef")).subject, "owner");
+      const approval = yield* grants.issueOneTimeToken({ mcpApproval: "auto" });
+      NodeAssert.equal(
+        (yield* Effect.exit(
+          grants.consume(approval.credential.replaceAll("-", " "), {
+            allowedSubject: `${PairingLinks.MCP_APPROVAL_SUBJECT_PREFIX}auto`,
+          }),
+        ))._tag,
+        "Failure",
+      );
+      yield* grants.consume(` \t${approval.credential.toLowerCase()} `, {
+        allowedSubject: `${PairingLinks.MCP_APPROVAL_SUBJECT_PREFIX}auto`,
+      });
       // The full search service reads live projection writes through the selected graph.
       yield* Context.get(context, Search.ThreadSearch).search({ query: "Native" });
     }),
   );
   checks.push(
-    "production-selected event sink, complete projections, search and authentication share native persistence without SqlClient",
+    "production-selected event sink, projections, search, task folders and authentication share native persistence without SqlClient",
   );
   NodeAssert.equal(
     inspectNativeReplay({
@@ -276,7 +329,16 @@ try {
   checks.push(
     "retained SQLite configuration refuses an authoritative omdb home instead of forking state",
   );
+  checks.push(
+    "Selected native pairing accepts grouped issued codes exactly once while preserving opaque credentials and MCP approval formats",
+  );
   checks.push(await verifyNativeSchemaUpgrade(executable));
+  checks.push(await verifyNativeSchema88Upgrade(executable));
+  checks.push(await verifyNativeSchema89Upgrade(executable));
+  checks.push(await verifyNativeSchema89Upgrade(executable, 93));
+  checks.push(await verifyNativeSchema89Upgrade(executable, 94));
+  checks.push(await verifyNativeSchema89Upgrade(executable, 105));
+  checks.push(await verifyNativeSchema89Upgrade(executable, 106));
   await finishProof({
     executable,
     fixture,
@@ -288,6 +350,9 @@ try {
       "apps/server/src/server.ts",
       "apps/server/src/config.ts",
       "apps/server/src/persistence/Omdb.ts",
+      "apps/server/src/persistence/RedbClient.ts",
+      "apps/server/src/workspace/TaskFolderStore.ts",
+      "apps/server/src/workspace/redb_task_folders.rs",
       "apps/server/src/persistence/redb_schema_upgrade.rs",
       "apps/server/src/persistence/redb_import.rs",
       "apps/server/src/persistence/migrateSqliteToOmdb.ts",
@@ -295,6 +360,9 @@ try {
       "apps/server/src/persistence/omdb-schema.json",
       "apps/server/src/persistence/omdb-schema-80.json",
       "apps/server/src/persistence/omdb-schema-88.json",
+      "apps/server/src/persistence/omdb-schema-89.json",
+      "apps/server/src/persistence/omdb-schema-93.json",
+      "apps/server/src/persistence/omdb-schema-94.json",
       "tools/omdb-schema-upgrade-fixture.mjs",
       "apps/server/src/persistence/SelectedPersistence.ts",
       "apps/server/src/persistence/Sqlite.ts",

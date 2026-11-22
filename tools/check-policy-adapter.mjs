@@ -115,6 +115,7 @@ for (const mask of masks) {
       sourceRunStatus: flags & 4 ? "completed" : "failed",
       fromSpecificTurn: Boolean(flags & 8),
       sourceBusy: Boolean(flags & 16),
+      hasNativeTurnBoundary: false,
     });
   }
 }
@@ -138,6 +139,23 @@ for (const strength of ["none", "weak", "strong"]) {
       sourceRunStatus,
       fromSpecificTurn: true,
       sourceBusy: false,
+      hasNativeTurnBoundary: false,
+    });
+  }
+}
+for (const exposesNativeTurnId of [false, true]) {
+  for (const hasNativeTurnBoundary of [false, true]) {
+    const base = input(all);
+    base.capabilities.threads.canForkWhileSourceRunning = true;
+    base.capabilities.turns.exposesNativeTurnId = exposesNativeTurnId;
+    await compare("decideForkExecution", {
+      ...base,
+      sameProvider: true,
+      hasStrongNativeSource: true,
+      sourceRunStatus: "completed",
+      fromSpecificTurn: true,
+      sourceBusy: true,
+      hasNativeTurnBoundary,
     });
   }
 }

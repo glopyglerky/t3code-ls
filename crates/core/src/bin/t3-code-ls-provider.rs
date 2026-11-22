@@ -1,8 +1,9 @@
 #[cfg(unix)]
 mod app {
     use std::io::{self, BufReader, Write};
-    use std::os::unix::process::ExitStatusExt;
+    use std::os::unix::process::{CommandExt, ExitStatusExt};
     use std::path::PathBuf;
+    use std::process::Command;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc::{self, TryRecvError, TrySendError};
@@ -13,7 +14,7 @@ mod app {
         is_blank_frame, read_frame,
     };
 
-    const USAGE: &str = "Usage: t3-code-ls-provider --program PROVIDER --cwd /workspace (--home /isolated/home | --inherit-env) [--inherit-stderr] [--parent-protocol] [--env KEY=VALUE] [--max-frame-bytes N] [--max-pending N] [--queue-size N] [--request-timeout-ms N] -- [provider arguments]\n\nReads and writes Codex app-server JSONL on stdin/stdout. Start Codex with provider argument app-server. By default the program must be absolute and the child receives only the explicit environment and home defaults. --inherit-env preserves the launcher's environment exactly and permits PATH or relative program names; an optional --home overrides HOME only. --inherit-stderr passes the provider's stderr directly to the caller. A request timeout of 0 leaves deadlines to the caller. --parent-protocol delegates pending-request failures and deadlines to the caller, forwards only provider messages, and preserves the provider's exit status.";
+    const USAGE: &str = "Usage: t3-code-ls-provider --program PROVIDER --cwd /workspace (--home /isolated/home | --inherit-env) [--inherit-stderr] [--parent-protocol | --version-probe] [--env KEY=VALUE] [--max-frame-bytes N] [--max-pending N] [--queue-size N] [--request-timeout-ms N] -- [provider arguments]\n\nReads and writes Codex app-server JSONL on stdin/stdout. Start Codex with provider argument app-server. By default the program must be absolute and the child receives only the explicit environment and home defaults. --inherit-env preserves the launcher's environment exactly and permits PATH or relative program names; an optional --home overrides HOME only. --inherit-stderr passes the provider's stderr directly to the caller. A request timeout of 0 leaves deadlines to the caller. --parent-protocol delegates pending-request failures and deadlines to the caller, forwards only provider messages, and preserves the provider's exit status. --version-probe runs only --version through the selected launcher.";
 
     enum Input {
         Frame(String),
@@ -24,6 +25,7 @@ mod app {
     struct Options {
         process: Config,
         parent_protocol: bool,
+        version_probe: bool,
     }
 
     fn exit_code(status: std::process::ExitStatus) -> i32 {
@@ -52,6 +54,7 @@ mod app {
         let mut inherit_environment = false;
         let mut inherit_stderr = false;
         let mut parent_protocol = false;
+        let mut version_probe = false;
         let mut request_timeout = None;
         let mut environment = Vec::new();
         let mut limits = Limits::default();
@@ -65,6 +68,11 @@ mod app {
             }
             if key == "--inherit-stderr" {
                 inherit_stderr = true;
+                index += 1;
+                continue;
+            }
+            if key == "--version-probe" {
+                version_probe = true;
                 index += 1;
                 continue;
             }
@@ -106,6 +114,17 @@ mod app {
         } else {
             Vec::new()
         };
+        if version_probe
+            && (!inherit_environment
+                || parent_protocol
+                || home.is_some()
+                || !environment.is_empty()
+                || !args.is_empty())
+        {
+            return Err(
+                "--version-probe requires --inherit-env and accepts no launch arguments".into(),
+            );
+        }
         if parent_protocol {
             if request_timeout.is_some_and(|timeout| !timeout.is_zero()) {
                 return Err("--parent-protocol cannot use a local request deadline".to_owned());
@@ -127,7 +146,21 @@ mod app {
                 limits,
             },
             parent_protocol,
+            version_probe,
         }))
+    }
+
+    fn exec_version(config: Config) -> Result<i32, String> {
+        // Replace this launcher so the existing caller owns and can reap the probe.
+        let error = Command::new(config.program)
+            .current_dir(config.cwd)
+            .arg("--version")
+            .exec();
+        if error.kind() == io::ErrorKind::NotFound {
+            eprintln!("t3-code-ls-provider: version executable not found");
+            return Ok(127);
+        }
+        Err(format!("could not run provider --version: {error}"))
     }
 
     pub fn run() -> Result<i32, String> {
@@ -135,6 +168,9 @@ mod app {
             return Ok(0);
         };
         let config = options.process;
+        if options.version_probe {
+            return exec_version(config);
+        }
         let parent_protocol = options.parent_protocol;
         let interrupted = Arc::new(AtomicUsize::new(0));
         for signal in [signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM] {

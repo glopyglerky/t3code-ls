@@ -53,12 +53,16 @@ impl ProjectionRecordField {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProjectionRecordFilter {
+    pub provider_turn_ids: Option<Vec<String>>,
+    pub attempt_ids: Option<Vec<String>>,
+    pub subagent_child_thread_ids: Option<Vec<String>>,
     pub provider_thread_ids: Option<Vec<String>>,
     pub provider_turn_attempt_ids: Option<Vec<String>>,
     pub provider_turn_thread_ids: Option<Vec<String>>,
     pub latest_provider_turn_usage_only: Option<bool>,
     pub message_roles: Option<Vec<String>>,
     pub monitor_notifications_only: Option<bool>,
+    pub delegated_task_messages_only: Option<bool>,
     pub message_ids: Option<Vec<String>>,
     pub message_run_ids: Option<Vec<String>>,
     pub turn_item_run_id: Option<String>,
@@ -70,6 +74,8 @@ pub struct ProjectionRecordFilter {
     pub run_ids: Option<Vec<String>>,
     pub run_statuses: Option<Vec<String>>,
     pub include_latest_run: Option<bool>,
+    pub latest_run_limit: Option<i64>,
+    pub include_latest_executed_run: Option<bool>,
     pub runtime_request_statuses: Option<Vec<String>>,
     pub context_transfer_statuses: Option<Vec<String>>,
     pub subagent_ids: Option<Vec<String>>,
@@ -278,7 +284,11 @@ async fn candidates(
     active: &mut BTreeMap<String, bool>,
 ) -> Result<Vec<IndexedRow>> {
     match field {
-        ProjectionRecordField::Runs if filter.include_latest_run != Some(true) => {
+        ProjectionRecordField::Runs
+            if filter.latest_run_limit.is_none()
+                && filter.include_latest_executed_run != Some(true)
+                && filter.include_latest_run != Some(true) =>
+        {
             if filter.run_ids.as_ref().is_some_and(Vec::is_empty)
                 || filter.run_statuses.as_ref().is_some_and(Vec::is_empty)
             {
@@ -310,6 +320,40 @@ async fn candidates(
                 }
             }
             Ok(owned)
+        }
+        ProjectionRecordField::Attempts if filter.attempt_ids.is_some() => {
+            let mut rows = Vec::new();
+            for id in filter
+                .attempt_ids
+                .as_ref()
+                .unwrap()
+                .iter()
+                .collect::<BTreeSet<_>>()
+            {
+                if let Some(row) = compact_row(session, ATTEMPTS, id).await? {
+                    if text(&row.row, "thread_id")? == thread {
+                        rows.push(row);
+                    }
+                }
+            }
+            Ok(rows)
+        }
+        ProjectionRecordField::ProviderTurns if filter.provider_turn_ids.is_some() => {
+            let mut rows = Vec::new();
+            for id in filter
+                .provider_turn_ids
+                .as_ref()
+                .unwrap()
+                .iter()
+                .collect::<BTreeSet<_>>()
+            {
+                if let Some(row) = compact_row(session, TURNS, id).await? {
+                    if text(&row.row, "thread_id")? == thread {
+                        rows.push(row);
+                    }
+                }
+            }
+            Ok(rows)
         }
         ProjectionRecordField::ProviderSessions => {
             let mut rows = Vec::new();
@@ -377,21 +421,62 @@ async fn candidates(
     }
 }
 
+fn forced_runs(rows: &[IndexedRow], filter: &ProjectionRecordFilter) -> Result<BTreeSet<String>> {
+    if let Some(limit) = filter.latest_run_limit {
+        let mut ordered = rows
+            .iter()
+            .map(|row| Ok((integer(&row.row, "ordinal")?, text(&row.row, "run_id")?)))
+            .collect::<Result<Vec<_>>>()?;
+        ordered.sort_unstable_by(|left, right| right.cmp(left));
+        let take = usize::try_from(limit).unwrap_or(usize::MAX);
+        return Ok(ordered.into_iter().take(take).map(|(_, id)| id).collect());
+    }
+    let executed = filter.include_latest_executed_run == Some(true);
+    if filter.run_statuses.is_none() || (!executed && filter.include_latest_run != Some(true)) {
+        return Ok(BTreeSet::new());
+    }
+    let mut latest = None;
+    for row in rows {
+        let status = text(&row.row, "status")?;
+        if (executed && status == "queued")
+            || (status == "cancelled" && payload(&row.row)?["startedAt"].is_null())
+        {
+            continue;
+        }
+        let completed = if executed {
+            nullable(&row.row, "completed_at")?
+        } else {
+            None
+        };
+        let order = (
+            completed.is_none(),
+            completed,
+            integer(&row.row, "ordinal")?,
+            text(&row.row, "run_id")?,
+        );
+        if latest.as_ref().is_none_or(|previous| order > *previous) {
+            latest = Some(order);
+        }
+    }
+    Ok(latest.into_iter().map(|(_, _, _, id)| id).collect())
+}
+
 async fn retain(
     session: &mut Session,
     field: ProjectionRecordField,
     row: &Map<String, Value>,
     filter: &ProjectionRecordFilter,
-    latest_run: Option<&str>,
+    forced_runs: &BTreeSet<String>,
     active: &mut BTreeMap<String, bool>,
 ) -> Result<bool> {
     Ok(match field {
         ProjectionRecordField::Runs => {
             selected(&filter.run_ids, row, "run_id")?
-                && (selected(&filter.run_statuses, row, "status")?
-                    || (filter.include_latest_run == Some(true)
-                        && latest_run == Some(text(row, "run_id")?.as_str())))
+                && (forced_runs.contains(&text(row, "run_id")?)
+                    || ((filter.latest_run_limit.is_none() || filter.run_statuses.is_some())
+                        && selected(&filter.run_statuses, row, "status")?))
         }
+        ProjectionRecordField::Attempts => selected(&filter.attempt_ids, row, "attempt_id")?,
         ProjectionRecordField::Nodes => {
             let settled_leaf = filter.omit_settled_leaf_nodes == Some(true)
                 && ["tool_call", "assistant_message", "reasoning"]
@@ -451,6 +536,7 @@ async fn retain(
                 )
                 && !active_run(session, active, nullable(row, "run_id")?).await?;
             selected(&filter.subagent_ids, row, "subagent_id")?
+                && selected(&filter.subagent_child_thread_ids, row, "child_thread_id")?
                 && selected(&filter.subagent_run_ids, row, "run_id")?
                 && !omit
         }
@@ -458,7 +544,8 @@ async fn retain(
             selected(&filter.provider_thread_ids, row, "provider_thread_id")?
         }
         ProjectionRecordField::ProviderTurns => {
-            selected(&filter.provider_turn_attempt_ids, row, "run_attempt_id")?
+            selected(&filter.provider_turn_ids, row, "provider_turn_id")?
+                && selected(&filter.provider_turn_attempt_ids, row, "run_attempt_id")?
                 && selected(&filter.provider_turn_thread_ids, row, "provider_thread_id")?
                 && (filter.latest_provider_turn_usage_only != Some(true)
                     || payload(row)?["nativeHasTokenUsage"] == true)
@@ -472,6 +559,10 @@ async fn retain(
                 && selected(&filter.message_run_ids, row, "run_id")?
                 && (filter.monitor_notifications_only != Some(true)
                     || payload(row)?["nativeMonitorNotification"] == true)
+                && (filter.delegated_task_messages_only != Some(true)
+                    || (text(row, "role")? == "user"
+                        && payload(row)
+                            .is_ok_and(|message| message["nativeDelegatedTaskMessage"] == true)))
         }
         ProjectionRecordField::TurnItems => {
             let run = nullable(row, "run_id")?;
@@ -729,6 +820,90 @@ pub(crate) fn timestamp(value: &Value, now: i64) -> Option<i64> {
     )
 }
 
+async fn command_turn_items(
+    session: &mut Session,
+    thread: &str,
+    runs: &[IndexedRow],
+    mut read: BTreeSet<String>,
+) -> Result<Vec<IndexedRow>> {
+    let mut items = Vec::new();
+    for item in related(session, ITEMS, "_shell_thread", thread).await? {
+        if text(&item.row, "type")? == "error" && text(&item.row, "status")? == "failed" {
+            items.push(item);
+        }
+    }
+    let mut candidates = Vec::new();
+    for row in runs {
+        let id = text(&row.row, "run_id")?;
+        let run = payload(&row.row)?;
+        if run["freshContext"] == true {
+            read.insert(id.clone());
+        }
+        if !matches!(text(&row.row, "status")?.as_str(), "queued" | "rolled_back") {
+            let completed = nullable(&row.row, "completed_at")?;
+            candidates.push((
+                (
+                    completed.is_none(),
+                    completed,
+                    integer(&row.row, "ordinal")?,
+                ),
+                id,
+                run["userMessageId"].as_str().map(str::to_owned),
+                !run["contextHandoffId"].is_null(),
+            ));
+        }
+    }
+    candidates.sort_by(|left, right| right.0.cmp(&left.0));
+    let mut shown = BTreeSet::new();
+    for id in &read {
+        add_command_prompts(session, thread, id, &mut items, &mut shown).await?;
+    }
+    let mut start: usize = 0;
+    let mut size: usize = 1;
+    while start < candidates.len() {
+        let end = start.saturating_add(size).min(candidates.len());
+        let batch = &candidates[start..end];
+        for (_, id, _, _) in batch {
+            if read.insert(id.clone()) {
+                add_command_prompts(session, thread, id, &mut items, &mut shown).await?;
+            }
+        }
+        if batch.iter().any(|(_, _, prompt, handoff)| {
+            *handoff || prompt.as_ref().is_some_and(|id| shown.contains(id))
+        }) {
+            break;
+        }
+        start = end;
+        size = size.saturating_mul(2);
+    }
+    Ok(items)
+}
+
+async fn add_command_prompts(
+    session: &mut Session,
+    thread: &str,
+    run: &str,
+    items: &mut Vec<IndexedRow>,
+    shown: &mut BTreeSet<String>,
+) -> Result<()> {
+    for item in related(session, ITEMS, "run_id", run).await? {
+        if text(&item.row, "thread_id")? != thread || text(&item.row, "type")? != "user_message" {
+            continue;
+        }
+        let prompt = payload(&item.row)?;
+        if let Some(id) = prompt["messageId"].as_str() {
+            if !(prompt["inputIntent"] == "queued_turn" && text(&item.row, "status")? == "pending")
+                && !id.starts_with("async-answer:")
+                && prompt["nativeCompactionPrompt"] != true
+            {
+                shown.insert(id.to_owned());
+            }
+        }
+        items.push(item);
+    }
+    Ok(())
+}
+
 async fn query(
     session: &mut Session,
     input: ProjectionRecordsQuery,
@@ -772,29 +947,37 @@ async fn query(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| UNIX_EPOCH_JULIAN_MS + elapsed.as_millis() as i64)
         .map_err(|_| Error::IncompatibleStore)?;
+    let narrow_prompts = recent.is_some()
+        && input.fields.contains(&ProjectionRecordField::Runs)
+        && input.fields.contains(&ProjectionRecordField::TurnItems)
+        && filter.run_ids.is_none()
+        && filter.run_statuses.is_none()
+        && filter.latest_run_limit.is_none()
+        && filter.turn_item_run_id.is_none()
+        && filter.turn_item_run_ids.is_none()
+        && filter.turn_item_node_ids.is_none()
+        && filter.turn_item_request_ids.is_none()
+        && filter.turn_item_statuses.is_none();
+    let mut command_items = None;
     for field in input.fields.into_iter().collect::<BTreeSet<_>>() {
-        let rows = candidates(session, field, &input.thread_id, &filter, &mut active).await?;
-        let latest_run =
-            if field == ProjectionRecordField::Runs && filter.include_latest_run == Some(true) {
-                let mut latest: Option<(i64, String)> = None;
-                for row in &rows {
-                    if text(&row.row, "status")? == "cancelled"
-                        && payload(&row.row)?["startedAt"].is_null()
-                    {
-                        continue;
-                    }
-                    let ordinal = integer(&row.row, "ordinal")?;
-                    if latest
-                        .as_ref()
-                        .is_none_or(|(previous, _)| ordinal > *previous)
-                    {
-                        latest = Some((ordinal, text(&row.row, "run_id")?));
-                    }
-                }
-                latest.map(|(_, id)| id)
-            } else {
-                None
-            };
+        let narrowed_items = command_items.take_if(|_| field == ProjectionRecordField::TurnItems);
+        let narrowed = narrowed_items.is_some();
+        let rows = match narrowed_items {
+            Some(items) => items,
+            None => candidates(session, field, &input.thread_id, &filter, &mut active).await?,
+        };
+        if field == ProjectionRecordField::Runs && narrow_prompts {
+            if let Some(recent) = &recent {
+                command_items = Some(
+                    command_turn_items(session, &input.thread_id, &rows, recent.clone()).await?,
+                );
+            }
+        }
+        let forced_runs = if field == ProjectionRecordField::Runs {
+            forced_runs(&rows, &filter)?
+        } else {
+            BTreeSet::new()
+        };
         let mut ordered = Vec::new();
         for row in rows {
             if let Some(recent) = &recent {
@@ -828,15 +1011,8 @@ async fn query(
                     continue;
                 }
             }
-            if retain(
-                session,
-                field,
-                &row.row,
-                &filter,
-                latest_run.as_deref(),
-                &mut active,
-            )
-            .await?
+            if narrowed
+                || retain(session, field, &row.row, &filter, &forced_runs, &mut active).await?
             {
                 let usage = if field == ProjectionRecordField::ProviderTurns
                     && filter.latest_provider_turn_usage_only == Some(true)
@@ -880,7 +1056,13 @@ async fn query(
             if !["user_message", "assistant_message"].contains(&text(&row.row, "type")?.as_str()) {
                 continue;
             }
-            if let Some(id) = payload(&row.row)?["messageId"].as_str() {
+            // Migration 94's ordinal expression index and lookup both exclude
+            // invalid JSON. Selected record decoding retains its normal errors.
+            let raw = text(&row.row, "payload_json")?;
+            let Ok(value) = serde_json::from_str::<Value>(&raw) else {
+                continue;
+            };
+            if let Some(id) = value["messageId"].as_str() {
                 let ordinal = integer(&row.row, "ordinal")?;
                 ordinals
                     .entry(id.into())

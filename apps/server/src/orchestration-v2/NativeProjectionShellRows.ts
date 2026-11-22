@@ -12,6 +12,7 @@ const ShellThreadRow = Schema.Struct({
   thread_id: Schema.String,
   payload_json: Schema.String,
   forked_from_run_source_thread_id: Nullable,
+  worktree_path: Nullable,
   latest_run_id: Nullable,
   latest_run_status: Nullable,
   latest_run_requested_at: Nullable,
@@ -62,7 +63,25 @@ const ActiveShellIndexRow = Schema.Struct({
   pinned_at: Nullable,
   snoozed_until: Nullable,
   may_be_live: Schema.Number,
+  pin_order_key: Nullable,
   has_remote_tasks: Schema.Number,
+});
+
+const ActiveThreadListRow = Schema.Struct({
+  thread_id: Schema.String,
+  project_id: Schema.String,
+  title: Schema.String,
+  updated_at: Schema.String,
+  relationship_to_parent: Nullable,
+  parent_thread_id: Nullable,
+  root_thread_id: Schema.String,
+  side_chat: Schema.NullOr(Schema.Number),
+  delegated_from_environment_id: Nullable,
+  delegated_from_thread_id: Nullable,
+  delegated_from_title: Nullable,
+  settled_override: Nullable,
+  settled_at: Nullable,
+  snoozed_until: Nullable,
 });
 
 const makeRows = Effect.gen(function* () {
@@ -145,10 +164,11 @@ const makeRows = Effect.gen(function* () {
       { kind: "remote_tasks" },
       Schema.Array(Schema.Struct({ thread_id: Schema.String, subagent_id: Schema.String })),
     ),
-    selectThreadsWithPullRequests: (threadId) =>
+    selectThreadsWithPullRequests: (threadId, options) =>
       request(
         {
           kind: "threads_with_pull_requests",
+          include_archived: options?.includeArchived === true,
           ...(threadId === undefined ? {} : { thread_id: threadId }),
         },
         Schema.Array(PayloadRow),
@@ -175,6 +195,11 @@ const makeRows = Effect.gen(function* () {
       { kind: "count_threads" },
       Schema.Array(Schema.Struct({ count: Schema.Number })),
     ),
+    selectActiveThreads: (projectId) =>
+      request(
+        { kind: "active_threads", ...(projectId === undefined ? {} : { project_id: projectId }) },
+        Schema.Array(ActiveThreadListRow),
+      ),
     selectActiveShellIndex: request({ kind: "active_index" }, Schema.Array(ActiveShellIndexRow)),
     findGuestShareThread: (shareId) =>
       request({ kind: "guest_share", share_id: shareId }, Schema.Array(ThreadIdRow)),

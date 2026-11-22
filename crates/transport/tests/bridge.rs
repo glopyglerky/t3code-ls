@@ -266,6 +266,27 @@ async fn concurrent_tcp_connections_remain_isolated() {
 }
 
 #[tokio::test]
+async fn configured_udp_address_and_identity_survive_a_host_restart() {
+    timeout(DEADLINE, async {
+        let backend = TcpListener::bind(loopback()).await.unwrap();
+        let key = SecretKey::generate();
+        let mut config = HostConfig::new(backend.local_addr().unwrap(), Admission::new());
+        let original = Host::bind(key.clone(), Network::Loopback, config.clone())
+            .await
+            .unwrap();
+        let original_address = original.addr();
+        config.udp_bind = original_address.ip_addrs().copied().next();
+        assert!(config.udp_bind.is_some_and(|address| address.port() != 0));
+        original.shutdown().await.unwrap();
+        let restarted = Host::bind(key, Network::Loopback, config).await.unwrap();
+        assert_eq!(restarted.addr(), original_address);
+        restarted.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn public_tcp_bindings_and_zero_limits_are_refused() {
     let target = "0.0.0.0:3773".parse().unwrap();
     assert!(
@@ -293,6 +314,12 @@ async fn public_tcp_bindings_and_zero_limits_are_refused() {
             .await
             .is_err()
     );
+    let mut config = HostConfig::new("127.0.0.1:3773".parse().unwrap(), Admission::new());
+    config.udp_bind = Some("0.0.0.0:0".parse().unwrap());
+    assert!(matches!(
+        Host::bind(SecretKey::generate(), Network::Loopback, config).await,
+        Err(t3_code_ls_transport::BridgeError::Configuration(_))
+    ));
     let remote = SecretKey::generate().public().into();
     assert!(
         Forwarder::bind(

@@ -68,7 +68,7 @@ export const make = Effect.gen(function* () {
             ${row.runtime_mode},${row.interaction_mode},${row.created_by},${row.creation_source},${row.created_at},${row.updated_at},${row.next_run_at},${row.last_run_at},${row.last_run_status},${row.last_run_error},${row.run_count},${row.webhook_token},${row.webhook_secret}
           WHERE ${mutation.require_existing ? 0 : 1} = 1 OR EXISTS (SELECT 1 FROM scheduled_tasks WHERE task_id = ${row.task_id})
           ON CONFLICT (task_id) DO UPDATE SET title=excluded.title,prompt=excluded.prompt,enabled=excluded.enabled,schedule_json=excluded.schedule_json,project_id=excluded.project_id,
-            thread_id=CASE WHEN excluded.thread_mode='new_thread' THEN NULL WHEN excluded.project_id!=scheduled_tasks.project_id THEN excluded.thread_id ELSE COALESCE(excluded.thread_id,scheduled_tasks.thread_id) END,
+            thread_id=CASE WHEN excluded.thread_mode='new_thread' THEN NULL WHEN excluded.project_id!=scheduled_tasks.project_id THEN excluded.thread_id ELSE COALESCE(excluded.thread_id,NULLIF(scheduled_tasks.thread_id,${mutation.unbound_thread_id ?? null})) END,
             thread_mode=excluded.thread_mode,workspace_strategy_json=excluded.workspace_strategy_json,model_selection_json=excluded.model_selection_json,runtime_mode=excluded.runtime_mode,interaction_mode=excluded.interaction_mode,
             creation_source=excluded.creation_source,updated_at=excluded.updated_at,
             next_run_at=CASE WHEN ${mutation.kept_schedule_json === null ? 0 : 1}=1 AND scheduled_tasks.schedule_json IN (excluded.schedule_json,${mutation.kept_schedule_json}) AND scheduled_tasks.enabled=excluded.enabled

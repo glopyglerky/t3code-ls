@@ -43,6 +43,8 @@ pub enum EffectType {
     ProviderSessionDetach,
     #[serde(rename = "provider-session.apply-model-selection")]
     ProviderSessionApplyModelSelection,
+    #[serde(rename = "provider-session.apply-thread-title")]
+    ProviderSessionApplyThreadTitle,
     #[serde(rename = "provider-turn.start")]
     ProviderTurnStart,
     #[serde(rename = "provider-turn.interrupt")]
@@ -77,6 +79,7 @@ impl EffectType {
             Self::ProviderRuntimeContinue => "provider-runtime.continue",
             Self::ProviderSessionDetach => "provider-session.detach",
             Self::ProviderSessionApplyModelSelection => "provider-session.apply-model-selection",
+            Self::ProviderSessionApplyThreadTitle => "provider-session.apply-thread-title",
             Self::ProviderTurnStart => "provider-turn.start",
             Self::ProviderTurnInterrupt => "provider-turn.interrupt",
             Self::ProviderTurnSteer => "provider-turn.steer",
@@ -98,6 +101,7 @@ impl EffectType {
             "provider-runtime.continue" => Self::ProviderRuntimeContinue,
             "provider-session.detach" => Self::ProviderSessionDetach,
             "provider-session.apply-model-selection" => Self::ProviderSessionApplyModelSelection,
+            "provider-session.apply-thread-title" => Self::ProviderSessionApplyThreadTitle,
             "provider-turn.start" => Self::ProviderTurnStart,
             "provider-turn.interrupt" => Self::ProviderTurnInterrupt,
             "provider-turn.steer" => Self::ProviderTurnSteer,
@@ -398,7 +402,9 @@ fn trim_request_id(record: &mut Value, field: &str) -> Result<()> {
 /// Preserve unknown user answer values, but never persist transport extras as request fields.
 pub(crate) fn normalize_request(request: &Value) -> Result<Value> {
     let fields: &[&str] = match request_type(request)? {
-        EffectType::ProviderRuntimeContinue => &["type", "sourceRunId"],
+        EffectType::ProviderRuntimeContinue => {
+            &["type", "sourceRunId", "processLossCount", "cause"]
+        }
         EffectType::ProviderSessionDetach => {
             &["type", "providerSessionId", "detail", "revokeMcpCredential"]
         }
@@ -408,6 +414,7 @@ pub(crate) fn normalize_request(request: &Value) -> Result<Value> {
             "providerThreadId",
             "modelSelection",
         ],
+        EffectType::ProviderSessionApplyThreadTitle => &["type", "title"],
         EffectType::ProviderTurnStart => &["type", "runId"],
         EffectType::ProviderTurnInterrupt => &[
             "type",
@@ -453,7 +460,7 @@ pub(crate) fn normalize_request(request: &Value) -> Result<Value> {
         EffectType::ScheduledTasksCleanup
         | EffectType::TerminalCleanup
         | EffectType::PreviewCleanup => &["type"],
-        EffectType::AttachmentCleanup => &["type", "attachmentIds"],
+        EffectType::AttachmentCleanup => &["type", "attachmentIds", "skipReferenced"],
         EffectType::ThreadTitleGenerate => &["type", "kind"],
         EffectType::DelegatedTasksStop => &["type", "reason"],
     };
@@ -560,7 +567,7 @@ fn validate_request(request: &Value) -> Result<()> {
             return Err(invalid("outbox optional text must be a string"));
         }
     }
-    for key in ["revokeMcpCredential", "restoreFiles"] {
+    for key in ["revokeMcpCredential", "restoreFiles", "skipReferenced"] {
         if object.get(key).is_some_and(|value| !value.is_boolean()) {
             return Err(invalid("outbox optional flag must be a boolean"));
         }
@@ -583,6 +590,27 @@ fn validate_request(request: &Value) -> Result<()> {
         && !object.contains_key("modelSelection")
     {
         return Err(invalid("model selection effect requires modelSelection"));
+    }
+    if kind == EffectType::ProviderSessionApplyThreadTitle
+        && object.get("title").and_then(Value::as_str).is_none()
+    {
+        return Err(invalid("apply thread title requires a title"));
+    }
+    if object
+        .get("cause")
+        .is_some_and(|value| value.as_str() != Some("provider_exit"))
+    {
+        return Err(invalid("invalid restart continuation cause"));
+    }
+    if let Some(value) = object.get("processLossCount") {
+        if value
+            .as_f64()
+            .is_none_or(|value| !value.is_finite() || value < 0.0 || value.fract() != 0.0)
+        {
+            return Err(invalid(
+                "restart continuation loss count must be a nonnegative integer",
+            ));
+        }
     }
     if let Some(value) = object.get("steerFollowUpAfterRunOrdinal") {
         if value.as_u64().is_none_or(|value| value > MAX_COUNTER) {
@@ -1388,6 +1416,39 @@ pub(crate) async fn stage_list_in(
     }
 }
 
+pub(crate) async fn stage_first_steer_in(
+    tx: &mut Transaction,
+    repo: Repository<'_>,
+    thread_id: &str,
+    message_id: &str,
+) -> Result<Option<OutboxEffect>> {
+    crate::validate_id(thread_id)?;
+    crate::validate_id(message_id)?;
+    let mut earliest: Option<OutboxEffect> = None;
+    let mut after = None;
+    loop {
+        // The command index covers every effect, including failed and settled ones.
+        let entries = page(tx, repo, "command/", after.as_ref(), PAGE_SIZE).await?;
+        for entry in &entries {
+            let row = indexed_row(tx, repo, entry, &mut ReadBudget::default()).await?;
+            if row.thread_id == thread_id
+                && row.request["type"] == EffectType::ProviderTurnSteer.as_wire()
+                && row.request["messageId"] == message_id
+                && earliest
+                    .as_ref()
+                    .is_none_or(|current| row.insertion_ordinal < current.insertion_ordinal)
+            {
+                earliest = Some(row);
+            }
+        }
+        if entries.len() < PAGE_SIZE {
+            crate::validate_response_bytes(&earliest)?;
+            return Ok(earliest);
+        }
+        after = entries.last().map(|entry| entry.0.clone());
+    }
+}
+
 pub(crate) async fn stage_next_in(
     tx: &mut Transaction,
     repo: Repository<'_>,
@@ -1540,6 +1601,20 @@ pub(crate) async fn stage_prune_in(
         for entry in &entries {
             let row = indexed_row(tx, repo, entry, &mut budget).await?;
             if policy::prunable(&policy_row(&row)?, &input.before) {
+                if let Repository::Application(catalog) = repo
+                    && let Some(source_run_id) = row.request["sourceRunId"].as_str()
+                    && request_type(&row.request)? == EffectType::ProviderRuntimeContinue
+                    && crate::application_projections::has_run_projection(catalog)
+                    && crate::application_projections::has_live_restart_continuation(
+                        tx,
+                        catalog,
+                        &row.thread_id,
+                        source_run_id,
+                    )
+                    .await?
+                {
+                    continue;
+                }
                 for key in index_keys(repo, &row)? {
                     tx.delete(key).await?;
                 }
@@ -1572,6 +1647,16 @@ impl Store {
     pub async fn outbox_list_by_command(&self, command_id: &str) -> Result<Vec<OutboxEffect>> {
         let mut tx = self.db.begin().await?;
         let result = stage_list_in(&mut tx, Repository::Legacy, command_id).await;
+        finish(tx, result, false).await
+    }
+
+    pub async fn outbox_first_steer(
+        &self,
+        thread_id: &str,
+        message_id: &str,
+    ) -> Result<Option<OutboxEffect>> {
+        let mut tx = self.db.begin_read_only().await?;
+        let result = stage_first_steer_in(&mut tx, Repository::Legacy, thread_id, message_id).await;
         finish(tx, result, false).await
     }
 

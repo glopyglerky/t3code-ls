@@ -3,6 +3,7 @@ import * as NodePath from "node:path";
 
 import { SERVER_EXIT_CODE_STATE_DIR_OWNED } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { selectNativeExecutable } from "@t3tools/shared/nativeExecutable";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Duration from "effect/Duration";
 import * as Deferred from "effect/Deferred";
@@ -27,6 +28,7 @@ import {
   serviceStateActiveVersion,
 } from "./cloud/serviceProtocol.ts";
 import * as ProcessRunner from "./processRunner.ts";
+import * as NativeServerOwnershipLock from "./persistence/NativeServerOwnershipLock.ts";
 import { ServerOwnershipLock } from "./persistence/ServerOwnershipLock.ts";
 import * as SqliteServerOwnershipLock from "./persistence/SqliteServerOwnershipLock.ts";
 import {
@@ -282,6 +284,25 @@ export const acquireServerOwnershipWithLock = Effect.fn("acquireServerOwnership"
   };
 });
 
+/** Probe an existing ownership file before displaying the running-server hint. */
+export const isServerOwnershipHeld = Effect.fn("ServerOwnership.isHeld")(
+  function* (statePath: string) {
+    const stateDir = NodePath.dirname(statePath);
+    const file = NodePath.join(stateDir, "server-owner.sqlite");
+    const environment = yield* HostProcess.Environment;
+    const fs = yield* FileSystem.FileSystem;
+    const executable = yield* Effect.try({
+      try: () => selectNativeExecutable("db", environment.T3_CODE_LS_DB_EXECUTABLE),
+      catch: (cause) => new ServerOwnershipError({ stateDir, cause }),
+    });
+    if (executable !== undefined && (yield* fs.exists(executable))) {
+      return yield* NativeServerOwnershipLock.isHeld(executable, file);
+    }
+    return SqliteServerOwnershipLock.isHeld(file);
+  },
+  Effect.orElseSucceed(() => false),
+);
+
 /** Retained compatibility composition; production selects the native lock layer. */
 export const acquireServerOwnership = (statePath: string) =>
   acquireServerOwnershipWithLock(statePath).pipe(Effect.provide(SqliteServerOwnershipLock.layer));
@@ -292,15 +313,20 @@ export const holdServerOwnershipLockWithLock = Effect.fn("holdServerOwnershipLoc
 ) {
   const stateDir = NodePath.dirname(statePath);
   const locks = yield* ServerOwnershipLock;
-  const lock = yield* locks.acquire(NodePath.join(stateDir, "server-owner.sqlite")).pipe(
-    Effect.mapError((cause) => cause.busy
-      ? new ServerAlreadyRunningError({ stateDir })
-      : new ServerOwnershipError({ stateDir, cause })),
-  );
-  if (lock.replacedDuringAcquire) return yield* new ServerOwnershipError({
-    stateDir,
-    cause: new Error("server ownership lock replaced during acquisition"),
-  });
+  const lock = yield* locks
+    .acquire(NodePath.join(stateDir, "server-owner.sqlite"))
+    .pipe(
+      Effect.mapError((cause) =>
+        cause.busy
+          ? new ServerAlreadyRunningError({ stateDir })
+          : new ServerOwnershipError({ stateDir, cause }),
+      ),
+    );
+  if (lock.replacedDuringAcquire)
+    return yield* new ServerOwnershipError({
+      stateDir,
+      cause: new Error("server ownership lock replaced during acquisition"),
+    });
 });
 
 export const holdServerOwnershipLock = (statePath: string) =>

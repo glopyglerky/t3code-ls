@@ -65,6 +65,10 @@ pub enum PeerOperation {
     Delete {
         environment_id: String,
     },
+    RecordExpiry {
+        environment_id: String,
+        expires_at: String,
+    },
     RecordOutcome {
         environment_id: String,
         error: Option<String>,
@@ -438,6 +442,18 @@ impl ApplicationTransactions {
                     )
                     .await?;
                     Ok(Value::String(row.secret_name))
+                }
+                PeerOperation::RecordExpiry {
+                    environment_id,
+                    expires_at,
+                } => {
+                    if let Some(mut row) = find(&mut session, &environment_id).await?
+                        && row.expires_at < expires_at
+                    {
+                        row.expires_at = expires_at;
+                        replace(&mut session, &row).await?;
+                    }
+                    Ok(json!({"written":true}))
                 }
                 PeerOperation::RecordOutcome {
                     environment_id,

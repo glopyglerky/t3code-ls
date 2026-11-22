@@ -29,6 +29,7 @@ fn input(item: &str, run: Option<&str>, ordinal: Option<i64>) -> PositionAllocat
         run_id: run.map(str::to_owned),
         run_ordinal: ordinal,
         placement: None,
+        keep_existing: None,
     }
 }
 
@@ -99,9 +100,15 @@ async fn positions_reuse_identity_and_resolve_supplied_same_transaction_or_missi
         2
     );
     assert_eq!(
-        app.positions_allocate("seed", input("first", Some("run:one"), Some(9)))
-            .await
-            .unwrap(),
+        app.positions_allocate(
+            "seed",
+            PositionAllocate {
+                keep_existing: Some(true),
+                ..input("first", Some("run:one"), Some(9))
+            }
+        )
+        .await
+        .unwrap(),
         1
     );
     assert_eq!(
@@ -401,9 +408,15 @@ async fn supplied_run_ordinal_rejects_invalid_domain_values_after_existing_item_
     );
     for (scope, invalid_ordinal) in [("negative", -1), ("unsafe", MAX_SAFE_INTEGER + 1)] {
         assert_eq!(
-            app.positions_allocate("outer", input("existing", None, Some(invalid_ordinal)))
-                .await
-                .unwrap(),
+            app.positions_allocate(
+                "outer",
+                PositionAllocate {
+                    keep_existing: Some(true),
+                    ..input("existing", None, Some(invalid_ordinal))
+                }
+            )
+            .await
+            .unwrap(),
             1
         );
         app.savepoint("outer", scope).await.unwrap();
@@ -473,6 +486,7 @@ async fn run_start_uses_reserved_slot_once_and_rollback_leaves_no_position_gap()
             "write",
             PositionAllocate {
                 placement: Some(PositionPlacement::Append),
+                keep_existing: Some(true),
                 ..input("first", None, Some(9))
             }
         )
@@ -509,4 +523,60 @@ async fn run_start_uses_reserved_slot_once_and_rollback_leaves_no_position_gap()
         0
     );
     app.rollback("check").await.unwrap();
+}
+
+#[tokio::test]
+async fn reassigned_steers_move_ranges_and_repair_old_maximum_without_replaying_pending_items() {
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    let mut app = initialize(&store).await;
+    prepare(&store).await;
+    app.begin("move").await.unwrap();
+    assert_eq!(
+        app.positions_allocate("move", input("steer", None, Some(1)))
+            .await
+            .unwrap(),
+        1_000_001
+    );
+    app.savepoint("move", "before-move").await.unwrap();
+    assert_eq!(
+        app.positions_allocate("move", input("steer", None, Some(2)))
+            .await
+            .unwrap(),
+        2_000_001
+    );
+    // The previous maximum no longer points at a row which moved to another bucket.
+    assert_eq!(
+        app.positions_allocate("move", input("reuse-old-range", None, Some(1)))
+            .await
+            .unwrap(),
+        1_000_001
+    );
+    assert_eq!(
+        app.positions_allocate(
+            "move",
+            PositionAllocate {
+                keep_existing: Some(true),
+                ..input("steer", None, Some(3))
+            }
+        )
+        .await
+        .unwrap(),
+        2_000_001
+    );
+    app.rollback_to("move", "before-move").await.unwrap();
+    assert_eq!(
+        app.positions_allocate("move", input("steer", None, Some(1)))
+            .await
+            .unwrap(),
+        1_000_001
+    );
+    assert_eq!(
+        app.positions_allocate("move", input("new-range", None, Some(2)))
+            .await
+            .unwrap(),
+        2_000_001
+    );
+    app.release("move", "before-move").await.unwrap();
+    app.commit("move").await.unwrap();
 }

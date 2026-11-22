@@ -58,6 +58,15 @@ export const make = Effect.gen(function* () {
         )
         .pipe(Effect.mapError(toPeerLinkRowsError("remove"))),
     ),
+    recordExpiry: Effect.fn("PeerLinkRows.recordExpiry")((environment_id, expires_at) =>
+      client
+        .request(
+          "application_peers_write",
+          { request: { kind: "record_expiry", environment_id, expires_at } },
+          Written,
+        )
+        .pipe(Effect.asVoid, Effect.mapError(toPeerLinkRowsError("recordExpiry"))),
+    ),
     recordOutcome: Effect.fn("PeerLinkRows.recordOutcome")((environment_id, error, reached_at) =>
       client
         .request(

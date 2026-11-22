@@ -5,6 +5,8 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import {
   AuxiliaryPersistenceReads,
+  ScheduledThreadRow,
+  DeletedCheckpointTargetRow,
   toAuxiliaryReadError,
   type ProviderHistoryRow,
   type LegacyProjectSettingsRow,
@@ -17,6 +19,40 @@ import {
 export const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   return AuxiliaryPersistenceReads.of({
+    enabledScheduledThreadIds: sql<typeof ScheduledThreadRow.Type>`
+        SELECT thread_id AS "threadId" FROM scheduled_tasks
+        WHERE enabled = 1 AND thread_id IS NOT NULL
+      `.pipe(
+      NodeSqliteClient.readOnly,
+      Effect.mapError(toAuxiliaryReadError("enabledScheduledThreadIds")),
+    ),
+    deletedCheckpointTargets: sql<typeof DeletedCheckpointTargetRow.Type>`
+      WITH RECURSIVE retained_checkpoint_threads(thread_id) AS (
+        SELECT thread_id FROM orchestration_v2_projection_threads WHERE deleted_at IS NULL
+        UNION
+        SELECT json_extract(t.payload_json, '$.forkedFrom.threadId')
+        FROM orchestration_v2_projection_threads t
+        JOIN retained_checkpoint_threads retained ON retained.thread_id = t.thread_id
+        WHERE json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
+      )
+      SELECT t.thread_id AS "threadId",
+        json_extract(t.payload_json, '$.worktreePath') AS "worktreePath",
+        p.workspace_root AS "workspaceRoot", s.scope_id AS "scopeId",
+        json_extract(s.payload_json, '$.cwd') AS cwd
+      FROM orchestration_v2_projection_threads t
+      LEFT JOIN projection_projects p ON p.project_id = t.project_id
+      LEFT JOIN orchestration_v2_projection_checkpoint_scopes s ON s.thread_id = t.thread_id
+      WHERE t.deleted_at IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM retained_checkpoint_threads WHERE thread_id = t.thread_id)
+        AND NOT EXISTS (
+          SELECT 1 FROM orchestration_v2_effect_outbox e
+          WHERE e.thread_id = t.thread_id AND e.status IN ('pending', 'running')
+        )
+    `.pipe(
+      NodeSqliteClient.readOnly,
+      Effect.mapError(toAuxiliaryReadError("deletedCheckpointTargets")),
+    ),
+
     hasActiveRun: sql<{ readonly active: number }>`
       SELECT EXISTS (
         SELECT 1 FROM orchestration_v2_projection_runs

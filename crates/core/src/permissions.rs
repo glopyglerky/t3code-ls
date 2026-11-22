@@ -20,9 +20,10 @@ pub enum Permission {
     AccessWrite,
     RelayRead,
     RelayWrite,
+    RelayConfigure,
 }
 
-pub const ALL_PERMISSIONS: [Permission; 17] = [
+pub const ALL_PERMISSIONS: [Permission; 18] = [
     Permission::OrchestrationRead,
     Permission::OrchestrationOperate,
     Permission::SettingsWrite,
@@ -40,6 +41,7 @@ pub const ALL_PERMISSIONS: [Permission; 17] = [
     Permission::AccessWrite,
     Permission::RelayRead,
     Permission::RelayWrite,
+    Permission::RelayConfigure,
 ];
 
 impl Permission {
@@ -62,6 +64,7 @@ impl Permission {
             Self::AccessWrite => "access:write",
             Self::RelayRead => "relay:read",
             Self::RelayWrite => "relay:write",
+            Self::RelayConfigure => "relay:configure",
         }
     }
 
@@ -181,7 +184,12 @@ pub fn legacy_scope_response(permissions: &[Permission]) -> Vec<Permission> {
 }
 
 pub fn required_legacy_scope(permission: Permission) -> Permission {
-    permission.legacy_parent().unwrap_or(permission)
+    if permission == Permission::RelayConfigure {
+        // The old wire field describes the denial. It does not grant access.
+        Permission::RelayWrite
+    } else {
+        permission.legacy_parent().unwrap_or(permission)
+    }
 }
 
 #[cfg(test)]
@@ -206,6 +214,26 @@ mod tests {
         assert!(session.grants(Permission::OrchestrationOperate));
         session.authenticated = false;
         assert!(!session.grants(Permission::OrchestrationOperate));
+    }
+
+    #[test]
+    fn relay_configuration_requires_its_own_grant() {
+        let relay = Permission::RelayConfigure;
+        let mut session = ClientSession {
+            authenticated: true,
+            scopes: vec![Permission::RelayWrite],
+            ..Default::default()
+        };
+        assert_eq!(required_legacy_scope(relay), Permission::RelayWrite);
+        assert!(!session.grants(relay));
+        assert!(!server_grants_permission(
+            true,
+            &[Permission::RelayWrite],
+            relay
+        ));
+        session.permissions = Some(vec![relay]);
+        assert!(session.grants(relay));
+        assert!(server_grants_permission(true, &[relay], relay));
     }
 
     #[test]

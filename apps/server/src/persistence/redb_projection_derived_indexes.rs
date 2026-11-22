@@ -2,21 +2,34 @@
 
 use super::*;
 
-pub(super) const COLUMNS: [&str; 9] = [
+pub(super) const COLUMNS: [&str; 15] = [
     "codex_native_turn",
     "pull_request_number",
+    "issue_key",
+    "_hidden_run_thread",
+    "_shell_thread",
+    "_deferred_slash_thread",
+    "_shell_pending",
     "_deleted",
     "_non_stopped",
     "_unreadable_payload",
     "_invalid_pr_links",
     "_recovery",
     "_worktree_path",
+    "_worktree_path_key",
     "_root_thread",
 ];
 
 /// SQLite json_extract returns SQL scalars, with booleans represented as
 /// integers and compound values represented by their compact JSON text. Keep
 /// the first duplicate member and compound key order, as SQLite does.
+pub(crate) fn worktree_key(path: &str) -> String {
+    path.trim_matches(' ')
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_ascii_lowercase()
+}
+
 pub(crate) fn json_identity(source: &str, path: &[&str]) -> Result<Option<Value>> {
     let mut encoded = source.to_owned();
     for segment in path {
@@ -90,7 +103,27 @@ pub(crate) fn sqlite_integer(value: &Value) -> Option<i64> {
 pub(super) fn values(name: &str, row: &Map<String, Value>) -> Result<Vec<(&'static str, Value)>> {
     let mut result = Vec::new();
     let payload = if row.contains_key("payload_json") {
-        match serde_json::from_str::<Value>(&text(row, "payload_json")?) {
+        let raw = text(row, "payload_json")?;
+        let decoded = serde_json::from_str::<Value>(&raw);
+        if name == MESSAGES && text(row, "role")? == "user" {
+            // Keep malformed messages visible to the turn-start read. For
+            // valid JSON, match SQLite's broad first-member slash prefix.
+            let candidates = decoded.is_err()
+                || json_identity(&raw, &["text"])?.is_some_and(|cell| {
+                    cell["type"] == "text"
+                        && cell["value"].as_str().is_some_and(|text| {
+                            text.trim_start_matches(super::window::whitespace)
+                                .starts_with('/')
+                        })
+                });
+            if candidates {
+                result.push((
+                    "_deferred_slash_thread",
+                    text_cell(&text(row, "thread_id")?),
+                ));
+            }
+        }
+        match decoded {
             Ok(value) if value.is_object() => Some(value),
             _ => {
                 result.push(("_unreadable_payload", int_cell(1)));
@@ -112,6 +145,38 @@ pub(super) fn values(name: &str, row: &Map<String, Value>) -> Result<Vec<(&'stat
         Some("preparing" | "starting" | "running" | "waiting")
     );
     let live_item = matches!(status, Some("pending" | "running" | "waiting"));
+    let shell_row = match name {
+        ITEMS => {
+            let kind = text(row, "type")?;
+            let pending = matches!(
+                kind.as_str(),
+                "command_execution" | "dynamic_tool" | "subagent"
+            ) && status.is_some_and(|status| {
+                !matches!(status, "completed" | "interrupted" | "failed" | "cancelled")
+            });
+            if pending {
+                result.push(("_shell_pending", int_cell(1)));
+            }
+            pending
+                || kind == "run_interrupt_request"
+                || (matches!(kind.as_str(), "error" | "compaction") && status == Some("failed"))
+                || (matches!(kind.as_str(), "link_request" | "secret_request")
+                    && status == Some("waiting"))
+        }
+        MESSAGES => text(row, "role")? == "user",
+        REQUESTS => status == Some("pending"),
+        PLANS => status == Some("active") && text(row, "kind")? == "proposed_plan",
+        PROVIDER_THREADS => p["pendingBackgroundTasks"]
+            .as_array()
+            .is_some_and(|tasks| !tasks.is_empty()),
+        _ => false,
+    };
+    if shell_row {
+        if let Some(thread) = nullable(row, "thread_id")? {
+            result.push(("_shell_thread", text_cell(&thread)));
+        }
+    }
+
     let mut flags = Vec::new();
     match name {
         THREADS => {
@@ -125,6 +190,10 @@ pub(super) fn values(name: &str, row: &Map<String, Value>) -> Result<Vec<(&'stat
                     ("_root_thread", &["lineage", "rootThreadId"][..]),
                 ] {
                     if let Some(value) = json_identity(&raw, path)? {
+                        if column == "_worktree_path" {
+                            let path = value["value"].as_str().ok_or(Error::IncompatibleStore)?;
+                            result.push(("_worktree_path_key", text_cell(&worktree_key(path))));
+                        }
                         result.push((column, value));
                     }
                 }
@@ -144,6 +213,13 @@ pub(super) fn values(name: &str, row: &Map<String, Value>) -> Result<Vec<(&'stat
                         .into_iter()
                         .map(|number| ("pull_request_number", int_cell(number))),
                 );
+                if let Some(issues) = p["issues"].as_array() {
+                    let keys = issues
+                        .iter()
+                        .filter_map(|link| link.get("key").and_then(Value::as_str))
+                        .collect::<std::collections::BTreeSet<_>>();
+                    result.extend(keys.into_iter().map(|key| ("issue_key", text_cell(key))));
+                }
                 if p["lineage"]["relationshipToParent"] == "subagent"
                     && !p["lineage"]["parentThreadId"].is_null()
                     && p["forkedFrom"]["type"] == "node"
@@ -165,6 +241,9 @@ pub(super) fn values(name: &str, row: &Map<String, Value>) -> Result<Vec<(&'stat
             }
         }
         RUNS => {
+            if matches!(status, Some("rolled_back" | "queued" | "cancelled")) {
+                result.push(("_hidden_run_thread", text_cell(&text(row, "thread_id")?)));
+            }
             if status == Some("queued") {
                 flags.push("queued_run");
             }
@@ -223,6 +302,15 @@ pub(super) fn values(name: &str, row: &Map<String, Value>) -> Result<Vec<(&'stat
         }
         ITEMS => {
             let kind = text(row, "type")?;
+            if kind == "user_message"
+                && status == Some("pending")
+                && matches!(
+                    p["inputIntent"].as_str(),
+                    Some("steer" | "promoted_queued_to_steer")
+                )
+            {
+                flags.push("unread_steer");
+            }
             if live_item
                 && matches!(
                     kind.as_str(),

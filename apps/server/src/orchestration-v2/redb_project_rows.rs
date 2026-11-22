@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value, json};
+use t3_code_ls_core::{json as core_json, project_persistence_wire};
 
 use crate::application::{
     ApplicationCatalog, ApplicationTransactions, Session, decode_catalog, decode_row, row_prefix,
@@ -18,7 +19,7 @@ use crate::backend::Transaction;
 use crate::{Error, Result, Store, request_digest, store_key};
 
 const PROJECTS: &str = "projection_projects";
-const COLUMNS: [&str; 15] = [
+const COLUMNS: [&str; 16] = [
     "project_id",
     "title",
     "has_custom_title",
@@ -29,6 +30,7 @@ const COLUMNS: [&str; 15] = [
     "favicon_path",
     "project_icon_json",
     "scripts_json",
+    "tracked_folders_json",
     "pinned_at",
     "archived_at",
     "created_at",
@@ -52,6 +54,7 @@ pub struct ProjectRecord {
     pub favicon_path: Option<String>,
     pub project_icon: Option<String>,
     pub scripts: String,
+    pub tracked_folders: String,
     pub pinned_at: Option<String>,
     pub archived_at: Option<String>,
     pub created_at: String,
@@ -66,6 +69,49 @@ pub struct ProjectSelection {
     pub project_ids: Option<Vec<String>>,
     pub workspace_root: Option<String>,
     pub include_deleted: bool,
+}
+
+/// Domain rejection is a successful request, so a caught row-codec/reducer
+/// failure retains the caller's transaction just as the TypeScript reducer did.
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum ProjectEventReduction {
+    Reduced { row: Value },
+    InvalidEvent,
+}
+
+fn reduce_event(existing_json: Option<&str>, event_json: &str) -> Result<ProjectEventReduction> {
+    let bytes = existing_json
+        .unwrap_or("")
+        .len()
+        .checked_add(event_json.len());
+    if bytes.is_none_or(|bytes| bytes > crate::MAX_BATCH_BYTES) {
+        return Ok(ProjectEventReduction::InvalidEvent);
+    }
+    let parse = |source: &str| {
+        core_json::parse_with_limits(
+            source,
+            core_json::Limits {
+                max_bytes: crate::MAX_BATCH_BYTES,
+                max_depth: 64,
+                max_values: 262_144,
+            },
+        )
+    };
+    let existing = match existing_json.map(parse).transpose() {
+        Ok(value) => value.unwrap_or(core_json::Value::Null),
+        Err(_) => return Ok(ProjectEventReduction::InvalidEvent),
+    };
+    let event = match parse(event_json) {
+        Ok(value) => value,
+        Err(_) => return Ok(ProjectEventReduction::InvalidEvent),
+    };
+    let row = match project_persistence_wire::reduce_project_event(&existing, &event) {
+        Ok(row) => row,
+        Err(_) => return Ok(ProjectEventReduction::InvalidEvent),
+    };
+    let row = serde_json::from_str(&core_json::stringify(&row)).map_err(crate::json_error)?;
+    Ok(ProjectEventReduction::Reduced { row })
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
@@ -136,6 +182,7 @@ impl ProjectRecord {
             favicon_path: nullable(row, "favicon_path")?,
             project_icon: nullable(row, "project_icon_json")?,
             scripts: text(row, "scripts_json")?,
+            tracked_folders: text(row, "tracked_folders_json")?,
             pinned_at: nullable(row, "pinned_at")?,
             archived_at: nullable(row, "archived_at")?,
             created_at: text(row, "created_at")?,
@@ -170,6 +217,10 @@ impl ProjectRecord {
                 nullable_cell(self.project_icon.as_deref()),
             ),
             ("scripts_json".into(), text_cell(&self.scripts)),
+            (
+                "tracked_folders_json".into(),
+                text_cell(&self.tracked_folders),
+            ),
             ("pinned_at".into(), nullable_cell(self.pinned_at.as_deref())),
             (
                 "archived_at".into(),
@@ -402,6 +453,19 @@ impl Store {
 }
 
 impl ApplicationTransactions {
+    /// Pure field reduction uses the active session but never reads or writes rows.
+    /// The application still owns its shared row codecs and sticky-title upsert.
+    pub async fn projects_reduce_event(
+        &mut self,
+        id: &str,
+        existing_json: Option<&str>,
+        event_json: &str,
+    ) -> Result<ProjectEventReduction> {
+        let session = self.take(id)?;
+        let result = reduce_event(existing_json, event_json);
+        self.finish(id, session, result).await
+    }
+
     pub async fn projects_upsert(&mut self, id: &str, mut record: ProjectRecord) -> Result<()> {
         let mut session = self.take(id)?;
         let result = async {

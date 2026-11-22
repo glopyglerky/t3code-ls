@@ -479,7 +479,6 @@ try {
     sourcePaths: [
       "apps/server/src/orchestration-v2/ProjectionStore.ts",
       "apps/server/src/orchestration-v2/ProjectionControlRows.ts",
-      "apps/server/src/orchestration-v2/SqliteProjectionControlRows.ts",
       "apps/server/src/orchestration-v2/NativeProjectionControlRows.ts",
       "apps/server/src/persistence/redb_projection_control.rs",
       "apps/server/src/persistence/redb_projection_read_index.rs",

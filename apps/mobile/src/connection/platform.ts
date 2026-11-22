@@ -1,8 +1,4 @@
-import {
-  ClientCapabilities,
-  PlatformConnectionSource,
-  Persistence,
-} from "@t3tools/client-runtime/platform";
+import { ClientCapabilities, PlatformConnectionSource } from "@t3tools/client-runtime/platform";
 import {
   ConnectionBlockedError,
   ConnectionTransientError,
@@ -11,6 +7,8 @@ import {
 } from "@t3tools/client-runtime/connection";
 import { managedRelayAccountChanges, managedRelaySessionAtom } from "@t3tools/client-runtime/relay";
 import * as Clock from "effect/Clock";
+import { msg } from "gt-react-native";
+import { m } from "../i18n/messages";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -18,17 +16,16 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import Constants from "expo-constants";
+import { requireOptionalNativeModule } from "expo";
 import * as Network from "expo-network";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 
 import { authClientMetadata } from "../lib/authClientMetadata";
 import * as Runtime from "../lib/runtime";
 import * as MobileStorage from "../persistence/mobile-storage";
 import { appAtomRegistry } from "../state/atom-registry";
-import { clearThreadOutboxEnvironment } from "../state/thread-outbox-removal";
-import { clearComposerDraftsEnvironment } from "../state/use-composer-drafts";
-import { clearThreadComposerErrorsForEnvironment } from "../state/thread-composer-error";
 import { mobileApplicationActiveWakeup } from "./app-state-wakeups";
+import * as EnvironmentOwnedDataCleanup from "./environment-owned-data-cleanup";
 import * as ConnectionStorage from "./storage";
 
 function networkStatus(state: Network.NetworkState): "unknown" | "offline" | "online" {
@@ -150,6 +147,29 @@ const layerWakeups = Wakeups.layer({
   ),
 });
 
+interface NativeIrohModule {
+  readonly deviceEndpointId: () => Promise<string>;
+  readonly open: (
+    endpoint: string,
+    addresses: ReadonlyArray<string>,
+    relay: string | null,
+  ) => Promise<{
+    readonly handle: string;
+    readonly port: string;
+  }>;
+  readonly close: (handle: string) => Promise<void>;
+}
+
+const nativeIroh =
+  Platform.OS === "ios" && typeof requireOptionalNativeModule === "function"
+    ? requireOptionalNativeModule<NativeIrohModule>("T3Iroh")
+    : null;
+
+export const readIrohDeviceId =
+  nativeIroh !== null && typeof nativeIroh.deviceEndpointId === "function"
+    ? () => nativeIroh.deviceEndpointId()
+    : undefined;
+
 const layerCapabilities = Layer.effectContext(
   Effect.gen(function* () {
     const storage = yield* MobileStorage.MobileStorage;
@@ -164,7 +184,9 @@ const layerCapabilities = Layer.effectContext(
           if (session === null) {
             return yield* new ConnectionBlockedError({
               reason: "authentication",
-              detail: "Sign in to T3 Connect to connect this environment.",
+              detail: m(
+                msg("Sign in to {product} to connect this environment.", { product: "T3 Connect" }),
+              ),
             });
           }
           const token = yield* session.readClerkToken().pipe(
@@ -179,7 +201,7 @@ const layerCapabilities = Layer.effectContext(
           if (token === null) {
             return yield* new ConnectionBlockedError({
               reason: "authentication",
-              detail: "The T3 Connect session is unavailable.",
+              detail: m(msg("The {product} session is unavailable.", { product: "T3 Connect" })),
             });
           }
           return token;
@@ -204,13 +226,46 @@ const layerCapabilities = Layer.effectContext(
               (cause) =>
                 new ConnectionTransientError({
                   reason: "remote-unavailable",
-                  detail: `Could not load the mobile device identity: ${String(cause)}`,
+                  detail: m(
+                    msg("Could not load the mobile device identity: {cause}", {
+                      cause: String(cause),
+                    }),
+                  ),
                 }),
             ),
             Effect.asSome,
           ),
         }),
       ),
+      Context.add(ClientCapabilities.IrohTransport, {
+        available: nativeIroh !== null,
+        open: (peer) => {
+          const module = nativeIroh;
+          const unavailable = () =>
+            new ConnectionTransientError({
+              reason: "remote-unavailable",
+              detail: m(msg("The Iroh tunnel is unavailable on this device.")),
+            });
+          if (module === null) return Effect.fail(unavailable());
+          return Effect.acquireRelease(
+            Effect.tryPromise({
+              try: () => module.open(peer.endpointId, peer.addresses, peer.relay),
+              catch: unavailable,
+            }),
+            (lease) => Effect.promise(() => module.close(lease.handle).catch(() => undefined)),
+          ).pipe(
+            Effect.flatMap((lease) => {
+              const port = Number(lease.port);
+              return Number.isInteger(port) && port > 0 && port <= 65535
+                ? Effect.succeed({
+                    httpBaseUrl: `http://127.0.0.1:${port}`,
+                    wsBaseUrl: `ws://127.0.0.1:${port}`,
+                  })
+                : Effect.fail(unavailable());
+            }),
+          );
+        },
+      }),
       Context.add(
         ClientCapabilities.ClientPresentation,
         ClientCapabilities.ClientPresentation.of({
@@ -224,7 +279,11 @@ const layerCapabilities = Layer.effectContext(
             Effect.fail(
               new ConnectionBlockedError({
                 reason: "unsupported",
-                detail: "SSH environments are only available in the desktop app.",
+                detail: m(
+                  msg("{feature} environments are only available in the desktop app.", {
+                    feature: "SSH",
+                  }),
+                ),
               }),
             ),
           ),
@@ -232,7 +291,11 @@ const layerCapabilities = Layer.effectContext(
             Effect.fail(
               new ConnectionBlockedError({
                 reason: "unsupported",
-                detail: "SSH environments are only available in the desktop app.",
+                detail: m(
+                  msg("{feature} environments are only available in the desktop app.", {
+                    feature: "SSH",
+                  }),
+                ),
               }),
             ),
           ),
@@ -255,22 +318,6 @@ const layerPlatformConnectionSource = Layer.succeed(
 const layerProvidedConnectionStorage = ConnectionStorage.layer.pipe(Layer.provide(Runtime.layer));
 const layerProvidedCapabilities = layerCapabilities.pipe(Layer.provide(Runtime.layer));
 
-const layerEnvironmentOwnedDataCleanup = Layer.succeed(
-  Persistence.EnvironmentOwnedDataCleanup,
-  Persistence.EnvironmentOwnedDataCleanup.of({
-    clear: Effect.fn("Persistence.EnvironmentOwnedDataCleanup.clear")((environmentId) =>
-      Effect.all(
-        [
-          Effect.promise(() => clearThreadOutboxEnvironment(environmentId)),
-          Effect.promise(() => clearComposerDraftsEnvironment(environmentId)),
-          Effect.sync(() => clearThreadComposerErrorsForEnvironment(environmentId)),
-        ],
-        { concurrency: "unbounded", discard: true },
-      ),
-    ),
-  }),
-);
-
 type ConnectionPlatformLayerSource =
   | typeof layerProvidedConnectionStorage
   | typeof Runtime.layer
@@ -278,7 +325,7 @@ type ConnectionPlatformLayerSource =
   | typeof layerWakeups
   | typeof layerProvidedCapabilities
   | typeof layerPlatformConnectionSource
-  | typeof layerEnvironmentOwnedDataCleanup;
+  | typeof EnvironmentOwnedDataCleanup.layer;
 
 export const layer: Layer.Layer<
   Layer.Success<ConnectionPlatformLayerSource>,
@@ -291,5 +338,5 @@ export const layer: Layer.Layer<
   layerWakeups,
   layerProvidedCapabilities,
   layerPlatformConnectionSource,
-  layerEnvironmentOwnedDataCleanup,
+  EnvironmentOwnedDataCleanup.layer,
 );

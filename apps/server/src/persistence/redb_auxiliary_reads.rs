@@ -12,7 +12,7 @@ use crate::application::{
 };
 use crate::application_projections::read_index;
 use crate::application_projects::ProjectSelection;
-use crate::application_rows::{int_cell, nullable, read_row, text, text_cell};
+use crate::application_rows::{int_cell, integer, nullable, read_row, text, text_cell};
 use crate::backend::Transaction;
 use crate::outbox::OutboxEffect;
 use crate::{Error, Result, Store, request_digest, store_key};
@@ -36,6 +36,8 @@ pub enum AuxiliaryRead {
     DeletedThreadWorktrees,
     PendingThreadCleanup { thread_id: String },
     NonStoppedProviderSessions,
+    EnabledScheduledThreadIds,
+    DeletedCheckpointTargets,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -404,6 +406,115 @@ impl Store {
     }
 }
 
+async fn enabled_scheduled_threads(session: &mut Session) -> Result<Value> {
+    let name = "scheduled_tasks";
+    let prefix = row_prefix(&session.catalog.generation, name)?;
+    let end = prefix_end(&prefix);
+    let mut cursor = prefix;
+    let mut result = Vec::new();
+    loop {
+        let page = session.transaction.scan(&cursor, &end, PAGE_ROWS).await?;
+        let count = page.len();
+        for (key, bytes) in page {
+            let row = decode_row(
+                &session.catalog,
+                table(&session.catalog, name)?,
+                &key,
+                &bytes,
+            )?;
+            if integer(&row.row, "enabled")? == 1 {
+                if let Some(thread_id) = nullable(&row.row, "thread_id")? {
+                    result.push(json!({"threadId":thread_id}));
+                }
+            }
+            cursor = key;
+            cursor.push(0);
+        }
+        if count < PAGE_ROWS {
+            break;
+        }
+    }
+    Ok(Value::Array(result))
+}
+
+async fn deleted_checkpoint_targets(session: &mut Session) -> Result<Value> {
+    let mut retained = BTreeSet::new();
+    let threads = read_index::all_rows(session, THREADS).await?;
+    let mut sources = std::collections::BTreeMap::new();
+    for row in &threads {
+        let id = text(&row.row, "thread_id")?;
+        if nullable(&row.row, "deleted_at")?.is_none() {
+            retained.insert(id.clone());
+        }
+        let payload: Value = serde_json::from_str(&text(&row.row, "payload_json")?)
+            .map_err(|_| Error::IncompatibleStore)?;
+        if payload.pointer("/forkedFrom/type").and_then(Value::as_str) == Some("run") {
+            if let Some(source) = payload
+                .pointer("/forkedFrom/threadId")
+                .and_then(Value::as_str)
+            {
+                sources.insert(id, source.to_owned());
+            }
+        }
+    }
+    let mut pending: Vec<_> = retained.iter().cloned().collect();
+    while let Some(id) = pending.pop() {
+        if let Some(source) = sources.get(&id) {
+            if retained.insert(source.clone()) {
+                pending.push(source.clone());
+            }
+        }
+    }
+    let active: BTreeSet<_> = active_outbox_threads(session).await?.into_iter().collect();
+    let mut result = Vec::new();
+    for row in threads {
+        let id = text(&row.row, "thread_id")?;
+        if nullable(&row.row, "deleted_at")?.is_none()
+            || retained.contains(&id)
+            || active.contains(&id)
+        {
+            continue;
+        }
+        let payload: Value = serde_json::from_str(&text(&row.row, "payload_json")?)
+            .map_err(|_| Error::IncompatibleStore)?;
+        let project = read_row(
+            &mut session.transaction,
+            &session.catalog,
+            PROJECTS,
+            &[text_cell(&text(&row.row, "project_id")?)],
+        )
+        .await?;
+        let workspace = project
+            .as_ref()
+            .map(|p| text(&p.row, "workspace_root"))
+            .transpose()?;
+        let scopes = read_index::equal_rows(
+            session,
+            "orchestration_v2_projection_checkpoint_scopes",
+            "thread_id",
+            &text_cell(&id),
+        )
+        .await?;
+        if scopes.is_empty() {
+            result.push(
+                json!({"threadId":id,"worktreePath":payload.get("worktreePath"),
+                "workspaceRoot":workspace,"scopeId":null,"cwd":null}),
+            );
+        } else {
+            for scope in scopes {
+                let scope_payload: Value = serde_json::from_str(&text(&scope.row, "payload_json")?)
+                    .map_err(|_| Error::IncompatibleStore)?;
+                result.push(
+                    json!({"threadId":id,"worktreePath":payload.get("worktreePath"),
+                    "workspaceRoot":workspace,"scopeId":text(&scope.row,"scope_id")?,
+                    "cwd":scope_payload.get("cwd")}),
+                );
+            }
+        }
+    }
+    Ok(Value::Array(result))
+}
+
 impl ApplicationTransactions {
     pub async fn auxiliary_read(&mut self, id: &str, query: AuxiliaryRead) -> Result<Value> {
         if matches!(query, AuxiliaryRead::LegacyProjectSettings) {
@@ -433,6 +544,8 @@ impl ApplicationTransactions {
                         },
                     ).await.map(Value::Array)
                 }
+                AuxiliaryRead::EnabledScheduledThreadIds => enabled_scheduled_threads(&mut session).await,
+                AuxiliaryRead::DeletedCheckpointTargets => deleted_checkpoint_targets(&mut session).await,
                 AuxiliaryRead::ProviderHistory => provider_history(&mut session).await,
                 AuxiliaryRead::PendingThreadCleanup { thread_id } => pending_cleanup(&mut session, &thread_id).await,
                 AuxiliaryRead::AllThreadWorktrees => {
@@ -456,6 +569,7 @@ impl ApplicationTransactions {
                     }
                     Ok(Value::Array(result))
                 }
+
                 AuxiliaryRead::NonStoppedProviderSessions => {
                     let mut rows = read_index::equal_rows(&mut session, SESSIONS, "_non_stopped", &int_cell(1)).await?;
                     rows.sort_by_key(|row| row.order);

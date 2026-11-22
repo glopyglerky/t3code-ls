@@ -56,6 +56,7 @@ await NodeFSP.writeFile(
   peer,
   `#!${process.execPath}
 import { appendFileSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 writeFileSync(process.env.T3LS_ADAPTER_AUDIT, JSON.stringify({
   pid: process.pid, ppid: process.ppid, cwd: process.cwd(), argv: process.argv.slice(2),
@@ -72,6 +73,13 @@ if (process.argv[2] === "--version") {
 } else if (process.env.T3LS_ADAPTER_MODE === "exit") {
   process.stderr.write("Error: synthetic Codex startup failure\\n", () => process.exit(7));
 } else if (["status", "hold"].includes(process.env.T3LS_ADAPTER_MODE)) {
+  if (process.env.T3LS_ADAPTER_STARTUP_DONE) {
+    spawn(process.execPath, [
+      "-e",
+      "setTimeout(() => require('node:fs').writeFileSync(process.argv[1], String(process.ppid)), 900)",
+      process.env.T3LS_ADAPTER_STARTUP_DONE,
+    ], { stdio: "ignore" });
+  }
   let pending = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => {
@@ -206,12 +214,26 @@ function failure(exit) {
   return Cause.squash(exit.cause);
 }
 
+function isDead(pid) {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    if (error.code === "ESRCH") return true;
+    throw error;
+  }
+}
+
 function assertDead(pid) {
-  NodeAssert.throws(
-    () => process.kill(pid, 0),
-    (error) => error.code === "ESRCH",
-    `Owned process ${pid} survived its Effect scope`,
-  );
+  NodeAssert.ok(isDead(pid), `Owned process ${pid} survived its Effect scope`);
+}
+
+async function waitForProbeCleanup(pid) {
+  const deadline = performance.now() + 5_000;
+  while (!isDead(pid) && performance.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assertDead(pid);
 }
 
 function assertClosed(observation, audit) {
@@ -518,6 +540,33 @@ try {
         NodeAssert.equal(observation.handles.length, 1);
         const audit = JSON.parse(await NodeFSP.readFile(auditPath, "utf8"));
         NodeAssert.equal(audit.ppid, observation.handles[0].pid);
+        await waitForProbeCleanup(observation.handles[0].pid);
+        assertClosed(observation, audit);
+      },
+    );
+    await check(
+      "native status waits for startup descendants before reaping app-server",
+      async () => {
+        const auditPath = NodePath.join(temporary, `audit-${nextAudit++}`);
+        const startupDone = `${auditPath}-startup-done`;
+        const observation = observe({ selected: executable });
+        const result = value(
+          await run(
+            CodexProvider.checkCodexProviderStatus(
+              settings(),
+              undefined,
+              environment(auditPath, {
+                T3LS_ADAPTER_MODE: "status",
+                T3LS_ADAPTER_STARTUP_DONE: startupDone,
+              }),
+            ),
+            observation,
+          ),
+        );
+        NodeAssert.equal(result.auth.status, "unauthenticated");
+        const audit = JSON.parse(await NodeFSP.readFile(auditPath, "utf8"));
+        await waitForProbeCleanup(audit.ppid);
+        NodeAssert.equal(Number(await NodeFSP.readFile(startupDone, "utf8")), audit.pid);
         assertClosed(observation, audit);
       },
     );
@@ -551,45 +600,41 @@ try {
               observation,
             ),
           );
-          const originalSelected = selection.selected === undefined;
           NodeAssert.equal(result.status, "error");
           NodeAssert.equal(result.installed, true);
           NodeAssert.match(result.message, /synthetic Codex startup failure/);
-          NodeAssert.equal(result.version, originalSelected ? "0.159.0" : null);
-          NodeAssert.equal(observation.handles.length, originalSelected ? 2 : 1);
+          NodeAssert.equal(result.version, "0.159.0");
+          NodeAssert.equal(observation.handles.length, 2);
           const invocations = (await NodeFSP.readFile(invocationsPath, "utf8"))
             .trim()
             .split("\n")
             .map((line) => JSON.parse(line));
           NodeAssert.deepEqual(invocations, [
             ["app-server", "-c", "thread_unload_delay_secs=0", "--fixture", "space argument"],
-            ...(originalSelected ? [["--version"]] : []),
+            ["--version"],
           ]);
           assertClosed(observation, JSON.parse(await NodeFSP.readFile(auditPath, "utf8")));
         },
       );
     }
-    await check(
-      "configured launcher exit never falls back to original version command",
-      async () => {
-        const broken = NodePath.join(temporary, "broken-launcher");
-        await NodeFSP.writeFile(broken, `#!${process.execPath}\nprocess.exit(7);\n`, {
-          mode: 0o700,
-        });
-        const auditPath = NodePath.join(temporary, `audit-${nextAudit++}`);
-        const observation = observe({ selected: broken, implementation: "upstream" });
-        const result = value(
-          await run(
-            CodexProvider.checkCodexProviderStatus(settings(), undefined, environment(auditPath)),
-            observation,
-          ),
-        );
-        NodeAssert.equal(result.status, "error");
-        NodeAssert.equal(observation.handles.length, 1);
-        await NodeAssert.rejects(NodeFSP.readFile(auditPath), (error) => error.code === "ENOENT");
-        assertClosed(observation);
-      },
-    );
+    await check("configured launcher failure does not run the provider directly", async () => {
+      const broken = NodePath.join(temporary, "broken-launcher");
+      await NodeFSP.writeFile(broken, `#!${process.execPath}\nprocess.exit(7);\n`, {
+        mode: 0o700,
+      });
+      const auditPath = NodePath.join(temporary, `audit-${nextAudit++}`);
+      const observation = observe({ selected: broken, implementation: "upstream" });
+      const result = value(
+        await run(
+          CodexProvider.checkCodexProviderStatus(settings(), undefined, environment(auditPath)),
+          observation,
+        ),
+      );
+      NodeAssert.equal(result.status, "error");
+      NodeAssert.equal(observation.handles.length, 2);
+      await NodeAssert.rejects(NodeFSP.readFile(auditPath), (error) => error.code === "ENOENT");
+      assertClosed(observation);
+    });
     await check("missing selected launcher fails through both production paths", async () => {
       for (const kind of ["probe", "session"]) {
         const observation = observe({ selected: NodePath.join(temporary, "missing-launcher") });

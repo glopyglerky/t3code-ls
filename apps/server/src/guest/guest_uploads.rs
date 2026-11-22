@@ -88,7 +88,15 @@ fn units(value: &str) -> Vec<u16> {
 }
 
 fn equals_ascii(value: &[u16], ascii: &str) -> bool {
-    value.iter().copied().eq(ascii.bytes().map(u16::from))
+    if value.len() != ascii.len() {
+        return false;
+    }
+    for (index, byte) in ascii.bytes().enumerate() {
+        if value[index] != u16::from(byte) {
+            return false;
+        }
+    }
+    true
 }
 
 fn starts_with_ascii(value: &[u16], ascii: &str) -> bool {
@@ -220,10 +228,7 @@ mod tests {
             classify_uploads(&vec![invalid.clone(); 5]),
             Err(UploadRejection::TooManyFiles)
         );
-        assert_eq!(
-            classify_uploads(&[invalid]),
-            Err(UploadRejection::TooLarge)
-        );
+        assert_eq!(classify_uploads(&[invalid]), Err(UploadRejection::TooLarge));
         let exact = upload("exact", "text/plain", MAX_ATTACHMENT_BYTES, &[]);
         assert_eq!(
             classify_uploads(&[exact]).unwrap()[0].size_bytes,
@@ -302,8 +307,8 @@ mod tests {
     #[test]
     fn names_replace_controls_before_trim_and_preserve_split_surrogates() {
         let blocked = [
-            0x0000, 0x0009, 0x001f, 0x007f, 0x009f, 0x002f, 0x005c, 0x061c, 0x200e, 0x200f,
-            0x202a, 0x202e, 0x2066, 0x2069,
+            0x0000, 0x0009, 0x001f, 0x007f, 0x009f, 0x002f, 0x005c, 0x061c, 0x200e, 0x200f, 0x202a,
+            0x202e, 0x2066, 0x2069,
         ];
         let mut source = upload("", "text/plain", 1.0, &[]);
         source.name_units = [vec![0x2003], blocked.to_vec(), vec![0x3000]].concat();
@@ -343,7 +348,10 @@ mod tests {
                 .map(|size| upload("file", "text/plain", *size, &[]))
                 .collect::<Vec<_>>()
         };
-        assert!(classify_uploads(&with_sizes(&[1e30, MAX_ATTACHMENT_BYTES + 1.0, -1e30])).is_ok());
+        assert!(
+            classify_uploads(&with_sizes(&[1e30, MAX_ATTACHMENT_BYTES + 1.0, -1e30])).is_ok(),
+            "preserve sequential rounding"
+        );
         assert_eq!(
             classify_uploads(&with_sizes(&[1e30, -1e30, MAX_ATTACHMENT_BYTES + 1.0])),
             Err(UploadRejection::TooLarge)

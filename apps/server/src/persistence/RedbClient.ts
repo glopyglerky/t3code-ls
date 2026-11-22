@@ -43,7 +43,11 @@ const applicationOperations = {
   application_receipts_upsert: "write",
   application_receipts_get: "read",
   application_positions_allocate: "write",
+  application_task_folders_find: "read",
+  application_task_folders_upsert: "write",
+  application_task_folders_delete: "write",
   application_projects_select: "read",
+  application_projects_reduce_event: "read",
   application_projects_upsert: "write",
   application_projections_apply: "write",
   application_projections_normalization: "read",
@@ -53,6 +57,7 @@ const applicationOperations = {
   application_outbox_enqueue: "write",
   application_outbox_get: "read",
   application_outbox_list: "read",
+  application_outbox_first_steer: "read",
   application_outbox_cancel: "write",
   application_outbox_reconcile: "write",
   application_outbox_claim: "write",
@@ -155,6 +160,7 @@ export interface RedbClientShape {
   >;
   readonly prepareReceipts: Effect.Effect<PreparationResult, RedbClientError>;
   readonly preparePositions: Effect.Effect<PreparationResult, RedbClientError>;
+  readonly prepareTaskFolders: Effect.Effect<PreparationResult, RedbClientError>;
   readonly prepareProjects: Effect.Effect<PreparationResult, RedbClientError>;
   readonly prepareViewedFiles: Effect.Effect<PreparationResult, RedbClientError>;
   readonly prepareAuth: Effect.Effect<PreparationResult, RedbClientError>;
@@ -545,6 +551,13 @@ export const make = Effect.gen(function* () {
     preparePositions: Effect.gen(function* () {
       yield* outsideTransaction;
       return yield* database.request({ operation: "application_positions_prepare" }, Prepared);
+    }),
+    prepareTaskFolders: Effect.gen(function* () {
+      yield* outsideTransaction;
+      return yield* database.request(
+        { operation: "application_task_folders_prepare" },
+        Schema.Struct({ ...Prepared.fields, after: Schema.NullOr(Schema.String) }),
+      );
     }),
     prepareProjects: Effect.gen(function* () {
       yield* outsideTransaction;

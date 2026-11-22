@@ -2,6 +2,8 @@
 
 mod backend;
 
+pub use backend::run_on_database_thread;
+
 #[path = "../../../apps/server/src/persistence/redb_transactions.rs"]
 pub mod application;
 #[path = "../../../apps/server/src/persistence/redb_auth_rows.rs"]
@@ -48,6 +50,8 @@ pub mod application_search;
 pub mod application_server_ownership;
 #[path = "../../../apps/server/src/persistence/redb_database_storage.rs"]
 pub mod application_storage;
+#[path = "../../../apps/server/src/workspace/redb_task_folders.rs"]
+pub mod application_task_folders;
 #[path = "../../../apps/server/src/persistence/redb_thread_find.rs"]
 pub mod application_thread_find;
 #[path = "../../../apps/server/src/persistence/redb_turn_item_counts.rs"]

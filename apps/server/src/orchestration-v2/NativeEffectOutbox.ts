@@ -316,6 +316,13 @@ export const makeWithTransport = Effect.fn("NativeEffectOutbox.makeWithTransport
       );
       return rows.map(toEffect);
     }, mapError("list")),
+    firstSteer: Effect.fn("NativeEffectOutbox.firstSteer")(function* (threadId, messageId) {
+      const row = yield* request(
+        { operation: "outbox_first_steer", thread_id: threadId, message_id: messageId },
+        Schema.NullOr(StoredEffectResponse),
+      );
+      return row === null ? Option.none() : Option.some(toEffect(row));
+    }, mapError("first-steer")),
     cancelUnsettled: Effect.fn("NativeEffectOutbox.cancelUnsettled")(function* ({
       threadId,
       effectTypes,

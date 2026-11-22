@@ -15,7 +15,7 @@ function section(start, end) {
 }
 
 const constants = [...source.matchAll(/^(?:export )?const (Auth\w+Scope) = "([^"]+)" as const;/gm)];
-NodeAssert.equal(constants.length, 17, "Review new upstream permission vocabulary before porting");
+NodeAssert.equal(constants.length, 18, "Review new upstream permission vocabulary before porting");
 const declarations = constants
   .map((match) => `const ${match[1]} = ${JSON.stringify(match[2])};`)
   .join("\n");
@@ -51,6 +51,7 @@ const all = [
   "access:write",
   "relay:read",
   "relay:write",
+  "relay:configure",
 ];
 NodeAssert.deepEqual(new Set(all), new Set(constants.map((match) => match[2])));
 

@@ -347,7 +347,7 @@ const rollback = request("provider-thread.rollback", {
   restoreFiles: false,
 });
 const requests = [
-  continuation,
+  { ...continuation, cause: "provider_exit" },
   request("provider-session.detach", {
     providerSessionId: "session:one",
     detail: "detach é\n💬",
@@ -391,7 +391,10 @@ const requests = [
   request("scheduled-tasks.cleanup"),
   cleanup,
   request("preview.cleanup"),
-  request("attachment.cleanup", { attachmentIds: ["attachment:one", "attachment:é💬"] }),
+  request("attachment.cleanup", {
+    attachmentIds: ["attachment:one", "attachment:é💬"],
+    skipReferenced: true,
+  }),
   title,
   request("delegated-tasks.stop", { reason: "parent stopped é\n💬" }),
   request("provider-session.apply-model-selection", {
@@ -403,8 +406,9 @@ const requests = [
       options: [{ id: "effort", value: "high" }],
     },
   }),
+  request("provider-session.apply-thread-title", { title: "Updated title é💬" }),
 ];
-NodeAssert.equal(requests.length, 16);
+NodeAssert.equal(requests.length, 17);
 NodeAssert.deepEqual(
   new Set(requests.map(({ type }) => type)),
   new Set([
@@ -574,7 +578,7 @@ try {
     effect(`request:${String(index).padStart(2, "0")}:é💬`, `thread:${index}`, value, iso(1000)),
   );
   await runScenario("all effect payloads roundtrip and duplicate enqueue preserves originals", [
-    expect(enqueue(all), 16),
+    expect(enqueue(all), all.length),
     ...all.map(({ id }) => ({ operation: "outbox_get", effect_id: id })),
     { operation: "outbox_list", command_id: "command:fixture" },
     expect(
@@ -896,7 +900,7 @@ try {
   }
   matrix.push(
     { operation: "reopen", abrupt: true },
-    expect(reconcile(iso(1000)), { requeued: 10, cancelled: 12 }),
+    expect(reconcile(iso(1000)), { requeued: 10, cancelled: 14 }),
     expect(reconcile(iso(1001)), { requeued: 0, cancelled: 0 }),
     expect(settle("succeed", "a-running-00", "worker:original", iso(1001)), false),
     expect(claim("worker:recovered", iso(1001)), "a-running-00"),
@@ -985,7 +989,7 @@ try {
     comparisons,
     native_comparisons: nativeComparisons,
     policy_comparisons: policyComparisons,
-    effect_types: 16,
+    effect_types: requests.length,
     statuses_per_type: 5,
     checks,
     boundaries: [
@@ -998,7 +1002,7 @@ try {
   };
   if (proofPath) await NodeFSP.writeFile(proofPath, `${JSON.stringify(proof, null, 2)}\n`);
   console.log(
-    `Outbox comparisons passed: ${comparisons} upstream operations, ${nativeComparisons} complete redb comparisons, ${policyComparisons} policy comparisons; 16 effect types × 5 statuses.`,
+    `Outbox comparisons passed: ${comparisons} upstream operations, ${nativeComparisons} complete redb comparisons, ${policyComparisons} policy comparisons; ${requests.length} effect types × 5 statuses.`,
   );
 } finally {
   await NodeFSP.rm(temporary, { recursive: true, force: true });

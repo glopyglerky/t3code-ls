@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import tempfile
@@ -13,6 +14,12 @@ from unittest.mock import patch
 
 import ci_plan
 
+
+PERFORMANCE_HELPERS = (
+    "tools/pnpm-runtime-store.mjs", "tools/database-fixture.mjs",
+    "tools/export-sqlite-state.mjs", "tools/redb-domain-fixture.mjs",
+    "tools/redb-event-sink-fixtures.mjs", "tools/upstream-source.mjs",
+)
 
 NAMES = {
     "crates/core": "t3-code-ls-core",
@@ -113,7 +120,7 @@ class SelectionTests(unittest.TestCase):
 
     def assert_light(self, result):
         self.assertEqual(result["mode"], "affected-fork")
-        self.assertEqual(result["gates"], {"native": False, "adapters": False, "application": False})
+        self.assertEqual(result["gates"], {"native": False, "adapters": False, "application": False, "performance": False})
         self.assertEqual(result["rust_packages"], [])
         self.assertEqual(result["component_tests"], [])
         self.assertFalse(result["stage_native"])
@@ -121,7 +128,7 @@ class SelectionTests(unittest.TestCase):
 
     def assert_source_guards_only(self, result):
         self.assertEqual(result["mode"], "affected-fork")
-        self.assertEqual(result["gates"], {"native": True, "adapters": False, "application": False})
+        self.assertEqual(result["gates"], {"native": True, "adapters": False, "application": False, "performance": False})
         self.assertEqual(result["rust_packages"], ["t3code-ls-tools"])
         self.assertEqual(result["adapter_ports"], [])
         self.assertEqual(result["affected_ports"], [])
@@ -129,6 +136,55 @@ class SelectionTests(unittest.TestCase):
         self.assertTrue(result["source_guards"])
         self.assertFalse(result["stage_native"])
         self.assertFalse(result["upstream_tests"])
+
+    def test_measurement_contract_and_runner_changes_force_every_gate(self):
+        for path in ("tools/link-performance-runtime.mjs", *PERFORMANCE_HELPERS,
+                     "tools/performance-contract.json", "tools/performance-statistics.mjs",
+                     "tools/performance-worker.mjs", "tools/performance-compiler.mjs",
+                     "tools/ci_performance.py", "tools/ci_promotion.py",
+                     "tools/ci_commit_hooks.py", "tools/test_ci_commit_hooks.py"):
+            with self.subTest(path=path):
+                result = self.select([path])
+                self.assertTrue(all(result["gates"].values()))
+                self.assertTrue(ci_plan.is_policy(path))
+
+    def test_performance_helpers_invalidate_qualification_policy_digest(self):
+        for helper in PERFORMANCE_HELPERS:
+            with self.subTest(helper=helper):
+                before = {"tools/ci_plan.py": "a" * 40, helper: "b" * 40}
+                after = {**before, helper: "c" * 40}
+                self.assertNotEqual(ci_plan.policy_digest(before), ci_plan.policy_digest(after))
+
+    def test_adapter_runtime_lock_changes_invalidate_qualification(self):
+        for name in ("package.json", "package-lock.json"):
+            with self.subTest(name=name):
+                path = f"tools/server-test-runtime/{name}"
+                self.assertTrue(all(self.select([path])["gates"].values()))
+                self.assertNotEqual(
+                    ci_plan.policy_digest({path: "a" * 40}),
+                    ci_plan.policy_digest({path: "b" * 40}),
+                )
+
+    def test_local_performance_imports_are_qualification_policy(self):
+        root = Path(__file__).resolve().parents[1]
+        pending = list((root / "tools").glob("performance-*.mjs"))
+        pending.append(root / "tools/link-performance-runtime.mjs")
+        visited = set()
+        while pending:
+            module = pending.pop()
+            if module in visited:
+                continue
+            visited.add(module)
+            for relative in re.findall(
+                r"""(?:from\s*|import\s*(?:\(\s*)?)["'](\.[^"']+)["']""",
+                module.read_text(),
+            ):
+                helper = (module.parent / relative).resolve()
+                if not helper.is_relative_to(root / "tools"):
+                    continue
+                path = helper.relative_to(root).as_posix()
+                self.assertTrue(ci_plan.is_policy(path), f"{module.name} imports {path}")
+                pending.append(helper)
 
     def test_documentation_and_standalone_reporting_changes_skip_compilers_and_application(self):
         self.assert_light(self.select(["docs/porting/strategy.md", "README.md"]))
@@ -138,17 +194,18 @@ class SelectionTests(unittest.TestCase):
         result = self.select(["tools/src/migration.rs"])
         self.assertEqual(result["mode"], "affected-fork")
         self.assertEqual(result["rust_packages"], ["t3code-ls-tools"])
-        self.assertEqual(result["gates"], {"native": True, "adapters": False, "application": False})
+        self.assertEqual(result["gates"], {"native": True, "adapters": False, "application": False, "performance": False})
         self.assertTrue(result["source_guards"])
         self.assertFalse(result["stage_native"])
 
-    def test_storage_candidate_tests_reverse_consumer_without_production_application(self):
+    def test_production_storage_changes_require_application_and_performance(self):
         result = self.select(["crates/storage/src/lib.rs"])
         self.assertEqual(result["mode"], "affected-fork")
-        self.assertEqual(set(result["rust_packages"]), {"t3-code-ls-storage", "t3-code-ls-app", "t3code-ls-tools"})
+        self.assertEqual(set(result["rust_packages"]), {"t3-code-ls-core", "t3-code-ls-storage", "t3-code-ls-app", "t3code-ls-tools"})
         self.assertEqual(result["adapter_ports"], [])
-        self.assertFalse(result["gates"]["application"])
-        self.assertFalse(result["stage_native"])
+        self.assertTrue(result["gates"]["application"])
+        self.assertTrue(result["gates"]["performance"])
+        self.assertTrue(result["stage_native"])
 
     def test_transport_candidate_does_not_build_unrelated_storage_or_application(self):
         result = self.select(["crates/transport/src/bridge.rs"])
@@ -201,7 +258,7 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(set(result["rust_packages"]), {
             "t3-code-ls-core", "t3-code-ls-transport", "t3code-ls-tools",
         })
-        self.assertEqual(result["gates"], {"native": True, "adapters": False, "application": False})
+        self.assertEqual(result["gates"], {"native": True, "adapters": False, "application": False, "performance": False})
         self.assertFalse(result["stage_native"])
 
     def test_unknown_mapped_acceptance_tests_cannot_silently_pass_any_plan(self):
@@ -236,8 +293,9 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(set(result["rust_packages"]), {
             "t3-code-ls-core", "t3-code-ls-storage", "t3-code-ls-app", "t3code-ls-tools",
         })
-        self.assertFalse(result["stage_native"])
-        self.assertFalse(result["gates"]["application"])
+        self.assertTrue(result["stage_native"])
+        self.assertTrue(result["gates"]["application"])
+        self.assertTrue(result["gates"]["performance"])
         tests_only = self.select(["crates/storage/tests/store.rs"], mapping=mapping, old=mapping,
                                  manifest=manifest)
         self.assertEqual(tests_only["component_tests"], [])
@@ -447,7 +505,7 @@ class SelectionTests(unittest.TestCase):
                 self.assertEqual(result["rust_packages"], ["t3code-ls-tools"])
                 self.assertTrue(result["source_guards"])
                 self.assertFalse(result["stage_native"])
-                self.assertEqual(result["gates"], {"native": True, "adapters": False, "application": False})
+                self.assertEqual(result["gates"], {"native": True, "adapters": False, "application": False, "performance": False})
 
     def test_adapter_typecheck_configuration_is_not_swallowed_by_tools_cargo_member(self):
         result = self.select(["tools/project-tsconfig.json"])
@@ -529,8 +587,9 @@ class SelectionTests(unittest.TestCase):
             "redb-persistence", "iroh-transport", "native-api-component",
         })
         self.assertEqual(result["adapter_ports"], [])
-        self.assertFalse(result["gates"]["application"])
-        self.assertFalse(result["stage_native"])
+        self.assertTrue(result["gates"]["application"])
+        self.assertTrue(result["gates"]["performance"])
+        self.assertTrue(result["stage_native"])
 
     def test_reverse_dependency_owned_by_production_is_qualified_without_other_shared_crate_ports(self):
         mapping = copy.deepcopy(MAPPING)
@@ -573,6 +632,52 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(ci_plan.closure({"tools"}, graph), {"tools"})
 
 
+class RepositoryMappingTests(unittest.TestCase):
+    def test_iroh_connection_fixtures_run_in_the_application_gate(self):
+        root = Path(__file__).resolve().parents[1]
+        mapping = json.loads((root / "port-map.json").read_text())
+        manifest = json.loads((root / "tools/acceptance-checks.json").read_text())
+        iroh = next(port for port in mapping["ports"] if port["id"] == "iroh-transport")
+        self.assertTrue(ci_plan.APPLICATION_ACCEPTANCE_TESTS.issubset(iroh["acceptance_tests"]))
+        for path in ci_plan.APPLICATION_ACCEPTANCE_TESTS:
+            with self.subTest(path=path):
+                result = ci_plan.select_checks([path], mapping, mapping, NAMES, REVERSE, set(),
+                                               component_manifest=manifest)
+                self.assertEqual(result["mode"], "affected-fork")
+                self.assertIn("iroh-transport", result["affected_ports"])
+                self.assertTrue(result["gates"]["application"])
+                self.assertNotIn(path, result["component_tests"])
+
+    def test_count_helpers_and_migration_source_select_persistence_acceptance(self):
+        root = Path(__file__).resolve().parents[1]
+        mapping = json.loads((root / "port-map.json").read_text())
+        manifest = json.loads((root / "tools/acceptance-checks.json").read_text())
+        persistence = next(port for port in mapping["ports"] if port["id"] == "redb-persistence")
+        helpers = ["tools/redb-projection-count-fixture.mjs",
+                   "tools/check-redb-count-writer-compat.mjs"]
+        migration = "apps/server/src/persistence/Migrations/085_TurnItemCounts.ts"
+        for helper in helpers:
+            self.assertIn(helper, persistence["adapter_paths"])
+        self.assertIn(migration, {source["path"] for source in persistence["upstream_sources"]})
+        for path in [*helpers, migration]:
+            with self.subTest(path=path):
+                result = ci_plan.select_checks([path], mapping, mapping, NAMES, REVERSE, {migration},
+                                               component_manifest=manifest)
+                self.assertEqual(result["mode"], "affected-fork")
+                self.assertIn("redb-persistence", result["affected_ports"])
+                self.assertTrue({"tools/check-redb-projection-shells.mjs",
+                                 "tools/check-omdb-startup.mjs",
+                                 "tools/check-omdb-migration-head.mjs"}.issubset(result["component_tests"]))
+                self.assertTrue(result["source_guards"])
+                self.assertTrue(result["gates"]["native"])
+                self.assertTrue(result["gates"]["application"])
+                self.assertTrue(result["gates"]["performance"])
+        # The preserved old executable is supplied explicitly for its separate
+        # compatibility proof. CI must not claim a skipped old-binary test.
+        self.assertNotIn(helpers[1], persistence["acceptance_tests"])
+        self.assertNotIn(helpers[1], manifest)
+
+
 class GitFixtureTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix="t3-ci-plan-")
@@ -595,7 +700,7 @@ class GitFixtureTests(unittest.TestCase):
         self.write("port-map.json", json.dumps(MAPPING))
         self.write("tools/acceptance-checks.json", json.dumps(COMPONENT_MANIFEST))
         self.upstream = self.commit("upstream fixture")
-        self.write("upstream.lock.json", json.dumps({"upstream": {"commit": self.upstream}}))
+        self.write("upstream.lock.json", json.dumps({"upstream": {"commit": self.upstream, "root_tree": self.run_git("rev-parse", f"{self.upstream}^{{tree}}")}}))
         self.base = self.commit("qualified fork fixture")
 
     def tearDown(self):
@@ -619,6 +724,20 @@ class GitFixtureTests(unittest.TestCase):
     def qualification(self):
         # Production callers receive this only from ci_history's verified receipt lookup.
         return {"commit": self.base, "run_id": 123, "reused": False}
+
+    def test_documented_measurement_references_cannot_hide_runtime_or_policy_changes(self):
+        baseline = ci_plan.make_plan(self.root, self.base, self.qualification())
+        evidence = {"source_commit": self.base, "source_tree": baseline["source_tree"],
+                    "policy_digest": baseline["policy_digest"], "ci_run_id": "123",
+                    "upstream_commit": baseline["upstream_commit"], "upstream_tree": baseline["upstream_tree"]}
+        self.write("docs/performance/measured.md", "Complete results for the measured commit\n")
+        documented = self.commit("publish measured outcomes")
+        self.assertTrue(ci_plan.performance_reference_covers(self.root, documented, evidence))
+        self.write("crates/core/src/project_commands.rs", "pub fn changed() {}\n")
+        changed = self.commit("runtime change after measurements")
+        self.assertFalse(ci_plan.performance_reference_covers(self.root, changed, evidence))
+        self.assertFalse(ci_plan.performance_reference_covers(self.root, documented,
+                         {**evidence, "source_tree": "f" * 40}))
 
     def test_cargo_graph_reads_target_build_dev_and_workspace_path_dependencies(self):
         names, reverse = ci_plan.cargo_graph(self.root, self.base)
@@ -705,7 +824,7 @@ class GitFixtureTests(unittest.TestCase):
                 self.assertEqual(result["mode"], "full-fork")
                 self.assertTrue(all(result["gates"].values()))
 
-    def test_true_upstream_source_advance_and_addition_skip_unrelated_integration_checks(self):
+    def test_stock_oracle_advance_requires_fresh_performance_and_full_qualification(self):
         existing = "apps/web/src/TrustedUpstreamView.tsx"
         added = "apps/web/src/NewUpstreamView.tsx"
         mapping = provenance_mapping(self.upstream)
@@ -717,7 +836,7 @@ class GitFixtureTests(unittest.TestCase):
         upstream = self.commit("trusted upstream advances")
         self.run_git("checkout", "--detach", self.base)
         self.run_git("checkout", upstream, "--", existing, added)
-        self.write("upstream.lock.json", json.dumps({"upstream": {"commit": upstream}}))
+        self.write("upstream.lock.json", json.dumps({"upstream": {"commit": upstream, "root_tree": self.run_git("rev-parse", f"{upstream}^{{tree}}")}}))
         mapping["integrated_upstream_commit"] = upstream
         mapping["source_history"].append(upstream)
         for entry in mapping["ports"]:
@@ -727,11 +846,9 @@ class GitFixtureTests(unittest.TestCase):
         result = ci_plan.make_plan(self.root, head, self.qualification())
         self.assertEqual(set(result["changed_paths"]), {existing, added, "upstream.lock.json", "port-map.json"})
         self.assertEqual(set(result["trusted_upstream_paths"]), {existing, added})
-        self.assertEqual(result["mode"], "affected-fork")
-        self.assertEqual(result["rust_packages"], ["t3code-ls-tools"])
-        self.assertTrue(result["source_guards"])
-        self.assertFalse(result["gates"]["adapters"])
-        self.assertFalse(result["gates"]["application"])
+        self.assertEqual(result["mode"], "full-fork")
+        self.assertTrue(all(result["gates"].values()))
+        self.assertIn("The immutable stock comparison changed", result["reasons"])
 
     def test_restoring_a_fork_deleted_upstream_path_is_not_a_trusted_addition(self):
         path = "apps/web/src/TrustedUpstreamView.tsx"
@@ -744,9 +861,9 @@ class GitFixtureTests(unittest.TestCase):
         self.assertEqual(result["mode"], "full-fork")
 
     def test_unavailable_qualified_base_upstream_objects_require_full_qualification(self):
-        self.write("upstream.lock.json", json.dumps({"upstream": {"commit": "a" * 40}}))
+        self.write("upstream.lock.json", json.dumps({"upstream": {"commit": "a" * 40, "root_tree": "b" * 40}}))
         self.base = self.commit("qualification with unavailable old upstream source")
-        self.write("upstream.lock.json", json.dumps({"upstream": {"commit": self.upstream}}))
+        self.write("upstream.lock.json", json.dumps({"upstream": {"commit": self.upstream, "root_tree": self.run_git("rev-parse", f"{self.upstream}^{{tree}}")}}))
         head = self.commit("restore an available upstream pin")
         result = ci_plan.make_plan(self.root, head, self.qualification())
         self.assertEqual(result["trusted_upstream_paths"], [])

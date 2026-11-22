@@ -1,0 +1,7 @@
+{
+  "platforms": ["apple"],
+  "apple": {
+    "modules": ["T3IrohModule"],
+    "podspecPath": "T3IrohNative.podspec"
+  }
+}

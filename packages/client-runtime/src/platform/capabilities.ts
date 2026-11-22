@@ -7,6 +7,9 @@ import {
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import type * as Option from "effect/Option";
+import type * as Scope from "effect/Scope";
+import { ConnectionTransientError } from "../connection/model.ts";
+import type { IrohPeer } from "../connection/catalog.ts";
 
 import type { ConnectionAttemptError } from "../connection/model.ts";
 
@@ -93,3 +96,25 @@ export class SshEnvironmentGateway extends Context.Service<
     ) => Effect.Effect<void, ConnectionAttemptError>;
   }
 >()("@t3tools/client-runtime/platform/capabilities/SshEnvironmentGateway") {}
+
+export class IrohTransport extends Context.Reference<{
+  readonly available: boolean;
+  readonly open: (
+    peer: IrohPeer,
+  ) => Effect.Effect<
+    { readonly httpBaseUrl: string; readonly wsBaseUrl: string },
+    ConnectionAttemptError,
+    Scope.Scope
+  >;
+}>("@t3tools/client-runtime/platform/capabilities/IrohTransport", {
+  defaultValue: () => ({
+    available: false,
+    open: () =>
+      Effect.fail(
+        new ConnectionTransientError({
+          reason: "remote-unavailable",
+          detail: "Iroh transport is unavailable on this device.",
+        }),
+      ),
+  }),
+}) {}

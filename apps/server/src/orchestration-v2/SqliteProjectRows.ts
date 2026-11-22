@@ -23,6 +23,7 @@ const make = Effect.gen(function* () {
         favicon_path AS "faviconPath",
         project_icon_json AS "projectIcon",
         scripts_json AS "scripts",
+        tracked_folders_json AS "trackedFolders",
         pinned_at AS "pinnedAt",
         archived_at AS "archivedAt",
         created_at AS "createdAt",
@@ -52,13 +53,13 @@ const make = Effect.gen(function* () {
       sql`
       INSERT INTO projection_projects (
         project_id, title, has_custom_title, workspace_root, default_model_selection_json, default_thread_env_mode,
-        auto_pull, favicon_path, project_icon_json, scripts_json, pinned_at, archived_at,
+        auto_pull, favicon_path, project_icon_json, scripts_json, tracked_folders_json, pinned_at, archived_at,
         created_at, updated_at, deleted_at
       )
       VALUES (
         ${encoded.projectId}, ${encoded.title}, ${encoded.hasCustomTitle}, ${encoded.workspaceRoot}, ${encoded.defaultModelSelection},
         ${encoded.defaultThreadEnvMode}, ${encoded.autoPull}, ${encoded.faviconPath}, ${encoded.projectIcon},
-        ${encoded.scripts}, ${encoded.pinnedAt}, ${encoded.archivedAt}, ${encoded.createdAt},
+        ${encoded.scripts}, ${encoded.trackedFolders}, ${encoded.pinnedAt}, ${encoded.archivedAt}, ${encoded.createdAt},
         ${encoded.updatedAt}, ${encoded.deletedAt}
       )
       ON CONFLICT (project_id)
@@ -73,6 +74,7 @@ const make = Effect.gen(function* () {
         favicon_path = excluded.favicon_path,
         project_icon_json = excluded.project_icon_json,
         scripts_json = excluded.scripts_json,
+        tracked_folders_json = excluded.tracked_folders_json,
         pinned_at = excluded.pinned_at,
         archived_at = excluded.archived_at,
         created_at = excluded.created_at,

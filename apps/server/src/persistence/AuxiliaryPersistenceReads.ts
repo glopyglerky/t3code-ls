@@ -23,6 +23,15 @@ export const ProviderSessionRow = Schema.Struct({
   payload_json: Schema.String,
 });
 
+export const ScheduledThreadRow = Schema.Struct({ threadId: Schema.String });
+export const DeletedCheckpointTargetRow = Schema.Struct({
+  threadId: Schema.String,
+  worktreePath: Schema.NullOr(Schema.String),
+  workspaceRoot: Schema.NullOr(Schema.String),
+  scopeId: Schema.NullOr(Schema.String),
+  cwd: Schema.NullOr(Schema.String),
+});
+
 export class AuxiliaryPersistenceReadError extends Schema.TaggedError<AuxiliaryPersistenceReadError>()(
   "AuxiliaryPersistenceReadError",
   { operation: Schema.String, cause: Schema.Defect() },
@@ -33,6 +42,14 @@ export const toAuxiliaryReadError = (operation: string) => (cause: unknown) =>
 export class AuxiliaryPersistenceReads extends Context.Service<
   AuxiliaryPersistenceReads,
   {
+    readonly enabledScheduledThreadIds: Effect.Effect<
+      ReadonlyArray<typeof ScheduledThreadRow.Type>,
+      AuxiliaryPersistenceReadError
+    >;
+    readonly deletedCheckpointTargets: Effect.Effect<
+      ReadonlyArray<typeof DeletedCheckpointTargetRow.Type>,
+      AuxiliaryPersistenceReadError
+    >;
     readonly hasActiveRun: Effect.Effect<boolean, AuxiliaryPersistenceReadError>;
     readonly legacySubagentThreadIds: Effect.Effect<
       ReadonlyArray<string>,

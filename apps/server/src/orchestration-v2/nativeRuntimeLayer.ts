@@ -12,6 +12,7 @@ import * as NativeProjectionMaintenance from "./NativeProjectionMaintenance.ts";
 import * as NativeProjectionStore from "./NativeProjectionStore.ts";
 import * as NativeTurnItemPositionStore from "./NativeTurnItemPositionStore.ts";
 import * as NativeLegacyV1ThreadImporter from "./legacy/NativeLegacyV1ThreadImporter.ts";
+import * as TaskFolderStore from "../workspace/TaskFolderStore.ts";
 import { makeRuntimeLayers } from "./runtimeLayer.ts";
 
 /** Only storage implementations differ. All services, workers and queues use the shared graph. */
@@ -29,6 +30,7 @@ const nativeRuntime = makeRuntimeLayers({
   legacy: NativeLegacyV1ThreadImporter.layer,
   providerRuntime: NativeProviderSessionRuntime.layer,
   mcpContext: NativeMcpAppModelContext.layer,
+  taskFolders: TaskFolderStore.layerNative,
   scheduledTasks: ScheduledTaskService.layerWithRows.pipe(
     Layer.provide(NativeScheduledRows.layer),
     Layer.provide(PersistenceTransactions.redbLayer),

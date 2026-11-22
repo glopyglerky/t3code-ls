@@ -135,6 +135,9 @@ function copiedPayload(input: PlanInput): UnsequencedProjectEvent["payload"] {
       faviconPath: null,
       projectIcon: null,
       scripts: command.scripts ?? [],
+      ...(command.trackedFolders === undefined || command.trackedFolders.length === 0
+        ? {}
+        : { trackedFolders: command.trackedFolders }),
       createdAt: occurredAt,
       updatedAt: occurredAt,
     };
@@ -151,6 +154,7 @@ function copiedPayload(input: PlanInput): UnsequencedProjectEvent["payload"] {
     "faviconPath",
     "projectIcon",
     "scripts",
+    "trackedFolders",
   ] as const;
   return {
     projectId: command.projectId,

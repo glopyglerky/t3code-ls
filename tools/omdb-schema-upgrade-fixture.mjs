@@ -11,7 +11,13 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Omdb from "../apps/server/src/persistence/Omdb.ts";
 import * as NativeOwnership from "../apps/server/src/persistence/NativeServerOwnershipLock.ts";
 import schema88 from "../apps/server/src/persistence/omdb-schema-88.json" with { type: "json" };
+import schema89 from "../apps/server/src/persistence/omdb-schema-89.json" with { type: "json" };
+import schema93 from "../apps/server/src/persistence/omdb-schema-93.json" with { type: "json" };
+import schema94 from "../apps/server/src/persistence/omdb-schema-94.json" with { type: "json" };
+import schema105 from "../apps/server/src/persistence/omdb-schema-105.json" with { type: "json" };
+import schema106 from "../apps/server/src/persistence/omdb-schema-106.json" with { type: "json" };
 import currentSchema from "../apps/server/src/persistence/omdb-schema.json" with { type: "json" };
+import { JAVASCRIPT_TRIM_WHITESPACE } from "../apps/server/src/orchestration-v2/deferredCommandMessage.ts";
 import { snapshotForNativeImport } from "../apps/server/src/persistence/migrateSqliteToOmdb.ts";
 import {
   createMessageSearchTriggers,
@@ -33,6 +39,49 @@ const shellReadIndexes = [
   "orchestration_v2_projection_runs_run_status_idx",
 ];
 const migrationsSchema = Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }));
+
+const revertDeferredSlashIndex = Effect.fn("NativeSchemaUpgradeFixture.revertDeferredSlashIndex")(
+  function* (sql, version) {
+    yield* sql`DROP INDEX orchestration_v2_projection_messages_deferred_command_idx`;
+    if (version >= 100) {
+      yield* sql.unsafe(`
+        CREATE INDEX orchestration_v2_projection_messages_deferred_command_idx
+        ON orchestration_v2_projection_messages(thread_id, created_at, message_id)
+        WHERE role = 'user' AND (
+          lower(trim(json_extract(payload_json, '$.text'), '${JAVASCRIPT_TRIM_WHITESPACE}')) = '/compact'
+          OR trim(json_extract(payload_json, '$.text'), '${JAVASCRIPT_TRIM_WHITESPACE}') GLOB '/goal*'
+        )
+      `);
+    }
+  },
+);
+
+const revertToSchema94 = Effect.fn("NativeSchemaUpgradeFixture.revertToSchema94")(function* (sql) {
+  yield* sql`DROP INDEX orchestration_v2_projection_threads_worktree_path_key_idx`;
+  const triggers = yield* sql`SELECT name FROM sqlite_schema
+    WHERE type = 'trigger' AND name LIKE 'orchestration_v2_thread_item_counts_%'`;
+  for (const trigger of triggers)
+    yield* sql.unsafe(`DROP TRIGGER "${trigger.name.replaceAll('"', '""')}"`);
+  yield* sql`DROP TABLE orchestration_v2_projection_thread_item_counts`;
+  yield* sql`DROP TABLE task_folders`;
+  yield* sql`DROP TABLE issue_tracker_bindings`;
+  yield* sql`ALTER TABLE projection_projects DROP COLUMN tracked_folders_json`;
+  yield* sql`ALTER TABLE orchestration_v2_projection_turn_items DROP COLUMN inline_work_output`;
+});
+
+const revertConnectSchema = Effect.fn("NativeSchemaUpgradeFixture.revertConnectSchema")(
+  function* (sql) {
+    // These later indexes survive column-only fixture rollback and would make
+    // the real migration 93 fail when replaying a deliberately historical source.
+    yield* sql`DROP INDEX orchestration_v2_projection_provider_turns_attempt_idx`;
+    yield* sql`DROP INDEX orchestration_v2_projection_turn_items_message_ordinal_idx`;
+    yield* sql`DROP TABLE auth_connect_devices`;
+    yield* sql`ALTER TABLE auth_sessions DROP COLUMN proof_key_thumbprint`;
+    yield* sql`ALTER TABLE auth_pairing_links DROP COLUMN requires_connect_approval`;
+    yield* sql`ALTER TABLE auth_pairing_links DROP COLUMN requested_client_json`;
+    yield* sql`ALTER TABLE auth_pairing_links DROP COLUMN connect_denied`;
+  },
+);
 
 const isolated = (fixture, effect) =>
   effect.pipe(
@@ -172,6 +221,7 @@ export async function verifyNativeSchemaUpgrade(executable) {
       "[Assistant quote](t3-citation://v1/env/thread/message?text=quoted+history&start=0&end=14&prefix=&suffix=&comment=preserve+this)";
     await createMigratedSqlite(source, (sql) =>
       Effect.gen(function* () {
+        yield* revertToSchema94(sql);
         // Retain the exact previous schema and migration history. SQLite is only
         // this fixture's source/oracle; activated startup must never reopen it.
         const triggers = yield* sql`SELECT name FROM sqlite_schema WHERE type = 'trigger'
@@ -193,6 +243,8 @@ export async function verifyNativeSchemaUpgrade(executable) {
         yield* sql`DROP TABLE orchestration_v2_projection_turn_item_counts`;
         yield* sql`ALTER TABLE orchestration_v2_projection_messages DROP COLUMN search_text`;
         yield* sql`ALTER TABLE projection_projects DROP COLUMN has_custom_title`;
+        yield* revertConnectSchema(sql);
+        yield* revertDeferredSlashIndex(sql, 80);
         yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id > 80`;
         yield* sql`INSERT INTO projection_projects (project_id,title,workspace_root,scripts_json,created_at,updated_at)
         VALUES ('upgrade:project','Chosen title','/fixture','[]','2026-11-13T00:00:00.000Z','2026-11-13T00:00:00.000Z')`;
@@ -324,9 +376,9 @@ export async function verifyNativeSchemaUpgrade(executable) {
 /** Migration 89 changes indexes only, including homes already using native schema 88. */
 export async function verifyNativeSchema88Upgrade(executable) {
   NodeAssert.equal(schema88.migrations.at(-1).id, "88");
-  NodeAssert.equal(currentSchema.migrations.at(-1).id, "89");
-  NodeAssert.deepEqual(schema88.schema, currentSchema.schema);
-  NodeAssert.deepEqual(currentSchema.migrations.slice(0, -1), schema88.migrations);
+  NodeAssert.equal(currentSchema.migrations.at(-1).id, "107");
+  NodeAssert.deepEqual(schema88.schema, schema89.schema);
+  NodeAssert.deepEqual(currentSchema.migrations.slice(0, 88), schema88.migrations);
   const fixture = await createFixture();
   try {
     const source = NodePath.join(fixture.root, "statev2.sqlite");
@@ -342,7 +394,10 @@ export async function verifyNativeSchema88Upgrade(executable) {
       "[Assistant quote](t3-citation://v1/env/thread/message?text=quoted+history&start=0&end=14&prefix=&suffix=&comment=preserve+this)";
     await createMigratedSqlite(source, (sql) =>
       Effect.gen(function* () {
+        yield* revertToSchema94(sql);
         for (const index of shellReadIndexes) yield* sql.unsafe(`DROP INDEX "${index}"`);
+        yield* revertConnectSchema(sql);
+        yield* revertDeferredSlashIndex(sql, 88);
         yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id > 88`;
         for (const [id, title, custom] of [
           ["upgrade:project", "Chosen title", 1],
@@ -503,10 +558,17 @@ export async function verifyNativeSchema88Upgrade(executable) {
           yield* database.request({ operation: "application_migrations" }, migrationsSchema),
           currentSchema.migrations,
         );
+        const expected = structuredClone(expectedRows);
+        for (const { row } of expected.projection_projects) {
+          row.tracked_folders_json = { type: "text", value: "[]" };
+        }
+        for (const { row } of expected.orchestration_v2_projection_turn_items) {
+          row.inline_work_output = { type: "integer", value: "0" };
+        }
         NodeAssert.deepEqual(
           yield* readRows(client),
-          expectedRows,
-          "index-only upgrade preserves every application row",
+          expected,
+          "The full upgrade preserves application rows and supplies the new column defaults",
         );
         const count = yield* client.get("orchestration_v2_projection_turn_item_counts", [
           ...textKey(rootThread),
@@ -515,8 +577,13 @@ export async function verifyNativeSchema88Upgrade(executable) {
         NodeAssert.equal(
           count.item_count.value,
           "2",
-          "migration 89 must not repeat the count backfill",
+          "The upgrade must preserve the existing per-run count",
         );
+        const total = yield* client.get(
+          "orchestration_v2_projection_thread_item_counts",
+          textKey(rootThread),
+        );
+        NodeAssert.equal(total.item_count.value, "3", "Migration 102 includes the runless item");
         const shellIds = (options) =>
           client
             .request(
@@ -572,7 +639,137 @@ export async function verifyNativeSchema88Upgrade(executable) {
       version: 88,
       verify: verify(sourceRows, false),
     });
-    return "Schema-88 native homes upgrade through Omdb.make to exact migration 89, preserve custom-title flags, search text, run counts and native-only edits across restart, rebuild worktree/family reads, retain source/import proof, retry interrupted activation and reject changed SQLite sources without writes";
+    return "Schema-88 native homes upgrade through Omdb.make to exact migration 107, preserve custom-title flags, search text, run counts and native-only edits across restart, rebuild worktree/family reads, retain source/import proof, retry interrupted activation and reject changed SQLite sources without writes";
+  } finally {
+    await fixture.close();
+  }
+}
+
+/** Existing native authentication rows gain the exact defaults from migrations 90 and 91. */
+export async function verifyNativeSchema89Upgrade(
+  executable,
+  version = 89,
+  previousExecutable = executable,
+) {
+  const previousSchema = {
+    89: schema89,
+    93: schema93,
+    94: schema94,
+    105: schema105,
+    106: schema106,
+  }[version];
+  NodeAssert.ok(previousSchema !== undefined);
+  const fixture = await createFixture();
+  try {
+    const source = NodePath.join(fixture.root, "statev2.sqlite");
+    const archive = NodePath.join(fixture.root, `schema-${version}.jsonl`);
+    await createMigratedSqlite(source, (sql) =>
+      Effect.gen(function* () {
+        if (version === 105) {
+          yield* sql`DROP INDEX orchestration_v2_projection_threads_worktree_path_key_idx`;
+        } else if (version !== 106) {
+          yield* revertToSchema94(sql);
+        }
+        if (version === 89) yield* revertConnectSchema(sql);
+        if (version === 93)
+          yield* sql`DROP INDEX orchestration_v2_projection_turn_items_message_ordinal_idx`;
+        yield* revertDeferredSlashIndex(sql, version);
+        yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id > ${version}`;
+        yield* sql`INSERT INTO projection_projects
+          (project_id,title,workspace_root,scripts_json,created_at,updated_at,has_custom_title)
+          VALUES ('upgrade:project','Chosen title','/fixture','[]',${fixedTime},${fixedTime},1)`;
+        yield* sql`INSERT INTO auth_sessions
+          (session_id,subject,scopes,method,client_label,client_device_type,issued_at,expires_at)
+          VALUES ('upgrade:session','owner','["orchestration:read"]','bearer-access-token',
+            'Original label','desktop',${fixedTime},'2099-01-01T00:00:00.000Z')`;
+        yield* sql`INSERT INTO auth_pairing_links
+          (id,credential,method,scopes,subject,proof_key_thumbprint,created_at,expires_at)
+          VALUES ('upgrade:link','upgrade:credential','one-time-token','["orchestration:read"]',
+            'owner','original-link-proof',${fixedTime},'2099-01-01T00:00:00.000Z')`;
+      }),
+    );
+    await Effect.runPromise(
+      isolated(
+        fixture,
+        snapshotForNativeImport(source, { migrate: false }).pipe(
+          Effect.flatMap((snapshot) =>
+            Effect.promise(() => NodeFSP.copyFile(snapshot.path, archive)),
+          ),
+        ),
+      ),
+    );
+    const sourceDigest = hash(await NodeFSP.readFile(source));
+    const archiveDigest = hash(await NodeFSP.readFile(archive));
+    const imported = nativeRequest(previousExecutable, fixture, "initialize", {
+      operation: "import_sqlite_application",
+      path: archive,
+    });
+    NodeAssert.deepEqual(
+      nativeRequest(previousExecutable, fixture, "connect", { operation: "application_schema" }),
+      previousSchema.schema,
+    );
+    await withNative(previousExecutable, fixture, (client) =>
+      client.withTransaction(
+        Effect.gen(function* () {
+          const key = [{ type: "text", value: "upgrade:session" }];
+          const session = yield* client.get("auth_sessions", key);
+          yield* client.put("auth_sessions", key, {
+            ...session,
+            client_label: { type: "text", value: "Native-only label" },
+          });
+        }),
+      ),
+    );
+    const verify = Effect.fn("Schema89UpgradeFixture.verify")(function* (client, database) {
+      NodeAssert.deepEqual(
+        yield* database.request({ operation: "application_migrations" }, migrationsSchema),
+        currentSchema.migrations,
+      );
+      const session = yield* client.get("auth_sessions", [
+        { type: "text", value: "upgrade:session" },
+      ]);
+      NodeAssert.deepEqual(session.proof_key_thumbprint, { type: "null" });
+      const link = yield* client.get("auth_pairing_links", [
+        { type: "text", value: "upgrade:link" },
+      ]);
+      NodeAssert.equal(link.requires_connect_approval.value, "0");
+      NodeAssert.equal(link.connect_denied.value, "0");
+      NodeAssert.deepEqual(link.requested_client_json, { type: "null" });
+      NodeAssert.equal(link.proof_key_thumbprint.value, "original-link-proof");
+      const project = yield* client.get("projection_projects", [
+        { type: "text", value: "upgrade:project" },
+      ]);
+      NodeAssert.deepEqual(project.tracked_folders_json, { type: "text", value: "[]" });
+      return session;
+    });
+    await NodeFSP.writeFile(
+      NodePath.join(fixture.root, "server-owner.sqlite"),
+      "t3code-omdb-owner-v1\n",
+      { flag: "wx" },
+    );
+    for (let restart = 0; restart < 2; restart++) {
+      await Effect.runPromise(
+        isolated(
+          fixture,
+          Effect.gen(function* () {
+            const { client, database } = yield* Omdb.make({
+              executable,
+              databasePath: fixture.databasePath,
+            });
+            const session = yield* verify(client, database);
+            NodeAssert.equal(session.client_label.value, "Native-only label");
+          }),
+        ),
+      );
+      NodeAssert.deepEqual(
+        nativeRequest(executable, fixture, "connect", { operation: "application_import" }),
+        { ...imported, replayed: true },
+      );
+      NodeAssert.equal(hash(await NodeFSP.readFile(source)), sourceDigest);
+      NodeAssert.equal(hash(await NodeFSP.readFile(archive)), archiveDigest);
+    }
+    await verifyUnactivatedUpgrade(executable, source, archive, { version, verify });
+    return `Schema-${version} native homes preserve native-only authentication edits and original imports while upgrading to exact schema 107, including restart, interrupted activation and changed-source rejection`;
   } finally {
     await fixture.close();
   }

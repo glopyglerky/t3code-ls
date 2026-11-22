@@ -26,7 +26,7 @@ fn write_response(output: &mut impl Write, frame: &str) -> Result<(), &'static s
 fn run() -> Result<(), &'static str> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut output = io::stdout().lock();
-    if args.as_slice() == ["--follow-up-owner"] {
+    if args.len() == 1 && args[0] == "--follow-up-owner" {
         let mut input = BufReader::new(io::stdin().lock());
         let mut owner = dispatch::FollowUpOwner::default();
         while let Some(frame) =

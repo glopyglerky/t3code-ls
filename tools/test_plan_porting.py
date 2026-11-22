@@ -72,6 +72,10 @@ class PortingPlans(unittest.TestCase):
         for path, contents in {
             "apps/server/policy.ts": "policy\n",
             "apps/server/other.ts": "other\n",
+            "apps/desktop/app.ts": "desktop\n",
+            "apps/mobile/app.ts": "mobile\n",
+            "packages/client-runtime/src/connection/session.ts": "connection\n",
+            "packages/provider-fixture/adapter.ts": "provider\n",
             "apps/web/clean.ts": "clean\n",
             "apps/web/conflict.ts": "conflict\n",
             "apps/web/missing.ts": "missing\n",
@@ -88,6 +92,7 @@ class PortingPlans(unittest.TestCase):
                      "root_tree": self.git("rev-parse", f"{self.base}^{{tree}}")},
                      "qualification": {"last_qualified_commit": None}}
         self.mapping = {"schema_version": 1, "integrated_upstream_commit": self.base,
+                        "source_history": [self.base],
                         "supported_targets": ["linux-x64", "win32-x64", "browser"],
                         "ports": [self.port("policy", "apps/server/policy.ts")]}
 
@@ -132,8 +137,8 @@ class PortingPlans(unittest.TestCase):
                 (self.root / path).unlink()
             else:
                 self.write(path, content)
-        self.write("port-map.json", json.dumps(self.mapping))
-        self.write("upstream.lock.json", json.dumps(self.lock))
+        self.write("port-map.json", json.dumps(self.mapping, indent=2) + "\n")
+        self.write("upstream.lock.json", json.dumps(self.lock, indent=2) + "\n")
         return self.commit("fork")
 
     def plan(self, head):
@@ -160,6 +165,27 @@ class PortingPlans(unittest.TestCase):
         self.assertEqual(result["revisions"], {"integrated_upstream": self.base, "trusted_upstream": head,
                                               "fork": fork, "qualified_upstream": None})
         self.assertFalse(result["trust"]["upstream_tests_required"])
+
+    def test_added_persistence_sources_require_review_by_the_native_port(self):
+        migration = "apps/server/src/persistence/Migrations/105_TaskFolders.ts"
+        store = "apps/server/src/workspace/TaskFolderStore.ts"
+        reference = ".repos/effect/packages/effect/src/Effect.ts"
+        head = self.upstream({
+            migration: "new database table",
+            store: "new database repository",
+            reference: "upstream reference",
+        })
+        self.mapping["ports"].append(self.port("redb-persistence", "apps/server/other.ts"))
+        self.fork()
+        result = self.plan(head)
+        changes = {item["path"]: item for item in result["changes"]}
+        for path in (migration, store):
+            self.assertEqual(changes[path]["classification"], "translation-review")
+            self.assertEqual(changes[path]["ports"], ["redb-persistence"])
+        self.assertEqual(changes[reference]["classification"], "fork-policy-review")
+        task = next(item for item in result["queue"] if item["id"] == "port:redb-persistence")
+        self.assertEqual(task["upstream_paths"], [migration, store])
+        self.assertTrue(task["blocks_upstream_integration"])
 
     def test_mode_changes_are_not_mistaken_for_identical_source(self):
         (self.root / "apps/web/clean.ts").chmod(0o755)
@@ -248,6 +274,57 @@ class PortingPlans(unittest.TestCase):
         self.assertEqual(json.loads(output.read_text()), one)
         self.assertIn("Rust porting queue", summary.read_text())
         self.assertEqual(self.git("status", "--porcelain"), before)
+
+    def test_exact_mechanical_merge_generates_an_applicable_metadata_patch(self):
+        head = self.upstream({"apps/web/clean.ts": "changed upstream\n", "apps/web/new.ts": "new\n"})
+        fork = self.fork({"apps/web/conflict.ts": "existing fork change\n"})
+        self.git("merge", "--no-commit", head)
+        index = self.git("write-tree")
+        before = self.git("status", "--porcelain")
+        patch = self.directory / "metadata.patch"
+        report = self.directory / "plan.json"
+        args = ["--repo-root", str(self.root), "--upstream-commit", head, "--output", str(report),
+                "--mechanical-metadata-patch", str(patch)]
+        self.assertEqual(planner.main(args), 0)
+        self.assertEqual(self.git("status", "--porcelain"), before)
+        self.assertEqual(self.git("write-tree"), index)
+        self.assertEqual(self.git("rev-parse", "HEAD"), fork)
+        self.git("apply", "--index", str(patch))
+        mapping = json.loads((self.root / "port-map.json").read_text())
+        lock = json.loads((self.root / "upstream.lock.json").read_text())
+        self.assertEqual(mapping["source_history"], [self.base, head])
+        self.assertEqual(mapping["integrated_upstream_commit"], head)
+        self.assertEqual(mapping["ports"][0]["reviewed_upstream_commit"], head)
+        self.assertEqual(mapping["ports"][0]["upstream_sources"], self.mapping["ports"][0]["upstream_sources"])
+        self.assertEqual(lock["upstream"]["commit"], head)
+        self.assertEqual(lock["qualification"]["status"], "unqualified")
+        self.assertIsNone(lock["qualification"]["last_qualified_commit"])
+
+    def test_mechanical_metadata_refuses_staged_mode_or_unrelated_changes(self):
+        head = self.upstream({"apps/web/clean.ts": "changed upstream\n"})
+        self.fork()
+        self.git("merge", "--no-commit", head)
+        plan = self.plan(head)
+        self.git("update-index", "--chmod=+x", "apps/web/clean.ts")
+        with self.assertRaises(planner.nightly.TrackingError):
+            planner.mechanical_metadata_patch(self.root, plan)
+        self.git("update-index", "--chmod=-x", "apps/web/clean.ts")
+        self.write("apps/web/extra.ts", "unreviewed\n")
+        self.git("add", "apps/web/extra.ts")
+        with self.assertRaisesRegex(planner.nightly.TrackingError, "staged merge differs"):
+            planner.mechanical_metadata_patch(self.root, plan)
+
+    def test_mechanical_metadata_refuses_policy_changes_and_multiple_merge_parents(self):
+        head = self.upstream({"AGENTS.md": "changed upstream policy\n"})
+        self.fork()
+        self.git("merge", "--no-commit", head)
+        plan = self.plan(head)
+        with self.assertRaisesRegex(planner.nightly.TrackingError, "explicit source review"):
+            planner.mechanical_metadata_patch(self.root, plan)
+        merge_head = self.root / self.git("rev-parse", "--git-path", "MERGE_HEAD")
+        merge_head.write_text(f"{head}\n{self.base}\n")
+        with self.assertRaisesRegex(planner.nightly.TrackingError, "exact planned upstream"):
+            planner.mechanical_metadata_patch(self.root, plan)
 
     def test_uncommitted_metadata_and_in_checkout_reports_are_rejected(self):
         self.fork()

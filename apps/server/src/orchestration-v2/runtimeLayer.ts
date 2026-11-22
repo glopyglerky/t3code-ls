@@ -9,6 +9,7 @@ import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as PreviewAgentActivity from "../preview/PreviewAgentActivity.ts";
 import * as McpAppRequests from "../mcpApps/McpAppRequests.ts";
+import * as McpSignIn from "../mcpApps/McpSignIn.ts";
 import * as ProviderSessionRuntime from "../persistence/ProviderSessionRuntime.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
@@ -47,6 +48,7 @@ import * as ProviderRuntimeRecoveryService from "./ProviderRuntimeRecoveryServic
 import * as ProviderSwitchService from "./ProviderSwitchService.ts";
 import * as ProviderTurnControlService from "./ProviderTurnControlService.ts";
 import * as ProviderTurnStartService from "./ProviderTurnStartService.ts";
+import { layerThreadWorktreeRestore } from "../workspace/restoreMissingWorktree.ts";
 import * as RunExecutionService from "./RunExecutionService.ts";
 import * as RunFinalizationService from "./RunFinalizationService.ts";
 import * as ResourceCleanupService from "./ResourceCleanupService.ts";
@@ -58,6 +60,8 @@ import * as ThreadForkService from "./ThreadForkService.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
+import * as TaskFolderStore from "../workspace/TaskFolderStore.ts";
 
 /** Persistence is chosen once; the application graph and shared worker instances stay unchanged. */
 interface RuntimePersistenceServices {
@@ -74,6 +78,7 @@ interface RuntimePersistenceServices {
   readonly providerRuntime: ProviderSessionRuntime.ProviderSessionRuntimeRepository;
   readonly mcpContext: McpAppModelContext.McpAppModelContext;
   readonly scheduledTasks: ScheduledTaskService.ScheduledTaskService;
+  readonly taskFolders: TaskFolderStore.TaskFolderStore;
 }
 
 type RuntimePersistenceChannels = { readonly [Key in keyof RuntimePersistenceServices]: unknown };
@@ -112,6 +117,8 @@ export const makeRuntimeLayers = <
   McpServices,
   ScheduledError,
   ScheduledServices,
+  TaskFolderError,
+  TaskFolderServices,
 >(
   persistence: RuntimePersistenceLayers<
     {
@@ -126,6 +133,7 @@ export const makeRuntimeLayers = <
       providerRuntime: ProviderError;
       mcpContext: McpError;
       scheduledTasks: ScheduledError;
+      taskFolders: TaskFolderError;
     },
     {
       eventInfrastructure: EventServices;
@@ -139,12 +147,17 @@ export const makeRuntimeLayers = <
       providerRuntime: ProviderServices;
       mcpContext: McpServices;
       scheduledTasks: ScheduledServices;
+      taskFolders: TaskFolderServices;
     }
   >,
 ) => {
   const layerEventInfrastructure = persistence.eventInfrastructure;
 
+  const layerWorkspaceFoldersProvided = WorkspaceFolders.layer.pipe(
+    Layer.provide(Layer.merge(persistence.projects, persistence.taskFolders)),
+  );
   const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
+    Layer.provide(layerWorkspaceFoldersProvided),
     Layer.provide(persistence.projects),
   );
 
@@ -174,6 +187,7 @@ export const makeRuntimeLayers = <
   );
 
   const layerProjectService = ProjectService.layer.pipe(
+    Layer.provide(persistence.providerRuntime),
     Layer.provide(
       Layer.mergeAll(
         persistence.projects,
@@ -198,7 +212,7 @@ export const makeRuntimeLayers = <
   );
 
   const layerCheckpointServiceProvided = CheckpointService.layer.pipe(
-    Layer.provide(IdAllocator.layer),
+    Layer.provide(Layer.merge(IdAllocator.layer, layerWorkspaceFoldersProvided)),
   );
   const layerContextHandoffServiceProvided = ContextHandoffService.layer.pipe(
     Layer.provide(IdAllocator.layer),
@@ -290,6 +304,7 @@ export const makeRuntimeLayers = <
         layerEventSink,
         IdAllocator.layer,
         persistence.projections,
+        ThreadCommandExecutor.layer,
       ),
     ),
   );
@@ -308,6 +323,7 @@ export const makeRuntimeLayers = <
         layerContextHandoffServiceProvided,
         IdAllocator.layer,
         persistence.projects,
+        persistence.taskFolders,
         ProviderAdapterRegistry.layerFromProviderInstanceRegistry,
         // Reuse the continuation worker's layer reference so memoization shares one request queue.
         ProviderContinuationRequests.layer,
@@ -346,6 +362,7 @@ export const makeRuntimeLayers = <
         layerLegacyV1ThreadImporterProvided,
         layerCommandReceiptStoreProvided,
         layerProviderSessionManagerProvided,
+        layerThreadWorktreeRestore.pipe(Layer.provide(persistence.providerRuntime)),
       ),
     ),
   );
@@ -360,14 +377,13 @@ export const makeRuntimeLayers = <
   const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        layerProjectService,
         layerProjectSetupScriptRunner,
         layerManagedProjectFoldersProvided,
         layerThreadManagementProvided,
         layerCommandReceiptStoreProvided,
         layerEventSink,
         IdAllocator.layer,
-      ),
+      ).pipe(Layer.provideMerge(layerProjectService)),
     ),
   );
   const layerSecretRequestsProvided = SecretRequests.layer.pipe(
@@ -386,11 +402,10 @@ export const makeRuntimeLayers = <
   const layerScratchThreadPromotionProvided = ScratchThreadPromotion.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        layerProjectService,
         layerManagedProjectFoldersProvided,
         layerThreadManagementProvided,
         layerScheduledTaskProvided,
-      ),
+      ).pipe(Layer.provideMerge(layerProjectService)),
     ),
   );
   const layerProviderContinuationWorkerProvided = ProviderContinuationService.layer.pipe(
@@ -422,6 +437,7 @@ export const makeRuntimeLayers = <
         layerRuntimeRequestServiceProvided,
         layerThreadTitleRegenerationProvided,
         layerThreadManagementProvided,
+        persistence.projections,
       ),
     ),
   );
@@ -451,7 +467,12 @@ export const makeRuntimeLayers = <
     ),
   );
 
+  const layerMcpSignInProvided = McpSignIn.layer.pipe(
+    Layer.provide(Layer.merge(layerThreadManagementProvided, layerProviderSessionManagerProvided)),
+  );
+
   const layer = Layer.mergeAll(
+    layerMcpSignInProvided,
     layerCommandOutputHubProvided,
     layerOrchestratorProvided,
     layerMcpAppRequestsProvided,
@@ -462,14 +483,13 @@ export const makeRuntimeLayers = <
     layerProviderRuntimeRecoveryProvided,
     layerProjectionMaintenanceProvided,
     layerLegacyV1ThreadImporterProvided,
-  );
+  ).pipe(Layer.provide(persistence.mcpContext));
 
   const layerProduction = Layer.mergeAll(
     WorktreeBranchSync.layer.pipe(
       Layer.provide(Layer.merge(layerThreadManagementProvided, persistence.projections)),
     ),
-    layer.pipe(Layer.provide(layerProjectService)),
-    layerProjectService,
+    layer,
     layerManagedProjectFoldersProvided,
     layerThreadLaunchProvided,
     layerScheduledTaskProvided,
@@ -493,7 +513,11 @@ export const makeRuntimeLayers = <
     EffectOutbox.layerPruneWorker.pipe(Layer.provide(persistence.outbox)),
   ).pipe(
     Layer.provide(ResourceCleanupService.layer.pipe(Layer.provide(layerScheduledTaskProvided))),
+    Layer.provideMerge(layerProjectService),
+    Layer.provide(persistence.providerRuntime),
     Layer.provide(Scheduler.layer),
+    // WebSocket-owned scanners share this selected runtime repository too.
+    Layer.provideMerge(persistence.providerRuntime),
     Layer.provideMerge(layerEventInfrastructure),
   );
 
@@ -522,6 +546,7 @@ const sqliteRuntime = makeRuntimeLayers({
   providerRuntime: ProviderSessionRuntime.layer,
   mcpContext: McpAppModelContext.layer,
   scheduledTasks: ScheduledTaskService.layer,
+  taskFolders: TaskFolderStore.layer,
 });
 
 // Retained SQLite composition remains available to upstream tests and migration oracles.

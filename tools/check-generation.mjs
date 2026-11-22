@@ -23,8 +23,10 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import { upstreamSource } from "./upstream-source.mjs";
 
-function immutableModule(path, imports, names) {
-  const source = NodeModule.stripTypeScriptTypes(upstreamSource(path), { mode: "strip" })
+function immutableModule(path, imports, names, selectSource = (source) => source) {
+  const source = NodeModule.stripTypeScriptTypes(selectSource(upstreamSource(path)), {
+    mode: "strip",
+  })
     .replace(/^import\s[\s\S]*?;\s*$/gm, "")
     .replace(/^export (?=(?:function|const|class) )/gm, "");
   return new Function(...Object.keys(imports), `${source}\nreturn {${names.join(",")}};`)(
@@ -60,6 +62,18 @@ const { expandHomePath } = immutableModule(
   { NodePath },
   ["expandHomePath"],
 );
+const { codexAppServerEnvironment } = immutableModule(
+  "apps/server/src/provider/CodexProvider.ts",
+  {},
+  ["codexAppServerEnvironment"],
+  (source) => {
+    const name = source.match(/^const CODEX_CLIENT_NAME = .*;$/m);
+    const start = source.indexOf("export const codexAppServerEnvironment =");
+    const end = source.indexOf("export function buildCodexInitializeParams(", start);
+    NodeAssert.ok(name && start >= 0 && end > start, "Expected upstream Codex environment helper");
+    return [name[0], source.slice(start, end)].join("\n");
+  },
+);
 const outputSchema = Schema.Struct({ value: Schema.String });
 const host = {
   HomeDirectory: Context.Reference("generation-oracle-home", {
@@ -71,9 +85,13 @@ const serverConfig = {
 };
 const observedEnvironment = (env) =>
   Object.fromEntries(
-    ["HOME", "CODEX_HOME", "PRIVATE_FIXTURE_TOKEN", "T3CODE_CODEX_LAUNCH_ARGS"].flatMap((key) =>
-      env[key] === undefined ? [] : [[key, env[key]]],
-    ),
+    [
+      "HOME",
+      "CODEX_HOME",
+      "PRIVATE_FIXTURE_TOKEN",
+      "T3CODE_CODEX_LAUNCH_ARGS",
+      "CODEX_INTERNAL_ORIGINATOR_OVERRIDE",
+    ].flatMap((key) => (env[key] === undefined ? [] : [[key, env[key]]])),
   );
 
 function normalizedArgs(args) {
@@ -164,6 +182,7 @@ async function upstream(fixture) {
       ServerConfig: serverConfig,
       HostProcess: host,
       expandHomePath,
+      codexAppServerEnvironment,
       ...launch,
       ...model,
       ...tier,
@@ -251,6 +270,9 @@ const options = [
 ];
 
 add("empty model catalog");
+add("explicit originator override", {
+  env: { CODEX_INTERNAL_ORIGINATOR_OVERRIDE: "fixture-originator" },
+});
 add("exact model precedes default", {
   models: [candidate("default", { isDefault: true }), candidate("requested")],
   modelSelection: selected("requested", options),
@@ -365,7 +387,13 @@ for (const launchArgs of [
 ]) {
   add(`launch ${launchArgs}`, { launchArgs });
 }
-for (const override of ["", "  \ufeff\u00a0 ", " --config env=1 --listen ignored ", "\u0085"]) {
+for (const override of [
+  "",
+  "  \ufeff\u00a0 ",
+  " --config env=1 --listen ignored ",
+  "\ufeff--config skipped=1 --config kept=1",
+  "\u0085",
+]) {
   add(`environment launch override ${JSON.stringify(override)}`, {
     launchArgs: "--config setting=1 --strict-config",
     env: { T3CODE_CODEX_LAUNCH_ARGS: override },
@@ -442,7 +470,7 @@ const phase = args[0] === 'exec' ? 'exec' : 'mcp';
 let prompt = '';
 if (phase === 'exec') { for await (const chunk of process.stdin) prompt += chunk; }
 const normalized = args.map((arg, index) => args[index - 1] === '--output-schema' ? '<schema>' : args[index - 1] === '--output-last-message' ? '<output>' : arg);
-const env = Object.fromEntries(['HOME','CODEX_HOME','PRIVATE_FIXTURE_TOKEN','T3CODE_CODEX_LAUNCH_ARGS'].flatMap(key => process.env[key] === undefined ? [] : [[key,process.env[key]]]));
+const env = Object.fromEntries(['HOME','CODEX_HOME','PRIVATE_FIXTURE_TOKEN','T3CODE_CODEX_LAUNCH_ARGS','CODEX_INTERNAL_ORIGINATOR_OVERRIDE'].flatMap(key => process.env[key] === undefined ? [] : [[key,process.env[key]]]));
 const trace = {phase,args:normalized,cwd:process.cwd(),env,prompt};
 if (phase === 'exec') trace.schema = JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema')+1], 'utf8'));
 fs.appendFileSync(process.env.GENERATION_TRACE, JSON.stringify(trace)+'\\n');
@@ -463,7 +491,7 @@ async function native(executable, fixture, directory) {
   await NodeFSP.writeFile(planPath, JSON.stringify(fixture));
   const env = {
     PATH: process.env.PATH,
-    ...fixture.env,
+    ...codexAppServerEnvironment(fixture.env),
     ...(config.homePath ? { CODEX_HOME: expandHomePath(config.homePath, "/fixture-home") } : {}),
     GENERATION_FIXTURE: planPath,
     GENERATION_TRACE: tracePath,

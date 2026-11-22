@@ -60,6 +60,7 @@ const makeRows = Effect.gen(function* () {
           ),
         ),
       ),
+    isInTransaction: client.isInTransaction,
     withReadTransaction: client.withReadTransaction,
   } satisfies ThreadFindRows;
 });

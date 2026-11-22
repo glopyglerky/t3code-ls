@@ -35,5 +35,6 @@ export interface ThreadFindRows {
   readonly revision: (
     threadIds: ReadonlyArray<ThreadId>,
   ) => Effect.Effect<number, ThreadFindRowsError>;
+  readonly isInTransaction: PersistenceTransactionsShape["isInTransaction"];
   readonly withReadTransaction: PersistenceTransactionsShape["withReadTransaction"];
 }

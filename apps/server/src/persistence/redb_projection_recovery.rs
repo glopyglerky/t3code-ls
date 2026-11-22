@@ -12,6 +12,7 @@ use super::*;
 #[serde(rename_all = "kebab-case")]
 pub enum RecoveryKind {
     QueuedRuns,
+    UnreadSteers,
     DelegatedCompletions,
     SubagentResults,
     RestartContinuations,
@@ -202,6 +203,21 @@ async fn recovery_threads(
                 }
             }
         }
+        RecoveryKind::UnreadSteers => {
+            for row in flag(session, ITEMS, "unread_steer").await? {
+                let Some(run_id) = nullable(&row.row, "run_id")? else {
+                    continue;
+                };
+                if let Some(run) = read_metadata(session, RUNS, &run_id).await? {
+                    if matches!(
+                        text(&run.row, "status")?.as_str(),
+                        "completed" | "interrupted" | "failed" | "cancelled"
+                    ) {
+                        add_thread(&mut ids, &row.row)?;
+                    }
+                }
+            }
+        }
         RecoveryKind::DelegatedCompletions => {
             for row in flag(session, RUNS, "delegated_completion").await? {
                 add_thread(&mut ids, &row.row)?;
@@ -210,6 +226,16 @@ async fn recovery_threads(
         RecoveryKind::SubagentResults => ids = subagent_result_threads(session).await?,
         RecoveryKind::RestartContinuations => {
             session_threads(session, &mut ids, false).await?;
+            let mut with_work = BTreeSet::new();
+            for (name, selector) in [
+                (PROVIDER_THREADS, "pending_provider_thread"),
+                (ITEMS, "runtime_item"),
+            ] {
+                for row in flag(session, name, selector).await? {
+                    add_thread(&mut with_work, &row.row)?;
+                }
+            }
+            ids.retain(|id| with_work.contains(id));
             for row in flag(session, RUNS, "restart_continuation").await? {
                 add_thread(&mut ids, &row.row)?;
             }

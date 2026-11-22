@@ -237,8 +237,13 @@ pub(super) fn fold(mut code: u32) -> u32 {
 pub(super) fn trigram_iter(text: &str) -> impl Iterator<Item = String> + '_ {
     text.chars()
         .filter_map(|point| {
-            // Rust strings exclude malformed UTF-8 and surrogates. SQLite 3.54's
-            // amalgamation preserves other scalars, including noncharacters.
+            // SQLite's UTF-8 reader replaces the two BMP noncharacters before
+            // FTS folding. Higher-plane noncharacters remain intact. Rust
+            // strings already exclude malformed UTF-8 and surrogates.
+            let point = match point {
+                '\u{fffe}' | '\u{ffff}' => '\u{fffd}',
+                point => point,
+            };
             char::from_u32(fold(point as u32)).filter(|&point| point != '\0')
         })
         .scan(
@@ -266,8 +271,8 @@ mod tests {
         assert_eq!(trigrams("ÀḈộ"), vec!["aco"]);
         assert_eq!(trigrams("A\u{301}BC"), vec!["abc"]);
         assert_eq!(trigrams("AB\0CD"), vec!["abc", "bcd"]);
-        assert_eq!(trigrams("A\u{ffff}B"), vec!["a\u{ffff}b"]);
-        assert_eq!(trigrams("A\u{fffe}B"), vec!["a\u{fffe}b"]);
+        assert_eq!(trigrams("A\u{ffff}B"), vec!["a\u{fffd}b"]);
+        assert_eq!(trigrams("A\u{fffe}B"), vec!["a\u{fffd}b"]);
         assert_eq!(trigrams("A\u{10ffff}B"), vec!["a\u{10ffff}b"]);
         assert_eq!(fold('ẞ' as u32), 'ß' as u32);
         assert_eq!(fold('İ' as u32), 'i' as u32);

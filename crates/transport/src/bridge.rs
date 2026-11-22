@@ -109,7 +109,16 @@ async fn endpoint(
     network: Network,
     limits: &Limits,
     accepts_connections: bool,
+    udp_bind: Option<SocketAddr>,
 ) -> Result<Endpoint, BridgeError> {
+    if matches!(network, Network::Loopback)
+        && udp_bind.is_some_and(|address| !address.ip().is_loopback())
+    {
+        return Err(BridgeError::Configuration(
+            "loopback transport requires a loopback UDP bind",
+        ));
+    }
+
     limits.validate()?;
     let quic = QuicTransportConfig::builder()
         .max_concurrent_bidi_streams(limits.streams_per_connection.into())
@@ -132,6 +141,13 @@ async fn endpoint(
             Endpoint::builder(presets::Minimal).relay_mode(RelayMode::custom(relays))
         }
         Network::Public => Endpoint::builder(presets::N0),
+    };
+    let builder = match udp_bind {
+        Some(addr) => builder
+            .clear_ip_transports()
+            .bind_addr(addr)
+            .map_err(transport)?,
+        None => builder,
     };
     let alpns = if accepts_connections {
         vec![ALPN.to_vec()]
@@ -236,6 +252,7 @@ pub struct HostConfig {
     pub target: SocketAddr,
     pub admission: Admission,
     pub limits: Limits,
+    pub udp_bind: Option<SocketAddr>,
 }
 
 impl HostConfig {
@@ -244,6 +261,7 @@ impl HostConfig {
             target,
             admission,
             limits: Limits::default(),
+            udp_bind: None,
         }
     }
 }
@@ -291,7 +309,7 @@ impl Host {
                 "backend target port must be nonzero",
             ));
         }
-        let endpoint = endpoint(key, network, &config.limits, true).await?;
+        let endpoint = endpoint(key, network, &config.limits, true, config.udp_bind).await?;
         let (cancel, receiver) = watch::channel(false);
         let counters = Arc::new(Counters::default());
         let task = tokio::spawn(serve(endpoint.clone(), config, receiver, counters.clone()));
@@ -499,7 +517,7 @@ impl Forwarder {
     ) -> Result<Self, BridgeError> {
         require_loopback(listen)?;
         limits.validate()?;
-        let endpoint = endpoint(key, network, &limits, false).await?;
+        let endpoint = endpoint(key, network, &limits, false, None).await?;
         let listener = match TcpListener::bind(listen).await {
             Ok(listener) => listener,
             Err(error) => {
@@ -944,7 +962,7 @@ mod tests {
             .await
             .unwrap();
             let limits = Limits::default();
-            let endpoint = endpoint(key, Network::Loopback, &limits, false)
+            let endpoint = endpoint(key, Network::Loopback, &limits, false, None)
                 .await
                 .unwrap();
             let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1143,9 +1161,15 @@ mod tests {
     #[tokio::test]
     async fn an_actual_dial_timeout_counts_once_before_releasing_the_cache() {
         let limits = Limits::default();
-        let endpoint = endpoint(SecretKey::generate(), Network::Loopback, &limits, false)
-            .await
-            .unwrap();
+        let endpoint = endpoint(
+            SecretKey::generate(),
+            Network::Loopback,
+            &limits,
+            false,
+            None,
+        )
+        .await
+        .unwrap();
         let silent = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let remote = EndpointAddr::new(SecretKey::generate().public())
             .with_ip_addr(silent.local_addr().unwrap());

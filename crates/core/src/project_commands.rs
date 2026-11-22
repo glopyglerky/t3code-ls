@@ -28,6 +28,7 @@ pub struct MetadataChanges<Payload> {
     pub favicon_path: Option<Option<String>>,
     pub project_icon: Option<Option<Icon<Payload>>>,
     pub scripts: Option<Vec<Script<Payload>>>,
+    pub tracked_folders: Option<Vec<Payload>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,6 +37,7 @@ pub enum CommandKind<Payload> {
         title: String,
         workspace_root: String,
         scripts: Option<Vec<Script<Payload>>>,
+        tracked_folders: Option<Vec<Payload>>,
     },
     Update {
         changes: MetadataChanges<Payload>,
@@ -82,6 +84,7 @@ pub enum EventKind<Payload> {
         title: String,
         workspace_root: String,
         scripts: Vec<Script<Payload>>,
+        tracked_folders: Vec<Payload>,
     },
     Updated {
         changes: MetadataChanges<Payload>,
@@ -170,6 +173,7 @@ pub fn plan<Payload: Clone>(
             title,
             workspace_root,
             scripts,
+            tracked_folders,
         } => {
             if state.project.is_some() {
                 return Err(invariant(format!(
@@ -183,6 +187,7 @@ pub fn plan<Payload: Clone>(
                 workspace_root: workspace_root.clone(),
                 // Upstream validates newly introduced script IDs only on metadata updates.
                 scripts: scripts.clone().unwrap_or_default(),
+                tracked_folders: tracked_folders.clone().unwrap_or_default(),
             }
         }
         CommandKind::Update {
@@ -365,6 +370,7 @@ mod tests {
             title: "Restored".to_string(),
             workspace_root: "/taken".to_string(),
             scripts: None,
+            tracked_folders: None,
         });
         let mut deleted = project();
         deleted.deleted_at = Some("deleted".to_string());

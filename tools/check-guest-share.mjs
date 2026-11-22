@@ -211,13 +211,18 @@ for (const start of [initial(), { ...initial(), guestShare: null }]) {
 }
 decide("archived threads cannot open a share", { ...initial(), archivedAt: now }, open());
 decide(
-  "reopening replaces guest state and releases waiting attachments",
+  "reopening refuses a share with pending guest messages",
   withShare(
     share([
       message("waiting", "pending", [file("waiting-file", 1)]),
       message("sent", "sent", [file("sent-file", 1)]),
     ]),
   ),
+  open({ shareId: "replacement" }),
+);
+decide(
+  "reopening replaces a share after all pending messages are resolved",
+  withShare(share([message("sent", "sent", [file("sent-file", 1)])])),
   open({ shareId: "replacement" }),
 );
 let thread = decide("open share", initial(), open()).ok;
@@ -293,19 +298,32 @@ add("old link cannot cancel a replacement share", {
   guest: { ...sent.guest, shareId: "old-link" },
   now,
 });
-thread = decide(
-  "replace link drops waiting files and earlier guest",
+const refusedReplacement = decide(
+  "replacement keeps waiting messages and attachments",
   thread,
   open({ shareId: "share:two" }),
   now + 12,
+);
+NodeAssert.match(refusedReplacement.error, /Answer or dismiss waiting guest messages/);
+thread = decide(
+  "dismiss the remaining pending message before replacing its link",
+  thread,
+  { type: "thread.guest-message.dismiss", guestMessageId: "third" },
+  now + 13,
+).ok;
+thread = decide(
+  "replace the link after waiting messages are resolved",
+  thread,
+  open({ shareId: "share:two" }),
+  now + 15,
 ).ok;
 decide("old link cannot submit into new share", thread, submit("stale"));
-thread = decide("close current share", thread, { type: "thread.guest-share.close" }, now + 13).ok;
+thread = decide("close current share", thread, { type: "thread.guest-share.close" }, now + 16).ok;
 decide(
   "closing twice does not stamp a new update",
   thread,
   { type: "thread.guest-share.close" },
-  now + 14,
+  now + 17,
 );
 
 for (const settledOverride of [null, "active", "settled"]) {

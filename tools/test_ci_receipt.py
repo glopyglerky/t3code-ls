@@ -2,6 +2,7 @@
 
 import copy
 import json
+import hashlib
 import os
 from pathlib import Path
 import subprocess
@@ -11,6 +12,7 @@ import unittest
 
 import ci_history
 import ci_receipt
+from test_ci_performance import encoded_report
 
 
 HEAD = "a" * 40
@@ -23,6 +25,7 @@ def plan(mode="full-fork"):
     selected = mode == "full-fork"
     return {
         "schema_version": 1, "head": HEAD, "source_tree": TREE, "policy_digest": POLICY,
+        "upstream_commit": "d" * 40, "upstream_tree": "e" * 40,
         "mode": mode, "base": None if selected else HEAD, "base_run_id": None if selected else 100,
         "reused_run_id": 100 if mode == "reused" else None,
         "gates": {gate: selected for gate in ci_history.GATES},
@@ -35,7 +38,10 @@ def plan(mode="full-fork"):
 
 def needs(value):
     return {"plan": {"result": "success", "outputs": {}},
-            **{gate: {"result": "success" if selected else "skipped", "outputs": {}}
+            **{gate: {"result": "success" if selected else "skipped", "outputs": {
+                   "proof_sha256": hashlib.sha256(encoded_report(value)[1]).hexdigest(),
+                   "proof_run_attempt": "1",
+               } if gate == "performance" and selected else {}}
                for gate, selected in value["gates"].items()}}
 
 
@@ -45,14 +51,14 @@ class ReceiptIssuance(unittest.TestCase):
         value["changed_paths"] = ["large unrelated plan metadata " * 50000]
         statuses = needs(value)
         statuses["native"]["future_metadata"] = {"trace": "optional"}
-        result = ci_receipt.make_receipt(value, statuses, HEAD, "101")
+        result = ci_receipt.make_receipt(value, statuses, HEAD, "101", encoded_report(value))
         self.assertTrue(ci_history.valid_receipt(result, HEAD, TREE, POLICY))
         self.assertEqual(result["run_id"], 101)
         self.assertEqual(result["plan"]["adapter_ports"], ["project-commands"])
         self.assertNotIn("changed_paths", result["plan"])
         self.assertNotIn("reasons", result["plan"])
         self.assertNotIn("future_metadata", json.dumps(result))
-        self.assertLess(len(json.dumps(result)), 2048)
+        self.assertLess(len(json.dumps(result)), 8192)
 
     def test_affected_native_and_documentation_runs_accept_only_their_required_results(self):
         for native in (True, False):
@@ -78,6 +84,46 @@ class ReceiptIssuance(unittest.TestCase):
                 ci_receipt.make_receipt({**value, **changes}, needs(value), HEAD)
         with self.assertRaises(ci_receipt.ReceiptError):
             ci_receipt.make_receipt(value, needs(value), HEAD, "100")
+
+    def test_successful_job_without_current_performance_artifact_cannot_qualify(self):
+        value = plan()
+        with self.assertRaisesRegex(ci_receipt.ReceiptError, "performance artifact"):
+            ci_receipt.make_receipt(value, needs(value), HEAD, "101")
+
+    def test_exact_source_reuse_retains_explicit_measurement_identity(self):
+        full = plan()
+        evidence = ci_receipt.make_receipt(full, needs(full), HEAD, "101", encoded_report(full))["performance_evidence"]
+        value = plan("reused")
+        value["performance_reference"] = evidence
+        result = ci_receipt.make_receipt(value, needs(value), HEAD, "102")
+        self.assertEqual(result["performance_evidence"]["ci_run_id"], "101")
+        value["performance_reference"] = {**evidence, "upstream_commit": "f" * 40}
+        with self.assertRaises(ci_receipt.ReceiptError):
+            ci_receipt.make_receipt(value, needs(value), HEAD, "102")
+
+    def test_failed_job_retry_retains_the_original_successful_measurement_attempt(self):
+        value = plan()
+        result = ci_receipt.make_receipt(value, needs(value), HEAD, "101", encoded_report(value), "2")
+        self.assertEqual(result["run_attempt"], 2)
+        self.assertEqual(result["performance_run_attempt"], 1)
+        self.assertEqual(result["performance_evidence"]["ci_run_attempt"], "1")
+        self.assertTrue(ci_history.valid_receipt(result, HEAD, TREE, POLICY))
+        for attempt in (None, "", "0", "3"):
+            statuses = needs(value)
+            statuses["performance"]["outputs"]["proof_run_attempt"] = attempt
+            with self.assertRaises(ci_receipt.ReceiptError):
+                ci_receipt.make_receipt(value, statuses, HEAD, "101", encoded_report(value), "2")
+
+        measured, _ = encoded_report(value)
+        measured["ci_run_attempt"] = "2"
+        raw = json.dumps(measured).encode()
+        statuses = needs(value)
+        statuses["performance"]["outputs"] = {
+            "proof_run_attempt": "2", "proof_sha256": hashlib.sha256(raw).hexdigest(),
+        }
+        result = ci_receipt.make_receipt(value, statuses, HEAD, "101", (measured, raw), "2")
+        self.assertEqual(result["performance_evidence"]["ci_run_attempt"], "2")
+        self.assertEqual(result["performance_evidence"]["native_build_run_attempt"], "1")
 
     def test_missing_failed_cancelled_and_skipped_required_jobs_do_not_issue_evidence(self):
         value = plan()
@@ -164,17 +210,20 @@ class ReceiptCommand(unittest.TestCase):
         self.value.update(head=self.git("rev-parse", "HEAD"), source_tree=self.git("rev-parse", "HEAD^{tree}"))
         self.input = self.root / "plan.json"
         self.output = self.root / "proof" / "ci-qualification.json"
+        self.performance = self.root / "performance.json"
 
     def git(self, *args):
         return subprocess.check_output(["git", "-C", str(self.root), *args],
                                        stderr=subprocess.DEVNULL, text=True).strip()
 
-    def command(self, statuses=None, **environment):
-        self.input.write_text(json.dumps(self.value))
+    def command(self, statuses=None, *, write_artifacts=True, **environment):
+        if write_artifacts:
+            self.input.write_text(json.dumps(self.value))
+            self.performance.write_bytes(encoded_report(self.value)[1])
         env = {**os.environ, "CI_HEAD": self.value["head"], "CI_RUN_ID": "101",
                "CI_NEEDS": json.dumps(needs(self.value) if statuses is None else statuses), **environment}
         return subprocess.run([sys.executable, str(SCRIPT), "--plan", str(self.input),
-                               "--output", str(self.output)], cwd=self.root, env=env,
+                               "--output", str(self.output), "--performance", str(self.performance)], cwd=self.root, env=env,
                               capture_output=True, text=True, timeout=10)
 
     def test_command_writes_receipt_for_successful_exact_checkout(self):
@@ -194,6 +243,30 @@ class ReceiptCommand(unittest.TestCase):
         result = self.command(statuses)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.output.read_text(), "existing evidence\n")
+
+    def test_failed_jobs_are_reported_before_missing_plan_or_performance_files(self):
+        for job, status in (("performance", "failure"), ("performance", "cancelled"),
+                            ("application", "failure"), ("plan", "failure"), ("plan", "skipped")):
+            statuses = needs(self.value)
+            statuses[job]["result"] = status
+            statuses["performance"]["outputs"] = {}
+            with self.subTest(job=job, status=status):
+                result = self.command(statuses, write_artifacts=False)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("job " + job, result.stderr.lower())
+                self.assertNotIn("No such file", result.stderr)
+                self.assertFalse(self.output.exists())
+
+    def test_successful_job_without_its_report_still_cannot_issue_evidence(self):
+        result = self.command(write_artifacts=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("plan.json", result.stderr)
+        self.assertFalse(self.output.exists())
+        self.input.write_text(json.dumps(self.value))
+        result = self.command(write_artifacts=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("performance.json", result.stderr)
+        self.assertFalse(self.output.exists())
 
     def test_modified_or_staged_source_cannot_receive_a_commit_receipt(self):
         (self.root / "source.rs").write_text("unqualified source change\n")

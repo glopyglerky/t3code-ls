@@ -1,6 +1,6 @@
 {
-  "upstream": "10fbff5ab6d31c494b5c6cfd759d78c12aa731f6",
-  "source": "packages/shared/src/assistantCitations.ts",
+  "upstream": "e2afd2546eb34fde33ac9fb24c052e8a9d63b519",
+  "source": "apps/server/src/orchestration-v2/messageSearchIndex.ts",
   "cases": [
     {
       "name": "plain",
@@ -136,6 +136,41 @@
       "name": "encoded_parent_discarded_invalid_utf8",
       "input": "[Assistant quote](t3-citation://v1/%FF/%2e%2e/env/thread/msg?text=quoted+words&start=0&end=12&prefix=&suffix=)",
       "expected": "quoted words"
+    },
+    {
+      "name": "file_label",
+      "input": "Read [\\_\\_init\\_\\_.py](/tmp/__init__.py)",
+      "expected": "Read [__init__.py](/tmp/__init__.py)"
+    },
+    {
+      "name": "image_label",
+      "input": "![\\*preview\\*](asset)",
+      "expected": "![*preview*](asset)"
+    },
+    {
+      "name": "escaped_outside_label",
+      "input": "\\_outside\\_ [\\_file\\_](dest) \\*outside\\*",
+      "expected": "\\_outside\\_ [_file_](dest) \\*outside\\*"
+    },
+    {
+      "name": "invalid_link_space",
+      "input": "[\\_file\\_](two words)",
+      "expected": null
+    },
+    {
+      "name": "invalid_link_newline",
+      "input": "[\\_file\\_\n](dest)",
+      "expected": null
+    },
+    {
+      "name": "empty_link",
+      "input": "[\\_file\\_]() [\\*two\\*](next)",
+      "expected": "[_file_]() [*two*](next)"
+    },
+    {
+      "name": "escaped_other_punctuation",
+      "input": "[a\\_b\\*c\\#d](dest)",
+      "expected": "[a_b*c\\#d](dest)"
     }
   ]
 }

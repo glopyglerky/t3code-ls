@@ -9,6 +9,15 @@ const FUTURE: &str = "2026-11-09T11:00:00.000Z";
 fn effect(id: &str, thread: &str, kind: EffectType) -> EnqueueEffect {
     let request = match kind {
         EffectType::ProviderRuntimeContinue => json!({"type":kind.as_wire(), "sourceRunId":"run"}),
+        EffectType::ProviderSessionApplyModelSelection => json!({
+            "type":kind.as_wire(),
+            "providerSessionId":"session",
+            "providerThreadId":"provider-thread",
+            "modelSelection":{"instanceId":"codex","model":"model","options":[]}
+        }),
+        EffectType::ProviderSessionApplyThreadTitle => {
+            json!({"type":kind.as_wire(), "title":"Updated title"})
+        }
         EffectType::ProviderSessionDetach => {
             json!({"type":kind.as_wire(), "providerSessionId":"session"})
         }
@@ -907,11 +916,13 @@ async fn cancellation_is_thread_and_type_scoped_and_preserves_failed_rows() {
 }
 
 #[tokio::test]
-async fn restart_reconciliation_matches_all_fifteen_effect_type_policies() {
+async fn restart_reconciliation_matches_every_effect_type_policy() {
     let fixture = TestFixture::start().await;
     let store = fixture.initialize().await;
     let kinds = [
         EffectType::ProviderRuntimeContinue,
+        EffectType::ProviderSessionApplyModelSelection,
+        EffectType::ProviderSessionApplyThreadTitle,
         EffectType::ProviderSessionDetach,
         EffectType::ProviderTurnStart,
         EffectType::ProviderTurnInterrupt,
@@ -957,7 +968,7 @@ async fn restart_reconciliation_matches_all_fifteen_effect_type_policies() {
         outcome,
         ReconcileOutcome {
             requeued: 10,
-            cancelled: 10
+            cancelled: 14
         }
     );
     for (index, kind) in kinds.iter().enumerate() {
@@ -1880,4 +1891,28 @@ async fn one_large_valid_effect_can_be_scheduled_and_claimed() {
             .unwrap()
     );
     store.shutdown().await.unwrap();
+}
+
+#[test]
+fn restart_continuation_counts_survive_request_normalization_and_reject_invalid_values() {
+    for count in [json!(0), json!(3), json!(9_007_199_254_740_992_u64)] {
+        assert_eq!(
+            normalize_request(&json!({"type":"provider-runtime.continue",
+            "sourceRunId":"run", "processLossCount":count, "extra":"discard"}))
+            .unwrap(),
+            json!({"type":"provider-runtime.continue","sourceRunId":"run","processLossCount":count})
+        );
+    }
+    assert_eq!(
+        normalize_request(&json!({"type":"provider-runtime.continue","sourceRunId":"run"}))
+            .unwrap(),
+        json!({"type":"provider-runtime.continue","sourceRunId":"run"})
+    );
+    for count in [json!(-1), json!(0.5), json!(null), json!(true), json!("2")] {
+        assert!(
+            normalize_request(&json!({"type":"provider-runtime.continue",
+            "sourceRunId":"run","processLossCount":count}))
+            .is_err()
+        );
+    }
 }

@@ -17,7 +17,7 @@ const Ordinal = Schema.Number.check(
 export const make = Effect.gen(function* () {
   const client = yield* RedbClient;
   while (!(yield* client.preparePositions).prepared) yield* Effect.yieldNow;
-  return makeWithAllocate(({ threadId, turnItemId, runId, runOrdinal, placement }) =>
+  return makeWithAllocate(({ threadId, turnItemId, runId, runOrdinal, placement, keepExisting }) =>
     client
       .request(
         "application_positions_allocate",
@@ -25,6 +25,7 @@ export const make = Effect.gen(function* () {
           thread_id: threadId,
           turn_item_id: turnItemId,
           run_id: runId,
+          ...(keepExisting === undefined ? {} : { keep_existing: keepExisting }),
           ...(placement === undefined ? {} : { placement }),
           ...(runOrdinal === undefined ? {} : { run_ordinal: runOrdinal }),
         },

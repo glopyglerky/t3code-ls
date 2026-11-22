@@ -1,12 +1,11 @@
 #!/usr/bin/env node
-import * as Assert from "node:assert/strict";
-import * as FS from "node:fs/promises";
-import * as Path from "node:path";
-import * as Sqlite from "node:sqlite";
+import * as NodeAssert from "node:assert/strict";
+import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
+import * as NodeSqlite from "node:sqlite";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import * as Schema from "effect/Schema";
 
 import * as Projection from "../apps/server/src/orchestration-v2/ProjectionStore.ts";
 import * as NativeRows from "../apps/server/src/orchestration-v2/NativeProjectionRecoveryRows.ts";
@@ -27,8 +26,11 @@ import {
 } from "./redb-domain-fixture.mjs";
 
 const [executable, proofPath] = process.argv.slice(2);
-Assert.ok(executable && Path.isAbsolute(executable), "Pass an absolute native database executable");
-await FS.access(executable, FS.constants.X_OK);
+NodeAssert.ok(
+  executable && NodePath.isAbsolute(executable),
+  "Pass an absolute native database executable",
+);
+await NodeFSP.access(executable, NodeFSP.constants.X_OK);
 const oracle = await loadUpstreamModule("apps/server/src/orchestration-v2/ProjectionStore.ts");
 const fixture = await createFixture(),
   auditFixture = await createFixture();
@@ -158,97 +160,99 @@ async function services(kind, filename, use, target = fixture, auditOnly = false
   );
 }
 
-function exercise({ store, apply, transaction }) {
-  return Effect.gen(function* () {
-    const result = {};
-    for (const kind of [
-      "queued-runs",
-      "delegated-completions",
-      "subagent-results",
-      "restart-continuations",
-      "runtime",
-    ]) {
-      result[kind] = yield* stage(`select recovery ${kind}`, store.getRecoveryThreadIds(kind));
-      result[`${kind}:queue`] = yield* store.getRecoveryThreadIds(kind, {
-        include: ["project:queue"],
-      });
-      result[`${kind}:exclude`] = yield* store.getRecoveryThreadIds(kind, {
-        exclude: ["project:queue"],
-      });
-      Assert.deepEqual(yield* store.getRecoveryThreadIds(kind, { include: [] }), []);
-    }
-    Assert.deepEqual(result["queued-runs"], ["child:held", "q-held", "q-ready"]);
-    Assert.deepEqual(result["delegated-completions"], ["delegated"]);
-    Assert.deepEqual(result["subagent-results"], [
-      "child:held",
-      "child:pending-result",
-      "child:result",
-    ]);
-    for (const id of [
-      "q-ready",
-      "q-blocked",
-      "q-archived",
-      "session-live",
-      "session-detached",
-      "session-extension",
-      "provider-bg",
-      "node-owner",
-      "subagent-owner",
-      "child-root",
-      "native-subagent",
-      "item-live",
-      "outbox-pending",
-    ])
-      Assert.ok(result.runtime.includes(id), `Runtime candidate ${id}`);
-    for (const id of ["q-held", "q-deleted", "session-stopped", "item-rolled", "outbox-failed"])
-      Assert.ok(!result.runtime.includes(id), `Excluded runtime candidate ${id}`);
-    result.arm = yield* store.getLimitRecoveryCandidates(options());
-    Assert.deepEqual(
-      result.arm.map((row) => row.id),
-      ["limit:new", "limit:node", "limit:unstarted-cancel"],
-    );
-    result.snooze = yield* store.getLimitRecoveryCandidates(options(now, false, true));
-    Assert.deepEqual(result.snooze, result.arm);
-    Assert.deepEqual(yield* store.getLimitRecoveryCandidates(options(now, false, false)), []);
-    result.due = yield* store.getLimitRecoveryCandidates(options(due, false, false));
-    Assert.deepEqual(
-      result.due.map((row) => row.id),
-      ["limit:tracked"],
-    );
-    result.wake = yield* store.getLimitRecoveryWakeAt(now);
-    Assert.equal(result.wake, DateTime.toEpochMillis(due));
-    Assert.equal(yield* store.getLimitRecoveryWakeAt(due), null);
-    const changed = thread("limit:tracked", {
-      limitRecovery: {
-        runId: "run:limit:tracked:1",
-        resetAt: reset,
-        autoResume: true,
-        requestId: "choice",
-      },
-      snoozedUntil: snoozed,
+const exercise = Effect.fn("ProjectionRecoveryFixture.exercise")(function* ({
+  store,
+  apply,
+  transaction,
+}) {
+  const result = {};
+  for (const kind of [
+    "queued-runs",
+    "delegated-completions",
+    "subagent-results",
+    "restart-continuations",
+    "runtime",
+  ]) {
+    result[kind] = yield* stage(`select recovery ${kind}`, store.getRecoveryThreadIds(kind));
+    result[`${kind}:queue`] = yield* store.getRecoveryThreadIds(kind, {
+      include: ["project:queue"],
     });
-    const event = makeEvent("thread.metadata-updated", changed, { threadId: changed.id });
-    const rolled = yield* transaction(
-      Effect.gen(function* () {
-        yield* apply(event);
-        Assert.deepEqual(yield* store.getLimitRecoveryCandidates(options(due, false, false)), []);
-        Assert.equal(
-          yield* store.getLimitRecoveryWakeAt(due),
-          DateTime.toEpochMillis(DateTime.makeUnsafe(snoozed)),
-        );
-        return yield* Effect.fail("rollback recovery metadata");
-      }),
-    ).pipe(Effect.exit);
-    Assert.ok(Exit.isFailure(rolled));
-    Assert.deepEqual(
-      yield* store.getLimitRecoveryCandidates(options(due, false, false)),
-      result.due,
-    );
-    yield* apply(event);
-    result.finalWake = yield* store.getLimitRecoveryWakeAt(due);
-    return normalized(result);
+    result[`${kind}:exclude`] = yield* store.getRecoveryThreadIds(kind, {
+      exclude: ["project:queue"],
+    });
+    NodeAssert.deepEqual(yield* store.getRecoveryThreadIds(kind, { include: [] }), []);
+  }
+  NodeAssert.deepEqual(result["queued-runs"], ["child:held", "q-held", "q-ready"]);
+  NodeAssert.deepEqual(result["delegated-completions"], ["delegated"]);
+  NodeAssert.deepEqual(result["subagent-results"], [
+    "child:held",
+    "child:pending-result",
+    "child:result",
+  ]);
+  for (const id of [
+    "q-ready",
+    "q-blocked",
+    "q-archived",
+    "session-live",
+    "session-detached",
+    "session-extension",
+    "provider-bg",
+    "node-owner",
+    "subagent-owner",
+    "child-root",
+    "native-subagent",
+    "item-live",
+    "outbox-pending",
+  ])
+    NodeAssert.ok(result.runtime.includes(id), `Runtime candidate ${id}`);
+  for (const id of ["q-held", "q-deleted", "session-stopped", "item-rolled", "outbox-failed"])
+    NodeAssert.ok(!result.runtime.includes(id), `Excluded runtime candidate ${id}`);
+  result.arm = yield* store.getLimitRecoveryCandidates(options());
+  NodeAssert.deepEqual(
+    result.arm.map((row) => row.id),
+    ["limit:new", "limit:node", "limit:unstarted-cancel"],
+  );
+  result.snooze = yield* store.getLimitRecoveryCandidates(options(now, false, true));
+  NodeAssert.deepEqual(result.snooze, result.arm);
+  NodeAssert.deepEqual(yield* store.getLimitRecoveryCandidates(options(now, false, false)), []);
+  result.due = yield* store.getLimitRecoveryCandidates(options(due, false, false));
+  NodeAssert.deepEqual(
+    result.due.map((row) => row.id),
+    ["limit:tracked"],
+  );
+  result.wake = yield* store.getLimitRecoveryWakeAt(now);
+  NodeAssert.equal(result.wake, DateTime.toEpochMillis(due));
+  NodeAssert.equal(yield* store.getLimitRecoveryWakeAt(due), null);
+  const changed = thread("limit:tracked", {
+    limitRecovery: {
+      runId: "run:limit:tracked:1",
+      resetAt: reset,
+      autoResume: true,
+      requestId: "choice",
+    },
+    snoozedUntil: snoozed,
   });
-}
+  const event = makeEvent("thread.metadata-updated", changed, { threadId: changed.id });
+  const rolled = yield* transaction(
+    Effect.gen(function* () {
+      yield* apply(event);
+      NodeAssert.deepEqual(yield* store.getLimitRecoveryCandidates(options(due, false, false)), []);
+      NodeAssert.equal(
+        yield* store.getLimitRecoveryWakeAt(due),
+        DateTime.toEpochMillis(DateTime.makeUnsafe(snoozed)),
+      );
+      return yield* Effect.fail("rollback recovery metadata");
+    }),
+  ).pipe(Effect.exit);
+  NodeAssert.ok(Exit.isFailure(rolled));
+  NodeAssert.deepEqual(
+    yield* store.getLimitRecoveryCandidates(options(due, false, false)),
+    result.due,
+  );
+  yield* apply(event);
+  result.finalWake = yield* store.getLimitRecoveryWakeAt(due);
+  return normalized(result);
+});
 
 async function seed(source) {
   await createMigratedSqlite(source);
@@ -260,7 +264,7 @@ async function seed(source) {
         try {
           events.push(makeEvent(type, payload, { threadId: id, id: `seed:${events.length}` }));
         } catch (cause) {
-          throw new Error(`Invalid ${type} fixture ${id}: ${cause.message}`);
+          throw new Error(`Invalid ${type} fixture ${id}: ${cause.message}`, { cause });
         }
       };
       const ids = [
@@ -457,7 +461,7 @@ async function seed(source) {
       );
     }),
   );
-  const db = new Sqlite.DatabaseSync(source);
+  const db = new NodeSqlite.DatabaseSync(source);
   try {
     db.exec(
       `UPDATE orchestration_v2_projection_runs SET payload_json=json_set(payload_json,'$.delegatedCompletion',json('{"delivery":{}}')) WHERE thread_id='delegated'`,
@@ -497,26 +501,26 @@ async function seed(source) {
 }
 
 try {
-  const source = Path.join(fixture.root, "source.sqlite"),
-    retained = Path.join(fixture.root, "retained.sqlite"),
-    upstream = Path.join(fixture.root, "upstream.sqlite");
+  const source = NodePath.join(fixture.root, "source.sqlite"),
+    retained = NodePath.join(fixture.root, "retained.sqlite"),
+    upstream = NodePath.join(fixture.root, "upstream.sqlite");
   await seed(source);
-  const sourceHash = hash(await FS.readFile(source));
-  await FS.copyFile(source, retained);
-  await FS.copyFile(source, upstream);
-  const exported = Path.join(fixture.root, "source.ndjson");
+  const sourceHash = hash(await NodeFSP.readFile(source));
+  await NodeFSP.copyFile(source, retained);
+  await NodeFSP.copyFile(source, upstream);
+  const exported = NodePath.join(fixture.root, "source.ndjson");
   exportSqliteState({ source, destination: exported });
   nativeRequest(executable, fixture, "initialize", {
     operation: "import_sqlite_application",
     path: exported,
   });
   const expected = await services("upstream", upstream, exercise);
-  Assert.deepEqual(
+  NodeAssert.deepEqual(
     await services("sqlite", retained, exercise),
     expected,
     "Retained recovery factories match immutable upstream",
   );
-  Assert.deepEqual(
+  NodeAssert.deepEqual(
     await services("redb", source, exercise),
     expected,
     "Native indexed recovery selectors match immutable upstream",
@@ -529,13 +533,13 @@ try {
   );
   await services("redb", source, ({ store }) =>
     Effect.gen(function* () {
-      Assert.equal(yield* store.getLimitRecoveryWakeAt(due), expected.finalWake);
+      NodeAssert.equal(yield* store.getLimitRecoveryWakeAt(due), expected.finalWake);
     }),
   );
   checks.push("Reopening preserves changed recovery flags and wake times");
-  const auditSource = Path.join(auditFixture.root, "audit.sqlite");
-  await FS.copyFile(source, auditSource);
-  const db = new Sqlite.DatabaseSync(auditSource);
+  const auditSource = NodePath.join(auditFixture.root, "audit.sqlite");
+  await NodeFSP.copyFile(source, auditSource);
+  const db = new NodeSqlite.DatabaseSync(auditSource);
   try {
     db.exec(
       `UPDATE orchestration_v2_projection_threads SET payload_json='{bad' WHERE thread_id='q-held'`,
@@ -574,7 +578,7 @@ try {
   } finally {
     db.close();
   }
-  const auditExport = Path.join(auditFixture.root, "audit.ndjson");
+  const auditExport = NodePath.join(auditFixture.root, "audit.ndjson");
   exportSqliteState({ source: auditSource, destination: auditExport });
   nativeRequest(executable, auditFixture, "initialize", {
     operation: "import_sqlite_application",
@@ -593,46 +597,50 @@ try {
     "audit:orphan",
     "audit:clean",
   ])
-    Assert.ok(auditExpected.includes(id), `Unreadable affected thread ${id}`);
-  Assert.deepEqual(
+    NodeAssert.ok(auditExpected.includes(id), `Unreadable affected thread ${id}`);
+  NodeAssert.deepEqual(
     await services("sqlite", auditSource, inspect, auditFixture, true),
     auditExpected,
   );
-  Assert.deepEqual(await services("redb", auditSource, inspect, auditFixture, true), auditExpected);
+  NodeAssert.deepEqual(
+    await services("redb", auditSource, inspect, auditFixture, true),
+    auditExpected,
+  );
   checks.push(
     "Raw unreadability audit spans bounded pages before index preparation, including malformed JSON, provider owners and transitive/missing run-fork sources",
   );
-  const guardedRecovery = ({ store }) =>
-    Effect.gen(function* () {
-      const results = {};
-      for (const kind of [
-        "queued-runs",
-        "delegated-completions",
-        "subagent-results",
-        "restart-continuations",
-        "runtime",
-      ])
-        results[kind] = yield* store.getRecoveryThreadIds(kind);
-      Assert.ok(
-        Exit.isFailure(yield* store.getLimitRecoveryWakeAt(now).pipe(Effect.exit)),
-        "Unguarded wake JSON selection must report malformed source rows",
-      );
-      Assert.deepEqual(yield* store.getUnreadableThreadIds(), auditExpected);
-      return results;
-    });
+  const guardedRecovery = Effect.fn("ProjectionRecoveryFixture.guardedRecovery")(function* ({
+    store,
+  }) {
+    const results = {};
+    for (const kind of [
+      "queued-runs",
+      "delegated-completions",
+      "subagent-results",
+      "restart-continuations",
+      "runtime",
+    ])
+      results[kind] = yield* store.getRecoveryThreadIds(kind);
+    NodeAssert.ok(
+      Exit.isFailure(yield* store.getLimitRecoveryWakeAt(now).pipe(Effect.exit)),
+      "Unguarded wake JSON selection must report malformed source rows",
+    );
+    NodeAssert.deepEqual(yield* store.getUnreadableThreadIds(), auditExpected);
+    return results;
+  });
   const guardedExpected = await services("upstream", auditSource, guardedRecovery, auditFixture);
-  Assert.deepEqual(
+  NodeAssert.deepEqual(
     await services("sqlite", auditSource, guardedRecovery, auditFixture),
     guardedExpected,
   );
-  Assert.deepEqual(
+  NodeAssert.deepEqual(
     await services("redb", auditSource, guardedRecovery, auditFixture),
     guardedExpected,
   );
   checks.push(
     "Index preparation retains corrupt historical rows for audit; guarded recovery tolerates them and unguarded wake queries fail like SQLite",
   );
-  Assert.equal(hash(await FS.readFile(source)), sourceHash);
+  NodeAssert.equal(hash(await NodeFSP.readFile(source)), sourceHash);
   await finishProof({
     executable,
     fixture,
@@ -643,7 +651,6 @@ try {
     sourcePaths: [
       "apps/server/src/orchestration-v2/ProjectionStore.ts",
       "apps/server/src/orchestration-v2/ProjectionRecoveryRows.ts",
-      "apps/server/src/orchestration-v2/SqliteProjectionRecoveryRows.ts",
       "apps/server/src/orchestration-v2/NativeProjectionRecoveryRows.ts",
       "apps/server/src/persistence/redb_projection_recovery.rs",
       "apps/server/src/persistence/redb_projection_derived_indexes.rs",

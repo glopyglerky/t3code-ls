@@ -16,27 +16,27 @@ export class CodexAppServerProcessConfigurationError extends Schema.TaggedError<
   }
 }
 
-export const selectCodexAppServerExecutable = Effect.fn("selectCodexAppServerExecutable")(
-  function* () {
-    const environment = yield* HostProcess.Environment;
-    return selectNativeExecutable(
-      "provider",
-      environment.T3_CODE_LS_PROVIDER_EXECUTABLE,
-      yield* HostProcess.Platform,
-      yield* HostProcess.Architecture,
-      environment.T3_CODE_LS_IMPLEMENTATION,
-    );
-  },
-);
+const selectCodexAppServerExecutable = Effect.fn("selectCodexAppServerExecutable")(function* () {
+  const environment = yield* HostProcess.Environment;
+  return selectNativeExecutable(
+    "provider",
+    environment.T3_CODE_LS_PROVIDER_EXECUTABLE,
+    yield* HostProcess.Platform,
+    yield* HostProcess.Architecture,
+    environment.T3_CODE_LS_IMPLEMENTATION,
+  );
+});
 
 export const selectCodexAppServerCommand = Effect.fn("selectCodexAppServerCommand")(
   function* (input: {
     readonly command: string;
     readonly args: ReadonlyArray<string>;
     readonly cwd?: string | undefined;
+    readonly versionProbe?: true;
   }) {
     const executable = yield* selectCodexAppServerExecutable();
-    if (executable === undefined) return { command: input.command, args: input.args };
+    if (executable === undefined)
+      return { command: input.command, args: input.args, wrapped: false };
     if (!NodePath.isAbsolute(executable) || executable.includes("\0")) {
       return yield* new CodexAppServerProcessConfigurationError({ reason: "invalid-executable" });
     }
@@ -45,8 +45,16 @@ export const selectCodexAppServerCommand = Effect.fn("selectCodexAppServerComman
     }
 
     const cwd = NodePath.resolve(yield* HostProcess.WorkingDirectory, input.cwd ?? ".");
+    if (input.versionProbe) {
+      return {
+        command: executable,
+        wrapped: true,
+        args: ["--inherit-env", "--version-probe", "--program", input.command, "--cwd", cwd],
+      };
+    }
     return {
       command: executable,
+      wrapped: true,
       args: [
         "--inherit-env",
         "--inherit-stderr",

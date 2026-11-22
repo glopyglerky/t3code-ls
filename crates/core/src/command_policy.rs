@@ -49,6 +49,9 @@ pub struct ForkInput {
     pub source_completed_or_waiting: bool,
     pub from_specific_turn: bool,
     pub source_busy: bool,
+    pub can_fork_while_source_running: bool,
+    pub exposes_native_turn_id: bool,
+    pub has_native_turn_boundary: bool,
 }
 
 fn unsupported(capability: &'static str, detail: &'static str) -> Decision {
@@ -135,7 +138,9 @@ impl Capabilities {
     }
 
     pub fn ensure_rollback(self) -> Decision {
-        if !self.has(ROLLBACK_THREAD) || !self.has(ROLLBACK_CONVERSATION) {
+        if !self.has(ROLLBACK_THREAD)
+            || (!self.has(ROLLBACK_CONVERSATION) && !self.has(HANDOFF_SUMMARIES))
+        {
             return unsupported(
                 "rollback",
                 "providerInstanceId conversation rollback is unavailable",
@@ -179,10 +184,12 @@ impl Capabilities {
     }
 
     pub fn decide_fork(self, input: ForkInput) -> Decision {
+        let busy_fork_available = input.can_fork_while_source_running
+            && (input.has_native_turn_boundary || !input.exposes_native_turn_id);
         if input.source_completed_or_waiting
             && input.same_provider
             && input.has_strong_native_source
-            && !input.source_busy
+            && (!input.source_busy || busy_fork_available)
             && self.has(NATIVE_FORK)
             && (!input.from_specific_turn || self.has(FORK_FROM_TURN))
             && self.has(STRONG_THREAD_IDS)
@@ -231,12 +238,15 @@ pub fn evaluate(frame: &str) -> Result<Decision, &'static str> {
             };
             Ok(caps.ensure_handoff(strategy))
         }
-        ("fork", 8) => Ok(caps.decide_fork(ForkInput {
+        ("fork", 8 | 11) => Ok(caps.decide_fork(ForkInput {
             same_provider: flag(fields[3])?,
             has_strong_native_source: flag(fields[4])?,
             source_completed_or_waiting: flag(fields[5])?,
             from_specific_turn: flag(fields[6])?,
             source_busy: flag(fields[7])?,
+            can_fork_while_source_running: flag(fields.get(8).copied().unwrap_or("0"))?,
+            exposes_native_turn_id: flag(fields.get(9).copied().unwrap_or("0"))?,
+            has_native_turn_boundary: flag(fields.get(10).copied().unwrap_or("0"))?,
         })),
         _ => Err("unknown operation or wrong field count"),
     }
@@ -328,8 +338,32 @@ mod tests {
             source_completed_or_waiting: true,
             from_specific_turn: true,
             source_busy: false,
+            can_fork_while_source_running: false,
+            exposes_native_turn_id: false,
+            has_native_turn_boundary: false,
         };
         assert_eq!(caps(112).decide_fork(input), Ok("native_fork"));
+        let busy = ForkInput {
+            source_busy: true,
+            can_fork_while_source_running: true,
+            exposes_native_turn_id: true,
+            ..input
+        };
+        assert_eq!(
+            caps(112).decide_fork(ForkInput {
+                has_native_turn_boundary: true,
+                ..busy
+            }),
+            Ok("native_fork")
+        );
+        assert_eq!(
+            caps(112).decide_fork(ForkInput {
+                exposes_native_turn_id: false,
+                ..busy
+            }),
+            Ok("native_fork")
+        );
+        assert!(caps(112).decide_fork(busy).is_err());
         assert_eq!(
             caps(112)
                 .decide_fork(ForkInput {
@@ -360,6 +394,7 @@ mod tests {
             "rollback_snapshot"
         );
         assert_eq!(caps(128 | 256 | 512).ensure_rollback(), Ok(""));
+        assert_eq!(caps(128 | 512 | 1024).ensure_rollback(), Ok(""));
         assert_eq!(
             caps(1024 | 2048 | 4096).ensure_handoff(Handoff::Delta),
             Ok("")

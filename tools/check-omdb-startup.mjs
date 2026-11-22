@@ -11,9 +11,13 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NativeOwnership from "../apps/server/src/persistence/NativeServerOwnershipLock.ts";
 import { persistServerRuntimeState } from "../apps/server/src/serverRuntimeState.ts";
 import * as Omdb from "../apps/server/src/persistence/Omdb.ts";
+import currentSchema from "../apps/server/src/persistence/omdb-schema.json" with { type: "json" };
 import { createFixture } from "./database-fixture.mjs";
 import { createMigratedSqlite, hash, nativeRequest, withSqlite } from "./redb-domain-fixture.mjs";
-import { verifyNativeSchema88Upgrade } from "./omdb-schema-upgrade-fixture.mjs";
+import {
+  verifyNativeSchema88Upgrade,
+  verifyNativeSchema89Upgrade,
+} from "./omdb-schema-upgrade-fixture.mjs";
 const [executable, proofPath] = process.argv.slice(2);
 NodeAssert.ok(executable && NodePath.isAbsolute(executable));
 const checks = [];
@@ -61,8 +65,7 @@ try {
         { operation: "application_migrations" },
         Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
       );
-      NodeAssert.equal(migrations.length, 89);
-      NodeAssert.equal(migrations.at(-1).id, "89");
+      NodeAssert.deepEqual(migrations, currentSchema.migrations);
       const locks = yield* NativeOwnership.make(executable);
       yield* locks.acquire(NodePath.join(fixture.root, "server-owner.sqlite"));
     }),
@@ -274,6 +277,7 @@ try {
   await unwitnessed.close();
 }
 checks.push(await verifyNativeSchema88Upgrade(executable));
+checks.push(await verifyNativeSchema89Upgrade(executable));
 console.log(JSON.stringify({ checks }, null, 2));
 if (proofPath)
   await NodeFSP.writeFile(

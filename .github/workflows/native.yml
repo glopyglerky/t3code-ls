@@ -2,16 +2,27 @@ name: Rust components with packaged Lustr and BlueFe
 
 on:
   workflow_call:
+    outputs:
+      native_artifact:
+        description: Exact successful native job's release bundle artifact
+        value: ${{ jobs.qualify.outputs.native_artifact }}
+      iroh_fixture:
+        description: Exact successful native job's Iroh browser test executable
+        value: ${{ jobs.qualify.outputs.iroh_fixture }}
     inputs:
       packages:
         type: string
         default: '["t3-code-ls-app","t3-code-ls-core","t3-code-ls-storage","t3-code-ls-transport","t3code-ls-tools"]'
       component_tests:
         type: string
-        default: '[]'
+        default: "[]"
       source_guards:
         type: boolean
         default: true
+      stage_iroh:
+        description: Build the Iroh browser test fixture
+        type: boolean
+        default: false
       stage_native:
         type: boolean
         default: true
@@ -24,11 +35,15 @@ on:
       component_tests:
         description: JSON array of mapped component acceptance scripts
         type: string
-        default: '[]'
+        default: "[]"
       source_guards:
         description: Validate migration accounting
         type: boolean
         default: true
+      stage_iroh:
+        description: Build the Iroh browser test fixture
+        type: boolean
+        default: false
       stage_native:
         description: Stage the complete production helper bundle
         type: boolean
@@ -41,6 +56,9 @@ jobs:
   qualify:
     runs-on: ${{ ((github.event_name != 'pull_request' && github.event_name != 'pull_request_target') || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
     timeout-minutes: 30
+    outputs:
+      native_artifact: ${{ steps.scope.outputs.native_artifact }}
+      iroh_fixture: ${{ steps.scope.outputs.iroh_fixture }}
     env:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
@@ -50,17 +68,19 @@ jobs:
       CI_RUST_PACKAGES: ${{ inputs.packages }}
       CI_COMPONENT_TESTS: ${{ inputs.component_tests }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: 26.12.1
+          node-version-file: package.json
       - name: Select isolated generated output and cache scope
         id: scope
         run: |
           echo "CARGO_TARGET_DIR=$RUNNER_TEMP/t3code-ls-cargo" >> "$GITHUB_ENV"
           echo "CARGO_HOME=$RUNNER_TEMP/t3code-ls-cargo-home" >> "$GITHUB_ENV"
+          echo "native_artifact=hybrid-native-binaries-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+          echo "iroh_fixture=hybrid-iroh-fixture-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           python3 - <<'PY'
           import hashlib, json, os
           packages = json.loads(os.environ["CI_RUST_PACKAGES"])
@@ -69,7 +89,7 @@ jobs:
               output.write(f"key={scope}\n")
           PY
       - name: Cache immutable compiler downloads
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           key: bluefe-package-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('toolchain.lock.json') }}
           path: |
@@ -82,7 +102,7 @@ jobs:
       - name: Install and verify the pinned compiler package
         run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/t3code-ls-toolchains/preview-2026.11.09-2"
       - name: Cache Cargo sources and selected build outputs
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ${{ env.CARGO_HOME }}/registry
@@ -103,7 +123,7 @@ jobs:
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" run --locked -p t3code-ls-tools -- check-upstream-readme
       - name: Cache component test dependency downloads
         if: inputs.component_tests != '[]'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.npm
           key: component-npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/server-test-runtime/package-lock.json') }}
@@ -119,7 +139,7 @@ jobs:
         if: always() && inputs.component_tests != '[]'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: component-acceptance-proof
+          name: component-acceptance-proof-${{ github.run_attempt }}
           path: ${{ runner.temp }}/component-proof/
           if-no-files-found: warn
           retention-days: 14
@@ -130,15 +150,30 @@ jobs:
         if: inputs.stage_native
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: hybrid-native-binaries
+          name: ${{ steps.scope.outputs.native_artifact }}
           path: bin/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Build the Iroh browser fixture
+        if: inputs.stage_iroh
+        run: |
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --locked --release \
+            --target x86_64-unknown-linux-gnu -p t3-code-ls-transport --bin t3-code-ls
+          install -D -m 0755 "$CARGO_TARGET_DIR/x86_64-unknown-linux-gnu/release/t3-code-ls" "$RUNNER_TEMP/iroh-fixture/t3-code-ls"
+          (cd "$RUNNER_TEMP/iroh-fixture" && sha256sum t3-code-ls > SHA256SUMS)
+      - name: Retain the exact Iroh browser fixture
+        if: inputs.stage_iroh
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ${{ steps.scope.outputs.iroh_fixture }}
+          path: ${{ runner.temp }}/iroh-fixture/
           if-no-files-found: error
           retention-days: 14
       - name: Retain compiler identity
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: packaged-toolchain-proof
+          name: packaged-toolchain-proof-${{ github.run_attempt }}
           path: |
             toolchain.lock.json
             lust-toolchain.json

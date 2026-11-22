@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { RunAttemptId } from "@t3tools/contracts";
+import { CheckpointScopeId, ProjectId, RunAttemptId } from "@t3tools/contracts";
 import type { PersistenceTransactionsShape } from "../persistence/PersistenceTransactions.ts";
 
 export type ProjectionContextKind =
@@ -26,6 +26,8 @@ export type ProjectionContextKind =
   | "node"
   | "scope"
   | "provider"
+  | "repository_scopes"
+  | "repository_baselines"
   | "preserved_ordinals"
   | "checkpoint"
   | "rollback_target_attempt"
@@ -35,15 +37,16 @@ export type ProjectionContextKind =
   | "stale_checkpoints"
   | "rollback_nodes"
   | "rollback_turns"
-  | "attachment_messages"
-  | "attachment_renders"
-  | "attachment_answers"
-  | "attachment_guests"
+  | "attachment_render_candidates"
+  | "attachment_retained_render_candidates"
+  | "attachment_ids"
   | "thread"
   | "runtime_recovery";
 /** Fixed application selections; no SQL text crosses the native boundary. */
 export interface ProjectionContextQuery {
   readonly kind: ProjectionContextKind;
+  readonly include_shown_by_live_fork?: boolean;
+  readonly render_ids?: ReadonlyArray<{ readonly turn_item_id: string; readonly id: string }>;
   readonly thread_id: string;
   readonly run_id?: string;
   readonly record_id?: string | null;
@@ -60,9 +63,21 @@ export const SectionPayloadRows = Schema.Array(
 );
 export const ThreadRows = Schema.Array(Schema.Struct({ thread_id: Schema.String }));
 export const ConversationRows = Schema.Array(Schema.Struct({ present: Schema.Number }));
-export const SideChatRows = Schema.Array(Schema.Struct({ side_chat: Schema.Json }));
+export const SideChatRows = Schema.Array(Schema.Struct({
+  side_chat: Schema.Json,
+  project_id: ProjectId,
+  worktree_path: Schema.NullOr(Schema.String),
+}));
+export const RepositoryBaselineRows = Schema.Array(Schema.Struct({ scope_id: CheckpointScopeId }));
 export const OrdinalRows = Schema.Array(Schema.Struct({ ordinal: Schema.Number }));
 export const AttemptIdRows = Schema.Array(Schema.Struct({ id: RunAttemptId }));
+export const AttachmentRenderRows = Schema.Array(
+  Schema.Struct({
+    thread_id: Schema.String,
+    turn_item_id: Schema.String,
+    payload_json: Schema.String,
+  }),
+);
 export const AttachmentRows = Schema.Array(Schema.Struct({ id: Schema.Json }));
 export const RawRows = Schema.Array(Schema.JsonObject);
 export class ProjectionContextRowsError extends Schema.TaggedError<ProjectionContextRowsError>()(

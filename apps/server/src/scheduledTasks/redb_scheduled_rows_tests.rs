@@ -52,6 +52,7 @@ async fn save(app: &mut ApplicationTransactions, id: &str, row: Row) {
             row,
             require_existing: false,
             kept_schedule_json: None,
+            unbound_thread_id: None,
             secret_changed: true,
         },
     )
@@ -128,6 +129,7 @@ async fn task_order_cas_and_concurrent_settings_preserve_run_state_and_rotated_t
         "write",
         ScheduledWrite::SaveTask {
             kept_schedule_json: Some(edit["schedule_json"].as_str().unwrap().into()),
+            unbound_thread_id: Some("old-binding".into()),
             row: edit,
             require_existing: true,
             secret_changed: false,
@@ -147,6 +149,27 @@ async fn task_order_cas_and_concurrent_settings_preserve_run_state_and_rotated_t
     assert_eq!(saved[0]["thread_id"], "thread");
     assert_eq!(saved[0]["created_at"], "2026-11-02");
     assert_eq!(saved[0]["next_run_at"], "2026-11-11");
+    let mut unbind = task("task-a", "stale-created", Some("stale-next"));
+    unbind.insert("title".into(), json!("edited"));
+    app.scheduled_write(
+        "write",
+        ScheduledWrite::SaveTask {
+            kept_schedule_json: Some(unbind["schedule_json"].as_str().unwrap().into()),
+            unbound_thread_id: Some("thread".into()),
+            row: unbind,
+            require_existing: true,
+            secret_changed: false,
+        },
+    )
+    .await
+    .unwrap();
+    let unbound = query(
+        &mut app,
+        "write",
+        json!({"kind":"tasks","task_id":"task-a"}),
+    )
+    .await;
+    assert!(unbound[0]["thread_id"].is_null());
     let miss=mutate(&mut app,"write",json!({"kind":"patch_task","task_id":"task-a","expected":{"last_run_at":"other","last_run_status":"running"},"different":{},"patch":{"last_run_status":"succeeded"},"increment_run_count":true})).await;
     assert_eq!(miss, json!([]));
     mutate(&mut app,"write",json!({"kind":"patch_task","task_id":"task-a","expected":{"last_run_at":"start","last_run_status":"running"},"different":{},"patch":{"last_run_status":"succeeded","next_run_at":"2026-11-15"},"increment_run_count":true})).await;

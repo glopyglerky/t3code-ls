@@ -53,9 +53,9 @@ const failed = (body) =>
   );
 const ids = (records) => records.map((record) => record.id);
 
-async function withServices(kind, filename, use) {
+async function withServices(kind, filename, use, target = fixture) {
   if (kind === "redb")
-    return withNative(executable, fixture, (client) =>
+    return withNative(executable, target, (client) =>
       Effect.gen(function* () {
         const store = yield* NativeProjectionStore.make;
         return yield* use({
@@ -598,10 +598,18 @@ const exercise = Effect.fn("fixture.projectionRecords.exercise")(function ({
       9,
       "Compaction does not narrow run metadata",
     );
-    NodeAssert.equal(
-      result.afterCompaction.turnItems.length,
-      2,
-      "Compaction does not narrow turn items",
+    NodeAssert.deepEqual(
+      result.afterCompaction.turnItems,
+      [],
+      "Compacted prompt reads omit completed compaction items",
+    );
+    result.compactionItemsOnly = yield* read(compactedThread, ["turnItems"], {
+      sinceLastCompaction,
+    });
+    NodeAssert.deepEqual(
+      ids(result.compactionItemsOnly.turnItems),
+      ["item:compacted:boundary", "item:compacted:rolled"],
+      "An explicit item-only read retains the compaction records",
     );
     for (const field of ["attempts", "nodes", "messages", "providerTurns"]) {
       NodeAssert.equal(result.afterCompaction[field].length, 8);
@@ -737,7 +745,50 @@ const exercise = Effect.fn("fixture.projectionRecords.exercise")(function ({
   });
 });
 
+async function verifyMessageOrdinalGuard() {
+  const guard = await createFixture();
+  try {
+    const source = NodePath.join(guard.root, "ordinal.sqlite");
+    await createMigratedSqlite(source, (sql) =>
+      Effect.gen(function* () {
+        const store = yield* oracle.module.ProjectionStoreV2.pipe(
+          Effect.provide(oracle.module.layer),
+        );
+        for (const event of [...sampleEvents, ...extraEvents]) yield* store.apply(event);
+        const indexes = yield* sql`SELECT name FROM sqlite_schema
+        WHERE tbl_name='orchestration_v2_projection_turn_items' AND type='index' AND lower(sql) LIKE '%json_%'`;
+        for (const row of indexes)
+          yield* sql.unsafe(`DROP INDEX "${row.name.replaceAll('"', '""')}"`);
+        yield* sql`INSERT INTO orchestration_v2_projection_turn_items
+        (turn_item_id,thread_id,run_id,ordinal,type,status,updated_at,payload_json)
+        VALUES ('item:invalid-ordinal','thread:main','run:main',999,'assistant_message','completed',${fixedTime},'{broken')`;
+      }),
+    );
+    const archive = NodePath.join(guard.root, "ordinal.ndjson");
+    exportSqliteState({ source, destination: archive });
+    nativeRequest(executable, guard, "initialize", {
+      operation: "import_sqlite_application",
+      path: archive,
+    });
+    const observe = ({ read }) => read("thread:main", ["messages"]).pipe(Effect.map(normalized));
+    const expected = await withServices("upstream", source, observe);
+    NodeAssert.ok(expected.messages.length > 1);
+    NodeAssert.deepEqual(await withServices("sqlite", source, observe), expected);
+    NodeAssert.deepEqual(
+      await withServices("redb", source, observe, guard),
+      expected,
+      "Native ordinal lookup skips malformed message-item JSON exactly like migration 94's predicate",
+    );
+    checks.push(
+      "Migration 94 message-ordinal lookup skips malformed excluded item JSON while preserving message order",
+    );
+  } finally {
+    await guard.close();
+  }
+}
+
 try {
+  await verifyMessageOrdinalGuard();
   const source = NodePath.join(fixture.root, "source.sqlite");
   await createMigratedSqlite(source, () =>
     Effect.gen(function* () {

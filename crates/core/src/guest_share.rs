@@ -273,6 +273,17 @@ pub fn decide_transition<A: Clone, T: Clone>(
             if thread.archived_at.is_some() {
                 return Err("Archived threads cannot be shared.".to_string());
             }
+            if share.is_some_and(|share| {
+                share
+                    .messages
+                    .iter()
+                    .any(|message| message.status == MessageStatus::Pending)
+            }) {
+                return Err(
+                    "Answer or dismiss waiting guest messages before replacing this link."
+                        .to_string(),
+                );
+            }
             Some(GuestShare {
                 id: share_id.clone(),
                 host: host.clone(),
