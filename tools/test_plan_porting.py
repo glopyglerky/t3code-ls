@@ -331,6 +331,25 @@ class PortingPlans(unittest.TestCase):
         self.assertEqual(mapping["source_history"], [self.base, head])
         self.assertEqual(self.git("rev-parse", ":" + path), staged_blob)
 
+    def test_reviewed_fork_conflict_requires_the_exact_resolved_blob(self):
+        path = "apps/web/conflict.ts"
+        head = self.upstream({path: "upstream change\n"})
+        self.fork({path: "fork change\n"})
+        subprocess.run(["git", "merge", "--no-commit", head], cwd=self.root,
+                       capture_output=True, check=False)
+        self.write(path, "fork and upstream change\n")
+        self.git("add", path)
+        plan = self.plan(head)
+        staged_blob = self.git("rev-parse", ":" + path)
+        upstream_blob = self.git("rev-parse", f"{head}:{path}")
+        with self.assertRaisesRegex(planner.nightly.TrackingError, "explicit source review"):
+            planner.mechanical_metadata_patch(self.root, plan)
+        with self.assertRaisesRegex(planner.nightly.TrackingError, "staged merge differs"):
+            planner.mechanical_metadata_patch(self.root, plan, {path: upstream_blob})
+        patch = planner.mechanical_metadata_patch(self.root, plan, {path: staged_blob})
+        self.assertIn(f'"commit": "{head}"', patch)
+        self.assertEqual(self.git("rev-parse", ":" + path), staged_blob)
+
     def test_mechanical_metadata_refuses_staged_mode_or_unrelated_changes(self):
         head = self.upstream({"apps/web/clean.ts": "changed upstream\n"})
         self.fork()

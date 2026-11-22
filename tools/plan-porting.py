@@ -289,7 +289,7 @@ def mechanical_metadata_patch(
         category = change["classification"]
         if entry is None or entry["mode"] not in {"100644", "100755"}:
             raise nightly.TrackingError("The upstream change requires explicit source review.")
-        if category == "translation-review" and path in reviewed_translations:
+        if category in {"translation-review", "fork-conflict"} and path in reviewed_translations:
             before = change["before"]
             if before is None:
                 raise nightly.TrackingError("A new port source needs explicit metadata review.")
@@ -300,7 +300,7 @@ def mechanical_metadata_patch(
         else:
             raise nightly.TrackingError("The upstream change requires explicit source review.")
     if set(translations) != set(reviewed_translations):
-        raise nightly.TrackingError("A reviewed path is not a translation in this upstream merge.")
+        raise nightly.TrackingError("A reviewed path is not a translation or fork conflict in this upstream merge.")
     staged = bounded_git(root, "write-tree").decode().strip()
     if nightly.read_tree(root, staged) != expected:
         raise nightly.TrackingError("The staged merge differs from the planned upstream source.")
@@ -404,7 +404,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--mechanical-metadata-patch", type=Path,
                         help="Write a Git patch for an exact staged merge's metadata.")
     parser.add_argument("--reviewed-translation", action="append", default=[], metavar="PATH=STAGED_BLOB",
-                        help="Bind a manually reviewed translation to the exact staged blob.")
+                        help="Bind a manually reviewed translation or fork conflict to the exact staged blob.")
     args = parser.parse_args(argv)
     try:
         root = args.repo_root.resolve()
