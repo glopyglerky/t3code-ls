@@ -27,14 +27,12 @@ import {
 } from "./hybrid-client-turn.ts";
 
 type Implementation = "upstream" | "native";
-type DevReplayWindow = Window & {
-  t3dev?: { replayScenarios: () => string[]; replay: (scenario: string) => Promise<string> };
-};
 type OwnedApplication = { pid: number; pairingUrl: string; stop: () => Promise<void> };
 
 const repoRoot = NodeFS.realpathSync(NodeURL.fileURLToPath(new URL("../../../", import.meta.url)));
 const timeoutMs = 90_000;
 const startupTimeoutMs = 180_000;
+const replayPrompt = "Replay: showcase";
 const replayMarker = "This turn is a replay.";
 const decodeSnapshot = Schema.decodeUnknownSync(
   Schema.toCodecJson(OrchestrationV2ThreadDetailSnapshot),
@@ -320,6 +318,28 @@ async function readThreadSnapshot(
   return snapshot;
 }
 
+async function submitShowcase(page: Page): Promise<string> {
+  await page.getByRole("button", { name: "New thread in hybrid-fixture", exact: true }).click();
+  await page.waitForURL((url) => url.pathname.startsWith("/draft/"));
+  const picker = page.locator('[data-chat-provider-model-picker="true"]:visible');
+  const search = page.getByPlaceholder("Search models...");
+  await picker.click();
+  await search.fill("Showcase");
+  await page.getByRole("option", { name: /Showcase/u }).click();
+  if (!(await search.isVisible())) await picker.click();
+  await page.locator("[data-composer-permissions-trigger]:visible").click();
+  await page.getByRole("menuitemradio", { name: "Supervised", exact: true }).click();
+
+  const editor = page.getByTestId("composer-editor");
+  await editor.click();
+  await editor.fill(replayPrompt);
+  await page.getByRole("button", { name: "Submit message", exact: true }).click();
+  await page.waitForURL((url) => /^\/(?!draft\/)[^/]+\/[^/]+$/u.test(url.pathname));
+  const thread = new URL(page.url()).pathname.split("/").at(-1);
+  Assert.ok(thread, "The composer must navigate to the submitted thread");
+  return decodeURIComponent(thread);
+}
+
 function summarizeSnapshot(snapshot: OrchestrationV2ThreadDetailSnapshot) {
   const projection = snapshot.projection;
   return {
@@ -455,7 +475,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     status: "running",
     implementation,
     scope:
-      "Linux original web client; local project; free ACP showcase approval; reload; same-state server restart",
+      "Linux original web client; local project; composer submission; free ACP showcase approval; reload; same-state server restart",
     startedAt: new Date().toISOString(),
     finishedAt: null as string | null,
     source,
@@ -550,21 +570,21 @@ async function exercise(implementation: Implementation): Promise<void> {
     await page.getByText("hybrid-fixture", { exact: true }).first().waitFor({ state: "visible" });
     completed("Created local project through the normal client");
 
-    starting("controlled replay and approval");
-    await page.waitForFunction(
-      () => (window as DevReplayWindow).t3dev?.replayScenarios().includes("showcase"),
-      undefined,
-      { timeout: timeoutMs },
-    );
-    const threadId = await page.evaluate(async () => {
-      const replay = (window as DevReplayWindow).t3dev;
-      if (!replay) throw new Error("The original development replay host is unavailable");
-      return await replay.replay("showcase");
-    });
+    starting("normal composer submission and controlled approval");
+    const threadId = await submitShowcase(page);
     proof.threadId = threadId;
     const approval = page.getByRole("button", { name: /^(Yes|Approve)$/u }).first();
     await approval.waitFor({ state: "visible" });
-    const turnIdentity = replayTurnIdentity(await readThreadSnapshot(page, threadId));
+    const pending = await readThreadSnapshot(page, threadId);
+    Assert.equal(pending.projection.thread.modelSelection?.instanceId, "devReplay");
+    Assert.equal(pending.projection.thread.modelSelection?.model, "showcase");
+    Assert.ok(
+      pending.projection.messages.some(
+        (message) => message.role === "user" && message.text === replayPrompt,
+      ),
+      "The submitted prompt must be present in the authoritative thread snapshot",
+    );
+    const turnIdentity = replayTurnIdentity(pending);
     proof.turnIdentity = turnIdentity;
     await capture(page, directory, "approval");
     await approval.click();
