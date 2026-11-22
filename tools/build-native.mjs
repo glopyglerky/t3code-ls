@@ -5,7 +5,7 @@ import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import {
-  nativeComponents,
+  nativeBuildComponents,
   nativeFile,
   nativeHash,
   nativeTargets,
@@ -139,16 +139,20 @@ if (process.env.T3_CODE_LS_NATIVE_DIR) {
       "t3-code-ls-core",
       "-p",
       "t3-code-ls-storage",
+      "-p",
+      "t3-code-ls-transport",
       "--bins",
     ],
     { cwd: root, env, stdio: "inherit" },
   );
   NodeFS.mkdirSync(destination, { recursive: true });
   const files = {};
-  for (const component of nativeComponents) {
+  for (const component of nativeBuildComponents) {
     const file = nativeFile(component, targetKey);
+    const executable =
+      component === "iroh" ? `t3-code-ls${targetKey.startsWith("win32-") ? ".exe" : ""}` : file;
     NodeFS.copyFileSync(
-      NodePath.resolve(target, rustTarget, "release", file),
+      NodePath.resolve(target, rustTarget, "release", executable),
       NodePath.resolve(destination, file),
     );
     files[file] = nativeHash(NodePath.resolve(destination, file));

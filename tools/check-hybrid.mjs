@@ -6,7 +6,13 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeURL from "node:url";
-import { nativeComponents, nativeFile, nativeHash, nativeTargets } from "./native-artifacts.mjs";
+import {
+  nativeArtifactFiles,
+  nativeManifestComponents,
+  nativeFile,
+  nativeHash,
+  nativeTargets,
+} from "./native-artifacts.mjs";
 import { applicationChecks, parseHybridArguments, planAdapterChecks } from "./hybrid-checks.mjs";
 
 const root = NodeURL.fileURLToPath(new URL("../", import.meta.url));
@@ -27,6 +33,7 @@ NodeAssert.equal(
   nativeTargets[target],
   "Native artifact target mismatch",
 );
+const nativeComponents = nativeManifestComponents(nativeManifest, target);
 for (const component of nativeComponents) {
   const name = nativeFile(component, target);
   const file = NodePath.join(bin, name);
@@ -40,6 +47,7 @@ for (const component of nativeComponents) {
   );
 }
 
+nativeArtifactFiles(bin, target);
 if (mode === "--verify-binaries") {
   console.log(`Verified ${nativeComponents.length} native executables for ${target}`);
 } else {

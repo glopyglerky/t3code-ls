@@ -157,9 +157,14 @@ jobs:
       - name: Build the Iroh browser fixture
         if: inputs.stage_iroh
         run: |
-          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --locked --release \
-            --target x86_64-unknown-linux-gnu -p t3-code-ls-transport --bin t3-code-ls
-          install -D -m 0755 "$CARGO_TARGET_DIR/x86_64-unknown-linux-gnu/release/t3-code-ls" "$RUNNER_TEMP/iroh-fixture/t3-code-ls"
+          if [[ "${{ inputs.stage_native }}" == true ]]; then
+            source=bin/t3-code-ls-iroh
+          else
+            "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --locked --release \
+              --target x86_64-unknown-linux-gnu -p t3-code-ls-transport --bin t3-code-ls
+            source="$CARGO_TARGET_DIR/x86_64-unknown-linux-gnu/release/t3-code-ls"
+          fi
+          install -D -m 0755 "$source" "$RUNNER_TEMP/iroh-fixture/t3-code-ls"
           (cd "$RUNNER_TEMP/iroh-fixture" && sha256sum t3-code-ls > SHA256SUMS)
       - name: Retain the exact Iroh browser fixture
         if: inputs.stage_iroh

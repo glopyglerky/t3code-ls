@@ -7,7 +7,7 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import {
   nativeArtifactFiles,
-  nativeComponents,
+  nativeManifestComponents,
   nativeFile,
   nativeHash,
 } from "./native-artifacts.mjs";
@@ -76,9 +76,9 @@ function stageLustNative(base, receiptPath, artifacts, destination) {
     NodeAssert.equal(sha(bytes), wanted, `Lust proof input differs: ${path}`);
   }
 
-  const selected = nativeComponents.map((component) => {
+  const selected = nativeManifestComponents(manifest, target).map((component) => {
     const file = nativeFile(component, target);
-    const fromLust = component !== "db";
+    const fromLust = component !== "db" && component !== "iroh";
     const source = NodePath.join(fromLust ? artifacts : base, file);
     NodeAssert.ok(NodeFS.lstatSync(source).isFile(), `Expected a regular component file: ${file}`);
     NodeFS.accessSync(source, NodeFS.constants.X_OK);
@@ -94,7 +94,7 @@ function stageLustNative(base, receiptPath, artifacts, destination) {
         [{ file, sha256: digest }],
       );
     } else {
-      NodeAssert.equal(digest, manifest.files[file], `Base database hash differs: ${file}`);
+      NodeAssert.equal(digest, manifest.files[file], `Base component hash differs: ${file}`);
     }
     return { file, source, digest, compiler: fromLust ? "native-lust" : compatibility };
   });

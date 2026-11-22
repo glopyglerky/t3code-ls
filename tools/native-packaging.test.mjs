@@ -77,6 +77,9 @@ for (const name of ${JSON.stringify(nativeComponents)}) {
   if (!packages.includes(name === 'db' ? 't3-code-ls-storage' : 't3-code-ls-core')) continue;
   NodeFS.writeFileSync(p.join(dir, 't3-code-ls-' + name), '#!/usr/bin/env node\\nconsole.log("fixture-component")\\n', {mode:0o755});
 }
+if (packages.includes('t3-code-ls-transport')) {
+  NodeFS.writeFileSync(p.join(dir, 't3-code-ls'), '#!/usr/bin/env node\\nconsole.log("fixture-iroh")\\n', {mode:0o755});
+}
 NodeFS.writeFileSync(p.join(dir, 'flags.json'), JSON.stringify(process.env.CARGO_ENCODED_RUSTFLAGS));
 NodeFS.writeFileSync(p.join(dir, 'packages.json'), JSON.stringify(packages));
 `,
@@ -105,10 +108,15 @@ NodeFS.writeFileSync(p.join(dir, 'packages.json'), JSON.stringify(packages));
             NodePath.join(target, "x86_64-unknown-linux-gnu/release/packages.json"),
           ),
         ),
-        ["t3-code-ls-core", "t3-code-ls-storage"],
+        ["t3-code-ls-core", "t3-code-ls-storage", "t3-code-ls-transport"],
       );
       const manifest = JSON.parse(NodeFS.readFileSync(NodePath.join(output, "manifest.json")));
       NodeAssert.ok(Object.hasOwn(manifest.files, "t3-code-ls-db"));
+      const iroh = NodePath.join(output, "t3-code-ls-iroh");
+      NodeAssert.equal(manifest.files["t3-code-ls-iroh"], nativeHash(iroh));
+      const irohRun = NodeChildProcess.spawnSync(iroh, [], { encoding: "utf8" });
+      NodeAssert.equal(irohRun.status, 0, irohRun.stderr);
+      NodeAssert.equal(irohRun.stdout.trim(), "fixture-iroh");
       const checkout = NodeURL.fileURLToPath(new URL("..", import.meta.url));
       const git = (...args) =>
         NodeChildProcess.execFileSync("git", args, {
@@ -157,6 +165,16 @@ NodeFS.writeFileSync(p.join(dir, 'packages.json'), JSON.stringify(packages));
       NodeAssert.match(conflicting.stderr, /Conflicting.*sysroot/);
       const stage = NodePath.join(root, "archive/native-bin");
       stageNativeArtifacts(output, stage, "linux-x64");
+      const older = NodePath.join(root, "older-native-bin");
+      NodeFS.cpSync(output, older, { recursive: true });
+      const olderManifest = JSON.parse(NodeFS.readFileSync(NodePath.join(older, "manifest.json")));
+      delete olderManifest.files["t3-code-ls-iroh"];
+      NodeFS.unlinkSync(NodePath.join(older, "t3-code-ls-iroh"));
+      NodeFS.writeFileSync(NodePath.join(older, "manifest.json"), JSON.stringify(olderManifest));
+      const downgrade = NodePath.join(root, "downgrade");
+      stageNativeArtifacts(output, downgrade, "linux-x64");
+      stageNativeArtifacts(older, downgrade, "linux-x64");
+      NodeAssert.ok(!NodeFS.existsSync(NodePath.join(downgrade, "t3-code-ls-iroh")));
       const archive = NodePath.join(root, "fixture.tar");
       NodeAssert.equal(
         NodeChildProcess.spawnSync("tar", [

@@ -17,6 +17,7 @@ export const nativeComponents = [
   "project-store",
   "db",
 ];
+export const nativeBuildComponents = [...nativeComponents, "iroh"];
 export const nativeTargets = {
   "linux-x64": "x86_64-unknown-linux-gnu",
   "linux-arm64": "aarch64-unknown-linux-gnu",
@@ -36,6 +37,29 @@ export const nativeFile = (component, target) =>
 export const nativeHash = (file) =>
   NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(file)).digest("hex");
 
+export function nativeManifestComponents(manifest, target) {
+  return Object.hasOwn(manifest.files ?? {}, nativeFile("iroh", target))
+    ? nativeBuildComponents
+    : nativeComponents;
+}
+
+function verifiedObsoleteFiles(destination, names) {
+  const priorPath = NodePath.join(destination, "manifest.json");
+  const prior = NodeFS.existsSync(priorPath)
+    ? JSON.parse(NodeFS.readFileSync(priorPath, "utf8"))
+    : undefined;
+  const obsolete = [];
+  for (const file of names) {
+    const existing = NodePath.join(destination, file);
+    if (NodeFS.existsSync(existing)) {
+      if (!prior?.files || prior.files[file] !== nativeHash(existing))
+        throw new Error(`Use a clean output directory; unverified native component: ${file}`);
+      obsolete.push(existing);
+    }
+  }
+  return obsolete;
+}
+
 function validateUpstreamSelection(target, selection) {
   if (
     !nativeTargets[target] ||
@@ -47,23 +71,13 @@ function validateUpstreamSelection(target, selection) {
 
 export function stageUpstreamManifest(destination, target, selection = "unqualified-platform") {
   validateUpstreamSelection(target, selection);
-  const priorPath = NodePath.join(destination, "manifest.json");
-  const prior = NodeFS.existsSync(priorPath)
-    ? JSON.parse(NodeFS.readFileSync(priorPath, "utf8"))
-    : undefined;
-  const obsolete = [];
-  for (const component of nativeComponents) {
-    for (const file of [nativeFile(component, "linux-x64"), nativeFile(component, "win32-x64")]) {
-      const existing = NodePath.join(destination, file);
-      if (NodeFS.existsSync(existing)) {
-        if (!prior?.files || prior.files[file] !== nativeHash(existing))
-          throw new Error(
-            `Use a clean upstream-only output directory; unverified native component: ${file}`,
-          );
-        obsolete.push(existing);
-      }
-    }
-  }
+  const obsolete = verifiedObsoleteFiles(
+    destination,
+    nativeBuildComponents.flatMap((component) => [
+      nativeFile(component, "linux-x64"),
+      nativeFile(component, "win32-x64"),
+    ]),
+  );
   NodeFS.mkdirSync(destination, { recursive: true });
   for (const file of obsolete) NodeFS.unlinkSync(file);
   NodeFS.writeFileSync(
@@ -108,7 +122,7 @@ export function nativeArtifactFiles(source, target) {
       Object.keys(manifest.files).length !== 0
     )
       throw new Error(`Invalid upstream-only service manifest for ${target}`);
-    for (const component of nativeComponents) {
+    for (const component of nativeBuildComponents) {
       for (const file of [nativeFile(component, "linux-x64"), nativeFile(component, "win32-x64")]) {
         if (NodeFS.existsSync(NodePath.join(source, file)))
           throw new Error(`Upstream-only manifest contains a native component: ${file}`);
@@ -122,14 +136,15 @@ export function nativeArtifactFiles(source, target) {
     );
   if (manifest.implementation !== undefined && manifest.implementation !== "native")
     throw new Error(`Unknown service implementation: ${manifest.implementation}`);
+  const components = nativeManifestComponents(manifest, target);
   if (
     !manifest.files ||
     typeof manifest.files !== "object" ||
     Array.isArray(manifest.files) ||
-    Object.keys(manifest.files).length !== nativeComponents.length
+    Object.keys(manifest.files).length !== components.length
   )
     throw new Error("Native component manifest must identify every selected component");
-  for (const component of nativeComponents) {
+  for (const component of components) {
     const file = nativeFile(component, target);
     const input = NodePath.resolve(source, file);
     if (manifest.files[file] !== nativeHash(input))
@@ -139,7 +154,7 @@ export function nativeArtifactFiles(source, target) {
       target.startsWith("win32-") ? NodeFS.constants.R_OK : NodeFS.constants.X_OK,
     );
   }
-  return [...nativeComponents.map((component) => nativeFile(component, target)), "manifest.json"];
+  return [...components.map((component) => nativeFile(component, target)), "manifest.json"];
 }
 
 export function stageNativeArtifacts(source, destination, target) {
@@ -151,7 +166,10 @@ export function stageNativeArtifacts(source, destination, target) {
     stageUpstreamManifest(destination, target, manifest.selection);
     return;
   }
+  const iroh = nativeFile("iroh", target);
+  const obsolete = files.includes(iroh) ? [] : verifiedObsoleteFiles(destination, [iroh]);
   NodeFS.mkdirSync(destination, { recursive: true });
+  for (const file of obsolete) NodeFS.unlinkSync(file);
   for (const file of files) {
     if (NodePath.resolve(source, file) !== NodePath.resolve(destination, file))
       NodeFS.copyFileSync(NodePath.resolve(source, file), NodePath.resolve(destination, file));
