@@ -314,6 +314,39 @@ describe("learned routes", () => {
     expect(mergeLearnedRoutes({ entry: withTunnel, ...advertised })).toEqual([PUBLIC, RELAY]);
   });
 
+  it("relearns advertised routes whose paired credential owner is gone", () => {
+    const reported = [{ httpBaseUrl: "https://desk.tail1234.ts.net/" }];
+    const iroh = {
+      endpointId: "e4".repeat(32),
+      addresses: ["192.0.2.12:3774"],
+      relay: null,
+    };
+    const saved = mergeLearnedRoutes({
+      entry: entryWithRoutes(relayOnly, [PUBLIC, RELAY]),
+      activeRoute: PUBLIC,
+      reported,
+      iroh,
+      allowInsecure: true,
+    })!;
+    const entry = entryWithRoutes(relayOnly, [
+      LAN,
+      ...saved.filter((route) => connectionRouteId(route.target) !== "public"),
+    ]);
+    const recovered = mergeLearnedRoutes({
+      entry,
+      activeRoute: LAN,
+      reported,
+      iroh,
+      allowInsecure: true,
+    });
+    expect(ids(recovered)).toEqual([
+      `learned:${ENVIRONMENT_ID}:iroh:${iroh.endpointId}@lan`,
+      "lan",
+      `learned:${ENVIRONMENT_ID}:https://desk.tail1234.ts.net@lan`,
+      "relay",
+    ]);
+  });
+
   it("keeps a token paired over HTTPS off plain HTTP addresses outside the tailnet", () => {
     const entry = entryWithRoutes(relayOnly, [PUBLIC, RELAY]);
     const routes = mergeLearnedRoutes({

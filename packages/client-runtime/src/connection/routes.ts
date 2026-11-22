@@ -359,8 +359,18 @@ export function mergeLearnedRoutes(input: {
       return url === null || isLearned(route) ? [] : [normalized(url)];
     }),
   );
+  const savedIds = new Set(saved.map(({ target }) => connectionRouteId(target)));
   const kept = saved.flatMap((route): ReadonlyArray<ConnectionRoute> => {
     const profile = Option.getOrNull(route.profile);
+    if (
+      profile?._tag === "BearerConnectionProfile" &&
+      profile.learned === true &&
+      profile.authorization !== "t3-connect"
+    ) {
+      const owner = credentialConnectionId(connectionRouteId(route.target));
+      // A reachable environment can advertise this address again with its current credential.
+      if (owner !== sharedCredential && !savedIds.has(owner)) return [];
+    }
     if (profile?._tag === "BearerConnectionProfile" && profile.iroh !== undefined) {
       if (!isLearned(route)) return [route];
       if (input.iroh?.endpointId !== profile.iroh.endpointId) return [];
