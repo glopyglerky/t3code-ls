@@ -142,13 +142,15 @@ class SelectionTests(unittest.TestCase):
         self.assertTrue(result["source_guards"])
         self.assertFalse(result["stage_native"])
 
-    def test_storage_candidate_tests_reverse_consumer_without_production_application(self):
+    def test_storage_runtime_stages_native_binaries_and_selects_client_flow(self):
         result = self.select(["crates/storage/src/lib.rs"])
         self.assertEqual(result["mode"], "affected-fork")
-        self.assertEqual(set(result["rust_packages"]), {"t3-code-ls-storage", "t3-code-ls-app", "t3code-ls-tools"})
+        self.assertEqual(set(result["rust_packages"]), {
+            "t3-code-ls-core", "t3-code-ls-storage", "t3-code-ls-app", "t3code-ls-tools",
+        })
         self.assertEqual(result["adapter_ports"], [])
-        self.assertFalse(result["gates"]["application"])
-        self.assertFalse(result["stage_native"])
+        self.assertEqual(result["gates"], {"native": True, "adapters": False, "application": True})
+        self.assertTrue(result["stage_native"])
 
     def test_transport_candidate_does_not_build_unrelated_storage_or_application(self):
         result = self.select(["crates/transport/src/bridge.rs"])
@@ -219,7 +221,7 @@ class SelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown Rust package execution mapping"):
             self.select(["tools/check-connection.mjs"], manifest=manifest)
 
-    def test_candidate_runtime_changes_run_owning_component_checks(self):
+    def test_storage_runtime_keeps_mapped_component_checks(self):
         mapping = copy.deepcopy(MAPPING)
         mapping["ports"][2]["acceptance_tests"] = ["tools/check-database.mjs"]
         manifest = copy.deepcopy(COMPONENT_MANIFEST)
@@ -236,11 +238,12 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(set(result["rust_packages"]), {
             "t3-code-ls-core", "t3-code-ls-storage", "t3-code-ls-app", "t3code-ls-tools",
         })
-        self.assertFalse(result["stage_native"])
-        self.assertFalse(result["gates"]["application"])
+        self.assertTrue(result["stage_native"])
+        self.assertTrue(result["gates"]["application"])
         tests_only = self.select(["crates/storage/tests/store.rs"], mapping=mapping, old=mapping,
                                  manifest=manifest)
         self.assertEqual(tests_only["component_tests"], [])
+        self.assertFalse(tests_only["gates"]["application"])
 
     def test_component_typecheck_configuration_schedules_its_candidate_gate(self):
         manifest = copy.deepcopy(COMPONENT_MANIFEST)
@@ -518,7 +521,7 @@ class SelectionTests(unittest.TestCase):
         self.assertTrue(result["gates"]["application"])
         self.assertFalse(result["upstream_tests"])
 
-    def test_trusted_candidate_source_runs_owning_rust_crates_and_their_consumers(self):
+    def test_trusted_storage_source_runs_the_client_flow_and_rust_consumers(self):
         path = "apps/server/src/orchestration-v2/EventSink.ts"
         mapping = copy.deepcopy(MAPPING)
         mapping["ports"][2]["upstream_sources"] = [{"path": path}]
@@ -529,8 +532,8 @@ class SelectionTests(unittest.TestCase):
             "redb-persistence", "iroh-transport", "native-api-component",
         })
         self.assertEqual(result["adapter_ports"], [])
-        self.assertFalse(result["gates"]["application"])
-        self.assertFalse(result["stage_native"])
+        self.assertTrue(result["gates"]["application"])
+        self.assertTrue(result["stage_native"])
 
     def test_reverse_dependency_owned_by_production_is_qualified_without_other_shared_crate_ports(self):
         mapping = copy.deepcopy(MAPPING)

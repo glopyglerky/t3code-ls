@@ -19,6 +19,7 @@ PRODUCTION_PORTS = {
     "provider-recovery", "provider-maintenance", "codex-structured-generation",
     "codex-process-runtime",
 }
+APPLICATION_PORTS = PRODUCTION_PORTS | {"redb-persistence"}
 HYBRID_ACCEPTANCE_TESTS = {
     "tools/check-policy-adapter.mjs": "command-and-dispatch-policy",
     "tools/check-dispatch.mjs": "command-and-dispatch-policy",
@@ -263,7 +264,6 @@ def select_checks(changed: list[str], mapping: dict, old_mapping: dict, names: d
                     owners = {port["id"] for port in ports if member in port.get("rust_crates", [])}
                     affected.update(owners)
                     runtime_owners.update(owners)
-        application |= bool(runtime_owners & PRODUCTION_PORTS)
         runtime_affected.update(runtime_owners)
         if path.startswith("packages/contracts/"):
             affected.update(port["id"] for port in ports)
@@ -321,7 +321,7 @@ def select_checks(changed: list[str], mapping: dict, old_mapping: dict, names: d
                             if dependent_members.intersection(port.get("rust_crates", []))}
         affected.update(dependent_owners)
         runtime_affected.update(dependent_owners)
-        application |= bool(dependent_owners & PRODUCTION_PORTS)
+        application |= bool(runtime_affected & APPLICATION_PORTS)
     adapters = sorted(affected & PRODUCTION_PORTS)
     scheduled_tests = {path for path, port in HYBRID_ACCEPTANCE_TESTS.items() if port in adapters}
     selected_tests = acceptance_tests if full_reason else (

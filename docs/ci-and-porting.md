@@ -22,6 +22,8 @@ Full fork qualification covers the Rust workspace, production adapters, and the 
 
 Mapped component acceptance scripts have explicit executable requirements. CI builds those targets with the pinned compiler and runs changed scripts; a full qualification runs all mapped component checks. Unknown test mappings fail planning. Builds retain the verified compiler package and locked Cargo and pnpm dependency gates. Expensive jobs run only when selected.
 
+The `redb-persistence` port selects the native client flow when its mapped runtime changes. Its mapped storage checks still run in the native job. A platform acceptance receipt for an `omdb` route must record `"implementation": "omdb"` and satisfy the existing source, target, compiler and required-check rules.
+
 ## Reusing qualification
 
 CI only accepts a qualification receipt from a completed successful run of this repository's qualification workflow. The receipt must match the source commit, Git tree, and current CI policy digest, and every selected gate must have succeeded.
