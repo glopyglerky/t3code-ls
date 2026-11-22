@@ -62,6 +62,9 @@ fn validate_row(row: &Value, project_id: &Value) -> WireResult<()> {
     field(row, "scripts")?
         .as_array()
         .ok_or(Error::InvalidRequest)?;
+    if let Some(folders) = row.get("trackedFolders") {
+        folders.as_array().ok_or(Error::InvalidRequest)?;
+    }
     Ok(())
 }
 
@@ -175,6 +178,7 @@ fn normalize_row(row: Value) -> WireResult<Value> {
             "faviconPath",
             "projectIcon",
             "scripts",
+            "trackedFolders",
             "pinnedAt",
             "archivedAt",
             "createdAt",
@@ -226,11 +230,24 @@ fn normalize_row(row: Value) -> WireResult<Value> {
         scripts.push(normalized);
     }
     set(&mut result, "scripts", Value::Array(scripts))?;
+    let mut folders = Vec::new();
+    for folder in field(&row, "trackedFolders")?
+        .as_array()
+        .ok_or(Error::InvalidRequest)?
+    {
+        let mut normalized = known_fields(folder, &["path", "name", "discovered"])?;
+        for name in ["path", "name"] {
+            set(&mut normalized, name, trimmed(field(folder, name)?)?)?;
+        }
+        folders.push(normalized);
+    }
+    set(&mut result, "trackedFolders", Value::Array(folders))?;
     Ok(result)
 }
 
-/// Applies the same row changes as ProjectStoreV2.apply to a validated planner event.
-pub fn project_event(existing: &Value, event: &Value) -> WireResult<Value> {
+/// Reduces an event without running the shared application's row codecs.
+/// Creation callers may pass null and leave sticky-title handling to the row upsert.
+pub fn reduce_project_event(existing: &Value, event: &Value) -> WireResult<Value> {
     let payload = field(event, "payload")?;
     let project_id = field(payload, "projectId")?;
     project_id.as_str().ok_or(Error::InvalidRequest)?;
@@ -268,11 +285,19 @@ pub fn project_event(existing: &Value, event: &Value) -> WireResult<Value> {
                 )?;
             }
             set(&mut row, "autoPull", Value::Bool(false))?;
+            set(
+                &mut row,
+                "trackedFolders",
+                payload
+                    .get("trackedFolders")
+                    .cloned()
+                    .unwrap_or_else(|| Value::Array(Vec::new())),
+            )?;
             for name in ["pinnedAt", "archivedAt", "deletedAt"] {
                 set(&mut row, name, Value::Null)?;
             }
             validate_row(&row, project_id)?;
-            normalize_row(row)
+            Ok(row)
         }
         Some("project.meta-updated") | Some("project.deleted") => {
             if existing == &Value::Null {
@@ -283,6 +308,9 @@ pub fn project_event(existing: &Value, event: &Value) -> WireResult<Value> {
                 .as_bool()
                 .ok_or(Error::InvalidRequest)?;
             let mut row = existing.clone();
+            if row.get("trackedFolders").is_none() {
+                set(&mut row, "trackedFolders", Value::Array(Vec::new()))?;
+            }
             if field(event, "type")?.as_str() == Some("project.deleted") {
                 let deleted_at = field(payload, "deletedAt")?.clone();
                 set(&mut row, "deletedAt", deleted_at.clone())?;
@@ -297,6 +325,7 @@ pub fn project_event(existing: &Value, event: &Value) -> WireResult<Value> {
                     "faviconPath",
                     "projectIcon",
                     "scripts",
+                    "trackedFolders",
                     "pinnedAt",
                     "archivedAt",
                 ] {
@@ -310,9 +339,20 @@ pub fn project_event(existing: &Value, event: &Value) -> WireResult<Value> {
                 set(&mut row, "updatedAt", field(payload, "updatedAt")?.clone())?;
             }
             validate_row(&row, project_id)?;
-            normalize_row(row)
+            Ok(row)
         }
         _ => Err(Error::InvalidRequest),
+    }
+}
+
+/// Applies the same row changes as ProjectStoreV2.apply to a validated planner event.
+/// The standalone planner keeps its existing native normalization boundary.
+pub fn project_event(existing: &Value, event: &Value) -> WireResult<Value> {
+    let row = reduce_project_event(existing, event)?;
+    if row == Value::Null {
+        Ok(row)
+    } else {
+        normalize_row(row)
     }
 }
 
@@ -392,6 +432,47 @@ mod tests {
     }
 
     #[test]
+    fn tracked_folders_survive_unrelated_events_and_can_be_cleared() {
+        let mut row = project_event(&Value::Null, &created()).unwrap();
+        assert_eq!(row.get("trackedFolders"), Some(&Value::Array(Vec::new())));
+        row = project_event(
+            &row,
+            &event(
+                "project.meta-updated",
+                r#"{"projectId":"project:one","trackedFolders":[
+                    {"path":"/fixture/project/repo","name":"Repo","discovered":true}
+                ],"updatedAt":"2026-11-08T12:01:00.000Z"}"#,
+            ),
+        )
+        .unwrap();
+        let tracked = row.get("trackedFolders").unwrap().clone();
+        assert_eq!(
+            tracked.as_array().unwrap()[0].get("discovered"),
+            Some(&Value::Bool(true)),
+        );
+        row = project_event(
+            &row,
+            &event(
+                "project.meta-updated",
+                r#"{"projectId":"project:one","autoPull":true,
+                    "updatedAt":"2026-11-08T12:02:00.000Z"}"#,
+            ),
+        )
+        .unwrap();
+        assert_eq!(row.get("trackedFolders"), Some(&tracked));
+        row = project_event(
+            &row,
+            &event(
+                "project.meta-updated",
+                r#"{"projectId":"project:one","trackedFolders":[],
+                    "updatedAt":"2026-11-08T12:03:00.000Z"}"#,
+            ),
+        )
+        .unwrap();
+        assert_eq!(row.get("trackedFolders"), Some(&Value::Array(Vec::new())));
+    }
+
+    #[test]
     fn title_edits_are_sticky_even_when_the_text_does_not_change() {
         let mut row = project_event(&Value::Null, &created()).unwrap();
         assert_eq!(row.get("hasCustomTitle"), Some(&Value::Bool(false)));
@@ -450,6 +531,69 @@ mod tests {
             }
             assert_eq!(actual, expected);
         }
+    }
+
+    #[test]
+    fn application_reduction_leaves_codec_normalization_to_the_existing_boundary() {
+        let mut input = created();
+        let Value::Object(entries) = &mut input else {
+            unreachable!()
+        };
+        let payload = &mut entries
+            .iter_mut()
+            .find(|entry| entry.0 == "payload")
+            .unwrap()
+            .1;
+        set(payload, "projectId", Value::String(" project:one ".into())).unwrap();
+        set(
+            payload,
+            "projectIcon",
+            json::parse(r#"{"kind":"lucide","name":"folder","color":"blue","monogramText":"AB"}"#)
+                .unwrap(),
+        )
+        .unwrap();
+        set(payload, "scripts", json::parse(
+            r#"[{"id":" test ","name":" Test ","command":" echo test ","icon":"test","runOnWorktreeCreate":false,"extra":true}]"#,
+        ).unwrap()).unwrap();
+        let raw = reduce_project_event(&Value::Null, &input).unwrap();
+        assert_eq!(
+            raw.get("projectId").and_then(Value::as_str),
+            Some(" project:one ")
+        );
+        assert_eq!(
+            raw.get("projectIcon")
+                .unwrap()
+                .get("kind")
+                .and_then(Value::as_str),
+            Some("lucide")
+        );
+        let script = &raw.get("scripts").unwrap().as_array().unwrap()[0];
+        assert_eq!(script.get("id").and_then(Value::as_str), Some(" test "));
+        assert_eq!(script.get("extra"), Some(&Value::Bool(true)));
+        let standalone = project_event(&Value::Null, &input).unwrap();
+        assert_eq!(
+            standalone.get("projectId").and_then(Value::as_str),
+            Some("project:one")
+        );
+        assert_eq!(
+            standalone
+                .get("projectIcon")
+                .unwrap()
+                .get("kind")
+                .and_then(Value::as_str),
+            Some("monogram")
+        );
+        assert_eq!(
+            standalone.get("scripts").unwrap().as_array().unwrap()[0].get("extra"),
+            None
+        );
+        assert_eq!(
+            project_event(
+                &Value::Null,
+                &event("project.deleted", r#"{"projectId":"missing"}"#)
+            ),
+            Ok(Value::Null)
+        );
     }
 
     #[test]

@@ -19,6 +19,7 @@ pub enum EffectType {
     ProviderRuntimeContinue,
     ProviderSessionDetach,
     ProviderSessionApplyModelSelection,
+    ProviderSessionApplyThreadTitle,
     ProviderTurnStart,
     ProviderTurnInterrupt,
     ProviderTurnSteer,
@@ -42,6 +43,7 @@ impl EffectType {
             "provider-session.apply-model-selection" => {
                 Some(Self::ProviderSessionApplyModelSelection)
             }
+            "provider-session.apply-thread-title" => Some(Self::ProviderSessionApplyThreadTitle),
             "provider-turn.start" => Some(Self::ProviderTurnStart),
             "provider-turn.interrupt" => Some(Self::ProviderTurnInterrupt),
             "provider-turn.steer" => Some(Self::ProviderTurnSteer),
@@ -64,6 +66,7 @@ impl EffectType {
             Self::ProviderRuntimeContinue => "provider-runtime.continue",
             Self::ProviderSessionDetach => "provider-session.detach",
             Self::ProviderSessionApplyModelSelection => "provider-session.apply-model-selection",
+            Self::ProviderSessionApplyThreadTitle => "provider-session.apply-thread-title",
             Self::ProviderTurnStart => "provider-turn.start",
             Self::ProviderTurnInterrupt => "provider-turn.interrupt",
             Self::ProviderTurnSteer => "provider-turn.steer",
@@ -88,6 +91,7 @@ impl EffectType {
         matches!(
             self,
             Self::ProviderSessionApplyModelSelection
+                | Self::ProviderSessionApplyThreadTitle
                 | Self::ProviderTurnStart
                 | Self::ProviderTurnInterrupt
                 | Self::ProviderTurnSteer
@@ -633,6 +637,7 @@ mod tests {
     fn reconciliation_only_requeues_replay_safe_running_rows() {
         for kind in [
             EffectType::ProviderSessionApplyModelSelection,
+            EffectType::ProviderSessionApplyThreadTitle,
             EffectType::ProviderTurnStart,
             EffectType::ProviderTurnInterrupt,
             EffectType::ProviderTurnSteer,

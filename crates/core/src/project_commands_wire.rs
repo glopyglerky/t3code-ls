@@ -137,6 +137,15 @@ fn scripts(value: &Value) -> WireResult<Vec<Script<Value>>> {
         .collect()
 }
 
+fn tracked_folders(value: &Value) -> WireResult<Vec<Value>> {
+    value
+        .as_array()
+        .ok_or(Error::InvalidRequest)?
+        .iter()
+        .map(retained_object)
+        .collect()
+}
+
 fn project(value: &Value) -> WireResult<Option<Project>> {
     if *value == Value::Null {
         return Ok(None);
@@ -187,6 +196,10 @@ fn command(input: &Value) -> WireResult<Command<Value>> {
             title: text(field(value, "title")?)?,
             workspace_root: text(field(value, "workspaceRoot")?)?,
             scripts: value.get("scripts").map(scripts).transpose()?,
+            tracked_folders: value
+                .get("trackedFolders")
+                .map(tracked_folders)
+                .transpose()?,
         },
         "project.meta.update" => CommandKind::Update {
             changes: MetadataChanges {
@@ -217,6 +230,10 @@ fn command(input: &Value) -> WireResult<Command<Value>> {
                     })
                     .transpose()?,
                 scripts: value.get("scripts").map(scripts).transpose()?,
+                tracked_folders: value
+                    .get("trackedFolders")
+                    .map(tracked_folders)
+                    .transpose()?,
             },
             pinned: optional_bool(value.get("pinned"))?,
             archived: optional_bool(value.get("archived"))?,
@@ -280,6 +297,9 @@ fn metadata_fields(changes: &MetadataChanges<Value>) -> Vec<(&'static str, Value
     if let Some(value) = &changes.scripts {
         fields.push(("scripts", script_values(value)));
     }
+    if let Some(value) = &changes.tracked_folders {
+        fields.push(("trackedFolders", Value::Array(value.clone())));
+    }
     fields
 }
 
@@ -290,6 +310,7 @@ fn event_value(event: &Event<Value>) -> Value {
             title,
             workspace_root,
             scripts,
+            tracked_folders,
         } => {
             payload.extend([
                 ("title", Value::String(title.clone())),
@@ -301,6 +322,9 @@ fn event_value(event: &Event<Value>) -> Value {
                 ("createdAt", Value::String(event.occurred_at.clone())),
                 ("updatedAt", Value::String(event.occurred_at.clone())),
             ]);
+            if !tracked_folders.is_empty() {
+                payload.push(("trackedFolders", Value::Array(tracked_folders.clone())));
+            }
             "project.created"
         }
         EventKind::Updated {

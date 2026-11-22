@@ -14,6 +14,13 @@ pub struct Context {
     pub host_platform: String,
     pub command_platform: String,
     pub chocolatey_install: Option<String>,
+    pub mise_roots: MiseRoots,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct MiseRoots {
+    pub install: Vec<String>,
+    pub other: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -56,11 +63,13 @@ pub enum Observation {
     ResolveMise,
     MiseWhich,
     MiseListing,
+    MiseAllListing,
     MiseInstallPaths(Vec<String>),
     MiseToolPath(String),
     PnpmVersion,
     VoltaPackage,
     NpmShim,
+    MacPortsOwner,
     HomebrewExecutable(String),
     HomebrewPrefix,
 }
@@ -74,6 +83,7 @@ pub enum ObservationValue {
         present: bool,
         installs: Vec<MiseInstall>,
     },
+    AllInstalls(Vec<(String, Vec<MiseInstall>)>),
     NpmShim {
         directory: String,
         exists: bool,
@@ -98,6 +108,10 @@ pub enum Lookup {
     },
     Pnpm {
         package_name: String,
+    },
+    Npm {
+        package_name: String,
+        prefix: String,
     },
     VitePlus {
         package_name: String,
@@ -173,9 +187,13 @@ pub fn make_targeted_update_action(
     let mut selected = original_update_action(update);
     selected.args[package_index] = target.clone();
     if let Some(command_index) = selected.command.rfind(previous) {
-        selected
-            .command
-            .replace_range(command_index..command_index + previous.len(), &target);
+        let after = command_index + previous.len();
+        selected.command = format!(
+            "{}{}{}",
+            &selected.command[..command_index],
+            target,
+            &selected.command[after..]
+        );
     }
     Some(selected)
 }
@@ -367,11 +385,20 @@ fn manual(owner: &Owner, install_path: Option<&str>) -> Capabilities {
     }
 }
 
-fn is_mise_path(path: &str) -> bool {
+fn is_mise_path(path: &str, roots: &MiseRoots) -> bool {
     let path = normalize_path(path);
     (path.contains("/mise/installs/") && !path.contains("/mise/installs/node/"))
         || path.contains("/mise/shims/")
         || path.contains("/mise/command-wrappers/")
+        || roots.install.iter().any(|root| {
+            path.strip_prefix(root.as_str())
+                .and_then(|suffix| suffix.strip_prefix('/'))
+                .is_some_and(|suffix| !suffix.starts_with("node/"))
+        })
+        || roots.other.iter().any(|root| {
+            path.strip_prefix(root.as_str())
+                .is_some_and(|suffix| suffix.starts_with('/'))
+        })
 }
 
 fn is_mise_executable(path: &str) -> bool {
@@ -432,8 +459,8 @@ fn mise(
 ) -> Result<Option<Capabilities>, Error> {
     let is_shim = is_mise_executable(&context.real_command_path);
     let looks_mise = if is_shim
-        || is_mise_path(&context.resolved_command_path)
-        || is_mise_path(&context.real_command_path)
+        || is_mise_path(&context.resolved_command_path, &context.mise_roots)
+        || is_mise_path(&context.real_command_path, &context.mise_roots)
     {
         true
     } else {
@@ -536,7 +563,19 @@ fn mise(
             return Ok(Some(manual(owner, Some(binary_path))));
         }
     }
-    let args = vec!["upgrade".to_string(), tool.tool.clone()];
+    let ObservationValue::AllInstalls(configured) = cursor.read(Observation::MiseAllListing)?
+    else {
+        return Err(Error::ObservationMismatch);
+    };
+    let configured_tool = configured
+        .iter()
+        .find(|(_, installs)| {
+            installs
+                .iter()
+                .any(|candidate| candidate.path == active.path)
+        })
+        .map_or(tool.tool.as_str(), |(name, _)| name.as_str());
+    let args = vec!["upgrade".to_string(), configured_tool.to_string()];
     let mut capabilities = update(
         owner,
         &executable,
@@ -544,7 +583,7 @@ fn mise(
         "mise",
         &context.platform,
         "context",
-        Some(format!("mise upgrade {}", tool.tool)),
+        Some(format!("mise upgrade {configured_tool}")),
     );
     capabilities.latest_unknown = true;
     capabilities.latest_lookup = Some(Lookup::Mise {
@@ -772,6 +811,21 @@ fn package(request: &Request, cursor: &mut Cursor<'_>) -> Result<Option<Capabili
     {
         return Ok(Some(manual));
     }
+    if context.platform != "win32" {
+        if let Some(name) = cursor.text(Observation::MacPortsOwner)? {
+            if !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"_.+-".contains(&byte))
+            {
+                return Err(Error::ObservationMismatch);
+            }
+            let mut capabilities = manual;
+            if !name.is_empty() {
+                capabilities.manual_command = Some(format!("sudo port upgrade {name}"));
+            }
+            return Ok(Some(capabilities));
+        }
+    }
     let native = request.definition.native.as_ref().map_or_else(
         || manual.clone(),
         |native| {
@@ -854,14 +908,7 @@ fn package(request: &Request, cursor: &mut Cursor<'_>) -> Result<Option<Capabili
         };
         return Ok(Some(capabilities));
     }
-    let normalized = normalize_path(&context.real_command_path);
-    let basename = normalized
-        .trim_end_matches('/')
-        .rsplit('/')
-        .next()
-        .unwrap_or("");
-    let basename = basename.strip_suffix(".exe").unwrap_or(basename);
-    if basename == "volta-shim" && cursor.boolean(Observation::VoltaPackage)? {
+    if cursor.boolean(Observation::VoltaPackage)? {
         return Ok(Some(update(
             owner,
             "volta",
@@ -881,7 +928,7 @@ fn package(request: &Request, cursor: &mut Cursor<'_>) -> Result<Option<Capabili
         }
     };
     if let Some(prefix) = npm_prefix.filter(|prefix| !prefix.is_empty()) {
-        return Ok(Some(update(
+        let mut capabilities = update(
             owner,
             "npm",
             vec![
@@ -896,7 +943,13 @@ fn package(request: &Request, cursor: &mut Cursor<'_>) -> Result<Option<Capabili
             &context.command_platform,
             "context",
             None,
-        )));
+        );
+        capabilities.latest_unknown = true;
+        capabilities.latest_lookup = Some(Lookup::Npm {
+            package_name: package_name.to_string(),
+            prefix,
+        });
+        return Ok(Some(capabilities));
     }
     if let Some(ownership) = homebrew_ownership(&context.real_command_path) {
         return Ok(Some(
@@ -975,7 +1028,12 @@ mod tests {
         );
         assert_eq!(
             selected.args,
-            ["add", "雪/pkg@01.2.003", "雪/pkg", "雪/pkg@latest"]
+            vec![
+                "add".to_string(),
+                "雪/pkg@01.2.003".to_string(),
+                "雪/pkg".to_string(),
+                "雪/pkg@latest".to_string(),
+            ]
         );
         assert_eq!(input.args[1], "雪/pkg@latest");
 
@@ -1137,16 +1195,23 @@ mod tests {
                 host_platform: "linux".to_string(),
                 command_platform: "linux".to_string(),
                 chocolatey_install: None,
+                mise_roots: MiseRoots::default(),
             }),
             definition: Definition {
                 mise: None,
                 native: None,
             },
             homebrew: None,
-            observations: vec![Observed {
-                request: Observation::Wrapper,
-                result: ObservationValue::Text(None),
-            }],
+            observations: vec![
+                Observed {
+                    request: Observation::Wrapper,
+                    result: ObservationValue::Text(None),
+                },
+                Observed {
+                    request: Observation::MacPortsOwner,
+                    result: ObservationValue::Text(None),
+                },
+            ],
         }
     }
 
@@ -1169,7 +1234,20 @@ mod tests {
                 "/home/user/mise/installs/node/22",
             ),
         ] {
-            let value = capabilities(&request(path));
+            let mut input = request(path);
+            input.observations.push(Observed {
+                request: Observation::VoltaPackage,
+                result: ObservationValue::Boolean(false),
+            });
+            let value = capabilities(&input);
+            assert!(value.latest_unknown);
+            assert_eq!(
+                value.latest_lookup,
+                Some(Lookup::Npm {
+                    package_name: "@openai/codex".into(),
+                    prefix: prefix.into(),
+                })
+            );
             let update = value.update.unwrap();
             assert_eq!(update.executable, "npm");
             assert_eq!(update.args[3], prefix);
@@ -1191,6 +1269,35 @@ mod tests {
     }
 
     #[test]
+    fn macports_owner_precedes_native_and_npm_updates_and_requires_safe_manual_name() {
+        for path in [
+            "/opt/local/bin/codex",
+            "/opt/local/lib/node_modules/@openai/codex/bin/codex",
+        ] {
+            let mut input = request(path);
+            input.definition.native = Some(NativeUpdate {
+                args: vec!["update".into()],
+                matches_command_path: true,
+                requires_command_path: false,
+                has_env: false,
+            });
+            input.observations[1].result = ObservationValue::Text(Some("codex".into()));
+            let actual = capabilities(&input);
+            assert!(actual.update.is_none());
+            assert_eq!(
+                actual.manual_command.as_deref(),
+                Some("sudo port upgrade codex")
+            );
+            input.observations[1].result = ObservationValue::Text(Some(String::new()));
+            let actual = capabilities(&input);
+            assert!(actual.update.is_none());
+            assert!(actual.manual_command.is_none());
+            input.observations[1].result = ObservationValue::Text(Some("unsafe;port".into()));
+            assert_eq!(resolve(&input), Err(Error::ObservationMismatch));
+        }
+    }
+
+    #[test]
     fn command_quoting_preserves_posix_and_powershell_words() {
         assert_eq!(quote_shell_word("a'b", "linux"), "'a'\\''b'");
         assert_eq!(
@@ -1204,6 +1311,7 @@ mod tests {
         assert_eq!(quote_shell_word("", "linux"), "''");
         let mut input = request("C:\\Program Files\\codex.exe");
         input.context.as_mut().unwrap().platform = "win32".to_string();
+        input.observations.pop();
         input.definition.native = Some(NativeUpdate {
             args: vec!["update".to_string()],
             matches_command_path: true,
@@ -1217,6 +1325,17 @@ mod tests {
 
     #[test]
     fn mise_wrapper_checks_use_javascript_whitespace_and_ascii_boundaries() {
+        let roots = MiseRoots {
+            install: vec!["/fixture/installed".to_string()],
+            other: vec!["/fixture/wrappers".to_string()],
+        };
+        assert!(is_mise_path("/fixture/installed/codex/bin/codex", &roots));
+        assert!(is_mise_path("/fixture/wrappers/codex", &roots));
+        assert!(!is_mise_path("/fixture/installed-extra/codex", &roots));
+        assert!(!is_mise_path(
+            "/fixture/installed/node/24/bin/codex",
+            &roots
+        ));
         assert!(is_mise_wrapper("#!/bin/sh\nexec mise\u{feff}exec codex"));
         assert!(is_mise_wrapper("#!/bin/sh\nmise x -- codex"));
         assert!(!is_mise_wrapper("exec mise exec codex"));
@@ -1267,10 +1386,22 @@ mod tests {
                 result: ObservationValue::Text(Some("/data/mise/installs/codex".to_string())),
             },
         ];
+        input.observations.push(Observed {
+            request: Observation::MiseAllListing,
+            result: ObservationValue::AllInstalls(vec![(
+                "npm:@openai/codex".into(),
+                vec![MiseInstall {
+                    path: "/data/mise/installs/codex/1".into(),
+                    active: true,
+                    requested_version: Some("latest".into()),
+                }],
+            )]),
+        });
         assert_eq!(
             capabilities(&input).update.unwrap().command,
-            "mise upgrade codex"
+            "mise upgrade npm:@openai/codex"
         );
+        input.observations.pop();
         input.context.as_mut().unwrap().resolved_command_path =
             "/data/mise/installs/codex/1/bin/codex".to_string();
         assert!(capabilities(&input).update.is_none());
@@ -1298,7 +1429,7 @@ mod tests {
                 .contains(&"--allow-build=@openai/codex".to_string()),
             "pnpm approval must be preserved"
         );
-        input.observations[1].request = Observation::VoltaPackage;
+        input.observations[2].request = Observation::VoltaPackage;
         assert_eq!(resolve(&input), Err(Error::ObservationMismatch));
         input.observations.truncate(1);
         input.context = None;
@@ -1337,6 +1468,10 @@ mod tests {
         assert!(homebrew_ownership("/opt\n/Cellar/tool/1/bin/tool").is_none());
         let mut input = request("/opt/Caskroom/codex/1/bin/codex");
         input.observations.extend([
+            Observed {
+                request: Observation::VoltaPackage,
+                result: ObservationValue::Boolean(false),
+            },
             Observed {
                 request: Observation::HomebrewExecutable("/opt".to_string()),
                 result: ObservationValue::Text(Some("/opt/bin/brew".to_string())),
