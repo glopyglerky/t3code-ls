@@ -158,6 +158,9 @@ export interface RedbClientShape {
     { readonly prepared: boolean; readonly indexed_rows: number },
     RedbClientError
   >;
+  readonly prepareStartup: (
+    from: number,
+  ) => Effect.Effect<{ readonly next: number | null }, RedbClientError>;
   readonly prepareReceipts: Effect.Effect<PreparationResult, RedbClientError>;
   readonly preparePositions: Effect.Effect<PreparationResult, RedbClientError>;
   readonly prepareTaskFolders: Effect.Effect<PreparationResult, RedbClientError>;
@@ -539,6 +542,13 @@ export const make = Effect.gen(function* () {
     initialize: Effect.fn("RedbClient.initialize")(function* (schema) {
       yield* outsideTransaction;
       return yield* database.request({ operation: "application_init", schema }, Initialized);
+    }),
+    prepareStartup: Effect.fn("RedbClient.prepareStartup")(function* (from) {
+      yield* outsideTransaction;
+      return yield* database.request(
+        { operation: "application_startup_prepare", from },
+        Schema.Struct({ next: Schema.NullOr(Schema.Int) }),
+      );
     }),
     prepareEvents: Effect.gen(function* () {
       yield* outsideTransaction;

@@ -302,6 +302,35 @@ class PortingPlans(unittest.TestCase):
         self.assertEqual(lock["qualification"]["status"], "unqualified")
         self.assertIsNone(lock["qualification"]["last_qualified_commit"])
 
+    def test_reviewed_merge_binds_the_resolution_and_refreshes_the_upstream_blob(self):
+        path = "apps/server/policy.ts"
+        head = self.upstream({path: "changed upstream policy\n"})
+        fork = self.fork()
+        self.git("merge", "--no-commit", head)
+        self.write(path, "reviewed Rust policy adapter\n")
+        self.git("add", path)
+        plan = self.plan(head)
+        staged_blob = self.git("rev-parse", ":" + path)
+        upstream_blob = self.git("rev-parse", f"{head}:{path}")
+        index = self.git("write-tree")
+        with self.assertRaisesRegex(planner.nightly.TrackingError, "explicit source review"):
+            planner.mechanical_metadata_patch(self.root, plan)
+        with self.assertRaisesRegex(planner.nightly.TrackingError, "staged merge differs"):
+            planner.mechanical_metadata_patch(self.root, plan, {path: upstream_blob})
+        patch = self.directory / "metadata.patch"
+        report = self.directory / "plan.json"
+        self.assertEqual(planner.main([
+            "--repo-root", str(self.root), "--upstream-commit", head, "--output", str(report),
+            "--mechanical-metadata-patch", str(patch), "--reviewed-translation", f"{path}={staged_blob}",
+        ]), 0)
+        self.assertEqual(self.git("write-tree"), index)
+        self.assertEqual(self.git("rev-parse", "HEAD"), fork)
+        self.git("apply", "--index", str(patch))
+        mapping = json.loads((self.root / "port-map.json").read_text())
+        self.assertEqual(mapping["ports"][0]["upstream_sources"], [{"path": path, "blob": upstream_blob}])
+        self.assertEqual(mapping["source_history"], [self.base, head])
+        self.assertEqual(self.git("rev-parse", ":" + path), staged_blob)
+
     def test_mechanical_metadata_refuses_staged_mode_or_unrelated_changes(self):
         head = self.upstream({"apps/web/clean.ts": "changed upstream\n"})
         self.fork()

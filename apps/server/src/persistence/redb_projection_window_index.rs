@@ -477,44 +477,93 @@ pub(crate) async fn equal_metadata(
     }
     let prefix = index_prefix(&session.catalog, name, column, value);
     let end = prefix_end(&prefix);
+    let metadata_prefix = location(&session.catalog, &format!("window-meta/{name}/"));
+    if session.read_snapshot_validation.is_some() {
+        let name = name.to_owned();
+        let column = column.to_owned();
+        let value = value.clone();
+        return session
+            .transaction
+            .read_snapshot(move |reader| {
+                let mut cursor = prefix.clone();
+                let mut result = Vec::new();
+                loop {
+                    let page = reader.scan(&cursor, &end, 128)?;
+                    let count = page.len();
+                    for (index, bytes) in page {
+                        let (witness, digest) =
+                            validated_witness(&prefix, &name, &column, &value, &index, &bytes)?;
+                        let mut key = metadata_prefix.clone();
+                        key.extend_from_slice(digest.as_bytes());
+                        let metadata = reader
+                            .decode(&key, decode)?
+                            .ok_or(Error::IncompatibleStore)?;
+                        result.push(validated_row(&witness, metadata)?);
+                        cursor = index;
+                        cursor.push(0);
+                    }
+                    if count < 128 {
+                        return Ok(result);
+                    }
+                }
+            })
+            .await;
+    }
     let mut cursor = prefix.clone();
     let mut result = Vec::new();
     loop {
         let page = session.transaction.scan(&cursor, &end, 128).await?;
         let count = page.len();
         for (index, bytes) in page {
-            let witness: IndexRow = decode(&bytes)?;
-            if witness.table != name
-                || witness.column != column
-                || &witness.value != value
-                || index_key(&session.catalog, &witness) != index
-            {
-                return Err(Error::IncompatibleStore);
-            }
+            let (witness, digest) =
+                validated_witness(&prefix, name, column, value, &index, &bytes)?;
+            let mut key = metadata_prefix.clone();
+            key.extend_from_slice(digest.as_bytes());
             let bytes = session
                 .transaction
-                .get(&key(&session.catalog, name, &witness.primary))
+                .get(&key)
                 .await?
                 .ok_or(Error::IncompatibleStore)?;
-            let metadata: Metadata = decode(&bytes)?;
-            if metadata.table != name
-                || metadata.primary != witness.primary
-                || metadata.order != witness.order
-            {
-                return Err(Error::IncompatibleStore);
-            }
-            result.push(IndexedRow {
-                row: metadata.row,
-                order: metadata.order,
-            });
+            result.push(validated_row(&witness, decode(&bytes)?)?);
             cursor = index;
             cursor.push(0);
         }
         if count < 128 {
-            break;
+            return Ok(result);
         }
     }
-    Ok(result)
+}
+
+fn validated_witness(
+    prefix: &[u8],
+    name: &str,
+    column: &str,
+    value: &Value,
+    index: &[u8],
+    bytes: &[u8],
+) -> Result<(IndexRow, String)> {
+    let witness: IndexRow = decode(bytes)?;
+    if witness.table != name || witness.column != column || &witness.value != value {
+        return Err(Error::IncompatibleStore);
+    }
+    let digest = request_digest(&json!(witness.primary));
+    if index.strip_prefix(prefix) != Some(digest.as_bytes()) {
+        return Err(Error::IncompatibleStore);
+    }
+    Ok((witness, digest))
+}
+
+fn validated_row(witness: &IndexRow, metadata: Metadata) -> Result<IndexedRow> {
+    if metadata.table != witness.table
+        || metadata.primary != witness.primary
+        || metadata.order != witness.order
+    {
+        return Err(Error::IncompatibleStore);
+    }
+    Ok(IndexedRow {
+        row: metadata.row,
+        order: metadata.order,
+    })
 }
 
 pub(crate) async fn read_metadata(
@@ -544,6 +593,110 @@ pub(crate) async fn read_metadata(
 #[cfg(test)]
 mod compact_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn metadata_scan_preserves_page_order_and_snapshot_validation() {
+        use crate::application::ApplicationTransactionMode;
+        use crate::test_support::TestFixture;
+
+        let fixture = TestFixture::start().await;
+        let store = fixture.initialize().await;
+        store.bootstrap_application().await.unwrap();
+        while !store
+            .prepare_application_projection_reads()
+            .await
+            .unwrap()
+            .prepared
+        {}
+        let catalog =
+            decode_catalog(&store.db.read(&schema_key()).await.unwrap().unwrap()).unwrap();
+        let mut tx = store.db.begin().await.unwrap();
+        let mut row = spec(ITEMS)
+            .columns
+            .iter()
+            .map(|(name, kind)| {
+                let cell = match kind {
+                    T => text_cell("fixture"),
+                    I => int_cell(1),
+                    NT | NI => nullable_cell(None),
+                };
+                ((*name).to_owned(), cell)
+            })
+            .collect::<Map<String, Value>>();
+        row.insert("type".into(), text_cell("user_message"));
+        row.insert("payload_json".into(), text_cell("{}"));
+        row.insert("thread_id".into(), text_cell("history-thread"));
+        let selected = text_cell("history-thread");
+        let mut last = None;
+        for ordinal in 1..=129 {
+            row.insert("turn_item_id".into(), text_cell(&format!("item-{ordinal}")));
+            let order = RowOrder { epoch: 1, ordinal };
+            insert_entries(&mut tx, &catalog, ITEMS, &row, order)
+                .await
+                .unwrap();
+            let witness = entries(ITEMS, &row, order)
+                .unwrap()
+                .into_iter()
+                .find(|entry| entry.column == "thread_id")
+                .unwrap();
+            let index = index_key(&catalog, &witness);
+            if last.as_ref().is_none_or(|(key, _)| &index > key) {
+                last = Some((index, witness));
+            }
+        }
+        tx.commit().await.unwrap();
+
+        let mut application = ApplicationTransactions::new(store.clone());
+        application
+            .begin_mode("reader", ApplicationTransactionMode::Read, None)
+            .await
+            .unwrap();
+        let mut reader = application.take("reader").unwrap();
+        application
+            .begin_mode("writer", ApplicationTransactionMode::Write, None)
+            .await
+            .unwrap();
+        let mut writer = application.take("writer").unwrap();
+
+        let expected = equal_metadata(&mut writer, ITEMS, "thread_id", &selected)
+            .await
+            .unwrap();
+        assert_eq!(expected.len(), 129);
+        let (mut index, witness) = last.unwrap();
+        writer.transaction.delete(index.clone()).await.unwrap();
+        index.push(b'x');
+        writer
+            .transaction
+            .put(index, encode(&witness).unwrap())
+            .await
+            .unwrap();
+        assert!(matches!(
+            equal_metadata(&mut writer, ITEMS, "thread_id", &selected).await,
+            Err(Error::IncompatibleStore)
+        ));
+        writer.transaction.commit().await.unwrap();
+
+        let old = equal_metadata(&mut reader, ITEMS, "thread_id", &selected)
+            .await
+            .unwrap();
+        assert_eq!(old.len(), expected.len());
+        for (old, expected) in old.into_iter().zip(expected) {
+            assert_eq!(old.order, expected.order);
+            assert_eq!(old.row, expected.row);
+        }
+        reader.transaction.rollback().await.unwrap();
+
+        application
+            .begin_mode("fresh", ApplicationTransactionMode::Read, None)
+            .await
+            .unwrap();
+        let mut fresh = application.take("fresh").unwrap();
+        assert!(matches!(
+            equal_metadata(&mut fresh, ITEMS, "thread_id", &selected).await,
+            Err(Error::IncompatibleStore)
+        ));
+        fresh.transaction.rollback().await.unwrap();
+    }
 
     #[test]
     fn shell_metadata_drops_bodies_and_keeps_idle_compaction_flags() {

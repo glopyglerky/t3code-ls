@@ -230,27 +230,12 @@ export const make = Effect.fn("Omdb.make")(
       // Finish every resumable index preparation before making the cutover durable.
       // A failed preparation leaves the preserved SQLite source and the retryable
       // native candidate intact, without activating the older-server fence.
-      for (const prepare of [
-        client.prepareEvents,
-        client.prepareReceipts,
-        client.preparePositions,
-        client.prepareProjects,
-        client.prepareTaskFolders,
-        client.prepareProjections,
-        client.prepareOutbox,
-        client.prepareViewedFiles,
-        client.prepareAuth,
-        client.preparePeers,
-        client.prepareRuntimeState,
-        client.prepareScheduled,
-        client.prepareProjectionReads,
-        client.prepareAuxiliary,
-        client.prepareMessageRowids,
-        client.prepareSearch,
-        client.prepareLegacyV1,
-        client.prepareMaintenance,
-      ]) {
-        while (!(yield* prepare).prepared) yield* Effect.yieldNow;
+      let preparation = 0;
+      for (;;) {
+        const { next } = yield* client.prepareStartup(preparation);
+        if (next === null) break;
+        preparation = next;
+        yield* Effect.yieldNow;
       }
       if (activate !== undefined) yield* activate;
       return { database, client };

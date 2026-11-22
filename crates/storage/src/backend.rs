@@ -883,6 +883,31 @@ struct ObservedRange {
     rows: Vec<Pair>,
 }
 
+pub(crate) struct SnapshotReader(redb::ReadOnlyTable<&'static [u8], &'static [u8]>);
+
+impl SnapshotReader {
+    pub(crate) fn scan(&self, start: &[u8], end: &[u8], limit: usize) -> Result<Vec<Pair>> {
+        scan_table(&self.0, start, end, limit)
+    }
+
+    pub(crate) fn decode<T>(
+        &self,
+        key: &[u8],
+        decode: impl FnOnce(&[u8]) -> Result<T>,
+    ) -> Result<Option<T>> {
+        let value = self.0.get(key).map_err(storage_error)?;
+        value
+            .map(|value| {
+                let bytes = value.value();
+                if bytes.len() > MAX_BATCH_BYTES {
+                    return Err(Error::IncompatibleStore);
+                }
+                decode(bytes)
+            })
+            .transpose()
+    }
+}
+
 pub(crate) struct Transaction {
     backend: Backend,
     snapshot: Arc<ReadTransaction>,
@@ -968,6 +993,27 @@ impl Transaction {
             ));
         }
         Ok(())
+    }
+
+    /// Borrow values under one immutable engine table read. Writers keep their
+    /// overlay and conflict-observation path through the regular operations.
+    pub(crate) async fn read_snapshot<T>(
+        &self,
+        read: impl FnOnce(SnapshotReader) -> Result<T> + Send + 'static,
+    ) -> Result<T>
+    where
+        T: Send + 'static,
+    {
+        self.ensure_active()?;
+        if !self.read_only {
+            return Err(Error::Invalid("application transaction is writable".into()));
+        }
+        let snapshot = self.snapshot.clone();
+        execute_read(move || {
+            let table = snapshot.open_table(TABLE).map_err(storage_error)?;
+            read(SnapshotReader(table))
+        })
+        .await
     }
 
     pub(crate) async fn get(&mut self, key: &[u8]) -> Result<Option<Vec<u8>>> {
@@ -1148,6 +1194,28 @@ impl Transaction {
             result.push(value.clone());
         }
         Ok(result)
+    }
+
+    /// Prove a range empty without copying its values. Writable transactions
+    /// must keep their normal scans and conflict observations.
+    pub(crate) async fn empty_read_snapshot_range(
+        &self,
+        start: Vec<u8>,
+        end: Vec<u8>,
+    ) -> Result<bool> {
+        self.ensure_active()?;
+        if !self.read_only {
+            return Ok(false);
+        }
+        let snapshot = self.snapshot.clone();
+        execute_read(move || {
+            let table = snapshot.open_table(TABLE).map_err(storage_error)?;
+            let mut rows = table
+                .range(start.as_slice()..end.as_slice())
+                .map_err(storage_error)?;
+            Ok(rows.next().transpose().map_err(storage_error)?.is_none())
+        })
+        .await
     }
 
     pub(crate) async fn scan(

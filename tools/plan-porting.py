@@ -265,8 +265,11 @@ def build_plan(root: Path, upstream: dict) -> dict:
     }
 
 
-def mechanical_metadata_patch(root: Path, plan: dict) -> str:
-    """Render a pin update for an exact staged, mechanically imported upstream merge."""
+def mechanical_metadata_patch(
+    root: Path, plan: dict, reviewed_translations: dict[str, str] | None = None,
+) -> str:
+    """Render metadata for an exact staged merge and explicitly reviewed translations."""
+    reviewed_translations = reviewed_translations or {}
     revisions = plan["revisions"]
     fork = revisions["fork"]
     base = revisions["integrated_upstream"]
@@ -279,12 +282,25 @@ def mechanical_metadata_patch(root: Path, plan: dict) -> str:
         raise nightly.TrackingError("Resolve all unstaged changes before preparing merge metadata.")
 
     expected = nightly.read_tree(root, fork)
+    translations = {}
     for change in plan["changes"]:
+        path = change["path"]
         entry = change["after"]
-        if (change["classification"] not in {"mechanical-import-candidate", "already-matches-upstream"}
-                or entry is None or entry["mode"] not in {"100644", "100755"}):
+        category = change["classification"]
+        if entry is None or entry["mode"] not in {"100644", "100755"}:
             raise nightly.TrackingError("The upstream change requires explicit source review.")
-        expected[change["path"]] = entry
+        if category == "translation-review" and path in reviewed_translations:
+            before = change["before"]
+            if before is None:
+                raise nightly.TrackingError("A new port source needs explicit metadata review.")
+            translations[path] = (before["oid"], entry["oid"])
+            expected[path] = {**entry, "oid": nightly.require_sha(reviewed_translations[path])}
+        elif category in {"mechanical-import-candidate", "already-matches-upstream"}:
+            expected[path] = entry
+        else:
+            raise nightly.TrackingError("The upstream change requires explicit source review.")
+    if set(translations) != set(reviewed_translations):
+        raise nightly.TrackingError("A reviewed path is not a translation in this upstream merge.")
     staged = bounded_git(root, "write-tree").decode().strip()
     if nightly.read_tree(root, staged) != expected:
         raise nightly.TrackingError("The staged merge differs from the planned upstream source.")
@@ -317,6 +333,20 @@ def mechanical_metadata_patch(root: Path, plan: dict) -> str:
     history.append(head)
     for port in mapping["ports"]:
         port["reviewed_upstream_commit"] = head
+        for source in port["upstream_sources"]:
+            path = source["path"]
+            if path in translations and "source_commit" not in source:
+                before, after = translations[path]
+                if source["blob"] != before:
+                    raise nightly.TrackingError("A translated port source has an unexpected prior blob.")
+                source["blob"] = after
+    for path, (before, after) in translations.items():
+        quoted_path = re.escape(json.dumps(path))
+        updated_map = re.sub(
+            rf'("path"\s*:\s*{quoted_path},\s*"blob"\s*:\s*)"{before}"(?=\s*}})',
+            lambda match: f'{match[1]}"{after}"',
+            updated_map,
+        )
     if (replacements != len(mapping["ports"]) + 1 or history_replacements != 1
             or json.loads(updated_map) != mapping):
         raise nightly.TrackingError("Could not preserve the port map while updating its pins.")
@@ -372,7 +402,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--summary", type=Path, help="Optional Markdown job summary outside source.")
     parser.add_argument("--mechanical-metadata-patch", type=Path,
-                        help="Write a Git patch for the metadata of an exact staged mechanical merge.")
+                        help="Write a Git patch for an exact staged merge's metadata.")
+    parser.add_argument("--reviewed-translation", action="append", default=[], metavar="PATH=STAGED_BLOB",
+                        help="Bind a manually reviewed translation to the exact staged blob.")
     args = parser.parse_args(argv)
     try:
         root = args.repo_root.resolve()
@@ -393,7 +425,14 @@ def main(argv: list[str] | None = None) -> int:
         for commit in dict.fromkeys([base, upstream["commit"]]):
             ensure_metadata(root, commit, args.fetch_default)
         plan = build_plan(root, upstream)
-        metadata_patch = mechanical_metadata_patch(root, plan) if patch_path else None
+        reviewed_translations = {}
+        for review in args.reviewed_translation:
+            path, separator, blob = review.rpartition("=")
+            if not patch_path or not separator or not path or path in reviewed_translations:
+                raise nightly.TrackingError("Review each translation once using PATH=STAGED_BLOB and a metadata patch.")
+            reviewed_translations[path] = nightly.require_sha(blob)
+        metadata_patch = (mechanical_metadata_patch(root, plan, reviewed_translations)
+                          if patch_path else None)
         nightly.write_json(destination, plan)
         if patch_path:
             patch_path.parent.mkdir(parents=True, exist_ok=True)

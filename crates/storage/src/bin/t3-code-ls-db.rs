@@ -58,6 +58,9 @@ enum Request {
     ApplicationBootstrap {},
     ApplicationMigrations {},
     ApplicationUpgradeNeeded {},
+    ApplicationStartupPrepare {
+        from: u8,
+    },
     ApplicationProjectionWindowQuery {
         transaction_id: String,
         query: ProjectionWindowQuery,
@@ -513,6 +516,7 @@ impl Request {
     fn is_unscoped_mutation(&self) -> bool {
         match self {
             Self::ApplicationInit { .. }
+            | Self::ApplicationStartupPrepare { .. }
             | Self::ApplicationAuthPrepare { .. }
             | Self::ApplicationPeersPrepare { .. }
             | Self::ApplicationRuntimeStatePrepare { .. }
@@ -684,6 +688,50 @@ async fn evaluate(
         }
         Request::ApplicationUpgradeNeeded {} => {
             serde_json::to_value(store.application_upgrade_needed().await?)
+        }
+        Request::ApplicationStartupPrepare { from } => {
+            // Each stage keeps its original resumable transaction. Return the
+            // current stage for incomplete work, or the next one after a long batch.
+            let start = std::time::Instant::now();
+            let budget = std::time::Duration::from_millis(100);
+            let mut stage = 0_u8;
+            macro_rules! prepare {
+                ($($method:ident),+ $(,)?) => {
+                    $(
+                        if stage >= from {
+                            let result = store.$method().await?;
+                            if !result.prepared || start.elapsed() >= budget {
+                                return Ok(json!({ "next": stage + u8::from(result.prepared) }));
+                            }
+                        }
+                        stage += 1;
+                    )+
+                };
+            }
+            prepare!(
+                prepare_application_events,
+                prepare_application_receipts,
+                prepare_application_positions,
+                prepare_application_projects,
+                prepare_application_task_folders,
+                prepare_application_projections,
+                prepare_application_outbox,
+                prepare_application_viewed_files,
+                prepare_application_auth,
+                prepare_application_peers,
+                prepare_application_runtime_state,
+                prepare_application_scheduled,
+                prepare_application_projection_reads,
+                prepare_application_auxiliary,
+                prepare_application_message_rowids,
+                prepare_application_search,
+                prepare_application_legacy_v1,
+                prepare_application_maintenance,
+            );
+            if from > stage {
+                return Err(Error::Invalid("invalid startup preparation cursor".into()));
+            }
+            Ok(json!({ "next": null }))
         }
         Request::ApplicationProjectionWindowQuery {
             transaction_id,

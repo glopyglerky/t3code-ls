@@ -663,6 +663,7 @@ async fn legacy_next_document(
     catalog: &ApplicationCatalog,
     term: &str,
     mut maximum: i64,
+    has_live_documents: bool,
 ) -> Result<Option<i64>> {
     let prefix = term_prefix(catalog, term);
     loop {
@@ -678,7 +679,12 @@ async fn legacy_next_document(
         if posting.term != term || rowid > maximum || posting_key(catalog, &posting)? != key {
             return Err(Error::IncompatibleStore);
         }
-        let available = match live_document(tx, catalog, rowid).await? {
+        let live = if has_live_documents {
+            live_document(tx, catalog, rowid).await?
+        } else {
+            None
+        };
+        let available = match live {
             None => true,
             Some(document) if !document.source_present || document.suppressed.contains(term) => {
                 false
@@ -774,20 +780,52 @@ async fn bucket_next_document(
     }
 }
 
-async fn next_document(
-    tx: &mut Transaction,
-    catalog: &ApplicationCatalog,
-    term: &str,
-    maximum: i64,
-) -> Result<Option<i64>> {
-    Ok([
-        legacy_next_document(tx, catalog, term, maximum).await?,
-        direct_next_document(tx, catalog, term, maximum).await?,
-        bucket_next_document(tx, catalog, term, maximum).await?,
-    ]
-    .into_iter()
-    .flatten()
-    .max())
+struct PostingFormats {
+    imported: bool,
+    direct: bool,
+    bucketed: bool,
+    live_documents: bool,
+}
+
+impl PostingFormats {
+    async fn load(tx: &Transaction, catalog: &ApplicationCatalog) -> Result<Self> {
+        async fn present(
+            tx: &Transaction,
+            catalog: &ApplicationCatalog,
+            name: &str,
+        ) -> Result<bool> {
+            let start = metadata(catalog, name);
+            let end = prefix_end(&start);
+            Ok(!tx.empty_read_snapshot_range(start, end).await?)
+        }
+
+        Ok(Self {
+            imported: present(tx, catalog, "search-posting/").await?,
+            direct: present(tx, catalog, "search-live-posting/").await?,
+            bucketed: present(tx, catalog, "search-live-bucket/").await?,
+            live_documents: present(tx, catalog, "search-live-document/").await?,
+        })
+    }
+
+    async fn next_document(
+        &self,
+        tx: &mut Transaction,
+        catalog: &ApplicationCatalog,
+        term: &str,
+        maximum: i64,
+    ) -> Result<Option<i64>> {
+        let mut rowid = None;
+        if self.imported {
+            rowid = legacy_next_document(tx, catalog, term, maximum, self.live_documents).await?;
+        }
+        if self.direct {
+            rowid = rowid.max(direct_next_document(tx, catalog, term, maximum).await?);
+        }
+        if self.bucketed {
+            rowid = rowid.max(bucket_next_document(tx, catalog, term, maximum).await?);
+        }
+        Ok(rowid)
+    }
 }
 
 async fn positions(
@@ -795,9 +833,15 @@ async fn positions(
     catalog: &ApplicationCatalog,
     term: &str,
     rowid: i64,
+    has_live_documents: bool,
 ) -> Result<Positions> {
     let mut survivor = false;
-    if let Some(document) = live_document(tx, catalog, rowid).await? {
+    let live = if has_live_documents {
+        live_document(tx, catalog, rowid).await?
+    } else {
+        None
+    };
+    if let Some(document) = live {
         if document
             .terms
             .binary_search_by(|candidate| candidate.as_str().cmp(term))
@@ -893,12 +937,15 @@ async fn matching_documents(
     if terms.is_empty() {
         return Ok(Vec::new());
     }
+    // The lexical request keeps this immutable transaction for every term.
+    // Avoid probing absent storage formats for every candidate document.
+    let formats = PostingFormats::load(tx, catalog).await?;
     let mut maximum = i64::MAX;
     let mut result = Vec::new();
     loop {
         let mut aligned = true;
         for term in &terms {
-            let Some(found) = next_document(tx, catalog, term, maximum).await? else {
+            let Some(found) = formats.next_document(tx, catalog, term, maximum).await? else {
                 return Ok(result);
             };
             if found != maximum {
@@ -911,7 +958,10 @@ async fn matching_documents(
         }
         let mut indexed = BTreeMap::new();
         for term in &terms {
-            indexed.insert(*term, positions(tx, catalog, term, maximum).await?);
+            indexed.insert(
+                *term,
+                positions(tx, catalog, term, maximum, formats.live_documents).await?,
+            );
         }
         let matches = phrases.iter().all(|phrase| {
             let mut starts = indexed[phrase[0].as_str()].clone();
