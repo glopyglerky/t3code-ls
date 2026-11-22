@@ -4,9 +4,9 @@
     "repository": "pingdotgg/t3code",
     "channel": "default-branch",
     "branch": "main",
-    "source_url": "https://github.com/pingdotgg/t3code/commit/ad2bdc76a5bf22cd63b84e2cdee610c1a1b4bd18",
-    "commit": "ad2bdc76a5bf22cd63b84e2cdee610c1a1b4bd18",
-    "root_tree": "203f4ed948801708573964b843d43839d2ef5e90"
+    "source_url": "https://github.com/pingdotgg/t3code/commit/1d028248683f90f405b2d8e7b71682e3b67317ed",
+    "commit": "1d028248683f90f405b2d8e7b71682e3b67317ed",
+    "root_tree": "89b66260ef9d27ec3d059779ae4c6734be50bb24"
   },
   "qualification": {
     "status": "unqualified",
@@ -17,44 +17,32 @@
   "inventory_format": "SHA-256 of ASCII compact JSON arrays [path,mode,kind,Git-object-id], sorted by path; source objects come from the pinned commit, never the working tree.",
   "source_surfaces": {
     "server": {
-      "path_prefixes": [
-        "apps/server/"
-      ],
+      "path_prefixes": ["apps/server/"],
       "entries": 1764,
-      "inventory_sha256": "b4d27b0c087760e41bf0742d282d75ab1e29367c2b9d1206c658a70dd1570fbe"
+      "inventory_sha256": "87aa4e18dad9ce610b52fc56bb4c44de3523b8c438bb9b2a8609a05336731e4b"
     },
     "contracts": {
-      "path_prefixes": [
-        "packages/contracts/"
-      ],
+      "path_prefixes": ["packages/contracts/"],
       "entries": 114,
       "inventory_sha256": "fa7549fd1e97f4157d680c3cd2035211864c4371e2aeeba75bf0d4c42bf4fd88"
     },
     "client_runtime": {
-      "path_prefixes": [
-        "packages/client-runtime/"
-      ],
+      "path_prefixes": ["packages/client-runtime/"],
       "entries": 468,
       "inventory_sha256": "cd3213fb83d2cb32bb7bab50125d34f33da0c4ec3a0194f075c5fa7ef7c68ec0"
     },
     "web": {
-      "path_prefixes": [
-        "apps/web/"
-      ],
+      "path_prefixes": ["apps/web/"],
       "entries": 2182,
       "inventory_sha256": "25c9d90260e6879abe6141434716d00ec5a243b2fcaf2a9c86aed3b2e0946e97"
     },
     "desktop": {
-      "path_prefixes": [
-        "apps/desktop/"
-      ],
+      "path_prefixes": ["apps/desktop/"],
       "entries": 332,
       "inventory_sha256": "823a8f74504829d3e0bfe599fd6f09a1be435fea4844ea0baf2ccd803f94f098"
     },
     "mobile": {
-      "path_prefixes": [
-        "apps/mobile/"
-      ],
+      "path_prefixes": ["apps/mobile/"],
       "entries": 1910,
       "inventory_sha256": "df1e1a705b7bd03ace21ca7b9b9e77841d1765a916f20abc2720b107d6fdc3e5"
     },
@@ -80,12 +68,10 @@
         "packages/effect-codex-app-server/"
       ],
       "entries": 369,
-      "inventory_sha256": "da39c720b60d3c2e079d1523010591bc4ab998c1baeedd31a6d16b8c3f73ead0"
+      "inventory_sha256": "28b9e5cc18b9c4b6da52cc0e5dab9b025474c760f75f5b19a9f1f4e9fe72e41c"
     },
     "shared": {
-      "path_prefixes": [
-        "packages/shared/"
-      ],
+      "path_prefixes": ["packages/shared/"],
       "entries": 283,
       "inventory_sha256": "791deda9d849da505a7c3848c10568e451ea6269f043cc5ccfc64fe52b8698c8"
     }

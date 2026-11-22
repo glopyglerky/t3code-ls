@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "recovery_commit": "d29a94f3a175eac1f26c548023fedd8695cedfaf",
-  "integrated_upstream_commit": "ad2bdc76a5bf22cd63b84e2cdee610c1a1b4bd18",
+  "integrated_upstream_commit": "1d028248683f90f405b2d8e7b71682e3b67317ed",
   "source_history": [
     "521ac7c218b3faa74281fb72fc36ce74a0951fb3",
     "822671581383a357c5dc8d3ea9984b408c3e03c6",
@@ -61,7 +61,8 @@
     "1e78f37618f087f8606a0bc5a4e49f546c9e2781",
     "a985332c447173750394c0875fb961f88c306730",
     "620cf4770d992d642f822a13dc2539c2605a3500",
-    "ad2bdc76a5bf22cd63b84e2cdee610c1a1b4bd18"
+    "ad2bdc76a5bf22cd63b84e2cdee610c1a1b4bd18",
+    "1d028248683f90f405b2d8e7b71682e3b67317ed"
   ],
   "upstream_removals": [
     {
@@ -1122,7 +1123,7 @@
       "id": "command-and-dispatch-policy",
       "state": "integrated",
       "domain_owner": "apps/server/src/orchestration-v2",
-      "reviewed_upstream_commit": "ad2bdc76a5bf22cd63b84e2cdee610c1a1b4bd18",
+      "reviewed_upstream_commit": "1d028248683f90f405b2d8e7b71682e3b67317ed",
       "upstream_sources": [
         {
           "path": "apps/server/src/orchestration-v2/CommandPolicy.ts",
@@ -1171,7 +1172,7 @@
       "id": "project-commands",
       "state": "integrated",
       "domain_owner": "apps/server/src/project",
-      "reviewed_upstream_commit": "ad2bdc76a5bf22cd63b84e2cdee610c1a1b4bd18",
+      "reviewed_upstream_commit": "1d028248683f90f405b2d8e7b71682e3b67317ed",
       "upstream_sources": [
         {
           "path": "apps/server/src/orchestration-v2/ProjectCommands.ts",
@@ -1223,7 +1224,7 @@
       "id": "guest-share-decisions",
       "state": "integrated",
       "domain_owner": "apps/server/src/guest",
-      "reviewed_upstream_commit": "ad2bdc76a5bf22cd63b84e2cdee610c1a1b4bd18",
+      "reviewed_upstream_commit": "1d028248683f90f405b2d8e7b71682e3b67317ed",
       "upstream_sources": [
         {
           "path": "apps/server/src/orchestration-v2/GuestShareDecider.ts",
@@ -1280,7 +1281,7 @@
       "id": "provider-recovery",
       "state": "integrated",
       "domain_owner": "apps/server/src/orchestration-v2",
-      "reviewed_upstream_commit": "ad2bdc76a5bf22cd63b84e2cdee610c1a1b4bd18",
+      "reviewed_upstream_commit": "1d028248683f90f405b2d8e7b71682e3b67317ed",
       "upstream_sources": [
         {
           "path": "packages/provider-core/src/server/subagentProjection.ts",
@@ -1332,7 +1333,7 @@
       "id": "provider-maintenance",
       "state": "integrated",
       "domain_owner": "packages/provider-core/src/server",
-      "reviewed_upstream_commit": "ad2bdc76a5bf22cd63b84e2cdee610c1a1b4bd18",
+      "reviewed_upstream_commit": "1d028248683f90f405b2d8e7b71682e3b67317ed",
       "upstream_sources": [
         {
           "path": "packages/provider-core/src/server/maintenanceResolver.ts",
@@ -1385,7 +1386,7 @@
       "id": "codex-structured-generation",
       "state": "integrated",
       "domain_owner": "apps/server/src/textGeneration",
-      "reviewed_upstream_commit": "ad2bdc76a5bf22cd63b84e2cdee610c1a1b4bd18",
+      "reviewed_upstream_commit": "1d028248683f90f405b2d8e7b71682e3b67317ed",
       "upstream_sources": [
         {
           "path": "apps/server/src/provider/codexLaunchArgs.ts",
@@ -1444,7 +1445,7 @@
       "id": "codex-process-runtime",
       "state": "integrated",
       "domain_owner": "apps/server/src/provider",
-      "reviewed_upstream_commit": "ad2bdc76a5bf22cd63b84e2cdee610c1a1b4bd18",
+      "reviewed_upstream_commit": "1d028248683f90f405b2d8e7b71682e3b67317ed",
       "upstream_sources": [
         {
           "path": "apps/server/src/provider/CodexProvider.ts",
@@ -1452,7 +1453,7 @@
         },
         {
           "path": "apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts",
-          "blob": "e5dfd835592928efb8d9f550192828e80bd9522d"
+          "blob": "181ed17fd5c16c1a545d0ddf29c87749d4d39513"
         },
         {
           "path": "packages/shared/src/shell.ts",
@@ -1495,14 +1496,14 @@
       ],
       "acceptance_tests": ["tools/check-provider-adapter.mjs", "tools/check-provider.mjs"],
       "retired_paths": [],
-      "notes": "Rust owns the Unix child-process protocol transport. Provider retry deadlines, schemas and orchestration event translation remain in the shared upstream adapter; repeated retry notices retain the original retry-window deadline. Windows retains its process path. Native selection is preserved before effects, and uncertain provider actions never retry through the retained implementation. Frozen e2afd254 integration review: Retained current upstream adapter process/service dependencies, rate-limit reset interpretation, running web-search lifecycle and direct delegate/wait tool registrations. Native process transport boundary is preserved. The shared client owns unresponsive app-server retirement and does not retry an unknown outcome. The native bridge defers request deadlines to that client in parent-protocol mode. Shared command discovery retains the asynchronous Windows path.",
+      "notes": "Rust owns the Unix child-process protocol transport. Provider retry deadlines, schemas and orchestration event translation remain in the shared upstream adapter; repeated retry notices retain the original retry-window deadline. Windows retains its process path. Native selection is preserved before effects, and uncertain provider actions never retry through the retained implementation. Frozen e2afd254 integration review: Retained current upstream adapter process/service dependencies, rate-limit reset interpretation, running web-search lifecycle and direct delegate/wait tool registrations. Native process transport boundary is preserved. The shared client owns unresponsive app-server retirement and does not retry an unknown outcome. The native bridge defers request deadlines to that client in parent-protocol mode. Shared command discovery retains the asynchronous Windows path. The 1d028248 upstream adapter supplies complete multi-file diff payloads after the unchanged Rust transport. ACP startup deadlines and remote branch publishing stay in their upstream owners.",
       "rust_crates": ["crates/core"]
     },
     {
       "id": "redb-persistence",
       "state": "integrated",
       "domain_owner": "apps/server/src/persistence",
-      "reviewed_upstream_commit": "ad2bdc76a5bf22cd63b84e2cdee610c1a1b4bd18",
+      "reviewed_upstream_commit": "1d028248683f90f405b2d8e7b71682e3b67317ed",
       "upstream_sources": [
         {
           "path": "apps/server/integration/transferBudgetV2.integration.test.ts",
@@ -2242,7 +2243,7 @@
       "id": "iroh-transport",
       "state": "candidate",
       "domain_owner": "infra/relay",
-      "reviewed_upstream_commit": "ad2bdc76a5bf22cd63b84e2cdee610c1a1b4bd18",
+      "reviewed_upstream_commit": "1d028248683f90f405b2d8e7b71682e3b67317ed",
       "upstream_sources": [
         {
           "path": "apps/server/src/ws.ts",
@@ -2344,7 +2345,7 @@
       "id": "native-api-component",
       "state": "candidate",
       "domain_owner": "apps/server",
-      "reviewed_upstream_commit": "ad2bdc76a5bf22cd63b84e2cdee610c1a1b4bd18",
+      "reviewed_upstream_commit": "1d028248683f90f405b2d8e7b71682e3b67317ed",
       "upstream_sources": [
         {
           "path": "packages/contracts/src/orchestrationV2.ts",
