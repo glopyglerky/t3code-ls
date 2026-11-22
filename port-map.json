@@ -1778,6 +1778,37 @@
       "retired_paths": [],
       "notes": "Preserved component work. Its POST /rpc protocol does not replace the application WebSocket contract and is not the product entry point. Move reusable internals into their domains only in separate behavior-preserving changes.",
       "rust_crates": ["crates/core", "crates/storage", "crates/app"]
+    },
+    {
+      "id": "composer-document-offsets",
+      "state": "candidate",
+      "domain_owner": "packages/client-runtime",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/web/src/composer-rich-text-doc.ts",
+          "blob": "dfd238e71819ce427356576ebab45067e2071661"
+        },
+        {
+          "path": "apps/web/src/components/ComposerPromptEditorTiptap.tsx",
+          "blob": "5a036e34611ed5a72c7eb463a4a4e819ae1c2863"
+        }
+      ],
+      "rust_paths": ["packages/client-runtime/rust/src/lib.rs"],
+      "adapter_paths": [],
+      "platform_routes": [
+        {
+          "targets": ["browser"],
+          "state": "candidate",
+          "implementation": "standalone-component",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": ["packages/client-runtime/rust/tests/offsets.rs"],
+      "retired_paths": [],
+      "notes": "T01 and J37. Dependency-free no_std candidate for the browser composer's numeric rich-document offset mapping. Browser compilation, the real editor adapter and input performance still require qualification.",
+      "rust_crates": ["packages/client-runtime/rust"]
     }
   ],
   "backend_selection": "Select before execution. Compatible Linux GNU x86_64 defaults to Rust; other hosts use the retained upstream implementation. Explicit per-component native overrides fail visibly. T3_CODE_LS_IMPLEMENTATION=upstream provides a controlled original baseline. No retry through another implementation."
