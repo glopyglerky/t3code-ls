@@ -4,9 +4,9 @@
     "repository": "pingdotgg/t3code",
     "channel": "default-branch",
     "branch": "main",
-    "source_url": "https://github.com/pingdotgg/t3code/commit/7ddc81d639aa75ca6e0cbffb0f394ea3f0d83308",
-    "commit": "7ddc81d639aa75ca6e0cbffb0f394ea3f0d83308",
-    "root_tree": "89ff5b49ba6c0a9ccf7cd3980ce69963d0414ecb"
+    "source_url": "https://github.com/pingdotgg/t3code/commit/69720261214c047e583b494675ea9624bbe3a00a",
+    "commit": "69720261214c047e583b494675ea9624bbe3a00a",
+    "root_tree": "1decdaefa583d16c044f9049ac255ab03260d4a2"
   },
   "qualification": {
     "status": "unqualified",
@@ -19,7 +19,7 @@
     "server": {
       "path_prefixes": ["apps/server/"],
       "entries": 1766,
-      "inventory_sha256": "703b01f8e29a00123cb4f0fe15defce95f518bb3e76a5f260d1b5923aa2484c1"
+      "inventory_sha256": "8ee119b32f6f6da7760ed19a8e60de0241a8eb395f047a93fceacde270111f4d"
     },
     "contracts": {
       "path_prefixes": ["packages/contracts/"],
@@ -34,7 +34,7 @@
     "web": {
       "path_prefixes": ["apps/web/"],
       "entries": 2182,
-      "inventory_sha256": "893d46d8414efcfc4f0ec5fb52de264ce89984d53e4229cb71d353fada2d1db8"
+      "inventory_sha256": "26bb998d599fdce6bc853d77aa271858a3f179455b967833d22974d5cb58769a"
     },
     "desktop": {
       "path_prefixes": ["apps/desktop/"],
