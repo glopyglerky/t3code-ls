@@ -36,6 +36,8 @@ Every applicable journey needs:
 
 Before candidate results, T00 records an absolute budget and maximum acceptable regression for each applicable interaction/platform profile, together with the minimum practically meaningful improvement on the named target journeys. Derive those values from stock observations and expected interaction quality. Do not invent millisecond limits or claim an improvement percentage from source inspection. Release requires credible improvement on the chosen dominant journeys, no unexplained material regression elsewhere, and bounded steady-state resources.
 
+The [stock startup workflow](../../../.github/workflows/stock-startup.yml) samples the server portion of J01 on Linux. It builds the pinned stock checkout, runs its bundled `serve` entry point with a fresh profile, and times delivery of a descriptor that agrees with the persisted environment identity and delivery of the built web entry. Each trial has a fresh server process and home. The runner leaves filesystem caches unmanaged. Its evidence includes raw samples and build hashes. J01 also requires first client attachment and usable UI, which this probe does not measure.
+
 Correctness gates admit no loss outside the declared durability/failure contract, authority escalation, accidental duplicate uncertain mutation, broken promised capability or unsafe restoration of an older authoritative generation. Non-idempotent external protocols may leave an explicitly unknown outcome. Reconcile or expose that uncertainty; never turn it into an unqualified automatic retry.
 
 ### Durability and compatibility are independent dimensions

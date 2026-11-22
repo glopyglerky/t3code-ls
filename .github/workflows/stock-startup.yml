@@ -1,0 +1,85 @@
+name: Stock startup measurement
+
+on:
+  push:
+    branches: ["measure/t3code-ls-t00-stock-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stock-startup:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    env:
+      STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
+      STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      GIT_TERMINAL_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: measurement
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: pingdotgg/t3code
+          ref: ${{ env.STOCK_COMMIT }}
+          path: stock
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.13.1"
+      - name: Verify the stock source and install its locked dependencies
+        working-directory: stock
+        run: |
+          test "$(git rev-parse HEAD)" = "$STOCK_COMMIT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$STOCK_TREE"
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+      - name: Build the stock web client and server bundle
+        working-directory: stock
+        run: |
+          pnpm --dir apps/web run build
+          pnpm --dir apps/server run build:bundle
+      - name: Verify the pinned compiler package for the measurement tool
+        working-directory: measurement
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/stock-probe-toolchain"
+      - name: Sample built server startup and retain exact inputs
+        working-directory: measurement
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/stock-probe-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/stock-probe-target"
+          evidence="$RUNNER_TEMP/stock-startup-evidence"
+          mkdir "$evidence"
+          (
+            cd ../stock
+            sha256sum pnpm-lock.yaml
+            find apps/web/dist apps/server/dist -type f -print0 | sort -z | xargs -0 -r sha256sum
+          ) > "$evidence/build.sha256"
+          jq -n --arg commit "$STOCK_COMMIT" --arg tree "$STOCK_TREE" \
+            --arg probe_commit "$(git rev-parse HEAD)" --arg node "$(node --version)" \
+            --arg platform "$(uname -sm)" --arg load "$(uptime)" --argjson cores "$(nproc)" \
+            '{commit:$commit,tree:$tree,probe_commit:$probe_commit,node:$node,platform:$platform,initial_load:$load,cores:$cores,cache_profile:"fresh process and home, unmanaged filesystem cache",durability:"SQLite WAL/NORMAL"}' \
+            > "$evidence/inputs.json"
+          for sample in 1 2 3 4 5 6 7; do
+            "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" run \
+              --release --locked -p t3code-ls-tools -- probe-startup "$(command -v node)" \
+              ../stock/apps/server/dist/bin.mjs "$RUNNER_TEMP/stock-trial-$sample" \
+              > "$evidence/sample-$sample.json"
+            jq -e '.descriptor_micros > 0 and .html_micros >= .descriptor_micros' \
+              "$evidence/sample-$sample.json" > /dev/null
+          done
+      - name: Retain stock startup evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: stock-startup-evidence
+          path: ${{ runner.temp }}/stock-startup-evidence/
+          if-no-files-found: warn
+          retention-days: 30
