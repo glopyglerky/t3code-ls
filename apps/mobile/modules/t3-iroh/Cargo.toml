@@ -18,6 +18,7 @@ path = "src/bin/bindgen.rs"
 required-features = ["bindgen"]
 
 [dependencies]
+t3-code-ls-core = { path = "../../../../crates/core" }
 t3-code-ls-transport = { path = "../../../../crates/transport" }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 uniffi = "=0.31.1"

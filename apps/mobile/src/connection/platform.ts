@@ -149,6 +149,11 @@ const layerWakeups = Wakeups.layer({
 
 interface NativeIrohModule {
   readonly deviceEndpointId: () => Promise<string>;
+  readonly connectionRetryDelay?: (
+    failureCount: number,
+    random: number,
+    firstLoss: boolean,
+  ) => number | null;
   readonly open: (
     endpoint: string,
     addresses: ReadonlyArray<string>,
@@ -236,6 +241,11 @@ const layerCapabilities = Layer.effectContext(
             Effect.asSome,
           ),
         }),
+      ),
+      Context.add(
+        ClientCapabilities.ConnectionRetryDelay,
+        (failures, random, firstLoss) =>
+          nativeIroh?.connectionRetryDelay?.(failures, random, firstLoss) ?? null,
       ),
       Context.add(ClientCapabilities.IrohTransport, {
         available: nativeIroh !== null,

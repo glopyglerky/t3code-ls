@@ -2935,6 +2935,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "t3-code-ls-core"
+version = "0.1.0"
+dependencies = [
+ "ryu-js",
+ "signal-hook",
+]
+
+[[package]]
 name = "t3-code-ls-transport"
 version = "0.1.0"
 dependencies = [
@@ -2952,6 +2960,7 @@ dependencies = [
 name = "t3-iroh-apple"
 version = "0.1.0"
 dependencies = [
+ "t3-code-ls-core",
  "t3-code-ls-transport",
  "thiserror 2.0.21",
  "tokio",

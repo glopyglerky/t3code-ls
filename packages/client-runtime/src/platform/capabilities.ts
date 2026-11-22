@@ -97,6 +97,12 @@ export class SshEnvironmentGateway extends Context.Service<
   }
 >()("@t3tools/client-runtime/platform/capabilities/SshEnvironmentGateway") {}
 
+export class ConnectionRetryDelay extends Context.Reference<
+  ((failureCount: number, random: number, firstLoss: boolean) => number | null) | undefined
+>("@t3tools/client-runtime/platform/capabilities/ConnectionRetryDelay", {
+  defaultValue: () => undefined,
+}) {}
+
 export class IrohTransport extends Context.Reference<{
   readonly available: boolean;
   readonly open: (

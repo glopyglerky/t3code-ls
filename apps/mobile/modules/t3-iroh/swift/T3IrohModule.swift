@@ -11,6 +11,17 @@ public final class T3IrohModule: Module {
     public func definition() -> ModuleDefinition {
         Name("T3Iroh")
 
+        Function("connectionRetryDelay") {
+            (failureCount: Double, random: Double, firstLoss: Bool) -> Int? in
+            guard failureCount.isFinite, failureCount >= 0,
+                  failureCount.rounded(.towardZero) == failureCount else { return nil }
+            return connectionRetryDelay(
+                failureCount: UInt32(min(failureCount, Double(UInt32.max))),
+                random: random,
+                firstLoss: firstLoss
+            ).map(Int.init)
+        }
+
         AsyncFunction("deviceEndpointId") { () async throws -> String in
             try await self.tunnels.endpointId()
         }

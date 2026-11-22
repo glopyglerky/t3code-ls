@@ -62,6 +62,8 @@ jobs:
                   let seed = Data(repeating: 0x41, count: 32)
                   let endpoint = try deviceEndpointId(secretKey: seed)
                   precondition(endpoint.count == 64)
+                  precondition(connectionRetryDelay(failureCount: 0, random: 0.5, firstLoss: true) == 188)
+                  precondition(connectionRetryDelay(failureCount: 8, random: 1, firstLoss: false) == 300_000)
               }
           }
           SWIFT

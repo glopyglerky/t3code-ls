@@ -4,6 +4,7 @@ use std::{
     net::{Ipv4Addr, SocketAddr},
     sync::{Arc, Mutex, OnceLock},
 };
+use t3_code_ls_core::connection::{retry_delay_ms, session_loss_retry_delay_ms};
 use t3_code_ls_transport::{
     EndpointAddr, EndpointId, Forwarder, Limits, Network, RelayUrl, SecretKey,
 };
@@ -32,6 +33,19 @@ fn device_key(bytes: &[u8]) -> Result<SecretKey, TunnelError> {
 #[uniffi::export]
 pub fn device_endpoint_id(secret_key: Vec<u8>) -> Result<String, TunnelError> {
     Ok(device_key(&secret_key)?.public().to_string())
+}
+
+#[uniffi::export]
+pub fn connection_retry_delay(failure_count: u32, random: f64, first_loss: bool) -> Option<u32> {
+    if !(0.0..=1.0).contains(&random) {
+        return None;
+    }
+    let millis = if first_loss {
+        session_loss_retry_delay_ms(random)
+    } else {
+        retry_delay_ms(failure_count, random)
+    };
+    u32::try_from(millis).ok()
 }
 
 fn runtime() -> Result<&'static Runtime, TunnelError> {
@@ -123,6 +137,15 @@ impl IrohTunnel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retry_delay_accepts_upstream_jitter_and_caps_failures() {
+        assert_eq!(connection_retry_delay(0, 0.5, false), Some(1_500));
+        assert_eq!(connection_retry_delay(u32::MAX, 1.0, false), Some(300_000));
+        assert_eq!(connection_retry_delay(0, 0.5, true), Some(188));
+        assert_eq!(connection_retry_delay(0, f64::NAN, false), None);
+        assert_eq!(connection_retry_delay(0, -0.1, true), None);
+    }
 
     #[test]
     fn endpoint_id_matches_the_tunnel_key() {

@@ -501,6 +501,27 @@ describe("EnvironmentSupervisor", () => {
       }).pipe(Effect.provide(TestClock.layer())),
   );
 
+  it.effect("uses the platform retry delay when provided", () =>
+    Effect.gen(function* () {
+      const calls: Array<readonly [number, number, boolean]> = [];
+      const harness = yield* makeHarness({
+        prepare: () => Effect.fail(transient("Connection timed out.")),
+      });
+      const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
+        initiallyDesired: true,
+      }).pipe(
+        Effect.provideService(ClientCapabilities.ConnectionRetryDelay, (...input) => {
+          calls.push(input);
+          return 1_733;
+        }),
+        Effect.provide(harness.dependencies),
+      );
+      const waiting = yield* awaitState(supervisor.state, (state) => state.phase === "backoff");
+      expect((waiting.retryAt ?? 0) - (yield* Clock.currentTimeMillis)).toBe(1_733);
+      expect(calls).toEqual([[0, expect.any(Number), false]]);
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
   it.effect("keeps the latest failure visible throughout the next connection attempt", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({

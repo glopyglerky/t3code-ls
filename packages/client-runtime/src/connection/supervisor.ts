@@ -31,6 +31,7 @@ import {
   type SupervisorConnectionState,
 } from "./model.ts";
 import * as RpcSession from "../rpc/session.ts";
+import { ConnectionRetryDelay } from "../platform/capabilities.ts";
 import { safeErrorLogAttributes } from "../errors/safeLog.ts";
 import { NETWORK_BLOCKING_HINT } from "../errors/network.ts";
 import * as ConnectionWakeups from "./wakeups.ts";
@@ -302,6 +303,12 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
   const connectivity = yield* Connectivity.Connectivity;
   const driver = yield* ConnectionDriver.ConnectionDriver;
   const wakeups = yield* ConnectionWakeups.ConnectionWakeups;
+  const nativeRetryDelay = yield* ConnectionRetryDelay;
+  const delayForRetry = (failureCount: number, random: number, firstLoss = false) =>
+    nativeRetryDelay?.(failureCount, random, firstLoss) ??
+    (firstLoss
+      ? Math.round(SESSION_LOSS_RETRY_DELAY_MS * (0.5 + random / 2))
+      : retryDelayMs(failureCount, random));
   // The primary environment served this client or runs beside it on loopback,
   // so the device reporting offline (often wrongly) never parks it. The report
   // still probes its live session, like any other network change.
@@ -1306,13 +1313,13 @@ export const make = Effect.fn("EnvironmentSupervisor.make")(function* (
       const delayMs = awaitingApproval
         ? APPROVAL_PENDING_RETRY_DELAY_MS
         : firstLoss
-          ? Math.round(SESSION_LOSS_RETRY_DELAY_MS * (0.5 + (yield* Random.next) / 2))
+          ? delayForRetry(0, yield* Random.next, true)
           : error.reason === "approval-pending"
             ? Math.max(
                 APPROVAL_PENDING_RETRY_DELAY_MS,
-                retryDelayMs(backoffFailures - 1, yield* Random.next),
+                delayForRetry(backoffFailures - 1, yield* Random.next),
               )
-            : retryDelayMs(backoffFailures - 1, yield* Random.next);
+            : delayForRetry(backoffFailures - 1, yield* Random.next);
       pendingRetry = Option.map(attemptSpan, (previousAttempt) => ({
         previousAttempt,
         failureCount,
