@@ -6,6 +6,12 @@ This is an incremental Rust port of [T3 Code](https://github.com/pingdotgg/t3cod
 
 The original server, React web client, Electron desktop client and React Native mobile client are retained at their upstream paths. Rust replaces implementation behind their existing interfaces. Unported code stays until its replacement works in the actual application and passes the affected platform gates.
 
+## Full-system Rust implementation plan
+
+[Start with the implementation guide](docs/porting/full-system/README.md). It covers the complete server, desktop, browser, mobile, CLI, providers, workspace, remote services and distribution lifecycle. The guide includes dependency-ordered work packages, a concrete first conversation/history slice, 60 acceptance journeys and the full source research.
+
+Performance is compared with pinned stock upstream T3 Code. The current fork is the implementation starting point. Proposed toolkit and storage choices require qualification; [port-map.json](port-map.json) remains authoritative for actual integration, acceptance and retirement state.
+
 ## Build and run the hybrid application
 
 Use Node `26.12.1` and pnpm `12.14.0`, matching the inherited workspace. Install the pinned Linux GNU x86_64 compiler package into a new directory outside the checkout:
@@ -69,3 +75,4 @@ A candidate has component evidence. An integrated port has a real application co
 [upstream-README.md](upstream-README.md) preserves the immutable upstream README body. Its download and installation links describe upstream releases. Source and replacement mappings remain after retirement so future upstream edits cannot silently bypass translated code.
 
 The [MIT license](LICENSE), upstream copyright, dependency notices, repository identity and fork relationship remain unchanged. Historical source and reference pins remain in Git history. Disposable reference checkouts belong outside the product tree.
+

@@ -1,0 +1,4216 @@
+{
+  "revision": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "method": "Lexical extraction of declared RPC constants/Rpc.make definitions, HTTP endpoints and top-level command/event discriminants. Not a runtime protocol or dispatch test.",
+  "counts": {
+    "method_constants": 247,
+    "rpc_definitions": 247,
+    "streaming_rpc_definitions": 31,
+    "typed_http_endpoints": 59,
+    "public_orchestration_command_variants": 58,
+    "internal_orchestration_command_variants": 16,
+    "domain_event_variants": 49
+  },
+  "rpc": [
+    {
+      "symbol": "WsServerUpsertKeybindingRpc",
+      "method_key": "WS_METHODS.serverUpsertKeybinding",
+      "wire_name": "server.upsertKeybinding",
+      "line": 714,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ServerUpsertKeybindingInput,",
+        "success": "ServerUpsertKeybindingResult,",
+        "error": "Schema.Union([KeybindingsConfigError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L714"
+    },
+    {
+      "symbol": "WsServerRemoveKeybindingRpc",
+      "method_key": "WS_METHODS.serverRemoveKeybinding",
+      "wire_name": "server.removeKeybinding",
+      "line": 720,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ServerRemoveKeybindingInput,",
+        "success": "ServerRemoveKeybindingResult,",
+        "error": "Schema.Union([KeybindingsConfigError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L720"
+    },
+    {
+      "symbol": "WsServerProbeRpc",
+      "method_key": "WS_METHODS.serverProbe",
+      "wire_name": "server.probe",
+      "line": 726,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "Schema.Struct({}),",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L726"
+    },
+    {
+      "symbol": "WsServerGetConfigRpc",
+      "method_key": "WS_METHODS.serverGetConfig",
+      "wire_name": "server.getConfig",
+      "line": 732,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "ServerConfig,",
+        "error": "Schema.Union([KeybindingsConfigError, ServerSettingsError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L732"
+    },
+    {
+      "symbol": "WsServerRefreshProvidersRpc",
+      "method_key": "WS_METHODS.serverRefreshProviders",
+      "wire_name": "server.refreshProviders",
+      "line": 738,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({",
+        "success": "ServerProviderUpdatedPayload,",
+        "error": "Schema.Union([EnvironmentAuthorizationError, ProviderSetupError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L738"
+    },
+    {
+      "symbol": "WsServerUpdateProviderRpc",
+      "method_key": "WS_METHODS.serverUpdateProvider",
+      "wire_name": "server.updateProvider",
+      "line": 777,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ServerProviderUpdateInput,",
+        "success": "ServerProviderUpdatedPayload,",
+        "error": "Schema.Union([ServerProviderUpdateError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L777"
+    },
+    {
+      "symbol": "WsProviderConsumeResetCreditRpc",
+      "method_key": "WS_METHODS.providerConsumeResetCredit",
+      "wire_name": "provider.consumeResetCredit",
+      "line": 785,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProviderConsumeResetCreditInput,",
+        "success": "ProviderConsumeResetCreditResult,",
+        "error": "Schema.Union([ProviderSetupError, UsageLimitSourceError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L785"
+    },
+    {
+      "symbol": "WsProviderAuthStartRpc",
+      "method_key": "WS_METHODS.providerAuthStart",
+      "wire_name": "provider.auth.start",
+      "line": 791,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProviderAuthStartInput,",
+        "success": "ProviderAuthState,",
+        "error": "ProviderSetupRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L791"
+    },
+    {
+      "symbol": "WsProviderAuthRespondRpc",
+      "method_key": "WS_METHODS.providerAuthRespond",
+      "wire_name": "provider.auth.respond",
+      "line": 797,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProviderAuthRespondInput,",
+        "success": "ProviderAuthState,",
+        "error": "ProviderSetupRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L797"
+    },
+    {
+      "symbol": "WsProviderAuthCompleteRpc",
+      "method_key": "WS_METHODS.providerAuthComplete",
+      "wire_name": "provider.auth.complete",
+      "line": 803,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProviderAuthCompleteInput,",
+        "success": "ProviderAuthState,",
+        "error": "ProviderSetupRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L803"
+    },
+    {
+      "symbol": "WsChatGptReconnectProfileRpc",
+      "method_key": "WS_METHODS.chatGptReconnectProfile",
+      "wire_name": "provider.chatgpt.reconnect-profile",
+      "line": 809,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ChatGptReconnectProfileInput,",
+        "success": "Schema.NullOr(ChatGptReconnectProfile),",
+        "error": "ProviderSetupRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L809"
+    },
+    {
+      "symbol": "WsChatGptImportProfileRpc",
+      "method_key": "WS_METHODS.chatGptImportProfile",
+      "wire_name": "provider.chatgpt.import-profile",
+      "line": 814,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ChatGptImportProfileInput,",
+        "success": "ProviderAuthState,",
+        "error": "ProviderSetupRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L814"
+    },
+    {
+      "symbol": "WsChatGptHandoffSubscribeRpc",
+      "method_key": "WS_METHODS.chatGptHandoffSubscribe",
+      "wire_name": "provider.chatgpt.handoff.subscribe",
+      "line": 819,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "ChatGptHandoffInput,",
+        "success": "ChatGptHandoffState,",
+        "error": "ProviderSetupRpcError,",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L819"
+    },
+    {
+      "symbol": "WsProviderAuthCancelRpc",
+      "method_key": "WS_METHODS.providerAuthCancel",
+      "wire_name": "provider.auth.cancel",
+      "line": 826,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProviderAuthCancelInput,",
+        "success": "ProviderAuthState,",
+        "error": "ProviderSetupRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L826"
+    },
+    {
+      "symbol": "WsProviderAuthRemoveMethodRpc",
+      "method_key": "WS_METHODS.providerAuthRemoveMethod",
+      "wire_name": "provider.auth.removeMethod",
+      "line": 832,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProviderAuthRemoveMethodInput,",
+        "success": "ProviderAuthState,",
+        "error": "ProviderSetupRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L832"
+    },
+    {
+      "symbol": "WsProviderAuthLogoutRpc",
+      "method_key": "WS_METHODS.providerAuthLogout",
+      "wire_name": "provider.auth.logout",
+      "line": 838,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProviderSetupInput,",
+        "success": "ProviderAuthState,",
+        "error": "ProviderSetupRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L838"
+    },
+    {
+      "symbol": "WsProviderAuthSubscribeRpc",
+      "method_key": "WS_METHODS.providerAuthSubscribe",
+      "wire_name": "provider.auth.subscribe",
+      "line": 844,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "ProviderSetupInput,",
+        "success": "ProviderAuthState,",
+        "error": "ProviderSetupRpcError,",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L844"
+    },
+    {
+      "symbol": "WsProviderInstallStartRpc",
+      "method_key": "WS_METHODS.providerInstallStart",
+      "wire_name": "provider.install.start",
+      "line": 851,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProviderSetupInput,",
+        "success": "ProviderInstallState,",
+        "error": "ProviderSetupRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L851"
+    },
+    {
+      "symbol": "WsProviderInstallCancelRpc",
+      "method_key": "WS_METHODS.providerInstallCancel",
+      "wire_name": "provider.install.cancel",
+      "line": 857,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProviderInstallCancelInput,",
+        "success": "ProviderInstallState,",
+        "error": "ProviderSetupRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L857"
+    },
+    {
+      "symbol": "WsProviderInstallSubscribeRpc",
+      "method_key": "WS_METHODS.providerInstallSubscribe",
+      "wire_name": "provider.install.subscribe",
+      "line": 863,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "ProviderSetupInput,",
+        "success": "ProviderInstallState,",
+        "error": "ProviderSetupRpcError,",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L863"
+    },
+    {
+      "symbol": "WsProviderInstallRemoveRpc",
+      "method_key": "WS_METHODS.providerInstallRemove",
+      "wire_name": "provider.install.remove",
+      "line": 870,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProviderSetupInput,",
+        "success": "ProviderInstallState,",
+        "error": "ProviderSetupRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L870"
+    },
+    {
+      "symbol": "WsServerGetNpmReleaseRpc",
+      "method_key": "WS_METHODS.serverGetNpmRelease",
+      "wire_name": "server.getNpmRelease",
+      "line": 876,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ServerNpmReleaseInput,",
+        "success": "Schema.NullOr(ServerNpmRelease),",
+        "error": "Schema.Union([ServerNpmReleaseError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L876"
+    },
+    {
+      "symbol": "WsServerUpdateServerRpc",
+      "method_key": "WS_METHODS.serverUpdateServer",
+      "wire_name": "server.updateServer",
+      "line": 882,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ServerSelfUpdateInput,",
+        "success": "ServerSelfUpdateResult,",
+        "error": "Schema.Union([ServerSelfUpdateError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L882"
+    },
+    {
+      "symbol": "WsServerUpdateServerWithProgressRpc",
+      "method_key": "WS_METHODS.serverUpdateServerWithProgress",
+      "wire_name": "server.updateServerWithProgress",
+      "line": 888,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "ServerSelfUpdateInput,",
+        "success": "ServerSelfUpdateProgressEvent,",
+        "error": "Schema.Union([ServerSelfUpdateError, EnvironmentAuthorizationError]),",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L888"
+    },
+    {
+      "symbol": "WsServerCommitDesktopUpdateRpc",
+      "method_key": "WS_METHODS.serverCommitDesktopUpdate",
+      "wire_name": "server.commitDesktopUpdate",
+      "line": 895,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "DesktopUpdateCommitInput,",
+        "success": "ServerSelfUpdateResult,",
+        "error": "Schema.Union([ServerSelfUpdateError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L895"
+    },
+    {
+      "symbol": "WsServerRunStorageCleanupRpc",
+      "method_key": "WS_METHODS.serverRunStorageCleanup",
+      "wire_name": "server.runStorageCleanup",
+      "line": 901,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "StorageCleanupReport,",
+        "error": "Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L901"
+    },
+    {
+      "symbol": "WsServerGetStorageCleanupReportRpc",
+      "method_key": "WS_METHODS.serverGetStorageCleanupReport",
+      "wire_name": "server.getStorageCleanupReport",
+      "line": 906,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "Schema.NullOr(StorageCleanupReport),",
+        "stream": "true,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L906"
+    },
+    {
+      "symbol": "WsServerGetDatabaseStorageRpc",
+      "method_key": "WS_METHODS.serverGetDatabaseStorage",
+      "wire_name": "server.getDatabaseStorage",
+      "line": 913,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "Schema.NullOr(DatabaseStorageStatus),",
+        "stream": "true,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L913"
+    },
+    {
+      "symbol": "WsServerReclaimDatabaseSpaceRpc",
+      "method_key": "WS_METHODS.serverReclaimDatabaseSpace",
+      "wire_name": "server.reclaimDatabaseSpace",
+      "line": 920,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "error": "Schema.Union([DatabaseReclaimError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L920"
+    },
+    {
+      "symbol": "WsPeerLinksListRpc",
+      "method_key": "WS_METHODS.peerLinksList",
+      "wire_name": "peerLinks.list",
+      "line": 925,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "Schema.Struct({ links: Schema.Array(PeerLinkSummary) }),",
+        "error": "Schema.Union([PeerLinkError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L925"
+    },
+    {
+      "symbol": "WsPeerLinksNamesRpc",
+      "method_key": "WS_METHODS.peerLinksNames",
+      "wire_name": "peerLinks.names",
+      "line": 932,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "Schema.Struct({ links: Schema.Array(PeerLinkName) }),",
+        "error": "Schema.Union([PeerLinkError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L932"
+    },
+    {
+      "symbol": "WsPeerLinksLinkRpc",
+      "method_key": "WS_METHODS.peerLinksLink",
+      "wire_name": "peerLinks.link",
+      "line": 938,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PeerLinkCreateInput,",
+        "success": "PeerLink,",
+        "error": "Schema.Union([PeerLinkError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L938"
+    },
+    {
+      "symbol": "WsPeerLinksUnlinkRpc",
+      "method_key": "WS_METHODS.peerLinksUnlink",
+      "wire_name": "peerLinks.unlink",
+      "line": 944,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PeerLinkRemoveInput,",
+        "success": "PeerLinkRemoveResult,",
+        "error": "Schema.Union([PeerLinkError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L944"
+    },
+    {
+      "symbol": "WsPeerLinksSubscribeThreadRpc",
+      "method_key": "WS_METHODS.peerLinksSubscribeThread",
+      "wire_name": "peerLinks.subscribeThread",
+      "line": 951,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "PeerLinkThreadInput,",
+        "success": "OrchestrationV2RpcSchemas.subscribeThread.output,",
+        "error": "Schema.Union([PeerLinkThreadReadError, EnvironmentAuthorizationError]),",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L951"
+    },
+    {
+      "symbol": "WsPeerLinksThreadHistoryPageRpc",
+      "method_key": "WS_METHODS.peerLinksThreadHistoryPage",
+      "wire_name": "peerLinks.threadHistoryPage",
+      "line": 958,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PeerLinkThreadHistoryInput,",
+        "success": "OrchestrationV2ThreadHistoryPage,",
+        "error": "Schema.Union([PeerLinkThreadReadError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L958"
+    },
+    {
+      "symbol": "WsPeerLinksThreadItemRpc",
+      "method_key": "WS_METHODS.peerLinksThreadItem",
+      "wire_name": "peerLinks.threadItem",
+      "line": 964,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PeerLinkThreadItemInput,",
+        "success": "OrchestrationV2RpcSchemas.getTurnItem.output,",
+        "error": "Schema.Union([PeerLinkThreadReadError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L964"
+    },
+    {
+      "symbol": "WsPeerLinksPairClientRpc",
+      "method_key": "WS_METHODS.peerLinksPairClient",
+      "wire_name": "peerLinks.pairClient",
+      "line": 970,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PeerLinkClientPairingInput,",
+        "success": "PeerLinkClientPairingResult,",
+        "error": "Schema.Union([PeerLinkError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L970"
+    },
+    {
+      "symbol": "WsPeerLinksPairLinkRpc",
+      "method_key": "WS_METHODS.peerLinksPairLink",
+      "wire_name": "peerLinks.pairLink",
+      "line": 976,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PeerLinkLinkPairingInput,",
+        "success": "PeerLinkClientPairingResult,",
+        "error": "Schema.Union([PeerLinkError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L976"
+    },
+    {
+      "symbol": "WsPeerLinksAnswerRequestRpc",
+      "method_key": "WS_METHODS.peerLinksAnswerRequest",
+      "wire_name": "peerLinks.answerRequest",
+      "line": 982,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PeerLinkRequestAnswerInput,",
+        "error": "Schema.Union([PeerLinkRequestError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L982"
+    },
+    {
+      "symbol": "WsServerGetSettingsRpc",
+      "method_key": "WS_METHODS.serverGetSettings",
+      "wire_name": "server.getSettings",
+      "line": 988,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "ServerSettings,",
+        "error": "Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L988"
+    },
+    {
+      "symbol": "WsServerUpdateSettingsRpc",
+      "method_key": "WS_METHODS.serverUpdateSettings",
+      "wire_name": "server.updateSettings",
+      "line": 994,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({",
+        "success": "ServerSettings,",
+        "error": "Schema.Union([ServerSettingsError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L994"
+    },
+    {
+      "symbol": "WsServerDiscoverSourceControlRpc",
+      "method_key": "WS_METHODS.serverDiscoverSourceControl",
+      "wire_name": "server.discoverSourceControl",
+      "line": 1003,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "SourceControlDiscoveryResult,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1003"
+    },
+    {
+      "symbol": "WsServerCheckSecretSourceRpc",
+      "method_key": "WS_METHODS.serverCheckSecretSource",
+      "wire_name": "server.checkSecretSource",
+      "line": 1009,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({ source: SecretReference }),",
+        "success": "SecretSourceCheckResult,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1009"
+    },
+    {
+      "symbol": "WsServerSearchAcpRegistryRpc",
+      "method_key": "WS_METHODS.serverSearchAcpRegistry",
+      "wire_name": "server.searchAcpRegistry",
+      "line": 1015,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AcpRegistrySearchInput,",
+        "success": "AcpRegistrySearchResult,",
+        "error": "Schema.Union([AcpRegistryOperationError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1015"
+    },
+    {
+      "symbol": "WsServerPrepareAcpRegistryAgentRpc",
+      "method_key": "WS_METHODS.serverPrepareAcpRegistryAgent",
+      "wire_name": "server.prepareAcpRegistryAgent",
+      "line": 1021,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AcpRegistryPrepareInput,",
+        "success": "AcpRegistryPrepareResult,",
+        "error": "Schema.Union([AcpRegistryOperationError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1021"
+    },
+    {
+      "symbol": "WsServerUninstallAcpRegistryManagedBinaryRpc",
+      "method_key": "WS_METHODS.serverUninstallAcpRegistryManagedBinary",
+      "wire_name": "server.uninstallAcpRegistryManagedBinary",
+      "line": 1027,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AcpRegistryAcceptUrlAuthInput,",
+        "success": "AcpRegistryAcceptUrlAuthResult,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1027"
+    },
+    {
+      "symbol": "WsServerAcceptAcpRegistryUrlAuthRpc",
+      "method_key": "WS_METHODS.serverAcceptAcpRegistryUrlAuth",
+      "wire_name": "server.acceptAcpRegistryUrlAuth",
+      "line": 1036,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AcpRegistryAcceptUrlAuthInput,",
+        "success": "AcpRegistryAcceptUrlAuthResult,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1036"
+    },
+    {
+      "symbol": "WsServerListAcpRegistrySessionsRpc",
+      "method_key": "WS_METHODS.serverListAcpRegistrySessions",
+      "wire_name": "server.listAcpRegistrySessions",
+      "line": 1042,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AcpRegistryListSessionsInput,",
+        "success": "AcpRegistryListSessionsResult,",
+        "error": "Schema.Union([AcpRegistryOperationError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1042"
+    },
+    {
+      "symbol": "WsServerImportAcpRegistrySessionRpc",
+      "method_key": "WS_METHODS.serverImportAcpRegistrySession",
+      "wire_name": "server.importAcpRegistrySession",
+      "line": 1048,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AcpRegistryImportSessionInput,",
+        "success": "AcpRegistryImportSessionResult,",
+        "error": "Schema.Union([AcpRegistryOperationError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1048"
+    },
+    {
+      "symbol": "WsServerDeleteAcpRegistrySessionRpc",
+      "method_key": "WS_METHODS.serverDeleteAcpRegistrySession",
+      "wire_name": "server.deleteAcpRegistrySession",
+      "line": 1054,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AcpRegistryDeleteSessionInput,",
+        "success": "AcpRegistryDeleteSessionResult,",
+        "error": "Schema.Union([AcpRegistryOperationError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1054"
+    },
+    {
+      "symbol": "WsServerListAcpRegistryProvidersRpc",
+      "method_key": "WS_METHODS.serverListAcpRegistryProviders",
+      "wire_name": "server.listAcpRegistryProviders",
+      "line": 1060,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AcpRegistryListProvidersInput,",
+        "success": "AcpRegistryListProvidersResult,",
+        "error": "Schema.Union([AcpRegistryOperationError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1060"
+    },
+    {
+      "symbol": "WsServerSetAcpRegistryProviderRpc",
+      "method_key": "WS_METHODS.serverSetAcpRegistryProvider",
+      "wire_name": "server.setAcpRegistryProvider",
+      "line": 1066,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AcpRegistrySetProviderInput,",
+        "success": "AcpRegistrySetProviderResult,",
+        "error": "Schema.Union([AcpRegistryOperationError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1066"
+    },
+    {
+      "symbol": "WsServerDisableAcpRegistryProviderRpc",
+      "method_key": "WS_METHODS.serverDisableAcpRegistryProvider",
+      "wire_name": "server.disableAcpRegistryProvider",
+      "line": 1072,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AcpRegistryLogoutInput,",
+        "success": "AcpRegistryLogoutResult,",
+        "error": "Schema.Union([AcpRegistryOperationError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1072"
+    },
+    {
+      "symbol": "WsServerLogoutAcpRegistryRpc",
+      "method_key": "WS_METHODS.serverLogoutAcpRegistry",
+      "wire_name": "server.logoutAcpRegistry",
+      "line": 1081,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AcpRegistryLogoutInput,",
+        "success": "AcpRegistryLogoutResult,",
+        "error": "Schema.Union([AcpRegistryOperationError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1081"
+    },
+    {
+      "symbol": "WsServerGetTraceDiagnosticsRpc",
+      "method_key": "WS_METHODS.serverGetTraceDiagnostics",
+      "wire_name": "server.getTraceDiagnostics",
+      "line": 1087,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "ServerTraceDiagnosticsResult,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1087"
+    },
+    {
+      "symbol": "WsServerGetProcessDiagnosticsRpc",
+      "method_key": "WS_METHODS.serverGetProcessDiagnostics",
+      "wire_name": "server.getProcessDiagnostics",
+      "line": 1093,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "ServerProcessDiagnosticsResult,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1093"
+    },
+    {
+      "symbol": "WsServerGetHostResourcesRpc",
+      "method_key": "WS_METHODS.serverGetHostResources",
+      "wire_name": "server.getHostResources",
+      "line": 1099,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "HostResourcesSnapshot,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1099"
+    },
+    {
+      "symbol": "WsServerGetProcessResourceHistoryRpc",
+      "method_key": "WS_METHODS.serverGetProcessResourceHistory",
+      "wire_name": "server.getProcessResourceHistory",
+      "line": 1105,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ServerProcessResourceHistoryInput,",
+        "success": "ServerProcessResourceHistoryResult,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1105"
+    },
+    {
+      "symbol": "WsServerGetResourceTelemetryHistoryRpc",
+      "method_key": "WS_METHODS.serverGetResourceTelemetryHistory",
+      "wire_name": "server.getResourceTelemetryHistory",
+      "line": 1111,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "ResourceTelemetryRetryResult,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1111"
+    },
+    {
+      "symbol": "WsServerRetryResourceTelemetryRpc",
+      "method_key": "WS_METHODS.serverRetryResourceTelemetry",
+      "wire_name": "server.retryResourceTelemetry",
+      "line": 1120,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "ResourceTelemetryRetryResult,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1120"
+    },
+    {
+      "symbol": "WsServerCheckOtlpEndpointRpc",
+      "method_key": "WS_METHODS.serverCheckOtlpEndpoint",
+      "wire_name": "server.checkOtlpEndpoint",
+      "line": 1126,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OtlpEndpointCheckInput,",
+        "success": "OtlpEndpointCheckResult,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1126"
+    },
+    {
+      "symbol": "WsServerListTextGeneratorModelsRpc",
+      "method_key": "WS_METHODS.serverListTextGeneratorModels",
+      "wire_name": "server.listTextGeneratorModels",
+      "line": 1132,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ListTextGeneratorModelsInput,",
+        "success": "ListTextGeneratorModelsResult,",
+        "error": "Schema.Union([TextGeneratorError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1132"
+    },
+    {
+      "symbol": "WsServerPrepareTriageRpc",
+      "method_key": "WS_METHODS.serverPrepareTriage",
+      "wire_name": "server.prepareTriage",
+      "line": 1138,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ServerPrepareTriageInput,",
+        "success": "ServerPrepareTriageResult,",
+        "error": "Schema.Union([ServerPrepareTriageError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1138"
+    },
+    {
+      "symbol": "WsServerGetUsageSummaryRpc",
+      "method_key": "WS_METHODS.serverGetUsageSummary",
+      "wire_name": "server.getUsageSummary",
+      "line": 1144,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "UsageSummaryInput,",
+        "success": "UsageSummary,",
+        "error": "Schema.Union([EnvironmentAuthorizationError, UsageReadError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1144"
+    },
+    {
+      "symbol": "WsServerRefreshUsageRatesRpc",
+      "method_key": "WS_METHODS.serverRefreshUsageRates",
+      "wire_name": "server.refreshUsageRates",
+      "line": 1150,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "UsagePricing,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1150"
+    },
+    {
+      "symbol": "WsServerSignalProcessRpc",
+      "method_key": "WS_METHODS.serverSignalProcess",
+      "wire_name": "server.signalProcess",
+      "line": 1156,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ServerSignalProcessInput,",
+        "success": "ServerSignalProcessResult,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1156"
+    },
+    {
+      "symbol": "WsCloudGetRelayClientStatusRpc",
+      "method_key": "WS_METHODS.cloudGetRelayClientStatus",
+      "wire_name": "cloud.getRelayClientStatus",
+      "line": 1162,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "RelayClientStatusSchema,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1162"
+    },
+    {
+      "symbol": "WsCloudInstallRelayClientRpc",
+      "method_key": "WS_METHODS.cloudInstallRelayClient",
+      "wire_name": "cloud.installRelayClient",
+      "line": 1168,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "RelayClientInstallProgressEventSchema,",
+        "error": "Schema.Union([RelayClientInstallFailedError, EnvironmentAuthorizationError]),",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1168"
+    },
+    {
+      "symbol": "WsServerReportClientActivityRpc",
+      "method_key": "WS_METHODS.serverReportClientActivity",
+      "wire_name": "server.reportClientActivity",
+      "line": 1175,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ClientActivityReportInput,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1175"
+    },
+    {
+      "symbol": "WsPullRequestsListRpc",
+      "method_key": "WS_METHODS.pullRequestsList",
+      "wire_name": "pullRequests.list",
+      "line": 1186,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestListInput,",
+        "success": "PullRequestListResult,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1186"
+    },
+    {
+      "symbol": "WsPullRequestsListStatsRpc",
+      "method_key": "WS_METHODS.pullRequestsListStats",
+      "wire_name": "pullRequests.listStats",
+      "line": 1193,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestListStatsInput,",
+        "success": "PullRequestListStatsResult,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1193"
+    },
+    {
+      "symbol": "WsPullRequestsFilterOptionsRpc",
+      "method_key": "WS_METHODS.pullRequestsFilterOptions",
+      "wire_name": "pullRequests.filterOptions",
+      "line": 1199,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestFilterOptionsInput,",
+        "success": "PullRequestFilterOptions,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1199"
+    },
+    {
+      "symbol": "WsPullRequestsRoutingRpc",
+      "method_key": "WS_METHODS.pullRequestsRouting",
+      "wire_name": "pullRequests.routing",
+      "line": 1205,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestRef,",
+        "success": "PullRequestRoutingResult,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1205"
+    },
+    {
+      "symbol": "WsPullRequestsRoutingIdentityRpc",
+      "method_key": "WS_METHODS.pullRequestsRoutingIdentity",
+      "wire_name": "pullRequests.routingIdentity",
+      "line": 1211,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestRoutingIdentityInput,",
+        "success": "PullRequestRoutingIdentityResult,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1211"
+    },
+    {
+      "symbol": "WsPullRequestsSummaryRpc",
+      "method_key": "WS_METHODS.pullRequestsSummary",
+      "wire_name": "pullRequests.summary",
+      "line": 1217,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestRef,",
+        "success": "PullRequestSummary,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1217"
+    },
+    {
+      "symbol": "WsPullRequestsStackRpc",
+      "method_key": "WS_METHODS.pullRequestsStack",
+      "wire_name": "pullRequests.stack",
+      "line": 1223,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestRef,",
+        "success": "Schema.NullOr(PullRequestStack),",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1223"
+    },
+    {
+      "symbol": "WsPullRequestsLinkedThreadsRpc",
+      "method_key": "WS_METHODS.pullRequestsLinkedThreads",
+      "wire_name": "pullRequests.linkedThreads",
+      "line": 1229,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestRef,",
+        "success": "PullRequestLinkedThreadsResult,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1229"
+    },
+    {
+      "symbol": "WsPullRequestsDetailRpc",
+      "method_key": "WS_METHODS.pullRequestsDetail",
+      "wire_name": "pullRequests.detail",
+      "line": 1235,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestRef,",
+        "success": "PullRequestDetail,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1235"
+    },
+    {
+      "symbol": "WsPullRequestsPreviewRpc",
+      "method_key": "WS_METHODS.pullRequestsPreview",
+      "wire_name": "pullRequests.preview",
+      "line": 1241,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestRef,",
+        "success": "PullRequestPreview,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1241"
+    },
+    {
+      "symbol": "WsPullRequestsChecksRpc",
+      "method_key": "WS_METHODS.pullRequestsChecks",
+      "wire_name": "pullRequests.checks",
+      "line": 1247,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestRef,",
+        "success": "Schema.NullOr(PullRequestChecks),",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1247"
+    },
+    {
+      "symbol": "WsPullRequestsActivityRpc",
+      "method_key": "WS_METHODS.pullRequestsActivity",
+      "wire_name": "pullRequests.activity",
+      "line": 1253,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestRef,",
+        "success": "PullRequestActivity,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1253"
+    },
+    {
+      "symbol": "WsPullRequestsReviewGuideRpc",
+      "method_key": "WS_METHODS.pullRequestsReviewGuide",
+      "wire_name": "pullRequests.reviewGuide",
+      "line": 1259,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestRef,",
+        "success": "PullRequestReviewGuideResult,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1259"
+    },
+    {
+      "symbol": "WsPullRequestsGenerateReviewGuideRpc",
+      "method_key": "WS_METHODS.pullRequestsGenerateReviewGuide",
+      "wire_name": "pullRequests.generateReviewGuide",
+      "line": 1265,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestRef,",
+        "success": "PullRequestReviewGuideResult,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1265"
+    },
+    {
+      "symbol": "WsPullRequestsThreadCommentsRpc",
+      "method_key": "WS_METHODS.pullRequestsThreadComments",
+      "wire_name": "pullRequests.threadComments",
+      "line": 1271,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestThreadCommentsInput,",
+        "success": "PullRequestThreadCommentsResult,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1271"
+    },
+    {
+      "symbol": "WsPullRequestsDiffFileContentsRpc",
+      "method_key": "WS_METHODS.pullRequestsDiffFileContents",
+      "wire_name": "pullRequests.diffFileContents",
+      "line": 1277,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestDiffFileContentsInput,",
+        "success": "PullRequestDiffFileContentsResult,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1277"
+    },
+    {
+      "symbol": "WsPullRequestsFilesViewedRpc",
+      "method_key": "WS_METHODS.pullRequestsFilesViewed",
+      "wire_name": "pullRequests.filesViewed",
+      "line": 1283,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestRef,",
+        "success": "PullRequestFilesViewedResult,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1283"
+    },
+    {
+      "symbol": "WsPullRequestsChangeBreakdownRpc",
+      "method_key": "WS_METHODS.pullRequestsChangeBreakdown",
+      "wire_name": "pullRequests.changeBreakdown",
+      "line": 1289,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestRef,",
+        "success": "PullRequestChangeBreakdown,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1289"
+    },
+    {
+      "symbol": "WsPullRequestsSetFilesViewedRpc",
+      "method_key": "WS_METHODS.pullRequestsSetFilesViewed",
+      "wire_name": "pullRequests.setFilesViewed",
+      "line": 1295,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestSetFilesViewedInput,",
+        "success": "Schema.Void,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1295"
+    },
+    {
+      "symbol": "WsPullRequestsRunActionRpc",
+      "method_key": "WS_METHODS.pullRequestsRunAction",
+      "wire_name": "pullRequests.runAction",
+      "line": 1301,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestActionInput,",
+        "success": "Schema.UndefinedOr(PullRequestSummary),",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1301"
+    },
+    {
+      "symbol": "WsPullRequestsUpdateRpc",
+      "method_key": "WS_METHODS.pullRequestsUpdate",
+      "wire_name": "pullRequests.update",
+      "line": 1308,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestUpdateInput,",
+        "success": "Schema.Void,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1308"
+    },
+    {
+      "symbol": "WsPullRequestsCommentRpc",
+      "method_key": "WS_METHODS.pullRequestsComment",
+      "wire_name": "pullRequests.comment",
+      "line": 1314,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestCommentInput,",
+        "success": "Schema.Void,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1314"
+    },
+    {
+      "symbol": "WsPullRequestsUpdateCommentRpc",
+      "method_key": "WS_METHODS.pullRequestsUpdateComment",
+      "wire_name": "pullRequests.updateComment",
+      "line": 1320,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestCommentUpdateInput,",
+        "success": "Schema.Void,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1320"
+    },
+    {
+      "symbol": "WsPullRequestsSubmitReviewRpc",
+      "method_key": "WS_METHODS.pullRequestsSubmitReview",
+      "wire_name": "pullRequests.submitReview",
+      "line": 1326,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestSubmitReviewInput,",
+        "success": "Schema.Void,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1326"
+    },
+    {
+      "symbol": "WsPullRequestsReplyToThreadRpc",
+      "method_key": "WS_METHODS.pullRequestsReplyToThread",
+      "wire_name": "pullRequests.replyToThread",
+      "line": 1332,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestThreadReplyInput,",
+        "success": "Schema.Void,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1332"
+    },
+    {
+      "symbol": "WsPullRequestsSetThreadResolutionRpc",
+      "method_key": "WS_METHODS.pullRequestsSetThreadResolution",
+      "wire_name": "pullRequests.setThreadResolution",
+      "line": 1338,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestThreadResolutionInput,",
+        "success": "Schema.Void,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1338"
+    },
+    {
+      "symbol": "WsPullRequestsSetReactionRpc",
+      "method_key": "WS_METHODS.pullRequestsSetReaction",
+      "wire_name": "pullRequests.setReaction",
+      "line": 1344,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestReactionInput,",
+        "success": "Schema.Void,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1344"
+    },
+    {
+      "symbol": "WsPullRequestsInvalidateRpc",
+      "method_key": "WS_METHODS.pullRequestsInvalidate",
+      "wire_name": "pullRequests.invalidate",
+      "line": 1350,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestInvalidateInput,",
+        "success": "Schema.Void,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1350"
+    },
+    {
+      "symbol": "WsPullRequestsReportStateRpc",
+      "method_key": "WS_METHODS.pullRequestsReportState",
+      "wire_name": "pullRequests.reportState",
+      "line": 1356,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestReportStateInput,",
+        "success": "Schema.Void,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1356"
+    },
+    {
+      "symbol": "WsPullRequestsSubscribeRefreshesRpc",
+      "method_key": "WS_METHODS.pullRequestsSubscribeRefreshes",
+      "wire_name": "pullRequests.subscribeRefreshes",
+      "line": 1362,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "NonNegativeInt,",
+        "error": "EnvironmentAuthorizationError,",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1362"
+    },
+    {
+      "symbol": "WsPullRequestsSubscribeLinkedThreadRefreshesRpc",
+      "method_key": "WS_METHODS.pullRequestsSubscribeLinkedThreadRefreshes",
+      "wire_name": "pullRequests.subscribeLinkedThreadRefreshes",
+      "line": 1370,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestReviewerCandidatesInput,",
+        "success": "PullRequestReviewerCandidateList,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1370"
+    },
+    {
+      "symbol": "WsPullRequestsReviewerCandidatesRpc",
+      "method_key": "WS_METHODS.pullRequestsReviewerCandidates",
+      "wire_name": "pullRequests.reviewerCandidates",
+      "line": 1381,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestReviewerCandidatesInput,",
+        "success": "PullRequestReviewerCandidateList,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1381"
+    },
+    {
+      "symbol": "WsPullRequestsRequestReviewersRpc",
+      "method_key": "WS_METHODS.pullRequestsRequestReviewers",
+      "wire_name": "pullRequests.requestReviewers",
+      "line": 1387,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestReviewerRequestInput,",
+        "success": "Schema.Void,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1387"
+    },
+    {
+      "symbol": "WsPullRequestsLabelCandidatesRpc",
+      "method_key": "WS_METHODS.pullRequestsLabelCandidates",
+      "wire_name": "pullRequests.labelCandidates",
+      "line": 1393,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestRef,",
+        "success": "PullRequestLabelCandidateList,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1393"
+    },
+    {
+      "symbol": "WsPullRequestsSetLabelsRpc",
+      "method_key": "WS_METHODS.pullRequestsSetLabels",
+      "wire_name": "pullRequests.setLabels",
+      "line": 1399,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PullRequestLabelChangeInput,",
+        "success": "Schema.Void,",
+        "error": "PullRequestRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1399"
+    },
+    {
+      "symbol": "WsIssuesListRpc",
+      "method_key": "WS_METHODS.issuesList",
+      "wire_name": "issues.list",
+      "line": 1411,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "IssueListInput,",
+        "success": "IssueListResult,",
+        "error": "IssueRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1411"
+    },
+    {
+      "symbol": "WsIssuesDetailRpc",
+      "method_key": "WS_METHODS.issuesDetail",
+      "wire_name": "issues.detail",
+      "line": 1417,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "IssueRef,",
+        "success": "IssueDetail,",
+        "error": "IssueRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1417"
+    },
+    {
+      "symbol": "WsIssuesLinkedThreadsRpc",
+      "method_key": "WS_METHODS.issuesLinkedThreads",
+      "wire_name": "issues.linkedThreads",
+      "line": 1424,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ThreadIssueKey,",
+        "success": "IssueLinkedThreadsResult,",
+        "error": "IssueRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1424"
+    },
+    {
+      "symbol": "WsIssuesCommentsRpc",
+      "method_key": "WS_METHODS.issuesComments",
+      "wire_name": "issues.comments",
+      "line": 1430,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "IssueCommentsPageInput,",
+        "success": "IssueCommentsPage,",
+        "error": "IssueRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1430"
+    },
+    {
+      "symbol": "WsIssuesTemplatesRpc",
+      "method_key": "WS_METHODS.issuesTemplates",
+      "wire_name": "issues.templates",
+      "line": 1436,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "IssueScopeRef,",
+        "success": "IssueTemplateList,",
+        "error": "IssueRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1436"
+    },
+    {
+      "symbol": "WsIssuesCandidatesRpc",
+      "method_key": "WS_METHODS.issuesCandidates",
+      "wire_name": "issues.candidates",
+      "line": 1443,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "IssueScopeRef,",
+        "success": "IssueCandidates,",
+        "error": "IssueRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1443"
+    },
+    {
+      "symbol": "WsIssuesCreateRpc",
+      "method_key": "WS_METHODS.issuesCreate",
+      "wire_name": "issues.create",
+      "line": 1449,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "IssueCreateInput,",
+        "success": "IssueCreateResult,",
+        "error": "IssueRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1449"
+    },
+    {
+      "symbol": "WsIssuesCommentRpc",
+      "method_key": "WS_METHODS.issuesComment",
+      "wire_name": "issues.comment",
+      "line": 1455,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "IssueCommentInput,",
+        "success": "Schema.Void,",
+        "error": "IssueRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1455"
+    },
+    {
+      "symbol": "WsIssuesUpdateRpc",
+      "method_key": "WS_METHODS.issuesUpdate",
+      "wire_name": "issues.update",
+      "line": 1461,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "IssueUpdateInput,",
+        "success": "Schema.Void,",
+        "error": "IssueRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1461"
+    },
+    {
+      "symbol": "WsIssuesSetStateRpc",
+      "method_key": "WS_METHODS.issuesSetState",
+      "wire_name": "issues.setState",
+      "line": 1467,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "IssueSetStateInput,",
+        "success": "Schema.Void,",
+        "error": "IssueRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1467"
+    },
+    {
+      "symbol": "WsIssuesReactRpc",
+      "method_key": "WS_METHODS.issuesReact",
+      "wire_name": "issues.react",
+      "line": 1473,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "IssueReactionInput,",
+        "success": "Schema.Void,",
+        "error": "IssueRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1473"
+    },
+    {
+      "symbol": "WsIssueTrackersListRpc",
+      "method_key": "WS_METHODS.issueTrackersList",
+      "wire_name": "issueTrackers.list",
+      "line": 1485,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "IssueTrackerConnectionList,",
+        "error": "IssueTrackerRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1485"
+    },
+    {
+      "symbol": "WsIssueTrackersConnectRpc",
+      "method_key": "WS_METHODS.issueTrackersConnect",
+      "wire_name": "issueTrackers.connect",
+      "line": 1495,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "IssueTrackerConnectInput,",
+        "success": "IssueTrackerConnection,",
+        "error": "IssueTrackerRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1495"
+    },
+    {
+      "symbol": "WsIssueTrackersBindProjectRpc",
+      "method_key": "WS_METHODS.issueTrackersBindProject",
+      "wire_name": "issueTrackers.bindProject",
+      "line": 1501,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "IssueTrackerBindProjectInput,",
+        "success": "Schema.Void,",
+        "error": "IssueTrackerRpcError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1501"
+    },
+    {
+      "symbol": "WsSourceControlLookupRepositoryRpc",
+      "method_key": "WS_METHODS.sourceControlLookupRepository",
+      "wire_name": "sourceControl.lookupRepository",
+      "line": 1507,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "SourceControlRepositoryLookupInput,",
+        "success": "SourceControlRepositoryInfo,",
+        "error": "Schema.Union([SourceControlRepositoryError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1507"
+    },
+    {
+      "symbol": "WsSourceControlCloneRepositoryRpc",
+      "method_key": "WS_METHODS.sourceControlCloneRepository",
+      "wire_name": "sourceControl.cloneRepository",
+      "line": 1513,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "SourceControlCloneRepositoryInput,",
+        "success": "SourceControlCloneRepositoryResult,",
+        "error": "Schema.Union([SourceControlRepositoryError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1513"
+    },
+    {
+      "symbol": "WsSourceControlSignInStartRpc",
+      "method_key": "WS_METHODS.sourceControlSignInStart",
+      "wire_name": "sourceControl.signInStart",
+      "line": 1520,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "SourceControlSignInInput,",
+        "success": "SourceControlSignInPrompt,",
+        "error": "Schema.Union([SourceControlSignInError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1520"
+    },
+    {
+      "symbol": "WsSourceControlSignInWaitRpc",
+      "method_key": "WS_METHODS.sourceControlSignInWait",
+      "wire_name": "sourceControl.signInWait",
+      "line": 1527,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "SourceControlSignInInput,",
+        "success": "SourceControlSignInResult,",
+        "error": "Schema.Union([SourceControlSignInError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1527"
+    },
+    {
+      "symbol": "WsSourceControlSignInCancelRpc",
+      "method_key": "WS_METHODS.sourceControlSignInCancel",
+      "wire_name": "sourceControl.signInCancel",
+      "line": 1534,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "SourceControlSignInInput,",
+        "success": "Schema.Void,",
+        "error": "Schema.Union([SourceControlSignInError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1534"
+    },
+    {
+      "symbol": "WsSourceControlAppAccessRpc",
+      "method_key": "WS_METHODS.sourceControlAppAccess",
+      "wire_name": "sourceControl.appAccess",
+      "line": 1540,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "SourceControlAppAccessInput,",
+        "success": "SourceControlAppAccess,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1540"
+    },
+    {
+      "symbol": "WsSourceControlStarredRpc",
+      "method_key": "WS_METHODS.sourceControlStarred",
+      "wire_name": "sourceControl.starred",
+      "line": 1547,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "SourceControlStarredInput,",
+        "success": "Schema.Boolean,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1547"
+    },
+    {
+      "symbol": "WsSourceControlStarRpc",
+      "method_key": "WS_METHODS.sourceControlStar",
+      "wire_name": "sourceControl.star",
+      "line": 1554,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "SourceControlStarredInput,",
+        "success": "Schema.Boolean,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1554"
+    },
+    {
+      "symbol": "WsProjectCloneStartRpc",
+      "method_key": "WS_METHODS.projectCloneStart",
+      "wire_name": "projectClone.start",
+      "line": 1561,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProjectCloneStartInput,",
+        "success": "ProjectCloneStartResult,",
+        "error": "Schema.Union(["
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1561"
+    },
+    {
+      "symbol": "WsProjectCloneCancelRpc",
+      "method_key": "WS_METHODS.projectCloneCancel",
+      "wire_name": "projectClone.cancel",
+      "line": 1571,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProjectCloneActionInput,",
+        "success": "ProjectCloneActionResult,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1571"
+    },
+    {
+      "symbol": "WsProjectCloneRetryRpc",
+      "method_key": "WS_METHODS.projectCloneRetry",
+      "wire_name": "projectClone.retry",
+      "line": 1577,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProjectCloneActionInput,",
+        "success": "ProjectCloneActionResult,",
+        "error": "Schema.Union([SourceControlRepositoryError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1577"
+    },
+    {
+      "symbol": "WsSubscribeProjectClonesRpc",
+      "method_key": "WS_METHODS.subscribeProjectClones",
+      "wire_name": "subscribeProjectClones",
+      "line": 1583,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "ProjectCloneSubscribeInput,",
+        "success": "ProjectCloneListEvent,",
+        "error": "EnvironmentAuthorizationError,",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1583"
+    },
+    {
+      "symbol": "WsSourceControlPublishRepositoryRpc",
+      "method_key": "WS_METHODS.sourceControlPublishRepository",
+      "wire_name": "sourceControl.publishRepository",
+      "line": 1590,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "SourceControlPublishRepositoryInput,",
+        "success": "SourceControlPublishRepositoryResult,",
+        "error": "Schema.Union([SourceControlRepositoryError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1590"
+    },
+    {
+      "symbol": "WsProjectsSearchEntriesRpc",
+      "method_key": "WS_METHODS.projectsSearchEntries",
+      "wire_name": "projects.searchEntries",
+      "line": 1596,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProjectSearchEntriesInput,",
+        "success": "ProjectSearchEntriesResult,",
+        "error": "Schema.Union([ProjectSearchEntriesError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1596"
+    },
+    {
+      "symbol": "WsProjectsSearchContentsRpc",
+      "method_key": "WS_METHODS.projectsSearchContents",
+      "wire_name": "projects.searchContents",
+      "line": 1602,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProjectSearchContentsInput,",
+        "success": "ProjectSearchContentsResult,",
+        "error": "Schema.Union([ProjectSearchContentsError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1602"
+    },
+    {
+      "symbol": "WsProjectsListEntriesRpc",
+      "method_key": "WS_METHODS.projectsListEntries",
+      "wire_name": "projects.listEntries",
+      "line": 1608,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProjectListEntriesInput,",
+        "success": "ProjectListEntriesResult,",
+        "error": "Schema.Union([ProjectListEntriesError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1608"
+    },
+    {
+      "symbol": "WsProjectsListIgnoredFilesRpc",
+      "method_key": "WS_METHODS.projectsListIgnoredFiles",
+      "wire_name": "projects.listIgnoredFiles",
+      "line": 1614,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProjectListIgnoredFilesInput,",
+        "success": "ProjectListIgnoredFilesResult,",
+        "error": "Schema.Union([ProjectListEntriesError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1614"
+    },
+    {
+      "symbol": "WsProjectsReadFileRpc",
+      "method_key": "WS_METHODS.projectsReadFile",
+      "wire_name": "projects.readFile",
+      "line": 1620,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProjectReadFileInput,",
+        "success": "ProjectReadFileResult,",
+        "error": "Schema.Union([ProjectReadFileError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1620"
+    },
+    {
+      "symbol": "WsProjectsWriteFileRpc",
+      "method_key": "WS_METHODS.projectsWriteFile",
+      "wire_name": "projects.writeFile",
+      "line": 1626,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProjectWriteFileInput,",
+        "success": "ProjectWriteFileResult,",
+        "error": "Schema.Union([ProjectWriteFileError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1626"
+    },
+    {
+      "symbol": "WsProjectsMutateRpc",
+      "method_key": "WS_METHODS.projectsMutate",
+      "wire_name": "projects.mutate",
+      "line": 1632,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProjectMutation,",
+        "success": "Project,",
+        "error": "Schema.Union([ProjectMutationError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1632"
+    },
+    {
+      "symbol": "WsProjectsEnsureScratchRpc",
+      "method_key": "WS_METHODS.projectsEnsureScratch",
+      "wire_name": "projects.ensureScratch",
+      "line": 1638,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "ProjectEnsureScratchResult,",
+        "error": "Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1638"
+    },
+    {
+      "symbol": "WsProjectsCreateNewRpc",
+      "method_key": "WS_METHODS.projectsCreateNew",
+      "wire_name": "projects.createNew",
+      "line": 1644,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProjectCreateNewInput,",
+        "success": "ProjectCreateNewResult,",
+        "error": "Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1644"
+    },
+    {
+      "symbol": "WsProjectsCreateFromThreadRpc",
+      "method_key": "WS_METHODS.projectsCreateFromThread",
+      "wire_name": "projects.createFromThread",
+      "line": 1650,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProjectCreateFromThreadInput,",
+        "success": "ProjectCreateFromThreadResult,",
+        "error": "Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1650"
+    },
+    {
+      "symbol": "WsShellOpenInEditorRpc",
+      "method_key": "WS_METHODS.shellOpenInEditor",
+      "wire_name": "shell.openInEditor",
+      "line": 1656,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "LaunchEditorInput,",
+        "error": "Schema.Union([ExternalLauncherError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1656"
+    },
+    {
+      "symbol": "WsFilesystemGetMetadataRpc",
+      "method_key": "WS_METHODS.filesystemGetMetadata",
+      "wire_name": "filesystem.getMetadata",
+      "line": 1661,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "FilesystemGetMetadataInput,",
+        "success": "FilesystemGetMetadataResult,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1661"
+    },
+    {
+      "symbol": "WsFilesystemBrowseRpc",
+      "method_key": "WS_METHODS.filesystemBrowse",
+      "wire_name": "filesystem.browse",
+      "line": 1667,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "FilesystemBrowseInput,",
+        "success": "FilesystemBrowseResult,",
+        "error": "Schema.Union([FilesystemBrowseError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1667"
+    },
+    {
+      "symbol": "WsWorkspaceListFoldersRpc",
+      "method_key": "WS_METHODS.workspaceListFolders",
+      "wire_name": "workspace.listFolders",
+      "line": 1673,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "WorkspaceListFoldersInput,",
+        "success": "WorkspaceListFoldersResult,",
+        "error": "Schema.Union([WorkspaceFoldersError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1673"
+    },
+    {
+      "symbol": "WsWorkspaceScanFoldersRpc",
+      "method_key": "WS_METHODS.workspaceScanFolders",
+      "wire_name": "workspace.scanFolders",
+      "line": 1679,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "WorkspaceScanFoldersInput,",
+        "success": "WorkspaceScanFoldersResult,",
+        "error": "Schema.Union([WorkspaceFoldersError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1679"
+    },
+    {
+      "symbol": "WsWorkspaceTaskFolderRpc",
+      "method_key": "WS_METHODS.workspaceTaskFolder",
+      "wire_name": "workspace.taskFolder",
+      "line": 1685,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "WorkspaceTaskFolderInput,",
+        "success": "WorkspaceTaskFolderResult,",
+        "error": "Schema.Union([TaskFolderError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1685"
+    },
+    {
+      "symbol": "WsWorkspaceAddTaskFolderRepositoryRpc",
+      "method_key": "WS_METHODS.workspaceAddTaskFolderRepository",
+      "wire_name": "workspace.addTaskFolderRepository",
+      "line": 1691,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AgentSessionScanInput,",
+        "success": "AgentSessionScanResult,",
+        "error": "Schema.Union([AgentSessionScanError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1691"
+    },
+    {
+      "symbol": "WsAgentSessionsScanRpc",
+      "method_key": "WS_METHODS.agentSessionsScan",
+      "wire_name": "agentSessions.scan",
+      "line": 1700,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AgentSessionScanInput,",
+        "success": "AgentSessionScanResult,",
+        "error": "Schema.Union([AgentSessionScanError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1700"
+    },
+    {
+      "symbol": "WsAgentSessionsImportRpc",
+      "method_key": "WS_METHODS.agentSessionsImport",
+      "wire_name": "agentSessions.import",
+      "line": 1706,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AgentSessionImportInput,",
+        "success": "AgentSessionImportResult,",
+        "error": "Schema.Union(["
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1706"
+    },
+    {
+      "symbol": "WsAssetsCreateUrlRpc",
+      "method_key": "WS_METHODS.assetsCreateUrl",
+      "wire_name": "assets.createUrl",
+      "line": 1717,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AssetCreateUrlInput,",
+        "success": "AssetCreateUrlResult,",
+        "error": "Schema.Union([AssetAccessError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1717"
+    },
+    {
+      "symbol": "WsAssetsPersistChatAttachmentsRpc",
+      "method_key": "WS_METHODS.assetsPersistChatAttachments",
+      "wire_name": "assets.persistChatAttachments",
+      "line": 1723,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PersistChatAttachmentsInput,",
+        "success": "PersistChatAttachmentsResult,",
+        "error": "Schema.Union([PersistChatAttachmentsError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1723"
+    },
+    {
+      "symbol": "WsAttachmentsCreateUploadUrlRpc",
+      "method_key": "WS_METHODS.attachmentsCreateUploadUrl",
+      "wire_name": "attachments.createUploadUrl",
+      "line": 1729,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AttachmentCreateUploadUrlInput,",
+        "success": "AttachmentCreateUploadUrlResult,",
+        "error": "Schema.Union([AttachmentUploadSigningKeyError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1729"
+    },
+    {
+      "symbol": "WsAttachmentsDeleteRpc",
+      "method_key": "WS_METHODS.attachmentsDelete",
+      "wire_name": "attachments.delete",
+      "line": 1735,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "AttachmentDeleteInput,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1735"
+    },
+    {
+      "symbol": "WsMcpAppsCallToolRpc",
+      "method_key": "WS_METHODS.mcpAppsCallTool",
+      "wire_name": "mcpApps.callTool",
+      "line": 1740,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "McpAppCallToolInput,",
+        "success": "McpAppCallToolResult,",
+        "error": "Schema.Union([McpAppRequestError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1740"
+    },
+    {
+      "symbol": "WsMcpAppsToolInfoRpc",
+      "method_key": "WS_METHODS.mcpAppsToolInfo",
+      "wire_name": "mcpApps.toolInfo",
+      "line": 1746,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "McpAppToolInfoInput,",
+        "success": "McpAppToolInfo,",
+        "error": "Schema.Union([McpAppRequestError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1746"
+    },
+    {
+      "symbol": "WsMcpAppsUpdateModelContextRpc",
+      "method_key": "WS_METHODS.mcpAppsUpdateModelContext",
+      "wire_name": "mcpApps.updateModelContext",
+      "line": 1752,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "McpAppUpdateModelContextInput,",
+        "error": "Schema.Union([McpAppRequestError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1752"
+    },
+    {
+      "symbol": "WsMcpAppsReadResourceRpc",
+      "method_key": "WS_METHODS.mcpAppsReadResource",
+      "wire_name": "mcpApps.readResource",
+      "line": 1757,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "McpAppReadResourceInput,",
+        "success": "McpAppReadResourceResult,",
+        "error": "Schema.Union([McpAppRequestError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1757"
+    },
+    {
+      "symbol": "WsProviderUploadFeedbackRpc",
+      "method_key": "WS_METHODS.providerUploadFeedback",
+      "wire_name": "provider.uploadFeedback",
+      "line": 1763,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProviderUploadFeedbackInput,",
+        "success": "ProviderUploadFeedbackResult,",
+        "error": "Schema.Union([ProviderUploadFeedbackError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1763"
+    },
+    {
+      "symbol": "WsProviderMcpSignInStartRpc",
+      "method_key": "WS_METHODS.providerMcpSignInStart",
+      "wire_name": "provider.mcpSignIn.start",
+      "line": 1769,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProviderMcpSignInStartInput,",
+        "success": "ProviderMcpSignInStartResult,",
+        "error": "Schema.Union([ProviderMcpSignInError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1769"
+    },
+    {
+      "symbol": "WsProviderMcpSignInCompleteRpc",
+      "method_key": "WS_METHODS.providerMcpSignInComplete",
+      "wire_name": "provider.mcpSignIn.complete",
+      "line": 1775,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ProviderMcpSignInCompleteInput,",
+        "success": "ProviderMcpSignInCompleteResult,",
+        "error": "Schema.Union([ProviderMcpSignInError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1775"
+    },
+    {
+      "symbol": "WsSubscribeVcsBranchRpc",
+      "method_key": "WS_METHODS.subscribeVcsBranch",
+      "wire_name": "subscribeVcsBranch",
+      "line": 1781,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "VcsStatusInput,",
+        "success": "VcsBranchStatus,",
+        "error": "Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1781"
+    },
+    {
+      "symbol": "WsVcsRefreshBranchRpc",
+      "method_key": "WS_METHODS.vcsRefreshBranch",
+      "wire_name": "vcs.refreshBranch",
+      "line": 1788,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "VcsStatusInput,",
+        "success": "Schema.Void,",
+        "error": "Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1788"
+    },
+    {
+      "symbol": "WsSubscribeVcsStatusRpc",
+      "method_key": "WS_METHODS.subscribeVcsStatus",
+      "wire_name": "subscribeVcsStatus",
+      "line": 1794,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "VcsStatusSubscriptionInput,",
+        "success": "VcsStatusStreamEvent,",
+        "error": "Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1794"
+    },
+    {
+      "symbol": "WsVcsPullRpc",
+      "method_key": "WS_METHODS.vcsPull",
+      "wire_name": "vcs.pull",
+      "line": 1801,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "VcsPullInput,",
+        "success": "VcsPullResult,",
+        "error": "Schema.Union([GitCommandError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1801"
+    },
+    {
+      "symbol": "WsVcsRefreshStatusRpc",
+      "method_key": "WS_METHODS.vcsRefreshStatus",
+      "wire_name": "vcs.refreshStatus",
+      "line": 1807,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({",
+        "success": "VcsRefreshStatusResult,",
+        "error": "Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1807"
+    },
+    {
+      "symbol": "WsSubscribeWorktreeSetupRpc",
+      "method_key": "WS_METHODS.subscribeWorktreeSetup",
+      "wire_name": "subscribeWorktreeSetup",
+      "line": 1816,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "WorktreeSetupSubscribeInput,",
+        "success": "WorktreeSetupStreamEvent,",
+        "error": "EnvironmentAuthorizationError,",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1816"
+    },
+    {
+      "symbol": "WsWorktreeSetupCancelRpc",
+      "method_key": "WS_METHODS.worktreeSetupCancel",
+      "wire_name": "worktreeSetup.cancel",
+      "line": 1823,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "WorktreeSetupCancelInput,",
+        "success": "WorktreeSetupCancelResult,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1823"
+    },
+    {
+      "symbol": "WsGitRunStackedActionRpc",
+      "method_key": "WS_METHODS.gitRunStackedAction",
+      "wire_name": "git.runStackedAction",
+      "line": 1829,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "GitRunStackedActionInput,",
+        "success": "GitActionProgressEvent,",
+        "error": "Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1829"
+    },
+    {
+      "symbol": "WsGitResolvePullRequestRpc",
+      "method_key": "WS_METHODS.gitResolvePullRequest",
+      "wire_name": "git.resolvePullRequest",
+      "line": 1836,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "GitPullRequestRefInput,",
+        "success": "GitResolvePullRequestResult,",
+        "error": "Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1836"
+    },
+    {
+      "symbol": "WsGitPreparePullRequestThreadRpc",
+      "method_key": "WS_METHODS.gitPreparePullRequestThread",
+      "wire_name": "git.preparePullRequestThread",
+      "line": 1842,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "GitPreparePullRequestThreadInput,",
+        "success": "GitPreparePullRequestThreadResult,",
+        "error": "Schema.Union([GitManagerServiceError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1842"
+    },
+    {
+      "symbol": "WsVcsListRefsRpc",
+      "method_key": "WS_METHODS.vcsListRefs",
+      "wire_name": "vcs.listRefs",
+      "line": 1848,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "VcsListRefsInput,",
+        "success": "VcsListRefsResult,",
+        "error": "Schema.Union([GitCommandError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1848"
+    },
+    {
+      "symbol": "WsVcsCreateWorktreeRpc",
+      "method_key": "WS_METHODS.vcsCreateWorktree",
+      "wire_name": "vcs.createWorktree",
+      "line": 1854,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({ ...VcsCreateWorktreeInput.fields, path: Schema.Null }),",
+        "success": "VcsCreateWorktreeResult,",
+        "error": "Schema.Union([GitCommandError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1854"
+    },
+    {
+      "symbol": "WsVcsRemoveWorktreeRpc",
+      "method_key": "WS_METHODS.vcsRemoveWorktree",
+      "wire_name": "vcs.removeWorktree",
+      "line": 1861,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "VcsRemoveWorktreeInput,",
+        "error": "Schema.Union([GitCommandError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1861"
+    },
+    {
+      "symbol": "WsVcsCreateRefRpc",
+      "method_key": "WS_METHODS.vcsCreateRef",
+      "wire_name": "vcs.createRef",
+      "line": 1866,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "VcsCreateRefInput,",
+        "success": "VcsCreateRefResult,",
+        "error": "Schema.Union([GitCommandError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1866"
+    },
+    {
+      "symbol": "WsVcsSwitchRefRpc",
+      "method_key": "WS_METHODS.vcsSwitchRef",
+      "wire_name": "vcs.switchRef",
+      "line": 1872,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "VcsSwitchRefInput,",
+        "success": "VcsSwitchRefResult,",
+        "error": "Schema.Union([GitCommandError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1872"
+    },
+    {
+      "symbol": "WsVcsInitRpc",
+      "method_key": "WS_METHODS.vcsInit",
+      "wire_name": "vcs.init",
+      "line": 1878,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "VcsInitInput,",
+        "error": "Schema.Union([VcsError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1878"
+    },
+    {
+      "symbol": "WsReviewGetBranchCommitsRpc",
+      "method_key": "WS_METHODS.reviewGetBranchCommits",
+      "wire_name": "review.getBranchCommits",
+      "line": 1883,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ReviewBranchCommitsInput,",
+        "success": "ReviewBranchCommitsResult,",
+        "error": "Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1883"
+    },
+    {
+      "symbol": "WsReviewGetDiffPreviewRpc",
+      "method_key": "WS_METHODS.reviewGetDiffPreview",
+      "wire_name": "review.getDiffPreview",
+      "line": 1889,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ReviewDiffPreviewInput,",
+        "success": "ReviewDiffPreviewResult,",
+        "error": "Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1889"
+    },
+    {
+      "symbol": "WsReviewGetDiffFileContentsRpc",
+      "method_key": "WS_METHODS.reviewGetDiffFileContents",
+      "wire_name": "review.getDiffFileContents",
+      "line": 1895,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ReviewDiffFileContentsInput,",
+        "success": "ReviewDiffFileContentsResult,",
+        "error": "Schema.Union([ReviewDiffPreviewError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1895"
+    },
+    {
+      "symbol": "WsTerminalOpenRpc",
+      "method_key": "WS_METHODS.terminalOpen",
+      "wire_name": "terminal.open",
+      "line": 1901,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "TerminalOpenInput,",
+        "success": "TerminalSessionSnapshot,",
+        "error": "Schema.Union([TerminalError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1901"
+    },
+    {
+      "symbol": "WsTerminalAttachRpc",
+      "method_key": "WS_METHODS.terminalAttach",
+      "wire_name": "terminal.attach",
+      "line": 1907,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "TerminalAttachInput,",
+        "success": "TerminalAttachStreamEvent,",
+        "error": "Schema.Union([TerminalError, EnvironmentAuthorizationError]),",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1907"
+    },
+    {
+      "symbol": "WsTerminalObserveRpc",
+      "method_key": "WS_METHODS.terminalObserve",
+      "wire_name": "terminal.observe",
+      "line": 1914,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "TerminalObserveInput,",
+        "success": "TerminalAttachStreamEvent,",
+        "error": "Schema.Union([TerminalError, EnvironmentAuthorizationError]),",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1914"
+    },
+    {
+      "symbol": "WsTerminalWriteRpc",
+      "method_key": "WS_METHODS.terminalWrite",
+      "wire_name": "terminal.write",
+      "line": 1921,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "TerminalWriteInput,",
+        "error": "Schema.Union([TerminalError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1921"
+    },
+    {
+      "symbol": "WsTerminalResizeRpc",
+      "method_key": "WS_METHODS.terminalResize",
+      "wire_name": "terminal.resize",
+      "line": 1926,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "TerminalResizeInput,",
+        "error": "Schema.Union([TerminalError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1926"
+    },
+    {
+      "symbol": "WsTerminalClearRpc",
+      "method_key": "WS_METHODS.terminalClear",
+      "wire_name": "terminal.clear",
+      "line": 1931,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "TerminalClearInput,",
+        "error": "Schema.Union([TerminalError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1931"
+    },
+    {
+      "symbol": "WsTerminalCloseRpc",
+      "method_key": "WS_METHODS.terminalClose",
+      "wire_name": "terminal.close",
+      "line": 1936,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "TerminalCloseInput,",
+        "error": "Schema.Union([TerminalError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1936"
+    },
+    {
+      "symbol": "WsPreviewOpenRpc",
+      "method_key": "WS_METHODS.previewOpen",
+      "wire_name": "preview.open",
+      "line": 1941,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PreviewOpenInput,",
+        "success": "PreviewSessionSnapshot,",
+        "error": "Schema.Union([PreviewError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1941"
+    },
+    {
+      "symbol": "WsPreviewResizeRpc",
+      "method_key": "WS_METHODS.previewResize",
+      "wire_name": "preview.resize",
+      "line": 1947,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PreviewResizeInput,",
+        "success": "PreviewSessionSnapshot,",
+        "error": "Schema.Union([PreviewError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1947"
+    },
+    {
+      "symbol": "WsPreviewAdjustRpc",
+      "method_key": "WS_METHODS.previewAdjust",
+      "wire_name": "preview.adjust",
+      "line": 1953,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PreviewAdjustInput,",
+        "success": "PreviewSessionSnapshot,",
+        "error": "Schema.Union([PreviewError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1953"
+    },
+    {
+      "symbol": "WsPreviewCloseRpc",
+      "method_key": "WS_METHODS.previewClose",
+      "wire_name": "preview.close",
+      "line": 1959,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PreviewCloseInput,",
+        "error": "Schema.Union([PreviewError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1959"
+    },
+    {
+      "symbol": "WsPreviewListRpc",
+      "method_key": "WS_METHODS.previewList",
+      "wire_name": "preview.list",
+      "line": 1964,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PreviewListInput,",
+        "success": "PreviewListResult,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1964"
+    },
+    {
+      "symbol": "WsPreviewClearProfileRpc",
+      "method_key": "WS_METHODS.previewClearProfile",
+      "wire_name": "preview.clearProfile",
+      "line": 1970,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PreviewClearProfileInput,",
+        "error": "Schema.Union([PreviewClearProfileError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1970"
+    },
+    {
+      "symbol": "WsPreviewReportProfilesRpc",
+      "method_key": "WS_METHODS.previewReportProfiles",
+      "wire_name": "preview.reportProfiles",
+      "line": 1975,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PreviewReportProfilesInput,",
+        "error": "EnvironmentAuthorizationError,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1975"
+    },
+    {
+      "symbol": "WsPreviewReportStatusRpc",
+      "method_key": "WS_METHODS.previewReportStatus",
+      "wire_name": "preview.reportStatus",
+      "line": 1980,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PreviewReportStatusInput,",
+        "error": "Schema.Union([PreviewError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1980"
+    },
+    {
+      "symbol": "WsSubscribePreviewEventsRpc",
+      "method_key": "WS_METHODS.subscribePreviewEvents",
+      "wire_name": "subscribePreviewEvents",
+      "line": 1985,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "PreviewEvent,",
+        "error": "EnvironmentAuthorizationError,",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1985"
+    },
+    {
+      "symbol": "WsPreviewStopLocalServerRpc",
+      "method_key": "WS_METHODS.previewStopLocalServer",
+      "wire_name": "preview.stopLocalServer",
+      "line": 1992,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "PreviewStopLocalServerInput,",
+        "error": "Schema.Union([PreviewStopLocalServerError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1992"
+    },
+    {
+      "symbol": "WsSubscribeDiscoveredLocalServersRpc",
+      "method_key": "WS_METHODS.subscribeDiscoveredLocalServers",
+      "wire_name": "subscribeDiscoveredLocalServers",
+      "line": 1997,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({",
+        "success": "DiscoveredLocalServerList,",
+        "error": "EnvironmentAuthorizationError,",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L1997"
+    },
+    {
+      "symbol": "WsDeviceTestHostRpc",
+      "method_key": "WS_METHODS.deviceTestHost",
+      "wire_name": "device.testHost",
+      "line": 2006,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "SshDeviceHostConfig,",
+        "success": "DeviceHostSummary,",
+        "error": "Schema.Union([DeviceError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2006"
+    },
+    {
+      "symbol": "WsDeviceEasAccountRpc",
+      "method_key": "WS_METHODS.deviceEasAccount",
+      "wire_name": "device.easAccount",
+      "line": 2012,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "DeviceEasAccountInput,",
+        "success": "DeviceEasAccount,",
+        "error": "Schema.Union([DeviceEasAccountError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2012"
+    },
+    {
+      "symbol": "WsDeviceSimlockIdentityRpc",
+      "method_key": "WS_METHODS.deviceSimlockIdentity",
+      "wire_name": "device.simlockIdentity",
+      "line": 2018,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "DeviceSimlockIdentityInput,",
+        "success": "DeviceSimlockIdentity,",
+        "error": "Schema.Union([DeviceSimlockIdentityError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2018"
+    },
+    {
+      "symbol": "WsDeviceListRpc",
+      "method_key": "WS_METHODS.deviceList",
+      "wire_name": "device.list",
+      "line": 2024,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "DeviceListInput,",
+        "success": "DeviceServiceState,",
+        "error": "Schema.Union([DeviceError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2024"
+    },
+    {
+      "symbol": "WsDeviceConfigureRpc",
+      "method_key": "WS_METHODS.deviceConfigure",
+      "wire_name": "device.configure",
+      "line": 2030,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "DeviceConfigureInput,",
+        "success": "DeviceServiceState,",
+        "error": "Schema.Union([DeviceError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2030"
+    },
+    {
+      "symbol": "WsDeviceOpenRpc",
+      "method_key": "WS_METHODS.deviceOpen",
+      "wire_name": "device.open",
+      "line": 2036,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "DeviceOpenInput,",
+        "success": "DeviceSession,",
+        "error": "Schema.Union([DeviceError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2036"
+    },
+    {
+      "symbol": "WsDeviceCloseRpc",
+      "method_key": "WS_METHODS.deviceClose",
+      "wire_name": "device.close",
+      "line": 2042,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "DeviceCloseInput,",
+        "error": "Schema.Union([DeviceError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2042"
+    },
+    {
+      "symbol": "WsDeviceShutdownRpc",
+      "method_key": "WS_METHODS.deviceShutdown",
+      "wire_name": "device.shutdown",
+      "line": 2047,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "DeviceShutdownInput,",
+        "error": "Schema.Union([DeviceError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2047"
+    },
+    {
+      "symbol": "WsDeviceDetailRpc",
+      "method_key": "WS_METHODS.deviceDetail",
+      "wire_name": "device.detail",
+      "line": 2052,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "DeviceDetailInput,",
+        "success": "DeviceDetail,",
+        "error": "Schema.Union([DeviceError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2052"
+    },
+    {
+      "symbol": "WsDeviceActionRpc",
+      "method_key": "WS_METHODS.deviceAction",
+      "wire_name": "device.action",
+      "line": 2058,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "DeviceActionInput,",
+        "success": "DeviceDetail,",
+        "error": "Schema.Union([DeviceError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2058"
+    },
+    {
+      "symbol": "WsSubscribeDeviceStateRpc",
+      "method_key": "WS_METHODS.subscribeDeviceState",
+      "wire_name": "subscribeDeviceState",
+      "line": 2064,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "DeviceServiceState,",
+        "error": "EnvironmentAuthorizationError,",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2064"
+    },
+    {
+      "symbol": "WsOrchestrationV2DispatchCommandRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.dispatchCommand",
+      "wire_name": "orchestration.dispatchCommand",
+      "line": 2071,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.dispatchCommand.input,",
+        "success": "OrchestrationV2RpcSchemas.dispatchCommand.output,",
+        "error": "Schema.Union([OrchestrationV2DispatchCommandError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2071"
+    },
+    {
+      "symbol": "WsOrchestrationV2GetTurnDiffRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.getTurnDiff",
+      "wire_name": "orchestration.getTurnDiff",
+      "line": 2077,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.getTurnDiff.input,",
+        "success": "OrchestrationV2RpcSchemas.getTurnDiff.output,",
+        "error": "Schema.Union([OrchestrationGetTurnDiffError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2077"
+    },
+    {
+      "symbol": "WsOrchestrationV2GetFullThreadDiffRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.getFullThreadDiff",
+      "wire_name": "orchestration.getFullThreadDiff",
+      "line": 2083,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2SearchThreadInput,",
+        "success": "OrchestrationV2SearchThreadResult,",
+        "error": "Schema.Union([OrchestrationV2SearchThreadError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2083"
+    },
+    {
+      "symbol": "WsOrchestrationV2SearchThreadRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.searchThread",
+      "wire_name": "orchestration.searchThread",
+      "line": 2092,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2SearchThreadInput,",
+        "success": "OrchestrationV2SearchThreadResult,",
+        "error": "Schema.Union([OrchestrationV2SearchThreadError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2092"
+    },
+    {
+      "symbol": "WsOrchestrationV2SearchThreadStreamRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.searchThreadStream",
+      "wire_name": "orchestration.searchThreadStream",
+      "line": 2098,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2SearchThreadsInput,",
+        "success": "OrchestrationV2SearchThreadsResult,",
+        "error": "Schema.Union([OrchestrationSearchThreadsError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2098"
+    },
+    {
+      "symbol": "WsOrchestrationV2SearchThreadsRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.searchThreads",
+      "wire_name": "orchestration.searchThreads",
+      "line": 2108,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2SearchThreadsInput,",
+        "success": "OrchestrationV2SearchThreadsResult,",
+        "error": "Schema.Union([OrchestrationSearchThreadsError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2108"
+    },
+    {
+      "symbol": "WsOrchestrationV2GetArchivedShellSnapshotRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.getArchivedShellSnapshot",
+      "wire_name": "orchestration.getArchivedShellSnapshot",
+      "line": 2114,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.getThreadFamily.input,",
+        "success": "OrchestrationV2RpcSchemas.getThreadFamily.output,",
+        "error": "Schema.Union([OrchestrationV2GetShellSnapshotError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2114"
+    },
+    {
+      "symbol": "WsOrchestrationV2GetThreadFamilyRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.getThreadFamily",
+      "wire_name": "orchestration.getThreadFamily",
+      "line": 2123,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.getThreadFamily.input,",
+        "success": "OrchestrationV2RpcSchemas.getThreadFamily.output,",
+        "error": "Schema.Union([OrchestrationV2GetShellSnapshotError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2123"
+    },
+    {
+      "symbol": "WsOrchestrationV2GetThreadTitlesRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.getThreadTitles",
+      "wire_name": "orchestration.getThreadTitles",
+      "line": 2129,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.getThreadTitles.input,",
+        "success": "OrchestrationV2RpcSchemas.getThreadTitles.output,",
+        "error": "Schema.Union([OrchestrationV2GetShellSnapshotError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2129"
+    },
+    {
+      "symbol": "WsOrchestrationV2GetThreadLinkMetadataRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.getThreadLinkMetadata",
+      "wire_name": "orchestration.getThreadLinkMetadata",
+      "line": 2135,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.stopWorkflow.input,",
+        "success": "OrchestrationV2RpcSchemas.stopWorkflow.output,",
+        "error": "Schema.Union([OrchestrationV2StopWorkflowError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2135"
+    },
+    {
+      "symbol": "WsOrchestrationV2GetWorktreeThreadIdsRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.getWorktreeThreadIds",
+      "wire_name": "orchestration.getWorktreeThreadIds",
+      "line": 2144,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.stopWorkflow.input,",
+        "success": "OrchestrationV2RpcSchemas.stopWorkflow.output,",
+        "error": "Schema.Union([OrchestrationV2StopWorkflowError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2144"
+    },
+    {
+      "symbol": "WsOrchestrationV2GetOlderSettledThreadsRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.getOlderSettledThreads",
+      "wire_name": "orchestration.getOlderSettledThreads",
+      "line": 2153,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.stopWorkflow.input,",
+        "success": "OrchestrationV2RpcSchemas.stopWorkflow.output,",
+        "error": "Schema.Union([OrchestrationV2StopWorkflowError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2153"
+    },
+    {
+      "symbol": "WsOrchestrationV2GetThreadProjectionRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.getThreadProjection",
+      "wire_name": "orchestration.getThreadProjection",
+      "line": 2162,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.stopWorkflow.input,",
+        "success": "OrchestrationV2RpcSchemas.stopWorkflow.output,",
+        "error": "Schema.Union([OrchestrationV2StopWorkflowError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2162"
+    },
+    {
+      "symbol": "WsOrchestrationV2StopWorkflowRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.stopWorkflow",
+      "wire_name": "orchestration.stopWorkflow",
+      "line": 2171,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.stopWorkflow.input,",
+        "success": "OrchestrationV2RpcSchemas.stopWorkflow.output,",
+        "error": "Schema.Union([OrchestrationV2StopWorkflowError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2171"
+    },
+    {
+      "symbol": "WsOrchestrationV2ForceStopThreadRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.forceStopThread",
+      "wire_name": "orchestration.forceStopThread",
+      "line": 2177,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.forceStopThread.input,",
+        "success": "OrchestrationV2RpcSchemas.forceStopThread.output,",
+        "error": "Schema.Union([OrchestrationV2ForceStopThreadError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2177"
+    },
+    {
+      "symbol": "WsOrchestrationV2GetWorkflowScriptRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.getWorkflowScript",
+      "wire_name": "orchestration.getWorkflowScript",
+      "line": 2183,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.getTurnItem.input,",
+        "success": "OrchestrationV2RpcSchemas.getTurnItem.output,",
+        "error": "Schema.Union([OrchestrationV2GetThreadProjectionError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2183"
+    },
+    {
+      "symbol": "WsOrchestrationV2GetNativeChildWorkRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.getNativeChildWork",
+      "wire_name": "orchestration.getNativeChildWork",
+      "line": 2192,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.getTurnItem.input,",
+        "success": "OrchestrationV2RpcSchemas.getTurnItem.output,",
+        "error": "Schema.Union([OrchestrationV2GetThreadProjectionError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2192"
+    },
+    {
+      "symbol": "WsOrchestrationV2GetTurnItemRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.getTurnItem",
+      "wire_name": "orchestration.getTurnItem",
+      "line": 2201,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.getTurnItem.input,",
+        "success": "OrchestrationV2RpcSchemas.getTurnItem.output,",
+        "error": "Schema.Union([OrchestrationV2GetThreadProjectionError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2201"
+    },
+    {
+      "symbol": "WsOrchestrationV2LaunchThreadRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.launchThread",
+      "wire_name": "orchestration.launchThread",
+      "line": 2207,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.launchThread.input,",
+        "success": "OrchestrationV2RpcSchemas.launchThread.output,",
+        "error": "Schema.Union([OrchestrationV2ThreadLaunchError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2207"
+    },
+    {
+      "symbol": "WsOrchestrationV2SubscribeShellRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.subscribeShell",
+      "wire_name": "orchestration.subscribeShell",
+      "line": 2213,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.subscribeShell.input,",
+        "success": "OrchestrationV2RpcSchemas.subscribeShell.output,",
+        "error": "Schema.Union([OrchestrationV2GetShellSnapshotError, EnvironmentAuthorizationError]),",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2213"
+    },
+    {
+      "symbol": "WsOrchestrationV2SubscribeThreadRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.subscribeThread",
+      "wire_name": "orchestration.subscribeThread",
+      "line": 2220,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "OrchestrationV2RpcSchemas.subscribeThread.input,",
+        "success": "OrchestrationV2RpcSchemas.subscribeThread.output,",
+        "error": "Schema.Union([OrchestrationV2GetThreadProjectionError, EnvironmentAuthorizationError]),",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2220"
+    },
+    {
+      "symbol": "WsOrchestrationV2SubscribeCommandOutputRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.subscribeCommandOutput",
+      "wire_name": "orchestration.subscribeCommandOutput",
+      "line": 2227,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "TerminalMetadataStreamEvent,",
+        "error": "EnvironmentAuthorizationError,",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2227"
+    },
+    {
+      "symbol": "WsOrchestrationV2SubscribePromptSuggestionRpc",
+      "method_key": "ORCHESTRATION_V2_WS_METHODS.subscribePromptSuggestion",
+      "wire_name": "orchestration.subscribePromptSuggestion",
+      "line": 2237,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "TerminalMetadataStreamEvent,",
+        "error": "EnvironmentAuthorizationError,",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2237"
+    },
+    {
+      "symbol": "WsSubscribeTerminalMetadataRpc",
+      "method_key": "WS_METHODS.subscribeTerminalMetadata",
+      "wire_name": "subscribeTerminalMetadata",
+      "line": 2247,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "TerminalMetadataStreamEvent,",
+        "error": "EnvironmentAuthorizationError,",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2247"
+    },
+    {
+      "symbol": "WsSubscribeServerConfigRpc",
+      "method_key": "WS_METHODS.subscribeServerConfig",
+      "wire_name": "subscribeServerConfig",
+      "line": 2254,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({",
+        "success": "ServerConfigStreamEvent,",
+        "error": "Schema.Union([KeybindingsConfigError, ServerSettingsError, EnvironmentAuthorizationError]),",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2254"
+    },
+    {
+      "symbol": "WsSubscribeServerLifecycleRpc",
+      "method_key": "WS_METHODS.subscribeServerLifecycle",
+      "wire_name": "subscribeServerLifecycle",
+      "line": 2278,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "ServerLifecycleStreamEvent,",
+        "error": "EnvironmentAuthorizationError,",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2278"
+    },
+    {
+      "symbol": "WsScheduledTasksSubscribeRpc",
+      "method_key": "WS_METHODS.scheduledTasksSubscribe",
+      "wire_name": "scheduledTasks.subscribe",
+      "line": 2285,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "ScheduledTaskListInput,",
+        "success": "ScheduledTaskListResult,",
+        "error": "Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2285"
+    },
+    {
+      "symbol": "WsScheduledTasksUpsertRpc",
+      "method_key": "WS_METHODS.scheduledTasksUpsert",
+      "wire_name": "scheduledTasks.upsert",
+      "line": 2292,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ScheduledTaskUpsertInput,",
+        "success": "ScheduledTaskMutationResult,",
+        "error": "Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2292"
+    },
+    {
+      "symbol": "WsScheduledTasksSetEnabledRpc",
+      "method_key": "WS_METHODS.scheduledTasksSetEnabled",
+      "wire_name": "scheduledTasks.setEnabled",
+      "line": 2298,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ScheduledTaskSetEnabledInput,",
+        "success": "ScheduledTaskMutationResult,",
+        "error": "Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2298"
+    },
+    {
+      "symbol": "WsScheduledTasksDeleteRpc",
+      "method_key": "WS_METHODS.scheduledTasksDelete",
+      "wire_name": "scheduledTasks.delete",
+      "line": 2304,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ScheduledTaskDeleteInput,",
+        "success": "ScheduledTaskDeleteResult,",
+        "error": "Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2304"
+    },
+    {
+      "symbol": "WsScheduledTasksRunNowRpc",
+      "method_key": "WS_METHODS.scheduledTasksRunNow",
+      "wire_name": "scheduledTasks.runNow",
+      "line": 2310,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "ScheduledTaskRunNowInput,",
+        "success": "ScheduledTaskRunNowResult,",
+        "error": "Schema.Union([ScheduledTaskError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2310"
+    },
+    {
+      "symbol": "WsScheduledTasksRotateWebhookTokenRpc",
+      "method_key": "WS_METHODS.scheduledTasksRotateWebhookToken",
+      "wire_name": "scheduledTasks.rotateWebhookToken",
+      "line": 2316,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "GuestShareCreateInput,",
+        "success": "GuestShareCreateResult,",
+        "error": "Schema.Union([GuestShareCreateError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2316"
+    },
+    {
+      "symbol": "WsGuestShareCreateRpc",
+      "method_key": "WS_METHODS.guestShareCreate",
+      "wire_name": "guestShare.create",
+      "line": 2325,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "GuestShareCreateInput,",
+        "success": "GuestShareCreateResult,",
+        "error": "Schema.Union([GuestShareCreateError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2325"
+    },
+    {
+      "symbol": "WsSecretsAnswerRequestRpc",
+      "method_key": "WS_METHODS.secretsAnswerRequest",
+      "wire_name": "secrets.answerRequest",
+      "line": 2331,
+      "stream": false,
+      "schema_field_first_lines": {
+        "payload": "SecretRequestAnswerInput,",
+        "error": "Schema.Union([SecretRequestError, EnvironmentAuthorizationError]),"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2331"
+    },
+    {
+      "symbol": "WsScheduledTasksListWebhookDeliveriesRpc",
+      "method_key": "WS_METHODS.scheduledTasksListWebhookDeliveries",
+      "wire_name": "scheduledTasks.listWebhookDeliveries",
+      "line": 2336,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "AuthAccessStreamEvent,",
+        "error": "Schema.Union([AuthAccessStreamError, EnvironmentAuthorizationError]),",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2336"
+    },
+    {
+      "symbol": "WsScheduledTasksGetWebhookDeliveryRpc",
+      "method_key": "WS_METHODS.scheduledTasksGetWebhookDelivery",
+      "wire_name": "scheduledTasks.getWebhookDelivery",
+      "line": 2345,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "AuthAccessStreamEvent,",
+        "error": "Schema.Union([AuthAccessStreamError, EnvironmentAuthorizationError]),",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2345"
+    },
+    {
+      "symbol": "WsSubscribeAuthAccessRpc",
+      "method_key": "WS_METHODS.subscribeAuthAccess",
+      "wire_name": "subscribeAuthAccess",
+      "line": 2354,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "AuthAccessStreamEvent,",
+        "error": "Schema.Union([AuthAccessStreamError, EnvironmentAuthorizationError]),",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2354"
+    },
+    {
+      "symbol": "WsSubscribeResourceTelemetryRpc",
+      "method_key": "WS_METHODS.subscribeResourceTelemetry",
+      "wire_name": "subscribeResourceTelemetry",
+      "line": 2361,
+      "stream": true,
+      "schema_field_first_lines": {
+        "payload": "Schema.Struct({}),",
+        "success": "ResourceTelemetrySnapshot,",
+        "error": "EnvironmentAuthorizationError,",
+        "stream": "true,"
+      },
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts#L2361"
+    }
+  ],
+  "http": [
+    {
+      "group": "metadata",
+      "name": "descriptor",
+      "http_method": "GET",
+      "path_or_constant": "/.well-known/t3/environment",
+      "line": 590,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L590"
+    },
+    {
+      "group": "auth",
+      "name": "session",
+      "http_method": "GET",
+      "path_or_constant": "/api/auth/session",
+      "line": 597,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L597"
+    },
+    {
+      "group": "auth",
+      "name": "browserSession",
+      "http_method": "POST",
+      "path_or_constant": "/api/auth/browser-session",
+      "line": 604,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L604"
+    },
+    {
+      "group": "auth",
+      "name": "token",
+      "http_method": "POST",
+      "path_or_constant": "/oauth/token",
+      "line": 611,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L611"
+    },
+    {
+      "group": "auth",
+      "name": "webSocketTicket",
+      "http_method": "POST",
+      "path_or_constant": "/api/auth/websocket-ticket",
+      "line": 619,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L619"
+    },
+    {
+      "group": "auth",
+      "name": "webSocketTicketFor",
+      "http_method": "POST",
+      "path_or_constant": "/api/auth/websocket-ticket/:use",
+      "line": 626,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L626"
+    },
+    {
+      "group": "auth",
+      "name": "pairingCredential",
+      "http_method": "POST",
+      "path_or_constant": "/api/auth/pairing-token",
+      "line": 634,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L634"
+    },
+    {
+      "group": "auth",
+      "name": "revokePairingLink",
+      "http_method": "POST",
+      "path_or_constant": "/api/auth/pairing-links/revoke",
+      "line": 642,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L642"
+    },
+    {
+      "group": "auth",
+      "name": "revokeClient",
+      "http_method": "POST",
+      "path_or_constant": "/api/auth/clients/revoke",
+      "line": 650,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L650"
+    },
+    {
+      "group": "auth",
+      "name": "approveConnectDevice",
+      "http_method": "POST",
+      "path_or_constant": "/api/auth/connect-devices/approve",
+      "line": 658,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L658"
+    },
+    {
+      "group": "auth",
+      "name": "revokeConnectDevice",
+      "http_method": "POST",
+      "path_or_constant": "/api/auth/connect-devices/revoke",
+      "line": 666,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L666"
+    },
+    {
+      "group": "auth",
+      "name": "revokeOtherClients",
+      "http_method": "POST",
+      "path_or_constant": "/api/auth/clients/revoke-others",
+      "line": 674,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L674"
+    },
+    {
+      "group": "mcpOAuth",
+      "name": "protectedResource",
+      "http_method": "GET",
+      "path_or_constant": "/.well-known/oauth-protected-resource",
+      "line": 683,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L683"
+    },
+    {
+      "group": "mcpOAuth",
+      "name": "mcpProtectedResource",
+      "http_method": "GET",
+      "path_or_constant": "/.well-known/oauth-protected-resource/mcp",
+      "line": 688,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L688"
+    },
+    {
+      "group": "mcpOAuth",
+      "name": "authorizationServer",
+      "http_method": "GET",
+      "path_or_constant": "/.well-known/oauth-authorization-server",
+      "line": 693,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L693"
+    },
+    {
+      "group": "mcpOAuth",
+      "name": "register",
+      "http_method": "POST",
+      "path_or_constant": "/oauth/mcp/register",
+      "line": 698,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L698"
+    },
+    {
+      "group": "mcpOAuth",
+      "name": "authorize",
+      "http_method": "GET",
+      "path_or_constant": "/oauth/mcp/authorize",
+      "line": 704,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L704"
+    },
+    {
+      "group": "mcpOAuth",
+      "name": "approval",
+      "http_method": "POST",
+      "path_or_constant": "/oauth/mcp/approval",
+      "line": 706,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L706"
+    },
+    {
+      "group": "mcpOAuth",
+      "name": "decision",
+      "http_method": "POST",
+      "path_or_constant": "/oauth/mcp/decision",
+      "line": 715,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L715"
+    },
+    {
+      "group": "mcpOAuth",
+      "name": "token",
+      "http_method": "POST",
+      "path_or_constant": "/oauth/mcp/token",
+      "line": 724,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L724"
+    },
+    {
+      "group": "mcpOAuth",
+      "name": "revoke",
+      "http_method": "POST",
+      "path_or_constant": "/oauth/mcp/revoke",
+      "line": 731,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L731"
+    },
+    {
+      "group": "orchestration",
+      "name": "shellSnapshot",
+      "http_method": "GET",
+      "path_or_constant": "/api/orchestration/shell",
+      "line": 775,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L775"
+    },
+    {
+      "group": "orchestration",
+      "name": "threadSnapshot",
+      "http_method": "GET",
+      "path_or_constant": "/api/orchestration/threads/:threadId",
+      "line": 783,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L783"
+    },
+    {
+      "group": "orchestration",
+      "name": "threadTranscript",
+      "http_method": "GET",
+      "path_or_constant": "/api/orchestration/threads/:threadId/transcript",
+      "line": 791,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L791"
+    },
+    {
+      "group": "orchestration",
+      "name": "threadBoundedSnapshot",
+      "http_method": "GET",
+      "path_or_constant": "/api/orchestration/threads/:threadId/bounded",
+      "line": 799,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L799"
+    },
+    {
+      "group": "orchestration",
+      "name": "threadHistoryPage",
+      "http_method": "GET",
+      "path_or_constant": "/api/orchestration/threads/:threadId/history",
+      "line": 808,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L808"
+    },
+    {
+      "group": "projects",
+      "name": "snapshot",
+      "http_method": "GET",
+      "path_or_constant": "/api/projects",
+      "line": 819,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L819"
+    },
+    {
+      "group": "projects",
+      "name": "mutate",
+      "http_method": "POST",
+      "path_or_constant": "/api/projects/mutate",
+      "line": 826,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L826"
+    },
+    {
+      "group": "pullRequests",
+      "name": "diff",
+      "http_method": "POST",
+      "path_or_constant": "/api/pull-requests/diff",
+      "line": 835,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L835"
+    },
+    {
+      "group": "voice",
+      "name": "cloudKeys",
+      "http_method": "GET",
+      "path_or_constant": "/api/voice/cloud/keys",
+      "line": 856,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L856"
+    },
+    {
+      "group": "voice",
+      "name": "setCloudKey",
+      "http_method": "POST",
+      "path_or_constant": "/api/voice/cloud/:provider/key",
+      "line": 863,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L863"
+    },
+    {
+      "group": "voice",
+      "name": "cloudModels",
+      "http_method": "GET",
+      "path_or_constant": "/api/voice/cloud/openrouter/models",
+      "line": 877,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L877"
+    },
+    {
+      "group": "voice",
+      "name": "transcribeCloud",
+      "http_method": "POST",
+      "path_or_constant": "/api/voice/cloud/:provider/transcribe",
+      "line": 884,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L884"
+    },
+    {
+      "group": "voice",
+      "name": "status",
+      "http_method": "GET",
+      "path_or_constant": "/api/voice/status",
+      "line": 900,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L900"
+    },
+    {
+      "group": "voice",
+      "name": "prepareModel",
+      "http_method": "POST",
+      "path_or_constant": "/api/voice/models/prepare",
+      "line": 907,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L907"
+    },
+    {
+      "group": "voice",
+      "name": "models",
+      "http_method": "GET",
+      "path_or_constant": "/api/voice/models",
+      "line": 914,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L914"
+    },
+    {
+      "group": "voice",
+      "name": "downloadModel",
+      "http_method": "POST",
+      "path_or_constant": "/api/voice/models/download",
+      "line": 922,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L922"
+    },
+    {
+      "group": "voice",
+      "name": "selectModel",
+      "http_method": "POST",
+      "path_or_constant": "/api/voice/models/select",
+      "line": 930,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L930"
+    },
+    {
+      "group": "voice",
+      "name": "cancelModelDownload",
+      "http_method": "POST",
+      "path_or_constant": "/api/voice/models/cancel",
+      "line": 938,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L938"
+    },
+    {
+      "group": "voice",
+      "name": "removeModel",
+      "http_method": "POST",
+      "path_or_constant": "/api/voice/models/remove",
+      "line": 946,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L946"
+    },
+    {
+      "group": "voice",
+      "name": "linkModels",
+      "http_method": "POST",
+      "path_or_constant": "/api/voice/models/link",
+      "line": 954,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L954"
+    },
+    {
+      "group": "voice",
+      "name": "updateAcceleration",
+      "http_method": "POST",
+      "path_or_constant": "/api/voice/acceleration",
+      "line": 962,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L962"
+    },
+    {
+      "group": "voice",
+      "name": "updateModelUnloadTimeout",
+      "http_method": "POST",
+      "path_or_constant": "/api/voice/model-unload-timeout",
+      "line": 970,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L970"
+    },
+    {
+      "group": "voice",
+      "name": "transcribe",
+      "http_method": "POST",
+      "path_or_constant": "/api/voice/transcribe",
+      "line": 978,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L978"
+    },
+    {
+      "group": "voice",
+      "name": "postProcess",
+      "http_method": "POST",
+      "path_or_constant": "/api/voice/post-process",
+      "line": 988,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L988"
+    },
+    {
+      "group": "connect",
+      "name": "linkProof",
+      "http_method": "POST",
+      "path_or_constant": "/api/connect/link-proof",
+      "line": 998,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L998"
+    },
+    {
+      "group": "connect",
+      "name": "relayConfig",
+      "http_method": "POST",
+      "path_or_constant": "/api/connect/relay-config",
+      "line": 1006,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L1006"
+    },
+    {
+      "group": "connect",
+      "name": "linkState",
+      "http_method": "GET",
+      "path_or_constant": "/api/connect/link-state",
+      "line": 1014,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L1014"
+    },
+    {
+      "group": "connect",
+      "name": "checkReachability",
+      "http_method": "POST",
+      "path_or_constant": "/api/connect/reachability",
+      "line": 1021,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L1021"
+    },
+    {
+      "group": "connect",
+      "name": "unlink",
+      "http_method": "POST",
+      "path_or_constant": "/api/connect/unlink",
+      "line": 1028,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L1028"
+    },
+    {
+      "group": "connect",
+      "name": "preferences",
+      "http_method": "POST",
+      "path_or_constant": "/api/connect/preferences",
+      "line": 1035,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L1035"
+    },
+    {
+      "group": "connect",
+      "name": "liveActivityPreference",
+      "http_method": "POST",
+      "path_or_constant": "/api/connect/live-activity-preference",
+      "line": 1043,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L1043"
+    },
+    {
+      "group": "connect",
+      "name": "health",
+      "http_method": "POST",
+      "path_or_constant": "/api/t3-connect/health",
+      "line": 1051,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L1051"
+    },
+    {
+      "group": "connect",
+      "name": "t3MintCredential",
+      "http_method": "POST",
+      "path_or_constant": "/api/t3-connect/mint-credential",
+      "line": 1058,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L1058"
+    },
+    {
+      "group": "peerLink",
+      "name": "clientPairing",
+      "http_method": "POST",
+      "path_or_constant": "/api/peer-link/client-pairing",
+      "line": 1070,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L1070"
+    },
+    {
+      "group": "webhooks",
+      "name": "webhookPost",
+      "http_method": "POST",
+      "path_or_constant": "WEBHOOK_PATH",
+      "line": 1097,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L1097"
+    },
+    {
+      "group": "webhooks",
+      "name": "webhookPut",
+      "http_method": "PUT",
+      "path_or_constant": "WEBHOOK_PATH",
+      "line": 1098,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L1098"
+    },
+    {
+      "group": "webhooks",
+      "name": "webhookPatch",
+      "http_method": "PATCH",
+      "path_or_constant": "WEBHOOK_PATH",
+      "line": 1099,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L1099"
+    },
+    {
+      "group": "webhooks",
+      "name": "webhookGet",
+      "http_method": "GET",
+      "path_or_constant": "WEBHOOK_PATH",
+      "line": 1100,
+      "source_url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts#L1100"
+    }
+  ],
+  "public_commands": [
+    {
+      "type": "thread.stop",
+      "line": 3238
+    },
+    {
+      "type": "thread.create",
+      "line": 3249
+    },
+    {
+      "type": "thread.archive",
+      "line": 3294
+    },
+    {
+      "type": "thread.guest-share.close",
+      "line": 3299
+    },
+    {
+      "type": "thread.guest-message.dismiss",
+      "line": 3304
+    },
+    {
+      "type": "thread.unarchive",
+      "line": 3310
+    },
+    {
+      "type": "thread.delete",
+      "line": 3315
+    },
+    {
+      "type": "thread.settle",
+      "line": 3322
+    },
+    {
+      "type": "thread.auto-settle",
+      "line": 3330
+    },
+    {
+      "type": "thread.unsettle",
+      "line": 3337
+    },
+    {
+      "type": "thread.snooze",
+      "line": 3345
+    },
+    {
+      "type": "thread.unsnooze",
+      "line": 3351
+    },
+    {
+      "type": "thread.auto-settle.set",
+      "line": 3357
+    },
+    {
+      "type": "thread.pin",
+      "line": 3363
+    },
+    {
+      "type": "thread.unpin",
+      "line": 3369
+    },
+    {
+      "type": "thread.tag.set",
+      "line": 3374
+    },
+    {
+      "type": "thread.pin.reorder",
+      "line": 3381
+    },
+    {
+      "type": "thread.active.reorder",
+      "line": 3387
+    },
+    {
+      "type": "thread.visit",
+      "line": 3393
+    },
+    {
+      "type": "thread.mark-unread",
+      "line": 3403
+    },
+    {
+      "type": "thread.metadata.update",
+      "line": 3408
+    },
+    {
+      "type": "thread.pull-request.link",
+      "line": 3426
+    },
+    {
+      "type": "thread.pull-request.unlink",
+      "line": 3435
+    },
+    {
+      "type": "thread.pull-request-link.sync",
+      "line": 3441
+    },
+    {
+      "type": "thread.issue.link",
+      "line": 3449
+    },
+    {
+      "type": "thread.issue.unlink",
+      "line": 3460
+    },
+    {
+      "type": "thread.pull-request.watch",
+      "line": 3466
+    },
+    {
+      "type": "thread.pull-request.sync",
+      "line": 3484
+    },
+    {
+      "type": "thread.title.regeneration.complete",
+      "line": 3500
+    },
+    {
+      "type": "thread.runtime-mode.set",
+      "line": 3508
+    },
+    {
+      "type": "thread.interaction-mode.set",
+      "line": 3514
+    },
+    {
+      "type": "thread.model-selection.set",
+      "line": 3520
+    },
+    {
+      "type": "provider-session.detach",
+      "line": 3526
+    },
+    {
+      "type": "message.dispatch",
+      "line": 3533
+    },
+    {
+      "type": "prepared-run.release",
+      "line": 3581
+    },
+    {
+      "type": "notification.delivery.accept",
+      "line": 3587
+    },
+    {
+      "type": "prepared-run.progress",
+      "line": 3593
+    },
+    {
+      "type": "prepared-run.fail",
+      "line": 3600
+    },
+    {
+      "type": "prepared-run.retry",
+      "line": 3607
+    },
+    {
+      "type": "subagent.stop",
+      "line": 3613
+    },
+    {
+      "type": "run.interrupt",
+      "line": 3620
+    },
+    {
+      "type": "queued-message.promote-to-steer",
+      "line": 3628
+    },
+    {
+      "type": "queue.resume",
+      "line": 3635
+    },
+    {
+      "type": "queued-run.start",
+      "line": 3640
+    },
+    {
+      "type": "queued-run.reorder",
+      "line": 3646
+    },
+    {
+      "type": "queued-run.cancel",
+      "line": 3653
+    },
+    {
+      "type": "queued-run.edit",
+      "line": 3659
+    },
+    {
+      "type": "runtime-request.respond",
+      "line": 3669
+    },
+    {
+      "type": "thread.user-input.dismiss",
+      "line": 3679
+    },
+    {
+      "type": "checkpoint.rollback",
+      "line": 3685
+    },
+    {
+      "type": "thread.fork",
+      "line": 3693
+    },
+    {
+      "type": "thread.merge_back",
+      "line": 3704
+    },
+    {
+      "type": "delegated_task.request",
+      "line": 3713
+    },
+    {
+      "type": "delegated_task.wake-policy",
+      "line": 3730
+    },
+    {
+      "type": "delegated_task.completion-delivery.acknowledge",
+      "line": 3737
+    },
+    {
+      "type": "delegated_task.completion-delivery.dispose",
+      "line": 3744
+    },
+    {
+      "type": "thread.created.record",
+      "line": 3750
+    },
+    {
+      "type": "provider.switch",
+      "line": 3760
+    }
+  ],
+  "internal_commands": [
+    {
+      "type": "run.output.submit",
+      "line": 3772
+    },
+    {
+      "type": "thread.guest-share.open",
+      "line": 3780
+    },
+    {
+      "type": "thread.guest-share.redeem",
+      "line": 3788
+    },
+    {
+      "type": "thread.guest-message.submit",
+      "line": 3795
+    },
+    {
+      "type": "thread.project.adopt-folder",
+      "line": 3805
+    },
+    {
+      "type": "thread.pull-request-watch.checks-reopen",
+      "line": 3815
+    },
+    {
+      "type": "thread.pull-request-watch.sync",
+      "line": 3820
+    },
+    {
+      "type": "delegated_task.remote.request",
+      "line": 3865
+    },
+    {
+      "type": "delegated_task.remote.complete",
+      "line": 3884
+    },
+    {
+      "type": "delegated_task.remote.stop",
+      "line": 3907
+    },
+    {
+      "type": "checkpoint.rollback.fail",
+      "line": 3913
+    },
+    {
+      "type": "runtime-request.delivery.fail",
+      "line": 3921
+    },
+    {
+      "type": "thread.interrupt.unresponsive",
+      "line": 3928
+    },
+    {
+      "type": "thread.background-work.settle",
+      "line": 3935
+    },
+    {
+      "type": "secret_request.record",
+      "line": 3959
+    },
+    {
+      "type": "link_request.record",
+      "line": 3978
+    }
+  ],
+  "domain_events": [
+    {
+      "type": "thread.created",
+      "line": 2128
+    },
+    {
+      "type": "thread.archived",
+      "line": 2133
+    },
+    {
+      "type": "thread.unarchived",
+      "line": 2133
+    },
+    {
+      "type": "thread.deleted",
+      "line": 2133
+    },
+    {
+      "type": "thread.settled",
+      "line": 2133
+    },
+    {
+      "type": "thread.unsettled",
+      "line": 2133
+    },
+    {
+      "type": "thread.snoozed",
+      "line": 2133
+    },
+    {
+      "type": "thread.unsnoozed",
+      "line": 2133
+    },
+    {
+      "type": "thread.pinned",
+      "line": 2133
+    },
+    {
+      "type": "thread.auto-settle-set",
+      "line": 2133
+    },
+    {
+      "type": "thread.unpinned",
+      "line": 2133
+    },
+    {
+      "type": "thread.pin-reordered",
+      "line": 2133
+    },
+    {
+      "type": "thread.active-reordered",
+      "line": 2133
+    },
+    {
+      "type": "thread.tags-updated",
+      "line": 2133
+    },
+    {
+      "type": "thread.visited",
+      "line": 2133
+    },
+    {
+      "type": "thread.marked-unread",
+      "line": 2133
+    },
+    {
+      "type": "thread.metadata-updated",
+      "line": 2133
+    },
+    {
+      "type": "thread.pull-request-synced",
+      "line": 2133
+    },
+    {
+      "type": "thread.issue-synced",
+      "line": 2133
+    },
+    {
+      "type": "thread.runtime-mode-updated",
+      "line": 2133
+    },
+    {
+      "type": "thread.interaction-mode-updated",
+      "line": 2133
+    },
+    {
+      "type": "thread.model-selection-updated",
+      "line": 2133
+    },
+    {
+      "type": "thread.provider-switched",
+      "line": 2133
+    },
+    {
+      "type": "thread.guest-share-updated",
+      "line": 2133
+    },
+    {
+      "type": "thread.pull-request-link-updated",
+      "line": 2162
+    },
+    {
+      "type": "thread.visit-recorded",
+      "line": 2167
+    },
+    {
+      "type": "run.created",
+      "line": 2172
+    },
+    {
+      "type": "run.updated",
+      "line": 2177
+    },
+    {
+      "type": "run.background-work-cancelled",
+      "line": 2182
+    },
+    {
+      "type": "run.output-submitted",
+      "line": 2187
+    },
+    {
+      "type": "run-attempt.created",
+      "line": 2192
+    },
+    {
+      "type": "run-attempt.updated",
+      "line": 2197
+    },
+    {
+      "type": "node.updated",
+      "line": 2202
+    },
+    {
+      "type": "subagent.updated",
+      "line": 2207
+    },
+    {
+      "type": "provider-session.attached",
+      "line": 2212
+    },
+    {
+      "type": "provider-session.updated",
+      "line": 2212
+    },
+    {
+      "type": "provider-session.detached",
+      "line": 2217
+    },
+    {
+      "type": "provider-thread.updated",
+      "line": 2222
+    },
+    {
+      "type": "provider-turn.updated",
+      "line": 2227
+    },
+    {
+      "type": "runtime-request.updated",
+      "line": 2232
+    },
+    {
+      "type": "message.updated",
+      "line": 2237
+    },
+    {
+      "type": "turn-item.updated",
+      "line": 2242
+    },
+    {
+      "type": "plan.updated",
+      "line": 2247
+    },
+    {
+      "type": "checkpoint-scope.created",
+      "line": 2252
+    },
+    {
+      "type": "checkpoint.captured",
+      "line": 2257
+    },
+    {
+      "type": "checkpoint.rollback-requested",
+      "line": 2262
+    },
+    {
+      "type": "context-handoff.updated",
+      "line": 2267
+    },
+    {
+      "type": "context-transfer.created",
+      "line": 2272
+    },
+    {
+      "type": "context-transfer.updated",
+      "line": 2277
+    }
+  ],
+  "project_contract_source": "import * as Schema from \"effect/Schema\";\n\nimport { IsoDateTime, ProjectId, TrimmedNonEmptyString } from \"./baseSchemas.ts\";\nimport { RepositoryIdentity, ThreadEnvMode } from \"./environment.ts\";\nimport { ModelSelection } from \"./modelSelection.ts\";\nimport { ProjectScript, ProjectTrackedFolders, ReceivedProjectIcon } from \"./project.ts\";\n\nexport const OrchestrationProjectShell = Schema.Struct({\n  id: ProjectId,\n  title: TrimmedNonEmptyString,\n  // Set once someone renames the project. A folder-default title can equal the\n  // repository name, so grouped labels need this to tell a chosen name apart.\n  hasCustomTitle: Schema.optional(Schema.Boolean),\n  workspaceRoot: TrimmedNonEmptyString,\n  repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),\n  defaultModelSelection: Schema.NullOr(ModelSelection),\n  defaultThreadEnvMode: Schema.optional(Schema.NullOr(ThreadEnvMode)),\n  // Opt-in because background sync performs network I/O and may move the checkout.\n  autoPull: Schema.optional(Schema.Boolean),\n  faviconPath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),\n  projectIcon: Schema.optional(Schema.NullOr(ReceivedProjectIcon)),\n  scripts: Schema.Array(ProjectScript),\n  // Absent from older servers; that means a single-folder project.\n  trackedFolders: Schema.optional(ProjectTrackedFolders),\n  // Pinned projects lead project pickers; archived ones leave them. Optional so older servers decode.\n  pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),\n  archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)),\n  createdAt: IsoDateTime,\n  updatedAt: IsoDateTime,\n});\nexport type OrchestrationProjectShell = typeof OrchestrationProjectShell.Type;\n\n",
+  "unmapped_rpc_constants": [],
+  "limits": [
+    "Some direct HttpRouter routes are outside EnvironmentHttpApi; see server.ts composition and direct-route inventory.",
+    "Command types extracted only at exact top-level indentation; raw source is captured for review.",
+    "Schema first lines are navigation aids, not complete JSON Schema; preserve full source contract and version negotiation."
+  ]
+}

@@ -1,0 +1,5719 @@
+{
+  "revision": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "method": "Lexical Effect.fn and readonly declarations; not all are methods and unnamed functions may be omitted",
+  "files": [
+    {
+      "path": "apps/server/src/background/KeepAwake.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/background/KeepAwake.ts",
+      "span_named_operations": [],
+      "readonly_declaration_candidates": [
+        {
+          "line": 36,
+          "declaration": "readonly command: string;"
+        },
+        {
+          "line": 37,
+          "declaration": "readonly args: ReadonlyArray<string>;"
+        },
+        {
+          "line": 38,
+          "declaration": "readonly stdin: \"ignore\" | \"pipe\";"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/issue/linkedThreads.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/issue/linkedThreads.ts",
+      "span_named_operations": [
+        {
+          "line": 15,
+          "name": "listLinkedIssueThreads"
+        }
+      ],
+      "readonly_declaration_candidates": []
+    },
+    {
+      "path": "apps/server/src/mcpApps/McpAppModelContext.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcpApps/McpAppModelContext.ts",
+      "span_named_operations": [
+        {
+          "line": 42,
+          "name": "McpAppModelContext.forProvider"
+        },
+        {
+          "line": 70,
+          "name": "McpAppModelContext.set"
+        },
+        {
+          "line": 92,
+          "name": "McpAppModelContext.forThread"
+        },
+        {
+          "line": 118,
+          "name": "McpAppModelContext.set"
+        },
+        {
+          "line": 121,
+          "name": "McpAppModelContext.forThread"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 18,
+          "declaration": "readonly itemId: string;"
+        },
+        {
+          "line": 19,
+          "declaration": "readonly server: string;"
+        },
+        {
+          "line": 20,
+          "declaration": "readonly tool: string;"
+        },
+        {
+          "line": 21,
+          "declaration": "readonly text: string;"
+        },
+        {
+          "line": 28,
+          "declaration": "readonly set: (input: {"
+        },
+        {
+          "line": 29,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 30,
+          "declaration": "readonly itemId: TurnItemId;"
+        },
+        {
+          "line": 31,
+          "declaration": "readonly server: string;"
+        },
+        {
+          "line": 32,
+          "declaration": "readonly tool: string;"
+        },
+        {
+          "line": 33,
+          "declaration": "readonly text: string;"
+        },
+        {
+          "line": 35,
+          "declaration": "readonly forThread: ("
+        },
+        {
+          "line": 71,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 72,
+          "declaration": "readonly itemId: TurnItemId;"
+        },
+        {
+          "line": 73,
+          "declaration": "readonly server: string;"
+        },
+        {
+          "line": 74,
+          "declaration": "readonly tool: string;"
+        },
+        {
+          "line": 75,
+          "declaration": "readonly text: string;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/EffectOutbox.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/EffectOutbox.ts",
+      "span_named_operations": [
+        {
+          "line": 412,
+          "name": "EffectOutbox.enqueue"
+        },
+        {
+          "line": 501,
+          "name": "EffectOutbox.cancelUnsettled"
+        },
+        {
+          "line": 522,
+          "name": "EffectOutbox.signalCancellations"
+        },
+        {
+          "line": 539,
+          "name": "EffectOutbox.awaitSettled"
+        },
+        {
+          "line": 662,
+          "name": "EffectOutbox.succeed"
+        },
+        {
+          "line": 692,
+          "name": "EffectOutbox.retry"
+        },
+        {
+          "line": 725,
+          "name": "EffectOutbox.fail"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 181,
+          "declaration": "readonly id: string;"
+        },
+        {
+          "line": 182,
+          "declaration": "readonly commandId: CommandId;"
+        },
+        {
+          "line": 183,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 184,
+          "declaration": "readonly request: OrchestrationEffectRequestV2;"
+        },
+        {
+          "line": 185,
+          "declaration": "readonly status: OrchestrationEffectStatusV2;"
+        },
+        {
+          "line": 186,
+          "declaration": "readonly attemptCount: number;"
+        },
+        {
+          "line": 187,
+          "declaration": "readonly availableAt: string;"
+        },
+        {
+          "line": 188,
+          "declaration": "readonly leaseOwner: string | null;"
+        },
+        {
+          "line": 189,
+          "declaration": "readonly createdAt: string;"
+        },
+        {
+          "line": 190,
+          "declaration": "readonly updatedAt: string;"
+        },
+        {
+          "line": 191,
+          "declaration": "readonly completedAt: string | null;"
+        },
+        {
+          "line": 192,
+          "declaration": "readonly lastError: string | null;"
+        },
+        {
+          "line": 196,
+          "declaration": "readonly id: string;"
+        },
+        {
+          "line": 197,
+          "declaration": "readonly commandId: CommandId;"
+        },
+        {
+          "line": 198,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 199,
+          "declaration": "readonly request: OrchestrationEffectRequestV2;"
+        },
+        {
+          "line": 219,
+          "declaration": "readonly awaitAvailable: Effect.Effect<void>;"
+        },
+        {
+          "line": 220,
+          "declaration": "readonly notifyAvailable: (count?: number) => Effect.Effect<void>;"
+        },
+        {
+          "line": 222,
+          "declaration": "readonly enqueue: ("
+        },
+        {
+          "line": 225,
+          "declaration": "readonly get: ("
+        },
+        {
+          "line": 228,
+          "declaration": "readonly listByCommandId: ("
+        },
+        {
+          "line": 232,
+          "declaration": "readonly firstSteer: ("
+        },
+        {
+          "line": 236,
+          "declaration": "readonly cancelUnsettled: (input: {"
+        },
+        {
+          "line": 237,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 238,
+          "declaration": "readonly effectTypes: ReadonlyArray<OrchestrationEffectRequestV2[\"type\"]>;"
+        },
+        {
+          "line": 239,
+          "declaration": "readonly reason: string;"
+        },
+        {
+          "line": 241,
+          "declaration": "readonly signalCancellations: (effectIds: ReadonlyArray<string>) => Effect.Effect<void>;"
+        },
+        {
+          "line": 242,
+          "declaration": "readonly awaitCancellation: (effectId: string) => Effect.Effect<void>;"
+        },
+        {
+          "line": 243,
+          "declaration": "readonly clearCancellation: (effectId: string) => Effect.Effect<void>;"
+        },
+        {
+          "line": 245,
+          "declaration": "readonly awaitSettled: (effectId: string) => Effect.Effect<void, EffectOutboxError>;"
+        },
+        {
+          "line": 246,
+          "declaration": "readonly reconcileAfterProcessLoss: Effect.Effect<"
+        },
+        {
+          "line": 250,
+          "declaration": "readonly claimNext: (input: {"
+        },
+        {
+          "line": 251,
+          "declaration": "readonly workerId: string;"
+        },
+        {
+          "line": 255,
+          "declaration": "readonly nextClaimableAt: (input?: {"
+        },
+        {
+          "line": 258,
+          "declaration": "readonly succeed: (input: {"
+        },
+        {
+          "line": 259,
+          "declaration": "readonly effectId: string;"
+        },
+        {
+          "line": 260,
+          "declaration": "readonly workerId: string;"
+        },
+        {
+          "line": 262,
+          "declaration": "readonly retry: (input: {"
+        },
+        {
+          "line": 263,
+          "declaration": "readonly effectId: string;"
+        },
+        {
+          "line": 264,
+          "declaration": "readonly workerId: string;"
+        },
+        {
+          "line": 265,
+          "declaration": "readonly error: string;"
+        },
+        {
+          "line": 266,
+          "declaration": "readonly delayMs: number;"
+        },
+        {
+          "line": 268,
+          "declaration": "readonly fail: (input: {"
+        },
+        {
+          "line": 269,
+          "declaration": "readonly effectId: string;"
+        },
+        {
+          "line": 270,
+          "declaration": "readonly workerId: string;"
+        },
+        {
+          "line": 271,
+          "declaration": "readonly error: string;"
+        },
+        {
+          "line": 273,
+          "declaration": "readonly pruneSettled: Effect.Effect<number, EffectOutboxError>;"
+        },
+        {
+          "line": 281,
+          "declaration": "readonly effect_id: string;"
+        },
+        {
+          "line": 282,
+          "declaration": "readonly command_id: string;"
+        },
+        {
+          "line": 283,
+          "declaration": "readonly thread_id: string;"
+        },
+        {
+          "line": 284,
+          "declaration": "readonly effect_type: string;"
+        },
+        {
+          "line": 285,
+          "declaration": "readonly payload_json: string;"
+        },
+        {
+          "line": 286,
+          "declaration": "readonly status: string;"
+        },
+        {
+          "line": 287,
+          "declaration": "readonly attempt_count: number;"
+        },
+        {
+          "line": 288,
+          "declaration": "readonly available_at: string;"
+        },
+        {
+          "line": 289,
+          "declaration": "readonly lease_owner: string | null;"
+        },
+        {
+          "line": 290,
+          "declaration": "readonly created_at: string;"
+        },
+        {
+          "line": 291,
+          "declaration": "readonly updated_at: string;"
+        },
+        {
+          "line": 292,
+          "declaration": "readonly completed_at: string | null;"
+        },
+        {
+          "line": 293,
+          "declaration": "readonly last_error: string | null;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/EventSink.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/EventSink.ts",
+      "span_named_operations": [
+        {
+          "line": 488,
+          "name": "orchestrationV2.EventSink.write"
+        },
+        {
+          "line": 545,
+          "name": "orchestrationV2.EventSink.writeIfRunCurrent"
+        },
+        {
+          "line": 624,
+          "name": "orchestrationV2.EventSink.writeIfProviderThreadOwner"
+        },
+        {
+          "line": 712,
+          "name": "orchestrationV2.EventSink.writeIfProviderThreadUnchanged"
+        },
+        {
+          "line": 732,
+          "name": "orchestrationV2.EventSink.writeIfTurnItemUnchanged"
+        },
+        {
+          "line": 752,
+          "name": "orchestrationV2.EventSink.writeIfSubagentUnchanged"
+        },
+        {
+          "line": 788,
+          "name": "orchestrationV2.EventSink.commitCommand"
+        },
+        {
+          "line": 899,
+          "name": "orchestrationV2.EventSink.commitRejectedCommand"
+        },
+        {
+          "line": 935,
+          "name": "orchestrationV2.EventSink.commitProjectCommand"
+        },
+        {
+          "line": 965,
+          "name": "orchestrationV2.EventSink.commitRejectedProjectCommand"
+        },
+        {
+          "line": 1089,
+          "name": "orchestrationV2.EventSink.providerBatch"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 75,
+          "declaration": "readonly publish: Array<Effect.Effect<void>>;"
+        },
+        {
+          "line": 76,
+          "declaration": "readonly projection: ProjectionStore.ProviderBatchProjection;"
+        },
+        {
+          "line": 95,
+          "declaration": "readonly consumeProviderEvents: <A extends { readonly type: string }, E, R, E2, R2>("
+        },
+        {
+          "line": 108,
+          "declaration": "readonly withProviderBatch: <A, E, R>("
+        },
+        {
+          "line": 112,
+          "declaration": "readonly write: (input: {"
+        },
+        {
+          "line": 120,
+          "declaration": "readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;"
+        },
+        {
+          "line": 122,
+          "declaration": "readonly writeWithEffects: (input: {"
+        },
+        {
+          "line": 134,
+          "declaration": "readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;"
+        },
+        {
+          "line": 135,
+          "declaration": "readonly effects: ReadonlyArray<EffectOutbox.PendingOrchestrationEffectV2>;"
+        },
+        {
+          "line": 137,
+          "declaration": "readonly writeIfRunCurrent: (input: {"
+        },
+        {
+          "line": 140,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 141,
+          "declaration": "readonly runId: RunId;"
+        },
+        {
+          "line": 142,
+          "declaration": "readonly activeAttemptId: RunAttemptId;"
+        },
+        {
+          "line": 143,
+          "declaration": "readonly expectedStatus: OrchestrationV2Run[\"status\"];"
+        },
+        {
+          "line": 146,
+          "declaration": "readonly requestId: OrchestrationV2TurnItem[\"id\"];"
+        },
+        {
+          "line": 147,
+          "declaration": "readonly resultId: OrchestrationV2TurnItem[\"id\"];"
+        },
+        {
+          "line": 149,
+          "declaration": "readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;"
+        },
+        {
+          "line": 153,
+          "declaration": "readonly committed: boolean;"
+        },
+        {
+          "line": 154,
+          "declaration": "readonly storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>;"
+        },
+        {
+          "line": 159,
+          "declaration": "readonly writeIfProviderThreadOwner: (input: {"
+        },
+        {
+          "line": 162,
+          "declaration": "readonly providerThreadId: ProviderThreadId;"
+        },
+        {
+          "line": 163,
+          "declaration": "readonly runId: RunId;"
+        },
+        {
+          "line": 164,
+          "declaration": "readonly activeAttemptId: RunAttemptId;"
+        },
+        {
+          "line": 165,
+          "declaration": "readonly expectedLastRunOrdinal: number;"
+        },
+        {
+          "line": 166,
+          "declaration": "readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;"
+        },
+        {
+          "line": 169,
+          "declaration": "readonly committed: boolean;"
+        },
+        {
+          "line": 170,
+          "declaration": "readonly storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>;"
+        },
+        {
+          "line": 175,
+          "declaration": "readonly writeIfProviderThreadUnchanged: (input: {"
+        },
+        {
+          "line": 176,
+          "declaration": "readonly expected: OrchestrationV2ProviderThread;"
+        },
+        {
+          "line": 177,
+          "declaration": "readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;"
+        },
+        {
+          "line": 180,
+          "declaration": "readonly committed: boolean;"
+        },
+        {
+          "line": 181,
+          "declaration": "readonly storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>;"
+        },
+        {
+          "line": 186,
+          "declaration": "readonly writeIfTurnItemUnchanged: (input: {"
+        },
+        {
+          "line": 187,
+          "declaration": "readonly expected: OrchestrationV2TurnItem;"
+        },
+        {
+          "line": 188,
+          "declaration": "readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;"
+        },
+        {
+          "line": 191,
+          "declaration": "readonly committed: boolean;"
+        },
+        {
+          "line": 192,
+          "declaration": "readonly storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>;"
+        },
+        {
+          "line": 197,
+          "declaration": "readonly writeIfSubagentUnchanged: (input: {"
+        },
+        {
+          "line": 198,
+          "declaration": "readonly expected: OrchestrationV2Subagent;"
+        },
+        {
+          "line": 199,
+          "declaration": "readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;"
+        },
+        {
+          "line": 202,
+          "declaration": "readonly committed: boolean;"
+        },
+        {
+          "line": 203,
+          "declaration": "readonly storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>;"
+        },
+        {
+          "line": 207,
+          "declaration": "readonly commitCommand: (input: {"
+        },
+        {
+          "line": 208,
+          "declaration": "readonly commandId: CommandId;"
+        },
+        {
+          "line": 209,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 210,
+          "declaration": "readonly commandType: string;"
+        },
+        {
+          "line": 211,
+          "declaration": "readonly acceptedAt: DateTime.Utc;"
+        },
+        {
+          "line": 212,
+          "declaration": "readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;"
+        },
+        {
+          "line": 213,
+          "declaration": "readonly effects: ReadonlyArray<EffectOutbox.PendingOrchestrationEffectV2>;"
+        },
+        {
+          "line": 215,
+          "declaration": "readonly effectTypes: ReadonlyArray<EffectOutbox.OrchestrationEffectRequestV2[\"type\"]>;"
+        },
+        {
+          "line": 216,
+          "declaration": "readonly reason: string;"
+        },
+        {
+          "line": 222,
+          "declaration": "readonly receipt: CommandReceiptStore.CommandReceiptV2;"
+        },
+        {
+          "line": 223,
+          "declaration": "readonly storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>;"
+        },
+        {
+          "line": 224,
+          "declaration": "readonly committed: boolean;"
+        },
+        {
+          "line": 225,
+          "declaration": "readonly cancelledEffectCount: number;"
+        },
+        {
+          "line": 229,
+          "declaration": "readonly commitRejectedCommand: (input: {"
+        },
+        {
+          "line": 230,
+          "declaration": "readonly commandId: CommandId;"
+        },
+        {
+          "line": 231,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 232,
+          "declaration": "readonly commandType: string;"
+        },
+        {
+          "line": 233,
+          "declaration": "readonly rejectedAt: DateTime.Utc;"
+        },
+        {
+          "line": 234,
+          "declaration": "readonly error: string;"
+        },
+        {
+          "line": 236,
+          "declaration": "readonly commitProjectCommand: (input: {"
+        },
+        {
+          "line": 237,
+          "declaration": "readonly commandId: CommandId;"
+        },
+        {
+          "line": 238,
+          "declaration": "readonly projectId: ProjectId;"
+        },
+        {
+          "line": 239,
+          "declaration": "readonly commandType: string;"
+        },
+        {
+          "line": 240,
+          "declaration": "readonly acceptedAt: DateTime.Utc;"
+        },
+        {
+          "line": 241,
+          "declaration": "readonly event: UnsequencedProjectEvent;"
+        },
+        {
+          "line": 246,
+          "declaration": "readonly commitRejectedProjectCommand: (input: {"
+        },
+        {
+          "line": 247,
+          "declaration": "readonly commandId: CommandId;"
+        },
+        {
+          "line": 248,
+          "declaration": "readonly projectId: ProjectId;"
+        },
+        {
+          "line": 249,
+          "declaration": "readonly commandType: string;"
+        },
+        {
+          "line": 250,
+          "declaration": "readonly rejectedAt: DateTime.Utc;"
+        },
+        {
+          "line": 251,
+          "declaration": "readonly error: string;"
+        },
+        {
+          "line": 253,
+          "declaration": "readonly stream: (input?: {"
+        },
+        {
+          "line": 260,
+          "declaration": "readonly latestSequence: (input?: {"
+        },
+        {
+          "line": 263,
+          "declaration": "readonly readByCommandId: (input: {"
+        },
+        {
+          "line": 264,
+          "declaration": "readonly commandId: CommandId;"
+        },
+        {
+          "line": 558,
+          "declaration": "readonly status: string;"
+        },
+        {
+          "line": 559,
+          "declaration": "readonly active_attempt_id: string | null;"
+        },
+        {
+          "line": 640,
+          "declaration": "readonly active_attempt_id: string | null;"
+        },
+        {
+          "line": 641,
+          "declaration": "readonly last_run_ordinal: number | null;"
+        },
+        {
+          "line": 987,
+          "declaration": "readonly afterSequence: number;"
+        },
+        {
+          "line": 988,
+          "declaration": "readonly throughSequence: number;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/EventStore.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/EventStore.ts",
+      "span_named_operations": [
+        {
+          "line": 110,
+          "name": "EventStoreV2.append"
+        },
+        {
+          "line": 121,
+          "name": "EventStoreV2.appendProjectEvent"
+        },
+        {
+          "line": 133,
+          "name": "EventStoreV2.latestSequence"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 51,
+          "declaration": "readonly append: (input: {"
+        },
+        {
+          "line": 53,
+          "declaration": "readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;"
+        },
+        {
+          "line": 55,
+          "declaration": "readonly appendProjectEvent: ("
+        },
+        {
+          "line": 58,
+          "declaration": "readonly read: (input?: {"
+        },
+        {
+          "line": 65,
+          "declaration": "readonly readByCommandId: (input: {"
+        },
+        {
+          "line": 66,
+          "declaration": "readonly commandId: CommandId;"
+        },
+        {
+          "line": 68,
+          "declaration": "readonly latestSequence: (input?: {"
+        },
+        {
+          "line": 71,
+          "declaration": "readonly latestApplicationSequence: Effect.Effect<number, EventStoreV2Error>;"
+        },
+        {
+          "line": 72,
+          "declaration": "readonly publishCommitted: (events: ReadonlyArray<ApplicationStoredEvent>) => Effect.Effect<void>;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProjectStore.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProjectStore.ts",
+      "span_named_operations": [
+        {
+          "line": 246,
+          "name": "ProjectStoreV2.apply"
+        },
+        {
+          "line": 307,
+          "name": "ProjectStoreV2.getShell"
+        },
+        {
+          "line": 310,
+          "name": "ProjectStoreV2.listShells"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 88,
+          "declaration": "readonly apply: (event: ApplicationProjectEvent) => Effect.Effect<void, ProjectStoreV2Error>;"
+        },
+        {
+          "line": 89,
+          "declaration": "readonly get: ("
+        },
+        {
+          "line": 93,
+          "declaration": "readonly list: (options?: {"
+        },
+        {
+          "line": 98,
+          "declaration": "readonly findActiveByWorkspaceRoot: ("
+        },
+        {
+          "line": 101,
+          "declaration": "readonly getShell: ("
+        },
+        {
+          "line": 104,
+          "declaration": "readonly listShells: (options?: {"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProjectionMaintenance.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProjectionMaintenance.ts",
+      "span_named_operations": [
+        {
+          "line": 257,
+          "name": "ProjectionMaintenance.pruneEventStore"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 26,
+          "declaration": "readonly pruneEventStore: (betweenPages?: Effect.Effect<void>) => Effect.Effect<"
+        },
+        {
+          "line": 28,
+          "declaration": "readonly deletedEventCount: number;"
+        },
+        {
+          "line": 29,
+          "declaration": "readonly deletedReceiptCount: number;"
+        },
+        {
+          "line": 30,
+          "declaration": "readonly reclaimableBytes: number;"
+        },
+        {
+          "line": 48,
+          "declaration": "readonly projection_name: string;"
+        },
+        {
+          "line": 49,
+          "declaration": "readonly last_sequence: number;"
+        },
+        {
+          "line": 50,
+          "declaration": "readonly updated_at: string;"
+        },
+        {
+          "line": 153,
+          "declaration": "readonly sequence: number;"
+        },
+        {
+          "line": 154,
+          "declaration": "readonly prompt_sequence: number | null;"
+        },
+        {
+          "line": 224,
+          "declaration": "readonly row_id: number;"
+        },
+        {
+          "line": 225,
+          "declaration": "readonly command_id: string;"
+        },
+        {
+          "line": 226,
+          "declaration": "readonly imported: number;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ProjectionStore.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProjectionStore.ts",
+      "span_named_operations": [
+        {
+          "line": 3403,
+          "name": "ProjectionStore.retainedWindowRows"
+        },
+        {
+          "line": 3794,
+          "name": "ProjectionStore.runIdsSinceLastCompaction"
+        },
+        {
+          "line": 3841,
+          "name": "ProjectionStore.commandTurnItems"
+        },
+        {
+          "line": 3893,
+          "name": "ProjectionStore.readCanonicalProjection"
+        },
+        {
+          "line": 4767,
+          "name": "ProjectionStore.readProjection"
+        },
+        {
+          "line": 4954,
+          "name": "ProjectionStore.getLimitRecoveryCandidates"
+        },
+        {
+          "line": 5085,
+          "name": "ProjectionStore.getLimitRecoveryWakeAt"
+        },
+        {
+          "line": 5113,
+          "name": "ProjectionStore.getRecoveryThreadIds"
+        },
+        {
+          "line": 5323,
+          "name": "ProjectionStore.getUnreadableThreadIds"
+        },
+        {
+          "line": 5602,
+          "name": "ProjectionStore.getTurnStartHistory"
+        },
+        {
+          "line": 5632,
+          "name": "ProjectionStore.getRuntimeRecoveryProjection"
+        },
+        {
+          "line": 5987,
+          "name": "ProjectionStore.getThread"
+        },
+        {
+          "line": 5995,
+          "name": "ProjectionStore.findThread"
+        },
+        {
+          "line": 5999,
+          "name": "ProjectionStore.requireThread"
+        },
+        {
+          "line": 6067,
+          "name": "ProjectionStore.hasUnpairedRunInterruptRequest"
+        },
+        {
+          "line": 6084,
+          "name": "ProjectionStore.hasRunInterruptRequest"
+        },
+        {
+          "line": 6100,
+          "name": "ProjectionStore.isNodeStored"
+        },
+        {
+          "line": 6775,
+          "name": "ProjectionStore.hasPendingDelegatedCompletion"
+        },
+        {
+          "line": 6851,
+          "name": "ProjectionStore.runAttachmentIds"
+        },
+        {
+          "line": 6900,
+          "name": "ProjectionStore.unshownRunAttachmentIds"
+        },
+        {
+          "line": 6912,
+          "name": "ProjectionStore.getThreadAttachmentIds"
+        },
+        {
+          "line": 6974,
+          "name": "ProjectionStore.getMessagesById"
+        },
+        {
+          "line": 7007,
+          "name": "ProjectionStore.getRunProviderRecords"
+        },
+        {
+          "line": 7039,
+          "name": "ProjectionStore.getRunCardRecords"
+        },
+        {
+          "line": 7084,
+          "name": "ProjectionStore.readTimelineIndex"
+        },
+        {
+          "line": 7226,
+          "name": "ProjectionStore.readSnapshotTimelineIndex"
+        },
+        {
+          "line": 7256,
+          "name": "ProjectionStore.readTimelineWindow"
+        },
+        {
+          "line": 7329,
+          "name": "ProjectionStore.openLocalTimeline"
+        },
+        {
+          "line": 7433,
+          "name": "ProjectionStore.countVisibleTimelineRows"
+        },
+        {
+          "line": 7496,
+          "name": "ProjectionStore.runsStartedBefore"
+        },
+        {
+          "line": 7543,
+          "name": "ProjectionStore.selectHistoryPageInWindow"
+        },
+        {
+          "line": 7874,
+          "name": "ProjectionStore.materializeHistoryRows"
+        },
+        {
+          "line": 7969,
+          "name": "ProjectionStore.matchLocalTimelineRows"
+        },
+        {
+          "line": 8041,
+          "name": "ProjectionStore.readLocalTimelinePage"
+        },
+        {
+          "line": 8772,
+          "name": "ProjectionStore.pendingBackgroundDataByThreadId"
+        },
+        {
+          "line": 8982,
+          "name": "ProjectionStore.getThreadsWithPullRequests"
+        },
+        {
+          "line": 9220,
+          "name": "ProjectionStore.readShellSnapshotRows"
+        },
+        {
+          "line": 9300,
+          "name": "ProjectionStore.decodeShellSnapshot"
+        },
+        {
+          "line": 9355,
+          "name": "ProjectionStore.getPullRequestSnapshot"
+        },
+        {
+          "line": 9390,
+          "name": "ProjectionStore.getAgentAwarenessSnapshot"
+        },
+        {
+          "line": 9468,
+          "name": "ProjectionStore.listActiveSubagentThreadIds"
+        },
+        {
+          "line": 9482,
+          "name": "ProjectionStore.countThreads"
+        },
+        {
+          "line": 9499,
+          "name": "ProjectionStore.listActiveShellIndex"
+        },
+        {
+          "line": 9596,
+          "name": "ProjectionStore.listActiveThreads"
+        },
+        {
+          "line": 9658,
+          "name": "ProjectionStore.getThreadLinkMetadata"
+        },
+        {
+          "line": 9676,
+          "name": "ProjectionStore.getThreadTitles"
+        },
+        {
+          "line": 9688,
+          "name": "ProjectionStore.findGuestShareThreadId"
+        },
+        {
+          "line": 9700,
+          "name": "ProjectionStore.listOlderSettledThreads"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 249,
+          "declaration": "readonly latestUserAuthoredMessageAt: DateTime.Utc | null;"
+        },
+        {
+          "line": 284,
+          "declaration": "readonly run: OrchestrationV2Run | undefined;"
+        },
+        {
+          "line": 285,
+          "declaration": "readonly rootNode: OrchestrationV2ExecutionNode | undefined;"
+        },
+        {
+          "line": 286,
+          "declaration": "readonly scope: OrchestrationV2CheckpointScope | undefined;"
+        },
+        {
+          "line": 287,
+          "declaration": "readonly providerThread: OrchestrationV2ProviderThread | undefined;"
+        },
+        {
+          "line": 292,
+          "declaration": "readonly preservedCheckpointOrdinals: ReadonlyArray<number>;"
+        },
+        {
+          "line": 294,
+          "declaration": "readonly sideChat: boolean;"
+        },
+        {
+          "line": 296,
+          "declaration": "readonly thread: Pick<OrchestrationV2AppThread, \"projectId\" | \"worktreePath\"> | undefined;"
+        },
+        {
+          "line": 298,
+          "declaration": "readonly repositoryScopes: ReadonlyArray<OrchestrationV2CheckpointScope>;"
+        },
+        {
+          "line": 300,
+          "declaration": "readonly repositoryScopesWithBaseline: ReadonlyArray<CheckpointScopeId>;"
+        },
+        {
+          "line": 312,
+          "declaration": "readonly thread: OrchestrationV2AppThread;"
+        },
+        {
+          "line": 313,
+          "declaration": "readonly providerThread: OrchestrationV2ProviderThread | undefined;"
+        },
+        {
+          "line": 314,
+          "declaration": "readonly providerSession: OrchestrationV2ThreadProjection[\"providerSessions\"][number] | undefined;"
+        },
+        {
+          "line": 315,
+          "declaration": "readonly checkpoint: OrchestrationV2Checkpoint | undefined;"
+        },
+        {
+          "line": 316,
+          "declaration": "readonly scope: OrchestrationV2CheckpointScope | undefined;"
+        },
+        {
+          "line": 317,
+          "declaration": "readonly targetAttempt: (typeof RollbackTargetAttempts.Type)[number] | undefined;"
+        },
+        {
+          "line": 318,
+          "declaration": "readonly providerTurns: ReadonlyArray<OrchestrationV2ProviderTurn>;"
+        },
+        {
+          "line": 319,
+          "declaration": "readonly rolledBackAttemptIds: ReadonlyArray<RunAttemptId>;"
+        },
+        {
+          "line": 320,
+          "declaration": "readonly runsToRollback: ReadonlyArray<OrchestrationV2Run>;"
+        },
+        {
+          "line": 321,
+          "declaration": "readonly rootNodes: ReadonlyArray<OrchestrationV2ExecutionNode>;"
+        },
+        {
+          "line": 323,
+          "declaration": "readonly staleCheckpoints: ReadonlyArray<OrchestrationV2Checkpoint>;"
+        },
+        {
+          "line": 327,
+          "declaration": "readonly providerThread: OrchestrationV2ThreadProjection[\"providerThreads\"][number] | undefined;"
+        },
+        {
+          "line": 328,
+          "declaration": "readonly providerTurn: OrchestrationV2ProviderTurn | undefined;"
+        },
+        {
+          "line": 329,
+          "declaration": "readonly attempt: OrchestrationV2ThreadProjection[\"attempts\"][number] | undefined;"
+        },
+        {
+          "line": 330,
+          "declaration": "readonly message: OrchestrationV2ConversationMessage | undefined;"
+        },
+        {
+          "line": 331,
+          "declaration": "readonly run: OrchestrationV2Run | undefined;"
+        },
+        {
+          "line": 335,
+          "declaration": "readonly providerThreadId: ProviderThreadId;"
+        },
+        {
+          "line": 336,
+          "declaration": "readonly providerTurnId: ProviderTurnId;"
+        },
+        {
+          "line": 366,
+          "declaration": "readonly request: OrchestrationV2ThreadProjection[\"runtimeRequests\"][number] | undefined;"
+        },
+        {
+          "line": 367,
+          "declaration": "readonly node: OrchestrationV2ThreadProjection[\"nodes\"][number] | undefined;"
+        },
+        {
+          "line": 368,
+          "declaration": "readonly item: OrchestrationV2ThreadProjection[\"turnItems\"][number] | undefined;"
+        },
+        {
+          "line": 369,
+          "declaration": "readonly session: OrchestrationV2ThreadProjection[\"providerSessions\"][number] | undefined;"
+        },
+        {
+          "line": 437,
+          "declaration": "readonly keepRunIds: ReadonlyArray<RunId>;"
+        },
+        {
+          "line": 439,
+          "declaration": "readonly keepMessageId: MessageId;"
+        },
+        {
+          "line": 482,
+          "declaration": "readonly limit: number;"
+        },
+        {
+          "line": 485,
+          "declaration": "readonly items: ReadonlyArray<OrchestrationV2ProjectedTurnItem>;"
+        },
+        {
+          "line": 486,
+          "declaration": "readonly totalItems: number;"
+        },
+        {
+          "line": 488,
+          "declaration": "readonly hasMore: boolean;"
+        },
+        {
+          "line": 490,
+          "declaration": "readonly hasEarlier: boolean;"
+        },
+        {
+          "line": 519,
+          "declaration": "readonly mayBeLive: boolean;"
+        },
+        {
+          "line": 521,
+          "declaration": "readonly hasRemoteTasks: boolean;"
+        },
+        {
+          "line": 539,
+          "declaration": "readonly before: OrchestrationV2OlderSettledCursor;"
+        },
+        {
+          "line": 541,
+          "declaration": "readonly limit: number;"
+        },
+        {
+          "line": 545,
+          "declaration": "readonly threadIds: ReadonlyArray<ThreadId>;"
+        },
+        {
+          "line": 547,
+          "declaration": "readonly counts: ReadonlyArray<OrchestrationV2OlderSettledCount>;"
+        },
+        {
+          "line": 551,
+          "declaration": "readonly searchThreadStream: ("
+        },
+        {
+          "line": 554,
+          "declaration": "readonly searchThread: ("
+        },
+        {
+          "line": 558,
+          "declaration": "readonly getThreadAttachmentIds: ("
+        },
+        {
+          "line": 562,
+          "declaration": "readonly getThreadHistoryPage: ("
+        },
+        {
+          "line": 569,
+          "declaration": "readonly getTimelinePage: ("
+        },
+        {
+          "line": 573,
+          "declaration": "readonly getMessageCount: (threadId: ThreadId) => Effect.Effect<number, ProjectionStoreV2Error>;"
+        },
+        {
+          "line": 575,
+          "declaration": "readonly getTranscriptByteFloor: ("
+        },
+        {
+          "line": 579,
+          "declaration": "readonly getSubagentCount: (threadId: ThreadId) => Effect.Effect<number, ProjectionStoreV2Error>;"
+        },
+        {
+          "line": 580,
+          "declaration": "readonly getRunCount: (threadId: ThreadId) => Effect.Effect<number, ProjectionStoreV2Error>;"
+        },
+        {
+          "line": 582,
+          "declaration": "readonly listAppOwnedChildThreadIds: ("
+        },
+        {
+          "line": 585,
+          "declaration": "readonly hasPendingDelegatedCompletion: ("
+        },
+        {
+          "line": 588,
+          "declaration": "readonly getNextTurnItemOrdinal: ("
+        },
+        {
+          "line": 591,
+          "declaration": "readonly getTurnItem: (input: {"
+        },
+        {
+          "line": 592,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 593,
+          "declaration": "readonly itemId: TurnItemId;"
+        },
+        {
+          "line": 595,
+          "declaration": "readonly getMessagesById: ("
+        },
+        {
+          "line": 602,
+          "declaration": "readonly getThreadRecords: <K extends ProjectionRecordField>("
+        },
+        {
+          "line": 608,
+          "declaration": "readonly apply: ("
+        },
+        {
+          "line": 611,
+          "declaration": "readonly getPullRequestSnapshot: (options: {"
+        },
+        {
+          "line": 616,
+          "declaration": "readonly snapshotSequence: number;"
+        },
+        {
+          "line": 617,
+          "declaration": "readonly threads: ReadonlyArray<typeof PullRequestThread.Type>;"
+        },
+        {
+          "line": 621,
+          "declaration": "readonly getAgentAwarenessSnapshot: ("
+        },
+        {
+          "line": 627,
+          "declaration": "readonly getShellSnapshot: ("
+        },
+        {
+          "line": 630,
+          "declaration": "readonly listActiveSubagentThreadIds: () => Effect.Effect<"
+        },
+        {
+          "line": 635,
+          "declaration": "readonly countThreads: () => Effect.Effect<number, ProjectionStoreV2Error>;"
+        },
+        {
+          "line": 637,
+          "declaration": "readonly listActiveShellIndex: () => Effect.Effect<"
+        },
+        {
+          "line": 642,
+          "declaration": "readonly listActiveThreads: ("
+        },
+        {
+          "line": 646,
+          "declaration": "readonly listOlderSettledThreads: ("
+        },
+        {
+          "line": 654,
+          "declaration": "readonly readShellSnapshot: ("
+        },
+        {
+          "line": 660,
+          "declaration": "readonly getThreadShell: ("
+        },
+        {
+          "line": 664,
+          "declaration": "readonly findGuestShareThreadId: ("
+        },
+        {
+          "line": 667,
+          "declaration": "readonly getThread: ("
+        },
+        {
+          "line": 671,
+          "declaration": "readonly findThread: ("
+        },
+        {
+          "line": 674,
+          "declaration": "readonly getLimitRecoveryCandidates: (options: {"
+        },
+        {
+          "line": 675,
+          "declaration": "readonly now: DateTime.Utc;"
+        },
+        {
+          "line": 676,
+          "declaration": "readonly autoResume: boolean;"
+        },
+        {
+          "line": 677,
+          "declaration": "readonly snooze: boolean;"
+        },
+        {
+          "line": 680,
+          "declaration": "readonly getLimitRecoveryWakeAt: ("
+        },
+        {
+          "line": 683,
+          "declaration": "readonly getSettlementCandidates: ("
+        },
+        {
+          "line": 686,
+          "declaration": "readonly getThreadsWithPullRequests: ("
+        },
+        {
+          "line": 691,
+          "declaration": "readonly getThreadLinkMetadata: ("
+        },
+        {
+          "line": 694,
+          "declaration": "readonly getThreadTitles: ("
+        },
+        {
+          "line": 697,
+          "declaration": "readonly getThreadWorktreePaths: (options?: {"
+        },
+        {
+          "line": 708,
+          "declaration": "readonly getOpenRemoteDelegatedTasks: Effect.Effect<"
+        },
+        {
+          "line": 712,
+          "declaration": "readonly getTurnStartContext: ("
+        },
+        {
+          "line": 734,
+          "declaration": "readonly getTurnStartHistory: ("
+        },
+        {
+          "line": 738,
+          "declaration": "readonly getThreadProjection: ("
+        },
+        {
+          "line": 741,
+          "declaration": "readonly getRuntimeRecoveryProjection: ("
+        },
+        {
+          "line": 744,
+          "declaration": "readonly getPendingNativeUserInputs: ("
+        },
+        {
+          "line": 748,
+          "declaration": "readonly getPlan: ("
+        },
+        {
+          "line": 752,
+          "declaration": "readonly hasUnpairedRunInterruptRequest: ("
+        },
+        {
+          "line": 758,
+          "declaration": "readonly hasRunInterruptRequest: ("
+        },
+        {
+          "line": 763,
+          "declaration": "readonly getRunProviderRecords: ("
+        },
+        {
+          "line": 772,
+          "declaration": "readonly getRunCardRecords: ("
+        },
+        {
+          "line": 783,
+          "declaration": "readonly isNodeStored: ("
+        },
+        {
+          "line": 786,
+          "declaration": "readonly getRuntimeRequest: ("
+        },
+        {
+          "line": 793,
+          "declaration": "readonly getProviderControlContext: ("
+        },
+        {
+          "line": 797,
+          "declaration": "readonly getRunningTurnContext: ("
+        },
+        {
+          "line": 803,
+          "declaration": "readonly getThreadProviderContext: ("
+        },
+        {
+          "line": 807,
+          "declaration": "readonly getRuntimeResponseContext: ("
+        },
+        {
+          "line": 811,
+          "declaration": "readonly getCheckpointContext: ("
+        },
+        {
+          "line": 814,
+          "declaration": "readonly getCheckpointCaptureContext: ("
+        },
+        {
+          "line": 818,
+          "declaration": "readonly getCheckpointRollbackContext: ("
+        },
+        {
+          "line": 821,
+          "declaration": "readonly providerThreadId: ProviderThreadId;"
+        },
+        {
+          "line": 822,
+          "declaration": "readonly checkpointId: CheckpointId;"
+        },
+        {
+          "line": 823,
+          "declaration": "readonly scopeId: CheckpointScopeId;"
+        },
+        {
+          "line": 826,
+          "declaration": "readonly getRunMessage: ("
+        },
+        {
+          "line": 830,
+          "declaration": "readonly getRun: ("
+        },
+        {
+          "line": 839,
+          "declaration": "readonly getDelegatedChildControls: ("
+        },
+        {
+          "line": 844,
+          "declaration": "readonly runsFloor: OrchestrationV2Run | undefined;"
+        },
+        {
+          "line": 848,
+          "declaration": "readonly canStartQueuedRun: ("
+        },
+        {
+          "line": 851,
+          "declaration": "readonly getHeldQueuedRuns: ("
+        },
+        {
+          "line": 854,
+          "declaration": "readonly getRecoveryThreadIds: ("
+        },
+        {
+          "line": 861,
+          "declaration": "readonly getUnreadableThreadIds: () => Effect.Effect<"
+        },
+        {
+          "line": 865,
+          "declaration": "readonly getThreadSnapshot: (threadId: ThreadId) => Effect.Effect<"
+        },
+        {
+          "line": 867,
+          "declaration": "readonly schemaVersion: number;"
+        },
+        {
+          "line": 868,
+          "declaration": "readonly snapshotSequence: number;"
+        },
+        {
+          "line": 869,
+          "declaration": "readonly projection: OrchestrationV2ThreadProjection;"
+        },
+        {
+          "line": 874,
+          "declaration": "readonly getThreadSnapshotWindow: ("
+        },
+        {
+          "line": 877,
+          "declaration": "readonly rowLimit: number;"
+        },
+        {
+          "line": 886,
+          "declaration": "readonly schemaVersion: number;"
+        },
+        {
+          "line": 887,
+          "declaration": "readonly snapshotSequence: number;"
+        },
+        {
+          "line": 888,
+          "declaration": "readonly projection: OrchestrationV2ThreadProjection;"
+        },
+        {
+          "line": 909,
+          "declaration": "readonly nodeReads: Map<NodeId, string | undefined>;"
+        },
+        {
+          "line": 911,
+          "declaration": "readonly threadTouches: Map<ThreadId, string>;"
+        },
+        {
+          "line": 1235,
+          "declaration": "readonly payload_json: string;"
+        },
+        {
+          "line": 1239,
+          "declaration": "readonly thread_id: string;"
+        },
+        {
+          "line": 1240,
+          "declaration": "readonly owning_provider_instance_id: string | null;"
+        },
+        {
+          "line": 1259,
+          "declaration": "readonly thread_id: string;"
+        },
+        {
+          "line": 1260,
+          "declaration": "readonly payload_json: string;"
+        },
+        {
+          "line": 1261,
+          "declaration": "readonly forked_from_run_source_thread_id: string | null;"
+        },
+        {
+          "line": 1262,
+          "declaration": "readonly worktree_path: string | null;"
+        },
+        {
+          "line": 1263,
+          "declaration": "readonly latest_run_id: string | null;"
+        },
+        {
+          "line": 1264,
+          "declaration": "readonly latest_run_status: string | null;"
+        },
+        {
+          "line": 1265,
+          "declaration": "readonly latest_run_requested_at: string | null;"
+        },
+        {
+          "line": 1266,
+          "declaration": "readonly latest_run_started_at: string | null;"
+        },
+        {
+          "line": 1267,
+          "declaration": "readonly latest_run_completed_at: string | null;"
+        },
+        {
+          "line": 1268,
+          "declaration": "readonly latest_run_stop_requested: number;"
+        },
+        {
+          "line": 1269,
+          "declaration": "readonly latest_run_background_wake: number;"
+        },
+        {
+          "line": 1270,
+          "declaration": "readonly active_run_id: string | null;"
+        },
+        {
+          "line": 1271,
+          "declaration": "readonly active_run_status: string | null;"
+        },
+        {
+          "line": 1272,
+          "declaration": "readonly activity_run_status: string | null;"
+        },
+        {
+          "line": 1273,
+          "declaration": "readonly activity_run_started_at: string | null;"
+        },
+        {
+          "line": 1274,
+          "declaration": "readonly last_error: string | null;"
+        },
+        {
+          "line": 1275,
+          "declaration": "readonly terminal_failure_payload_json: string | null;"
+        },
+        {
+          "line": 1276,
+          "declaration": "readonly blocking_run_id: string | null;"
+        },
+        {
+          "line": 1277,
+          "declaration": "readonly blocking_run_requested_at: string | null;"
+        },
+        {
+          "line": 1278,
+          "declaration": "readonly blocking_run_started_at: string | null;"
+        },
+        {
+          "line": 1279,
+          "declaration": "readonly blocking_run_completed_at: string | null;"
+        },
+        {
+          "line": 1280,
+          "declaration": "readonly blocking_run_stop_requested: number;"
+        },
+        {
+          "line": 1281,
+          "declaration": "readonly blocking_run_background_wake: number;"
+        },
+        {
+          "line": 1282,
+          "declaration": "readonly blocking_failure_payload_json: string | null;"
+        },
+        {
+          "line": 1283,
+          "declaration": "readonly pending_request_payload_json: string | null;"
+        },
+        {
+          "line": 1284,
+          "declaration": "readonly pending_secret_request_payload_json: string | null;"
+        },
+        {
+          "line": 1285,
+          "declaration": "readonly pending_link_request_payload_json: string | null;"
+        },
+        {
+          "line": 1286,
+          "declaration": "readonly latest_user_message_at: string | null;"
+        },
+        {
+          "line": 1287,
+          "declaration": "readonly latest_user_authored_message_at: string | null;"
+        },
+        {
+          "line": 1288,
+          "declaration": "readonly has_actionable_proposed_plan: number;"
+        },
+        {
+          "line": 1292,
+          "declaration": "readonly thread_id: string;"
+        },
+        {
+          "line": 1293,
+          "declaration": "readonly run_id: string;"
+        },
+        {
+          "line": 1294,
+          "declaration": "readonly ordinal: number;"
+        },
+        {
+          "line": 1295,
+          "declaration": "readonly rolled_back_at: string | null;"
+        },
+        {
+          "line": 1299,
+          "declaration": "readonly ordinal: number;"
+        },
+        {
+          "line": 1300,
+          "declaration": "readonly rolledBackAt: DateTime.Utc | null;"
+        },
+        {
+          "line": 1317,
+          "declaration": "readonly thread_id: string;"
+        },
+        {
+          "line": 1318,
+          "declaration": "readonly run_id: string;"
+        },
+        {
+          "line": 1319,
+          "declaration": "readonly item_count: number;"
+        },
+        {
+          "line": 1323,
+          "declaration": "readonly thread_id: string;"
+        },
+        {
+          "line": 1324,
+          "declaration": "readonly item_count: number;"
+        },
+        {
+          "line": 1325,
+          "declaration": "readonly runless_item_count: number;"
+        },
+        {
+          "line": 1334,
+          "declaration": "readonly relationship_to_parent: string | null;"
+        },
+        {
+          "line": 1335,
+          "declaration": "readonly parent_thread_id: string | null;"
+        },
+        {
+          "line": 1336,
+          "declaration": "readonly root_thread_id: string;"
+        },
+        {
+          "line": 1337,
+          "declaration": "readonly side_chat: number | null;"
+        },
+        {
+          "line": 1627,
+          "declaration": "readonly targetProjection: Pick<OrchestrationV2ThreadProjection, \"thread\">;"
+        },
+        {
+          "line": 1628,
+          "declaration": "readonly sourceThreadId: ThreadId;"
+        },
+        {
+          "line": 1629,
+          "declaration": "readonly sourceRunId: NonNullable<OrchestrationV2TurnItem[\"runId\"]>;"
+        },
+        {
+          "line": 1653,
+          "declaration": "readonly historyOrigin: OrchestrationV2ThreadProjection[\"thread\"][\"historyOrigin\"];"
+        },
+        {
+          "line": 1654,
+          "declaration": "readonly itemRunId: OrchestrationV2TurnItem[\"runId\"];"
+        },
+        {
+          "line": 1655,
+          "declaration": "readonly runOrdinalById: ReadonlyMap<NonNullable<OrchestrationV2TurnItem[\"runId\"]>, number>;"
+        },
+        {
+          "line": 1656,
+          "declaration": "readonly sourceRunOrdinal: number;"
+        },
+        {
+          "line": 1711,
+          "declaration": "readonly sourceProjection: OrchestrationV2ThreadProjection;"
+        },
+        {
+          "line": 1712,
+          "declaration": "readonly sourceRunId: NonNullable<OrchestrationV2TurnItem[\"runId\"]>;"
+        },
+        {
+          "line": 1713,
+          "declaration": "readonly forkCreatedAt: DateTime.Utc;"
+        },
+        {
+          "line": 1760,
+          "declaration": "readonly projection: OrchestrationV2ThreadProjection;"
+        },
+        {
+          "line": 1761,
+          "declaration": "readonly sourceProjection: OrchestrationV2ThreadProjection | null;"
+        },
+        {
+          "line": 2028,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 2029,
+          "declaration": "readonly providerThreads: ReadonlyArray<"
+        },
+        {
+          "line": 2098,
+          "declaration": "readonly status: ShellActivityRunStatus;"
+        },
+        {
+          "line": 2104,
+          "declaration": "readonly thread: OrchestrationV2ThreadProjection[\"thread\"];"
+        },
+        {
+          "line": 2105,
+          "declaration": "readonly latestRunId: RunId | null;"
+        },
+        {
+          "line": 2106,
+          "declaration": "readonly latestRunStatus: OrchestrationV2ShellThreadStatus;"
+        },
+        {
+          "line": 2107,
+          "declaration": "readonly latestRunRequestedAt: DateTime.Utc | null;"
+        },
+        {
+          "line": 2108,
+          "declaration": "readonly latestRunStartedAt: DateTime.Utc | null;"
+        },
+        {
+          "line": 2109,
+          "declaration": "readonly latestRunCompletedAt: DateTime.Utc | null;"
+        },
+        {
+          "line": 2110,
+          "declaration": "readonly latestRunStopRequested: boolean;"
+        },
+        {
+          "line": 2111,
+          "declaration": "readonly latestRunBackgroundWake: boolean;"
+        },
+        {
+          "line": 2112,
+          "declaration": "readonly activeRunId: RunId | null;"
+        },
+        {
+          "line": 2113,
+          "declaration": "readonly blockedOnThreadWait: boolean;"
+        },
+        {
+          "line": 2114,
+          "declaration": "readonly activityRunStatus: ShellActivityRunStatus | null;"
+        },
+        {
+          "line": 2115,
+          "declaration": "readonly activityRunStartedAt: DateTime.Utc | null;"
+        },
+        {
+          "line": 2116,
+          "declaration": "readonly lastError: string | null;"
+        },
+        {
+          "line": 2117,
+          "declaration": "readonly lastErrorClass: OrchestrationV2ThreadShell[\"lastErrorClass\"];"
+        },
+        {
+          "line": 2118,
+          "declaration": "readonly lastErrorCode: OrchestrationV2ThreadShell[\"lastErrorCode\"];"
+        },
+        {
+          "line": 2119,
+          "declaration": "readonly usageLimitResetAt: OrchestrationV2ThreadShell[\"usageLimitResetAt\"];"
+        },
+        {
+          "line": 2120,
+          "declaration": "readonly pendingRuntimeRequest: OrchestrationV2PendingRuntimeRequestSummary | null;"
+        },
+        {
+          "line": 2121,
+          "declaration": "readonly latestUserMessageAt: DateTime.Utc | null;"
+        },
+        {
+          "line": 2122,
+          "declaration": "readonly latestUserAuthoredMessageAt: DateTime.Utc | null;"
+        },
+        {
+          "line": 2123,
+          "declaration": "readonly hasActionableProposedPlan: boolean;"
+        },
+        {
+          "line": 2124,
+          "declaration": "readonly pendingBackgroundTasks: OrchestrationV2ThreadShell[\"pendingBackgroundTasks\"];"
+        },
+        {
+          "line": 2125,
+          "declaration": "readonly providerInstanceHistory: OrchestrationV2ThreadShell[\"providerInstanceHistory\"];"
+        },
+        {
+          "line": 2126,
+          "declaration": "readonly goal: OrchestrationV2ThreadShell[\"goal\"];"
+        },
+        {
+          "line": 2127,
+          "declaration": "readonly itemCount: number;"
+        },
+        {
+          "line": 2128,
+          "declaration": "readonly runlessItemCount: number;"
+        },
+        {
+          "line": 2129,
+          "declaration": "readonly updatedAt: OrchestrationV2ThreadProjection[\"updatedAt\"];"
+        },
+        {
+          "line": 2130,
+          "declaration": "readonly runsById: ReadonlyMap<RunId, ShellRun>;"
+        },
+        {
+          "line": 2131,
+          "declaration": "readonly itemCountByRunId: ReadonlyMap<RunId, number>;"
+        },
+        {
+          "line": 2155,
+          "declaration": "readonly state: ShellThreadState;"
+        },
+        {
+          "line": 2156,
+          "declaration": "readonly runId: RunId;"
+        },
+        {
+          "line": 2157,
+          "declaration": "readonly forkCreatedAt: DateTime.Utc;"
+        },
+        {
+          "line": 2193,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 2194,
+          "declaration": "readonly statesByThreadId: ReadonlyMap<ThreadId, ShellThreadState>;"
+        },
+        {
+          "line": 2239,
+          "declaration": "readonly state: ShellThreadState;"
+        },
+        {
+          "line": 2240,
+          "declaration": "readonly visibleItemCount: number;"
+        },
+        {
+          "line": 2442,
+          "declaration": "readonly sourceThreadId: ThreadId;"
+        },
+        {
+          "line": 2443,
+          "declaration": "readonly sourceItemId: TurnItemId;"
+        },
+        {
+          "line": 2444,
+          "declaration": "readonly visibility: OrchestrationV2ProjectedTurnItem[\"visibility\"];"
+        },
+        {
+          "line": 2445,
+          "declaration": "readonly item: TimelineIndexItem;"
+        },
+        {
+          "line": 2449,
+          "declaration": "readonly records: ProjectionRecords<\"runs\" | \"attempts\">;"
+        },
+        {
+          "line": 2451,
+          "declaration": "readonly threadIds: ReadonlyArray<ThreadId>;"
+        },
+        {
+          "line": 2452,
+          "declaration": "readonly local: ReadonlyArray<TimelineIndexRow>;"
+        },
+        {
+          "line": 2453,
+          "declaration": "readonly visible: ReadonlyArray<TimelineIndexRow>;"
+        },
+        {
+          "line": 3585,
+          "declaration": "readonly ordinal: number | null;"
+        },
+        {
+          "line": 3586,
+          "declaration": "readonly long_turn: number;"
+        },
+        {
+          "line": 4083,
+          "declaration": "readonly plan_id: string;"
+        },
+        {
+          "line": 4084,
+          "declaration": "readonly run_id: string;"
+        },
+        {
+          "line": 4085,
+          "declaration": "readonly provider_thread_id: string | null;"
+        },
+        {
+          "line": 4086,
+          "declaration": "readonly last_plan_id: string;"
+        },
+        {
+          "line": 4957,
+          "declaration": "readonly payload_json: string;"
+        },
+        {
+          "line": 4958,
+          "declaration": "readonly run_id: string;"
+        },
+        {
+          "line": 4959,
+          "declaration": "readonly completed_at: string | null;"
+        },
+        {
+          "line": 4960,
+          "declaration": "readonly failure_payload_json: string;"
+        },
+        {
+          "line": 4961,
+          "declaration": "readonly last_error: string | null;"
+        },
+        {
+          "line": 5089,
+          "declaration": "readonly reset_ms: number | null;"
+        },
+        {
+          "line": 5090,
+          "declaration": "readonly snooze_ms: number | null;"
+        },
+        {
+          "line": 5329,
+          "declaration": "readonly name: string;"
+        },
+        {
+          "line": 5330,
+          "declaration": "readonly id: string;"
+        },
+        {
+          "line": 5331,
+          "declaration": "readonly decode: (payload: string, entityId: string) => Effect.Effect<unknown, unknown>;"
+        },
+        {
+          "line": 5418,
+          "declaration": "readonly row_id: number;"
+        },
+        {
+          "line": 5419,
+          "declaration": "readonly entity_id: string;"
+        },
+        {
+          "line": 5420,
+          "declaration": "readonly thread_id: string | null;"
+        },
+        {
+          "line": 5421,
+          "declaration": "readonly target_thread_id: string | null;"
+        },
+        {
+          "line": 5422,
+          "declaration": "readonly payload_json: string;"
+        },
+        {
+          "line": 6366,
+          "declaration": "readonly side_chat: number | null;"
+        },
+        {
+          "line": 6367,
+          "declaration": "readonly project_id: ProjectId;"
+        },
+        {
+          "line": 6368,
+          "declaration": "readonly worktree_path: string | null;"
+        },
+        {
+          "line": 7459,
+          "declaration": "readonly position: number;"
+        },
+        {
+          "line": 7460,
+          "declaration": "readonly canonicalPosition: number;"
+        },
+        {
+          "line": 7546,
+          "declaration": "readonly page: SelectTimelinePageResult<IndexedTimelineRow>;"
+        },
+        {
+          "line": 7547,
+          "declaration": "readonly historyItems: ReadonlyArray<IndexedTimelineRow>;"
+        },
+        {
+          "line": 7552,
+          "declaration": "readonly cursor: string;"
+        },
+        {
+          "line": 7553,
+          "declaration": "readonly throughEntryId: string | undefined;"
+        },
+        {
+          "line": 7554,
+          "declaration": "readonly workMode: \"deferred\" | \"work\" | undefined;"
+        },
+        {
+          "line": 8735,
+          "declaration": "readonly runRows: ReadonlyArray<ShellRunRow>;"
+        },
+        {
+          "line": 8736,
+          "declaration": "readonly itemCountRows: ReadonlyArray<ShellRunItemCountRow>;"
+        },
+        {
+          "line": 8775,
+          "declaration": "readonly providerThreadRows: ReadonlyArray<PayloadRow & { readonly thread_id: string }>;"
+        },
+        {
+          "line": 8776,
+          "declaration": "readonly pendingTurnItemRows: ReadonlyArray<ShellPendingTurnItemRow>;"
+        },
+        {
+          "line": 8956,
+          "declaration": "readonly thread_id: string;"
+        },
+        {
+          "line": 8957,
+          "declaration": "readonly subagent_id: string;"
+        },
+        {
+          "line": 9028,
+          "declaration": "readonly row: ShellThreadRow;"
+        },
+        {
+          "line": 9029,
+          "declaration": "readonly runsByThreadId: ReadonlyMap<ThreadId, Map<RunId, ShellRun>>;"
+        },
+        {
+          "line": 9030,
+          "declaration": "readonly itemCountsByThreadId: ReadonlyMap<ThreadId, Map<RunId, number>>;"
+        },
+        {
+          "line": 9031,
+          "declaration": "readonly shellItemCountsByThreadId: ReadonlyMap<"
+        },
+        {
+          "line": 9035,
+          "declaration": "readonly providerThreadsByThreadId: ReadonlyMap<"
+        },
+        {
+          "line": 9039,
+          "declaration": "readonly pendingTurnItemsByThreadId: ReadonlyMap<"
+        },
+        {
+          "line": 9501,
+          "declaration": "readonly thread_id: string;"
+        },
+        {
+          "line": 9502,
+          "declaration": "readonly project_id: string;"
+        },
+        {
+          "line": 9503,
+          "declaration": "readonly relationship_to_parent: string | null;"
+        },
+        {
+          "line": 9504,
+          "declaration": "readonly parent_thread_id: string | null;"
+        },
+        {
+          "line": 9505,
+          "declaration": "readonly root_thread_id: string;"
+        },
+        {
+          "line": 9506,
+          "declaration": "readonly side_chat: number | null;"
+        },
+        {
+          "line": 9507,
+          "declaration": "readonly settled_override: string | null;"
+        },
+        {
+          "line": 9508,
+          "declaration": "readonly settled_at: string | null;"
+        },
+        {
+          "line": 9509,
+          "declaration": "readonly pinned_at: string | null;"
+        },
+        {
+          "line": 9510,
+          "declaration": "readonly pin_order_key: string | null;"
+        },
+        {
+          "line": 9511,
+          "declaration": "readonly snoozed_until: string | null;"
+        },
+        {
+          "line": 9512,
+          "declaration": "readonly may_be_live: number;"
+        },
+        {
+          "line": 9513,
+          "declaration": "readonly has_remote_tasks: number;"
+        },
+        {
+          "line": 9600,
+          "declaration": "readonly thread_id: string;"
+        },
+        {
+          "line": 9601,
+          "declaration": "readonly project_id: string;"
+        },
+        {
+          "line": 9602,
+          "declaration": "readonly title: string;"
+        },
+        {
+          "line": 9603,
+          "declaration": "readonly updated_at: string;"
+        },
+        {
+          "line": 9604,
+          "declaration": "readonly relationship_to_parent: string | null;"
+        },
+        {
+          "line": 9605,
+          "declaration": "readonly parent_thread_id: string | null;"
+        },
+        {
+          "line": 9606,
+          "declaration": "readonly root_thread_id: string;"
+        },
+        {
+          "line": 9607,
+          "declaration": "readonly side_chat: number | null;"
+        },
+        {
+          "line": 9608,
+          "declaration": "readonly delegated_from_environment_id: string | null;"
+        },
+        {
+          "line": 9609,
+          "declaration": "readonly delegated_from_thread_id: string | null;"
+        },
+        {
+          "line": 9610,
+          "declaration": "readonly delegated_from_title: string | null;"
+        },
+        {
+          "line": 9611,
+          "declaration": "readonly settled_override: string | null;"
+        },
+        {
+          "line": 9612,
+          "declaration": "readonly settled_at: string | null;"
+        },
+        {
+          "line": 9613,
+          "declaration": "readonly snoozed_until: string | null;"
+        },
+        {
+          "line": 9663,
+          "declaration": "readonly thread_id: ThreadId;"
+        },
+        {
+          "line": 9664,
+          "declaration": "readonly title: string;"
+        },
+        {
+          "line": 9665,
+          "declaration": "readonly project_id: ProjectId;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ShellStream.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ShellStream.ts",
+      "span_named_operations": [
+        {
+          "line": 413,
+          "name": "ShellStream.loadSubscriberShellSnapshot"
+        },
+        {
+          "line": 458,
+          "name": "ShellStream.loadShellSnapshotParts"
+        },
+        {
+          "line": 486,
+          "name": "ShellStream.loadOlderSettledThreadsPage"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 87,
+          "declaration": "readonly events: Pick<"
+        },
+        {
+          "line": 91,
+          "declaration": "readonly resumeFrom: number | undefined;"
+        },
+        {
+          "line": 92,
+          "declaration": "readonly loadSnapshot: Effect.Effect<A, E, R>;"
+        },
+        {
+          "line": 127,
+          "declaration": "readonly projects: ReadonlyArray<"
+        },
+        {
+          "line": 130,
+          "declaration": "readonly resolvedRepositoryIdentityRoots: ReadonlyArray<string>;"
+        },
+        {
+          "line": 131,
+          "declaration": "readonly knownProjectIdentities: string | undefined;"
+        },
+        {
+          "line": 167,
+          "declaration": "readonly projects: ReadonlyArray<OrchestrationProjectShell>;"
+        },
+        {
+          "line": 168,
+          "declaration": "readonly threads: OrchestrationV2ThreadShellSnapshot;"
+        },
+        {
+          "line": 169,
+          "declaration": "readonly snapshotSequence: number;"
+        },
+        {
+          "line": 190,
+          "declaration": "readonly subagentParentIds: ReadonlySet<string>;"
+        },
+        {
+          "line": 191,
+          "declaration": "readonly subagentThreadIds: Set<string>;"
+        },
+        {
+          "line": 193,
+          "declaration": "readonly remoteTaskParentIds: ReadonlySet<string>;"
+        },
+        {
+          "line": 195,
+          "declaration": "readonly olderSettledBeforeMs: number | undefined;"
+        },
+        {
+          "line": 196,
+          "declaration": "readonly olderSettledCounts: ReadonlyArray<OrchestrationV2OlderSettledCount>;"
+        },
+        {
+          "line": 266,
+          "declaration": "readonly threads: ReadonlyArray<OrchestrationV2ThreadShell>;"
+        },
+        {
+          "line": 267,
+          "declaration": "readonly snapshotSequence: number;"
+        },
+        {
+          "line": 268,
+          "declaration": "readonly now: DateTime.Utc;"
+        },
+        {
+          "line": 275,
+          "declaration": "readonly threads: ReadonlyArray<OrchestrationV2ThreadShell>;"
+        },
+        {
+          "line": 276,
+          "declaration": "readonly olderSettled: OrchestrationV2OlderSettledThreads;"
+        },
+        {
+          "line": 320,
+          "declaration": "readonly threads: ReadonlyArray<OrchestrationV2ThreadShell>;"
+        },
+        {
+          "line": 321,
+          "declaration": "readonly subagentThreadIds: Set<string>;"
+        },
+        {
+          "line": 337,
+          "declaration": "readonly threads: ReadonlyArray<OrchestrationV2ThreadShell>;"
+        },
+        {
+          "line": 338,
+          "declaration": "readonly snapshotSequence: number;"
+        },
+        {
+          "line": 339,
+          "declaration": "readonly now: DateTime.Utc;"
+        },
+        {
+          "line": 341,
+          "declaration": "readonly threads: ReadonlyArray<OrchestrationV2ThreadShell>;"
+        },
+        {
+          "line": 342,
+          "declaration": "readonly olderSettled: OrchestrationV2OlderSettledThreads;"
+        },
+        {
+          "line": 348,
+          "declaration": "readonly omitIdleSubagents: boolean;"
+        },
+        {
+          "line": 349,
+          "declaration": "readonly omitOlderSettled: boolean;"
+        },
+        {
+          "line": 415,
+          "declaration": "readonly sql: SqlClient.SqlClient;"
+        },
+        {
+          "line": 416,
+          "declaration": "readonly listShellIndex: Effect.Effect<ReadonlyArray<ActiveShellIndexEntry>, E1>;"
+        },
+        {
+          "line": 417,
+          "declaration": "readonly readThreads: ("
+        },
+        {
+          "line": 420,
+          "declaration": "readonly listProjects: Effect.Effect<ReadonlyArray<OrchestrationProjectShell>, E4>;"
+        },
+        {
+          "line": 421,
+          "declaration": "readonly latestSequence: Effect.Effect<number, E5>;"
+        },
+        {
+          "line": 422,
+          "declaration": "readonly options: ShellSubscriberOptions;"
+        },
+        {
+          "line": 464,
+          "declaration": "readonly sql: SqlClient.SqlClient;"
+        },
+        {
+          "line": 465,
+          "declaration": "readonly readThreads: Effect.Effect<Effect.Effect<OrchestrationV2ThreadShellSnapshot, E2>, E1>;"
+        },
+        {
+          "line": 466,
+          "declaration": "readonly listProjects: Effect.Effect<ReadonlyArray<OrchestrationProjectShell>, E3>;"
+        },
+        {
+          "line": 467,
+          "declaration": "readonly latestSequence: Effect.Effect<number, E4>;"
+        },
+        {
+          "line": 488,
+          "declaration": "readonly sql: SqlClient.SqlClient;"
+        },
+        {
+          "line": 489,
+          "declaration": "readonly listThreads: Effect.Effect<"
+        },
+        {
+          "line": 491,
+          "declaration": "readonly threadIds: ReadonlyArray<ThreadId>;"
+        },
+        {
+          "line": 492,
+          "declaration": "readonly counts: ReadonlyArray<OrchestrationV2OlderSettledCount>;"
+        },
+        {
+          "line": 496,
+          "declaration": "readonly readThreads: ("
+        },
+        {
+          "line": 499,
+          "declaration": "readonly latestSequence: Effect.Effect<number, E4>;"
+        },
+        {
+          "line": 530,
+          "declaration": "readonly sequence: number;"
+        },
+        {
+          "line": 531,
+          "declaration": "readonly event: Pick<OrchestrationV2StoredEvent[\"event\"], \"threadId\">;"
+        },
+        {
+          "line": 593,
+          "declaration": "readonly initial: Stream.Stream<A, E, R>;"
+        },
+        {
+          "line": 594,
+          "declaration": "readonly tail: Stream.Stream<A2, E2, R2>;"
+        },
+        {
+          "line": 595,
+          "declaration": "readonly enrichment: Stream.Stream<A3, E3, R3>;"
+        },
+        {
+          "line": 601,
+          "declaration": "readonly items: Arr.NonEmptyReadonlyArray<A2 | A3>;"
+        },
+        {
+          "line": 658,
+          "declaration": "readonly projects: ReadonlyArray<OrchestrationProjectShell>;"
+        },
+        {
+          "line": 659,
+          "declaration": "readonly roots: ReadonlySet<string>;"
+        },
+        {
+          "line": 694,
+          "declaration": "readonly snapshot: OrchestrationV2ShellSnapshot;"
+        },
+        {
+          "line": 695,
+          "declaration": "readonly changes: ReadonlyArray<{ readonly workspaceRoot: string }>;"
+        },
+        {
+          "line": 715,
+          "declaration": "readonly snapshot: OrchestrationV2ShellSnapshot;"
+        },
+        {
+          "line": 716,
+          "declaration": "readonly resolvedRepositoryIdentityRoots: ReadonlyArray<string>;"
+        },
+        {
+          "line": 743,
+          "declaration": "readonly snapshot: OrchestrationV2ShellSnapshot;"
+        },
+        {
+          "line": 744,
+          "declaration": "readonly resolvedRepositoryIdentityRoots: ReadonlyArray<string>;"
+        },
+        {
+          "line": 792,
+          "declaration": "readonly stored: Extract<ShellApplicationEvent, { readonly event: unknown }>;"
+        },
+        {
+          "line": 793,
+          "declaration": "readonly shell: OrchestrationV2ThreadShell | null;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadFind.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadFind.ts",
+      "span_named_operations": [
+        {
+          "line": 198,
+          "name": "makeThreadFind"
+        },
+        {
+          "line": 226,
+          "name": "ThreadFind.load"
+        },
+        {
+          "line": 289,
+          "name": "ThreadFind.readRevision"
+        },
+        {
+          "line": 311,
+          "name": "ThreadFind.snapshot"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 28,
+          "declaration": "readonly position: number;"
+        },
+        {
+          "line": 29,
+          "declaration": "readonly visibility: OrchestrationV2ProjectedTurnItem[\"visibility\"];"
+        },
+        {
+          "line": 30,
+          "declaration": "readonly sourceThreadId: ThreadId;"
+        },
+        {
+          "line": 31,
+          "declaration": "readonly sourceItemId: TurnItemId;"
+        },
+        {
+          "line": 34,
+          "declaration": "readonly payload: string;"
+        },
+        {
+          "line": 35,
+          "declaration": "readonly entryId: string;"
+        },
+        {
+          "line": 36,
+          "declaration": "readonly runId: OrchestrationV2TurnItem[\"runId\"];"
+        },
+        {
+          "line": 37,
+          "declaration": "readonly type: OrchestrationV2TurnItem[\"type\"];"
+        },
+        {
+          "line": 38,
+          "declaration": "readonly emptyText: boolean;"
+        },
+        {
+          "line": 41,
+          "declaration": "readonly entryId: string;"
+        },
+        {
+          "line": 42,
+          "declaration": "readonly runId: OrchestrationV2TurnItem[\"runId\"];"
+        },
+        {
+          "line": 43,
+          "declaration": "readonly count: number;"
+        },
+        {
+          "line": 46,
+          "declaration": "readonly segments: readonly string[];"
+        },
+        {
+          "line": 47,
+          "declaration": "readonly sourceLength: number;"
+        },
+        {
+          "line": 201,
+          "declaration": "readonly item: Pick<OrchestrationV2TurnItem, \"type\" | \"runId\">;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadIssueService.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadIssueService.ts",
+      "span_named_operations": [
+        {
+          "line": 78,
+          "name": "ThreadIssueService.link"
+        },
+        {
+          "line": 99,
+          "name": "ThreadIssueService.unlink"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 28,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 29,
+          "declaration": "readonly ref: IssueRef & { readonly host: string };"
+        },
+        {
+          "line": 30,
+          "declaration": "readonly url: string;"
+        },
+        {
+          "line": 31,
+          "declaration": "readonly displayKey: string;"
+        },
+        {
+          "line": 32,
+          "declaration": "readonly title: string;"
+        },
+        {
+          "line": 33,
+          "declaration": "readonly source: ThreadIssueLinkSource;"
+        },
+        {
+          "line": 37,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 38,
+          "declaration": "readonly key: ThreadIssueKey;"
+        },
+        {
+          "line": 45,
+          "declaration": "readonly link: ("
+        },
+        {
+          "line": 48,
+          "declaration": "readonly unlink: ("
+        },
+        {
+          "line": 52,
+          "declaration": "readonly linkedThreads: ("
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/ThreadSearch.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadSearch.ts",
+      "span_named_operations": [
+        {
+          "line": 502,
+          "name": "ThreadSearch.search"
+        },
+        {
+          "line": 606,
+          "name": "ThreadSearch.searchThreads"
+        },
+        {
+          "line": 668,
+          "name": "ThreadSearch.searchOlderSettled"
+        },
+        {
+          "line": 726,
+          "name": "ThreadSearch.searchThreadsWithOlderSettledRows"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 331,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 332,
+          "declaration": "readonly projectId: ProjectId;"
+        },
+        {
+          "line": 333,
+          "declaration": "readonly title: string;"
+        },
+        {
+          "line": 334,
+          "declaration": "readonly source: \"title\" | OrchestrationThreadSearchSource;"
+        },
+        {
+          "line": 343,
+          "declaration": "readonly search: ("
+        },
+        {
+          "line": 350,
+          "declaration": "readonly searchThreads: ("
+        },
+        {
+          "line": 358,
+          "declaration": "readonly searchOlderSettled: (input: {"
+        },
+        {
+          "line": 359,
+          "declaration": "readonly query: string;"
+        },
+        {
+          "line": 360,
+          "declaration": "readonly before: string;"
+        },
+        {
+          "line": 364,
+          "declaration": "readonly messageThreadIds: ReadonlyArray<ThreadId>;"
+        },
+        {
+          "line": 504,
+          "declaration": "readonly projectId: ProjectId | null;"
+        },
+        {
+          "line": 516,
+          "declaration": "readonly row: typeof SearchRow.Type;"
+        },
+        {
+          "line": 518,
+          "declaration": "readonly text: string;"
+        },
+        {
+          "line": 519,
+          "declaration": "readonly quality: number;"
+        },
+        {
+          "line": 520,
+          "declaration": "readonly offset: number;"
+        },
+        {
+          "line": 729,
+          "declaration": "readonly request: OrchestrationV2SearchThreadsInput;"
+        },
+        {
+          "line": 730,
+          "declaration": "readonly search: ("
+        },
+        {
+          "line": 733,
+          "declaration": "readonly searchOlderSettled: ("
+        },
+        {
+          "line": 736,
+          "declaration": "readonly sql: SqlClient.SqlClient;"
+        },
+        {
+          "line": 737,
+          "declaration": "readonly readThreads: ("
+        },
+        {
+          "line": 740,
+          "declaration": "readonly latestSequence: Effect.Effect<number, E5>;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/TurnItemPositionStore.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/TurnItemPositionStore.ts",
+      "span_named_operations": [],
+      "readonly_declaration_candidates": [
+        {
+          "line": 20,
+          "declaration": "readonly allocate: (input: {"
+        },
+        {
+          "line": 21,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 22,
+          "declaration": "readonly turnItemId: TurnItemId;"
+        },
+        {
+          "line": 23,
+          "declaration": "readonly runId: RunId | null;"
+        },
+        {
+          "line": 30,
+          "declaration": "readonly normalize: ("
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/UserFacingErrors.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/UserFacingErrors.ts",
+      "span_named_operations": [],
+      "readonly_declaration_candidates": []
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/http.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/http.ts",
+      "span_named_operations": [
+        {
+          "line": 67,
+          "name": "http.orchestration.enrichProjectShells"
+        },
+        {
+          "line": 83,
+          "name": "http.orchestration.loadShellSnapshot"
+        },
+        {
+          "line": 106,
+          "name": "http.orchestration.answerShellSnapshot"
+        },
+        {
+          "line": 122,
+          "name": "http.orchestration.loadThreadSnapshot"
+        },
+        {
+          "line": 145,
+          "name": "http.orchestration.loadThreadSnapshotWindow"
+        },
+        {
+          "line": 187,
+          "name": "environment.orchestration.shellSnapshot"
+        },
+        {
+          "line": 200,
+          "name": "environment.orchestration.threadSnapshot"
+        },
+        {
+          "line": 215,
+          "name": "environment.orchestration.threadTranscript"
+        },
+        {
+          "line": 240,
+          "name": "environment.orchestration.threadBoundedSnapshot"
+        },
+        {
+          "line": 266,
+          "name": "environment.orchestration.threadHistoryPage"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 85,
+          "declaration": "readonly omitIdleSubagents: boolean;"
+        },
+        {
+          "line": 86,
+          "declaration": "readonly omitOlderSettled: boolean;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/legacy/LegacyV1ThreadImporter.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/legacy/LegacyV1ThreadImporter.ts",
+      "span_named_operations": [
+        {
+          "line": 372,
+          "name": "LegacyV1ThreadImporter.listShellMessages"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 42,
+          "declaration": "readonly thread_id: string;"
+        },
+        {
+          "line": 43,
+          "declaration": "readonly project_id: string;"
+        },
+        {
+          "line": 44,
+          "declaration": "readonly title: string;"
+        },
+        {
+          "line": 45,
+          "declaration": "readonly model_selection_json: string | null;"
+        },
+        {
+          "line": 46,
+          "declaration": "readonly runtime_mode: string;"
+        },
+        {
+          "line": 47,
+          "declaration": "readonly interaction_mode: string;"
+        },
+        {
+          "line": 48,
+          "declaration": "readonly branch: string | null;"
+        },
+        {
+          "line": 49,
+          "declaration": "readonly worktree_path: string | null;"
+        },
+        {
+          "line": 50,
+          "declaration": "readonly created_at: string;"
+        },
+        {
+          "line": 51,
+          "declaration": "readonly updated_at: string;"
+        },
+        {
+          "line": 52,
+          "declaration": "readonly archived_at: string | null;"
+        },
+        {
+          "line": 53,
+          "declaration": "readonly settled_override: string | null;"
+        },
+        {
+          "line": 54,
+          "declaration": "readonly settled_at: string | null;"
+        },
+        {
+          "line": 55,
+          "declaration": "readonly unsettled_at: string | null;"
+        },
+        {
+          "line": 56,
+          "declaration": "readonly snoozed_until: string | null;"
+        },
+        {
+          "line": 57,
+          "declaration": "readonly snoozed_at: string | null;"
+        },
+        {
+          "line": 58,
+          "declaration": "readonly pinned_at: string | null;"
+        },
+        {
+          "line": 59,
+          "declaration": "readonly auto_settle_disabled_at: string | null;"
+        },
+        {
+          "line": 60,
+          "declaration": "readonly pin_order_key: string | null;"
+        },
+        {
+          "line": 61,
+          "declaration": "readonly pull_requests_json: string;"
+        },
+        {
+          "line": 62,
+          "declaration": "readonly linked_pull_request_json: string | null;"
+        },
+        {
+          "line": 63,
+          "declaration": "readonly branch_pull_request_json: string | null;"
+        },
+        {
+          "line": 64,
+          "declaration": "readonly active_order_key: string | null;"
+        },
+        {
+          "line": 65,
+          "declaration": "readonly deleted_at: string | null;"
+        },
+        {
+          "line": 69,
+          "declaration": "readonly payload_json: string;"
+        },
+        {
+          "line": 73,
+          "declaration": "readonly message_id: string;"
+        },
+        {
+          "line": 74,
+          "declaration": "readonly thread_id: string;"
+        },
+        {
+          "line": 75,
+          "declaration": "readonly role: \"user\" | \"assistant\";"
+        },
+        {
+          "line": 76,
+          "declaration": "readonly text: string;"
+        },
+        {
+          "line": 77,
+          "declaration": "readonly attachments_json: string | null;"
+        },
+        {
+          "line": 79,
+          "declaration": "readonly is_streaming: number;"
+        },
+        {
+          "line": 80,
+          "declaration": "readonly created_at: string;"
+        },
+        {
+          "line": 81,
+          "declaration": "readonly updated_at: string;"
+        },
+        {
+          "line": 82,
+          "declaration": "readonly ordinal: number;"
+        },
+        {
+          "line": 86,
+          "declaration": "readonly thread_id: string;"
+        },
+        {
+          "line": 87,
+          "declaration": "readonly transcript_imported_at: string | null;"
+        },
+        {
+          "line": 91,
+          "declaration": "readonly importedThreadCount: number;"
+        },
+        {
+          "line": 92,
+          "declaration": "readonly importedMessageCount: number;"
+        },
+        {
+          "line": 111,
+          "declaration": "readonly pendingThreadCount: Effect.Effect<number, LegacyV1ThreadImportError>;"
+        },
+        {
+          "line": 112,
+          "declaration": "readonly reconcileShells: Effect.Effect<LegacyV1ImportSummary, LegacyV1ThreadImportError>;"
+        },
+        {
+          "line": 113,
+          "declaration": "readonly ensureTranscript: ("
+        },
+        {
+          "line": 116,
+          "declaration": "readonly importPendingTranscripts: Effect.Effect<LegacyV1ImportSummary, never>;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/orchestration-v2/messageSearchIndex.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/messageSearchIndex.ts",
+      "span_named_operations": [
+        {
+          "line": 89,
+          "name": "MessageSearchIndex.indexedText"
+        },
+        {
+          "line": 101,
+          "name": "MessageSearchIndex.createTriggers"
+        },
+        {
+          "line": 149,
+          "name": "MessageSearchIndex.recreateTriggers"
+        },
+        {
+          "line": 168,
+          "name": "MessageSearchIndex.rebuild"
+        }
+      ],
+      "readonly_declaration_candidates": []
+    },
+    {
+      "path": "apps/server/src/peer/PeerLinks.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/peer/PeerLinks.ts",
+      "span_named_operations": [
+        {
+          "line": 294,
+          "name": "PeerLinks.answersAs"
+        },
+        {
+          "line": 302,
+          "name": "PeerLinks.toLink"
+        },
+        {
+          "line": 331,
+          "name": "PeerLinks.signIn"
+        },
+        {
+          "line": 454,
+          "name": "PeerLinks.answeringAs"
+        },
+        {
+          "line": 504,
+          "name": "PeerLinks.answeringAt"
+        },
+        {
+          "line": 510,
+          "name": "PeerLinks.link"
+        },
+        {
+          "line": 626,
+          "name": "PeerLinks.statusOf"
+        },
+        {
+          "line": 671,
+          "name": "PeerLinks.revokeAtPeer"
+        },
+        {
+          "line": 699,
+          "name": "PeerLinks.unlink"
+        },
+        {
+          "line": 730,
+          "name": "PeerLinks.resolve"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 79,
+          "declaration": "readonly link: PeerLink;"
+        },
+        {
+          "line": 81,
+          "declaration": "readonly url: string;"
+        },
+        {
+          "line": 82,
+          "declaration": "readonly token: string;"
+        },
+        {
+          "line": 84,
+          "declaration": "readonly capabilities: ExecutionEnvironmentCapabilities;"
+        },
+        {
+          "line": 103,
+          "declaration": "readonly enabled: Effect.Effect<boolean>;"
+        },
+        {
+          "line": 104,
+          "declaration": "readonly link: (input: PeerLinkCreateInput) => Effect.Effect<PeerLink, PeerLinkError>;"
+        },
+        {
+          "line": 109,
+          "declaration": "readonly linkUnlessLinked: ("
+        },
+        {
+          "line": 112,
+          "declaration": "readonly list: Effect.Effect<ReadonlyArray<PeerLinkSummary>, PeerLinkError>;"
+        },
+        {
+          "line": 114,
+          "declaration": "readonly names: Effect.Effect<ReadonlyArray<PeerLinkName>, PeerLinkError>;"
+        },
+        {
+          "line": 116,
+          "declaration": "readonly get: ("
+        },
+        {
+          "line": 120,
+          "declaration": "readonly unlink: ("
+        },
+        {
+          "line": 124,
+          "declaration": "readonly resolve: ("
+        },
+        {
+          "line": 128,
+          "declaration": "readonly recordOutcome: ("
+        },
+        {
+          "line": 133,
+          "declaration": "readonly recordExpiry: ("
+        },
+        {
+          "line": 141,
+          "declaration": "readonly environment_id: string;"
+        },
+        {
+          "line": 142,
+          "declaration": "readonly secret_name: string;"
+        },
+        {
+          "line": 143,
+          "declaration": "readonly label: string;"
+        },
+        {
+          "line": 144,
+          "declaration": "readonly urls_json: string;"
+        },
+        {
+          "line": 145,
+          "declaration": "readonly access: string;"
+        },
+        {
+          "line": 146,
+          "declaration": "readonly linked_at: string;"
+        },
+        {
+          "line": 147,
+          "declaration": "readonly expires_at: string;"
+        },
+        {
+          "line": 148,
+          "declaration": "readonly last_reached_at: string | null;"
+        },
+        {
+          "line": 149,
+          "declaration": "readonly last_error: string | null;"
+        },
+        {
+          "line": 150,
+          "declaration": "readonly fenced: number;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/AuthConnectDevices.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/AuthConnectDevices.ts",
+      "span_named_operations": [],
+      "readonly_declaration_candidates": [
+        {
+          "line": 37,
+          "declaration": "readonly trust: ("
+        },
+        {
+          "line": 40,
+          "declaration": "readonly isTrusted: ("
+        },
+        {
+          "line": 43,
+          "declaration": "readonly list: () => Effect.Effect<"
+        },
+        {
+          "line": 47,
+          "declaration": "readonly remove: ("
+        },
+        {
+          "line": 50,
+          "declaration": "readonly removeAllExcept: ("
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/AuthPairingLinks.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/AuthPairingLinks.ts",
+      "span_named_operations": [],
+      "readonly_declaration_candidates": [
+        {
+          "line": 141,
+          "declaration": "readonly create: ("
+        },
+        {
+          "line": 144,
+          "declaration": "readonly consumeAvailable: ("
+        },
+        {
+          "line": 147,
+          "declaration": "readonly listActive: ("
+        },
+        {
+          "line": 150,
+          "declaration": "readonly revoke: ("
+        },
+        {
+          "line": 153,
+          "declaration": "readonly getByCredential: ("
+        },
+        {
+          "line": 156,
+          "declaration": "readonly getActiveById: ("
+        },
+        {
+          "line": 160,
+          "declaration": "readonly findPendingConnect: ("
+        },
+        {
+          "line": 164,
+          "declaration": "readonly recordConnectRequestClient: ("
+        },
+        {
+          "line": 167,
+          "declaration": "readonly revokeUnspentByProofKey: ("
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/AuthSessions.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/AuthSessions.ts",
+      "span_named_operations": [],
+      "readonly_declaration_candidates": [
+        {
+          "line": 114,
+          "declaration": "readonly create: ("
+        },
+        {
+          "line": 117,
+          "declaration": "readonly createReplacingActive: ("
+        },
+        {
+          "line": 120,
+          "declaration": "readonly createIfAbsent: ("
+        },
+        {
+          "line": 123,
+          "declaration": "readonly getById: ("
+        },
+        {
+          "line": 126,
+          "declaration": "readonly listActive: ("
+        },
+        {
+          "line": 129,
+          "declaration": "readonly revoke: ("
+        },
+        {
+          "line": 133,
+          "declaration": "readonly extend: ("
+        },
+        {
+          "line": 136,
+          "declaration": "readonly revokeAllExcept: ("
+        },
+        {
+          "line": 139,
+          "declaration": "readonly setLastConnectedAt: ("
+        },
+        {
+          "line": 142,
+          "declaration": "readonly getProofKeyThumbprint: ("
+        },
+        {
+          "line": 145,
+          "declaration": "readonly revokeByProofKey: ("
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/DatabaseMaintenance.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/DatabaseMaintenance.ts",
+      "span_named_operations": [
+        {
+          "line": 157,
+          "name": "DatabaseMaintenance.lockExclusively"
+        },
+        {
+          "line": 179,
+          "name": "DatabaseMaintenance.locate"
+        },
+        {
+          "line": 185,
+          "name": "DatabaseMaintenance.readLegacyOnlyRecords"
+        },
+        {
+          "line": 208,
+          "name": "DatabaseMaintenance.inspect"
+        },
+        {
+          "line": 235,
+          "name": "DatabaseMaintenance.compact"
+        },
+        {
+          "line": 280,
+          "name": "DatabaseMaintenance.removeLegacyDatabase"
+        },
+        {
+          "line": 330,
+          "name": "DatabaseMaintenance.runRequestedReclaim"
+        },
+        {
+          "line": 400,
+          "name": "DatabaseMaintenance.reclaimSpaceShortfall"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 99,
+          "declaration": "readonly inspect: (databasePath: string) => Effect.Effect<"
+        },
+        {
+          "line": 101,
+          "declaration": "readonly databaseBytes: number;"
+        },
+        {
+          "line": 102,
+          "declaration": "readonly reclaimableBytes: number;"
+        },
+        {
+          "line": 103,
+          "declaration": "readonly incrementalVacuumEnabled: boolean;"
+        },
+        {
+          "line": 105,
+          "declaration": "readonly legacyDatabaseBytes: number | null;"
+        },
+        {
+          "line": 106,
+          "declaration": "readonly legacyOnlyRecords: LegacyOnlyRecords | null;"
+        },
+        {
+          "line": 114,
+          "declaration": "readonly compact: ("
+        },
+        {
+          "line": 119,
+          "declaration": "readonly beforeBytes: number;"
+        },
+        {
+          "line": 120,
+          "declaration": "readonly afterBytes: number;"
+        },
+        {
+          "line": 121,
+          "declaration": "readonly deletedEventCount: number;"
+        },
+        {
+          "line": 122,
+          "declaration": "readonly deletedReceiptCount: number;"
+        },
+        {
+          "line": 127,
+          "declaration": "readonly removeLegacyDatabase: ("
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/DatabaseStorage.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/DatabaseStorage.ts",
+      "span_named_operations": [],
+      "readonly_declaration_candidates": [
+        {
+          "line": 30,
+          "declaration": "readonly reclaim: Effect.Effect<void>;"
+        },
+        {
+          "line": 32,
+          "declaration": "readonly status: Stream.Stream<DatabaseStorageStatus | null>;"
+        },
+        {
+          "line": 34,
+          "declaration": "readonly requestReclaim: Effect.Effect<void, DatabaseReclaimError>;"
+        },
+        {
+          "line": 71,
+          "declaration": "readonly pageSize: number;"
+        },
+        {
+          "line": 72,
+          "declaration": "readonly autoVacuum: number;"
+        },
+        {
+          "line": 73,
+          "declaration": "readonly incrementalVacuum: boolean;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/IssueTrackerBindings.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/IssueTrackerBindings.ts",
+      "span_named_operations": [
+        {
+          "line": 74,
+          "name": "IssueTrackerBindingsRepository.list"
+        },
+        {
+          "line": 91,
+          "name": "IssueTrackerBindingsRepository.set"
+        },
+        {
+          "line": 113,
+          "name": "IssueTrackerBindingsRepository.removeTracker"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 29,
+          "declaration": "readonly list: ("
+        },
+        {
+          "line": 36,
+          "declaration": "readonly set: (input: {"
+        },
+        {
+          "line": 37,
+          "declaration": "readonly projectId: ProjectId;"
+        },
+        {
+          "line": 38,
+          "declaration": "readonly binding: IssueTrackerProjectBinding | null;"
+        },
+        {
+          "line": 40,
+          "declaration": "readonly updatedAt: string;"
+        },
+        {
+          "line": 43,
+          "declaration": "readonly removeTracker: ("
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Migrations.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Migrations.ts",
+      "span_named_operations": [
+        {
+          "line": 262,
+          "name": "assertV2MigrationsCanRun"
+        },
+        {
+          "line": 289,
+          "name": "hasPendingMigrations"
+        },
+        {
+          "line": 311,
+          "name": "runMigrations"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 271,
+          "declaration": "readonly migration_id: number;"
+        },
+        {
+          "line": 272,
+          "declaration": "readonly name: string;"
+        },
+        {
+          "line": 332,
+          "declaration": "readonly id: number | null;"
+        },
+        {
+          "line": 359,
+          "declaration": "readonly migration_id: number;"
+        },
+        {
+          "line": 360,
+          "declaration": "readonly name: string;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/OrchestrationCommandReceipts.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/OrchestrationCommandReceipts.ts",
+      "span_named_operations": [],
+      "readonly_declaration_candidates": [
+        {
+          "line": 36,
+          "declaration": "readonly insertIfAbsent: ("
+        },
+        {
+          "line": 40,
+          "declaration": "readonly upsert: ("
+        },
+        {
+          "line": 44,
+          "declaration": "readonly getByCommandId: ("
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/OrchestrationEventStore.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/OrchestrationEventStore.ts",
+      "span_named_operations": [
+        {
+          "line": 199,
+          "name": "OrchestrationEventStore.rowToV2StoredEvent"
+        },
+        {
+          "line": 227,
+          "name": "OrchestrationEventStore.rowToProjectEvent"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 49,
+          "declaration": "readonly appendProjectEvent: ("
+        },
+        {
+          "line": 53,
+          "declaration": "readonly appendAgentEvents: (input: {"
+        },
+        {
+          "line": 55,
+          "declaration": "readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;"
+        },
+        {
+          "line": 59,
+          "declaration": "readonly readAgentEvents: (input?: {"
+        },
+        {
+          "line": 69,
+          "declaration": "readonly getAgentReplayStats: (input: {"
+        },
+        {
+          "line": 70,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 71,
+          "declaration": "readonly afterSequence: number;"
+        },
+        {
+          "line": 72,
+          "declaration": "readonly throughSequence: number;"
+        },
+        {
+          "line": 73,
+          "declaration": "readonly maxEvents: number;"
+        },
+        {
+          "line": 76,
+          "declaration": "readonly eventCount: number;"
+        },
+        {
+          "line": 77,
+          "declaration": "readonly rawPayloadBytes: number;"
+        },
+        {
+          "line": 78,
+          "declaration": "readonly hasCreateEvent: boolean;"
+        },
+        {
+          "line": 83,
+          "declaration": "readonly getReplayStats: (input: {"
+        },
+        {
+          "line": 84,
+          "declaration": "readonly afterSequence: number;"
+        },
+        {
+          "line": 85,
+          "declaration": "readonly throughSequence: number;"
+        },
+        {
+          "line": 88,
+          "declaration": "readonly eventCount: number;"
+        },
+        {
+          "line": 89,
+          "declaration": "readonly rawPayloadBytes: number;"
+        },
+        {
+          "line": 94,
+          "declaration": "readonly latestAgentSequence: ("
+        },
+        {
+          "line": 98,
+          "declaration": "readonly latestApplicationSequence: Effect.Effect<number, OrchestrationEventStoreError>;"
+        },
+        {
+          "line": 101,
+          "declaration": "readonly prunedThroughSequence: Effect.Effect<number, OrchestrationEventStoreError>;"
+        },
+        {
+          "line": 104,
+          "declaration": "readonly readApplicationEvents: (input: {"
+        },
+        {
+          "line": 105,
+          "declaration": "readonly afterSequence: number;"
+        },
+        {
+          "line": 106,
+          "declaration": "readonly throughSequence: number;"
+        },
+        {
+          "line": 111,
+          "declaration": "readonly publishCommitted: ("
+        },
+        {
+          "line": 115,
+          "declaration": "readonly streamApplicationEvents: (input?: {"
+        },
+        {
+          "line": 118,
+          "declaration": "readonly streamProjectedApplicationEvents: <A extends { readonly sequence: number }>(input: {"
+        },
+        {
+          "line": 120,
+          "declaration": "readonly project: (event: ApplicationStoredEvent) => A;"
+        },
+        {
+          "line": 167,
+          "declaration": "readonly sequence: number;"
+        },
+        {
+          "line": 168,
+          "declaration": "readonly event_id: string;"
+        },
+        {
+          "line": 169,
+          "declaration": "readonly command_id: string | null;"
+        },
+        {
+          "line": 170,
+          "declaration": "readonly aggregate_kind: \"project\" | \"thread\";"
+        },
+        {
+          "line": 171,
+          "declaration": "readonly stream_id: string;"
+        },
+        {
+          "line": 172,
+          "declaration": "readonly event_type: string;"
+        },
+        {
+          "line": 173,
+          "declaration": "readonly occurred_at: string;"
+        },
+        {
+          "line": 174,
+          "declaration": "readonly payload_json: string;"
+        },
+        {
+          "line": 175,
+          "declaration": "readonly metadata_json: string;"
+        },
+        {
+          "line": 176,
+          "declaration": "readonly application_event_version: number;"
+        },
+        {
+          "line": 177,
+          "declaration": "readonly causation_event_id: string | null;"
+        },
+        {
+          "line": 178,
+          "declaration": "readonly correlation_id: string | null;"
+        },
+        {
+          "line": 395,
+          "declaration": "readonly afterSequence: number;"
+        },
+        {
+          "line": 401,
+          "declaration": "readonly limit: number;"
+        },
+        {
+          "line": 472,
+          "declaration": "readonly sequence: number;"
+        },
+        {
+          "line": 597,
+          "declaration": "readonly eventCount: number;"
+        },
+        {
+          "line": 598,
+          "declaration": "readonly rawPayloadBytes: number;"
+        },
+        {
+          "line": 599,
+          "declaration": "readonly hasCreateEvent: number;"
+        },
+        {
+          "line": 693,
+          "declaration": "readonly afterSequence: number;"
+        },
+        {
+          "line": 694,
+          "declaration": "readonly throughSequence: number;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/ProviderSessionRuntime.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/ProviderSessionRuntime.ts",
+      "span_named_operations": [],
+      "readonly_declaration_candidates": [
+        {
+          "line": 62,
+          "declaration": "readonly upsert: ("
+        },
+        {
+          "line": 67,
+          "declaration": "readonly recordImportedTranscript: ("
+        },
+        {
+          "line": 71,
+          "declaration": "readonly getByThreadId: ("
+        },
+        {
+          "line": 78,
+          "declaration": "readonly list: (options?: {"
+        },
+        {
+          "line": 85,
+          "declaration": "readonly deleteByThreadId: ("
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/PullRequestFilesViewed.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/PullRequestFilesViewed.ts",
+      "span_named_operations": [
+        {
+          "line": 87,
+          "name": "PullRequestFilesViewedRepository.list"
+        },
+        {
+          "line": 98,
+          "name": "PullRequestFilesViewedRepository.set"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 34,
+          "declaration": "readonly files: ReadonlyArray<PullRequestFileViewedMark & { readonly viewed: boolean }>;"
+        },
+        {
+          "line": 35,
+          "declaration": "readonly viewedAt: string;"
+        },
+        {
+          "line": 41,
+          "declaration": "readonly files: ReadonlyArray<PullRequestFileViewedMark>;"
+        },
+        {
+          "line": 42,
+          "declaration": "readonly truncated: boolean;"
+        },
+        {
+          "line": 48,
+          "declaration": "readonly list: ("
+        },
+        {
+          "line": 51,
+          "declaration": "readonly set: ("
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/PullRequestReviewGuides.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/PullRequestReviewGuides.ts",
+      "span_named_operations": [
+        {
+          "line": 54,
+          "name": "PullRequestReviewGuideRepository.get"
+        },
+        {
+          "line": 65,
+          "name": "PullRequestReviewGuideRepository.put"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 25,
+          "declaration": "readonly get: ("
+        },
+        {
+          "line": 31,
+          "declaration": "readonly put: ("
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/Sqlite.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/Sqlite.ts",
+      "span_named_operations": [
+        {
+          "line": 54,
+          "name": "SqlitePersistence.runMigrationsAsOwner"
+        },
+        {
+          "line": 104,
+          "name": "makeSqlitePersistenceLive"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 76,
+          "declaration": "readonly count: number;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/persistence/databaseMigrationHead.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/databaseMigrationHead.ts",
+      "span_named_operations": [],
+      "readonly_declaration_candidates": []
+    },
+    {
+      "path": "apps/server/src/persistence/initializeV2Database.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/initializeV2Database.ts",
+      "span_named_operations": [
+        {
+          "line": 44,
+          "name": "removeAbandonedCopies"
+        },
+        {
+          "line": 61,
+          "name": "initializeV2Database"
+        }
+      ],
+      "readonly_declaration_candidates": []
+    },
+    {
+      "path": "apps/server/src/persistence/reconcileV2PreviewMigration.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/persistence/reconcileV2PreviewMigration.ts",
+      "span_named_operations": [
+        {
+          "line": 45,
+          "name": "reconcileV2PreviewMigration"
+        }
+      ],
+      "readonly_declaration_candidates": []
+    },
+    {
+      "path": "apps/server/src/project/AgentSessionScanner.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/project/AgentSessionScanner.ts",
+      "span_named_operations": [
+        {
+          "line": 955,
+          "name": "AgentSessionScanner.transcriptChunkReader"
+        },
+        {
+          "line": 982,
+          "name": "AgentSessionScanner.directoryIdentity"
+        },
+        {
+          "line": 998,
+          "name": "AgentSessionScanner.projectDirectoryStats"
+        },
+        {
+          "line": 1017,
+          "name": "AgentSessionScanner.readGitFiles"
+        },
+        {
+          "line": 1059,
+          "name": "AgentSessionScanner.readGitIdentities"
+        },
+        {
+          "line": 1146,
+          "name": "AgentSessionScanner.resolveDirectoryProjects"
+        },
+        {
+          "line": 1200,
+          "name": "AgentSessionScanner.readCwd"
+        },
+        {
+          "line": 1287,
+          "name": "AgentSessionScanner.readTranscript"
+        },
+        {
+          "line": 1422,
+          "name": "AgentSessionScanner.readCodexThreadNames"
+        },
+        {
+          "line": 1457,
+          "name": "AgentSessionScanner.discoverClaudeTranscripts"
+        },
+        {
+          "line": 1538,
+          "name": "AgentSessionScanner.readCodexProjectRoots"
+        },
+        {
+          "line": 1579,
+          "name": "AgentSessionScanner.discoverCodexTranscripts"
+        },
+        {
+          "line": 1659,
+          "name": "AgentSessionScanner.discoverPiTranscripts"
+        },
+        {
+          "line": 1712,
+          "name": "AgentSessionScanner.groupTranscriptsByCwd"
+        },
+        {
+          "line": 1774,
+          "name": "AgentSessionScanner.collectCandidates"
+        },
+        {
+          "line": 2049,
+          "name": "AgentSessionScanner.prepareRecentThreads"
+        },
+        {
+          "line": 2072,
+          "name": "AgentSessionScanner.belongsToRoot"
+        },
+        {
+          "line": 2083,
+          "name": "AgentSessionScanner.rootWorktree"
+        },
+        {
+          "line": 2166,
+          "name": "AgentSessionScanner.readCodexHistoryBase"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 198,
+          "declaration": "readonly source: AgentSessionSource;"
+        },
+        {
+          "line": 199,
+          "declaration": "readonly providerInstanceId: ProviderInstanceId;"
+        },
+        {
+          "line": 200,
+          "declaration": "readonly fallbackSessionId: string;"
+        },
+        {
+          "line": 201,
+          "declaration": "readonly lastActiveAtMs: number;"
+        },
+        {
+          "line": 205,
+          "declaration": "readonly role: \"user\" | \"assistant\";"
+        },
+        {
+          "line": 206,
+          "declaration": "readonly text: string;"
+        },
+        {
+          "line": 207,
+          "declaration": "readonly createdAt: string;"
+        },
+        {
+          "line": 211,
+          "declaration": "readonly source: AgentSessionSource;"
+        },
+        {
+          "line": 212,
+          "declaration": "readonly providerInstanceId: ProviderInstanceId;"
+        },
+        {
+          "line": 213,
+          "declaration": "readonly providerSessionId: string;"
+        },
+        {
+          "line": 214,
+          "declaration": "readonly title: string;"
+        },
+        {
+          "line": 215,
+          "declaration": "readonly model: string | null;"
+        },
+        {
+          "line": 216,
+          "declaration": "readonly createdAt: string;"
+        },
+        {
+          "line": 217,
+          "declaration": "readonly updatedAt: string;"
+        },
+        {
+          "line": 218,
+          "declaration": "readonly messages: ReadonlyArray<AgentSessionThreadMessage>;"
+        },
+        {
+          "line": 219,
+          "declaration": "readonly omittedMessageCount: number;"
+        },
+        {
+          "line": 224,
+          "declaration": "readonly _tag: \"Importable\";"
+        },
+        {
+          "line": 225,
+          "declaration": "readonly thread: AgentSessionThread;"
+        },
+        {
+          "line": 226,
+          "declaration": "readonly source: AgentSessionImportSource;"
+        },
+        {
+          "line": 228,
+          "declaration": "readonly worktree: { readonly path: string; readonly branch: string | null } | null;"
+        },
+        {
+          "line": 237,
+          "declaration": "readonly scan: Effect.Effect<AgentSessionScanResult, AgentSessionScanError>;"
+        },
+        {
+          "line": 238,
+          "declaration": "readonly recentThreads: ("
+        },
+        {
+          "line": 248,
+          "declaration": "readonly cwd: string;"
+        },
+        {
+          "line": 249,
+          "declaration": "readonly source: AgentSessionSource;"
+        },
+        {
+          "line": 250,
+          "declaration": "readonly providerInstanceId: ProviderInstanceId;"
+        },
+        {
+          "line": 251,
+          "declaration": "readonly homePath: string;"
+        },
+        {
+          "line": 252,
+          "declaration": "readonly threadCount: number;"
+        },
+        {
+          "line": 253,
+          "declaration": "readonly lastActiveAtMs: number | null;"
+        },
+        {
+          "line": 254,
+          "declaration": "readonly transcripts: ReadonlyArray<{"
+        },
+        {
+          "line": 255,
+          "declaration": "readonly filePath: string;"
+        },
+        {
+          "line": 256,
+          "declaration": "readonly mtimeMs: number | null;"
+        },
+        {
+          "line": 262,
+          "declaration": "readonly filePath: string;"
+        },
+        {
+          "line": 263,
+          "declaration": "readonly mtimeMs: number;"
+        },
+        {
+          "line": 264,
+          "declaration": "readonly providerInstanceId: ProviderInstanceId;"
+        },
+        {
+          "line": 265,
+          "declaration": "readonly homePath: string;"
+        },
+        {
+          "line": 266,
+          "declaration": "readonly identity: TranscriptIdentity;"
+        },
+        {
+          "line": 349,
+          "declaration": "readonly sessionId: string | undefined;"
+        },
+        {
+          "line": 350,
+          "declaration": "readonly title: string | undefined;"
+        },
+        {
+          "line": 351,
+          "declaration": "readonly customTitle: string | null;"
+        },
+        {
+          "line": 352,
+          "declaration": "readonly model: string | undefined;"
+        },
+        {
+          "line": 488,
+          "declaration": "readonly message: typeof TranscriptMessage.Type & { readonly role: \"user\" | \"assistant\" };"
+        },
+        {
+          "line": 498,
+          "declaration": "readonly contents: string;"
+        },
+        {
+          "line": 547,
+          "declaration": "readonly index: number;"
+        },
+        {
+          "line": 548,
+          "declaration": "readonly turnId: string;"
+        },
+        {
+          "line": 549,
+          "declaration": "readonly text: string;"
+        },
+        {
+          "line": 1065,
+          "declaration": "readonly _tag: \"Worktree\";"
+        },
+        {
+          "line": 1066,
+          "declaration": "readonly gitDir: string;"
+        },
+        {
+          "line": 1067,
+          "declaration": "readonly mainCheckout: string | null;"
+        },
+        {
+          "line": 1068,
+          "declaration": "readonly git: AgentSessionProjectGit | null;"
+        },
+        {
+          "line": 1162,
+          "declaration": "readonly key: string;"
+        },
+        {
+          "line": 1163,
+          "declaration": "readonly path: string;"
+        },
+        {
+          "line": 1164,
+          "declaration": "readonly git: AgentSessionProjectGit | null;"
+        },
+        {
+          "line": 1165,
+          "declaration": "readonly worktreeGitDir: string | null;"
+        },
+        {
+          "line": 1801,
+          "declaration": "readonly instanceId: ProviderInstanceId;"
+        },
+        {
+          "line": 1802,
+          "declaration": "readonly config: ProviderInstanceConfig;"
+        },
+        {
+          "line": 1885,
+          "declaration": "readonly transcripts: ReadonlyArray<TranscriptCandidate>;"
+        },
+        {
+          "line": 1886,
+          "declaration": "readonly truncated: boolean;"
+        },
+        {
+          "line": 1887,
+          "declaration": "readonly operationsUsed: number;"
+        },
+        {
+          "line": 2106,
+          "declaration": "readonly candidate: RawCandidate;"
+        },
+        {
+          "line": 2107,
+          "declaration": "readonly transcript: RawCandidate[\"transcripts\"][number] & { readonly mtimeMs: number };"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/provider/AcpRegistrySessions.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/AcpRegistrySessions.ts",
+      "span_named_operations": [
+        {
+          "line": 79,
+          "name": "AcpRegistrySessions.findOwner"
+        },
+        {
+          "line": 107,
+          "name": "AcpRegistrySessions.project"
+        },
+        {
+          "line": 128,
+          "name": "AcpRegistrySessions.sessionManager"
+        },
+        {
+          "line": 147,
+          "name": "AcpRegistrySessions.importSession"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 31,
+          "declaration": "readonly driver: ProviderDriverKind;"
+        },
+        {
+          "line": 32,
+          "declaration": "readonly instanceId: ProviderInstanceId;"
+        },
+        {
+          "line": 33,
+          "declaration": "readonly sessionId: string;"
+        },
+        {
+          "line": 44,
+          "declaration": "readonly project: (projectId: ProjectId) => Effect.Effect<Project, AcpRegistryOperationError>;"
+        },
+        {
+          "line": 45,
+          "declaration": "readonly sessionManager: (instanceId: ProviderInstanceId) => Effect.Effect<"
+        },
+        {
+          "line": 47,
+          "declaration": "readonly instance: ProviderInstance;"
+        },
+        {
+          "line": 48,
+          "declaration": "readonly manager: NonNullable<ProviderInstance[\"acpSessionManagement\"]>;"
+        },
+        {
+          "line": 52,
+          "declaration": "readonly findOwner: (input: {"
+        },
+        {
+          "line": 53,
+          "declaration": "readonly driver: ProviderDriverKind;"
+        },
+        {
+          "line": 54,
+          "declaration": "readonly instanceId: ProviderInstanceId;"
+        },
+        {
+          "line": 55,
+          "declaration": "readonly sessionId: string;"
+        },
+        {
+          "line": 61,
+          "declaration": "readonly importSession: ("
+        },
+        {
+          "line": 80,
+          "declaration": "readonly driver: ProviderDriverKind;"
+        },
+        {
+          "line": 81,
+          "declaration": "readonly instanceId: ProviderInstanceId;"
+        },
+        {
+          "line": 82,
+          "declaration": "readonly sessionId: string;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/provider/Drivers/antigravityUsageReader.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/Drivers/antigravityUsageReader.ts",
+      "span_named_operations": [
+        {
+          "line": 246,
+          "name": "readDatabase"
+        },
+        {
+          "line": 417,
+          "name": "readAntigravityUsage"
+        },
+        {
+          "line": 498,
+          "name": "readAntigravityUsage.readFile"
+        },
+        {
+          "line": 520,
+          "name": "antigravityUsageReader.walk"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 277,
+          "declaration": "readonly row_id: number;"
+        },
+        {
+          "line": 278,
+          "declaration": "readonly idx: unknown;"
+        },
+        {
+          "line": 279,
+          "declaration": "readonly data: unknown;"
+        },
+        {
+          "line": 410,
+          "declaration": "readonly fingerprint: string;"
+        },
+        {
+          "line": 411,
+          "declaration": "readonly data: Effect.Success<ReturnType<typeof readDatabase>>;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/provider/ProviderInstanceRegistryHydration.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/ProviderInstanceRegistryHydration.ts",
+      "span_named_operations": [
+        {
+          "line": 95,
+          "name": "ProviderInstanceRegistryHydration.seedDevReplayInstance"
+        }
+      ],
+      "readonly_declaration_candidates": []
+    },
+    {
+      "path": "apps/server/src/provider/ProviderOrchestrationAdapterInfrastructure.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/ProviderOrchestrationAdapterInfrastructure.ts",
+      "span_named_operations": [],
+      "readonly_declaration_candidates": []
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravityChildWork.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/acp/AntigravityChildWork.ts",
+      "span_named_operations": [
+        {
+          "line": 437,
+          "name": "readAntigravityChildWork"
+        },
+        {
+          "line": 757,
+          "name": "readAntigravityPendingReply"
+        },
+        {
+          "line": 785,
+          "name": "readAntigravityChildrenAtWork"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 45,
+          "declaration": "readonly role: string;"
+        },
+        {
+          "line": 46,
+          "declaration": "readonly prompt: string;"
+        },
+        {
+          "line": 126,
+          "declaration": "readonly toolCallId: string | undefined;"
+        },
+        {
+          "line": 127,
+          "declaration": "readonly launches: ReadonlyArray<AntigravityChildLaunch>;"
+        },
+        {
+          "line": 128,
+          "declaration": "readonly children: ReadonlyArray<{"
+        },
+        {
+          "line": 129,
+          "declaration": "readonly conversationId: string;"
+        },
+        {
+          "line": 183,
+          "declaration": "readonly title: string | null;"
+        },
+        {
+          "line": 184,
+          "declaration": "readonly prompt: string;"
+        },
+        {
+          "line": 206,
+          "declaration": "readonly rootSessionId: string;"
+        },
+        {
+          "line": 207,
+          "declaration": "readonly nativeTaskId: string;"
+        },
+        {
+          "line": 208,
+          "declaration": "readonly launch: BatchLaunch;"
+        },
+        {
+          "line": 209,
+          "declaration": "readonly siblings: ReadonlyArray<BatchLaunch & { readonly nativeTaskId: string }>;"
+        },
+        {
+          "line": 438,
+          "declaration": "readonly profileDirectory: string;"
+        },
+        {
+          "line": 439,
+          "declaration": "readonly rootSessionId: string;"
+        },
+        {
+          "line": 440,
+          "declaration": "readonly nativeTaskId: string;"
+        },
+        {
+          "line": 441,
+          "declaration": "readonly launch: BatchLaunch;"
+        },
+        {
+          "line": 443,
+          "declaration": "readonly siblings: ReadonlyArray<BatchLaunch & { readonly nativeTaskId: string }>;"
+        },
+        {
+          "line": 787,
+          "declaration": "readonly profileDirectory: string;"
+        },
+        {
+          "line": 788,
+          "declaration": "readonly rootSessionId: string;"
+        },
+        {
+          "line": 789,
+          "declaration": "readonly toolCallIds: ReadonlyArray<string>;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravitySessionFiles.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/acp/AntigravitySessionFiles.ts",
+      "span_named_operations": [
+        {
+          "line": 118,
+          "name": "removeAntigravitySessionFiles"
+        },
+        {
+          "line": 178,
+          "name": "retireAntigravityRuntimeTempDirs"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 29,
+          "declaration": "readonly sessionId: string | undefined;"
+        },
+        {
+          "line": 30,
+          "declaration": "readonly workspaceUris: ReadonlyArray<string>;"
+        },
+        {
+          "line": 120,
+          "declaration": "readonly profileDirectory: string;"
+        },
+        {
+          "line": 121,
+          "declaration": "readonly sessionId: string | undefined;"
+        },
+        {
+          "line": 122,
+          "declaration": "readonly cwd: string;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/provider/acp/AntigravityTurnOutcome.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/acp/AntigravityTurnOutcome.ts",
+      "span_named_operations": [
+        {
+          "line": 204,
+          "name": "AntigravityTurnOutcome.watch"
+        },
+        {
+          "line": 246,
+          "name": "AntigravityTurnOutcome.check"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 49,
+          "declaration": "readonly type: number;"
+        },
+        {
+          "line": 50,
+          "declaration": "readonly payload: Uint8Array | null;"
+        },
+        {
+          "line": 51,
+          "declaration": "readonly reachedModel: boolean;"
+        },
+        {
+          "line": 134,
+          "declaration": "readonly failure: OrchestrationV2ProviderFailure;"
+        },
+        {
+          "line": 135,
+          "declaration": "readonly threadDisposition: \"reusable\" | \"broken\";"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/pullRequest/linkedThreads.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/pullRequest/linkedThreads.ts",
+      "span_named_operations": [
+        {
+          "line": 24,
+          "name": "listLinkedPullRequestThreads"
+        }
+      ],
+      "readonly_declaration_candidates": []
+    },
+    {
+      "path": "apps/server/src/scheduledTasks/ScheduledTaskService.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/scheduledTasks/ScheduledTaskService.ts",
+      "span_named_operations": [
+        {
+          "line": 449,
+          "name": "ScheduledTaskService.listDueTasks"
+        },
+        {
+          "line": 566,
+          "name": "ScheduledTaskService.listRows"
+        },
+        {
+          "line": 606,
+          "name": "ScheduledTaskService.findTask"
+        },
+        {
+          "line": 634,
+          "name": "ScheduledTaskService.loadTask"
+        },
+        {
+          "line": 825,
+          "name": "ScheduledTaskService.releaseStuckRun"
+        },
+        {
+          "line": 863,
+          "name": "ScheduledTaskService.queuedOccurrence"
+        },
+        {
+          "line": 890,
+          "name": "ScheduledTaskService.bindThread"
+        },
+        {
+          "line": 910,
+          "name": "ScheduledTaskService.recordRunOutcome"
+        },
+        {
+          "line": 971,
+          "name": "ScheduledTaskService.runTask"
+        },
+        {
+          "line": 1269,
+          "name": "ScheduledTaskService.rescheduleMissedRun"
+        },
+        {
+          "line": 1309,
+          "name": "ScheduledTaskService.runDueTasks"
+        },
+        {
+          "line": 1436,
+          "name": "ScheduledTaskService.requireDestinationThread"
+        },
+        {
+          "line": 1460,
+          "name": "ScheduledTaskService.upsert"
+        },
+        {
+          "line": 1631,
+          "name": "ScheduledTaskService.setEnabled"
+        },
+        {
+          "line": 1719,
+          "name": "ScheduledTaskService.deleteForThread"
+        },
+        {
+          "line": 1747,
+          "name": "ScheduledTaskService.moveThreadTasks"
+        },
+        {
+          "line": 1763,
+          "name": "ScheduledTaskService.runNow"
+        },
+        {
+          "line": 1781,
+          "name": "ScheduledTaskService.rotateWebhookToken"
+        },
+        {
+          "line": 1847,
+          "name": "ScheduledTaskService.getWebhookDelivery"
+        },
+        {
+          "line": 2052,
+          "name": "ScheduledTaskService.webhookPermit"
+        },
+        {
+          "line": 2066,
+          "name": "ScheduledTaskService.releaseFailedDelivery"
+        },
+        {
+          "line": 2081,
+          "name": "ScheduledTaskService.runWebhookDelivery"
+        },
+        {
+          "line": 2571,
+          "name": "ScheduledTaskService.dispatchPendingWebhooks"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 114,
+          "declaration": "readonly relayHookBaseUrl: string | null;"
+        },
+        {
+          "line": 120,
+          "declaration": "readonly relayUrl: string;"
+        },
+        {
+          "line": 121,
+          "declaration": "readonly tunnelName: string | undefined;"
+        },
+        {
+          "line": 144,
+          "declaration": "readonly accepted: ReadonlyArray<{ readonly at: number }>;"
+        },
+        {
+          "line": 145,
+          "declaration": "readonly rejectedLogged: boolean;"
+        },
+        {
+          "line": 149,
+          "declaration": "readonly hookId: string;"
+        },
+        {
+          "line": 150,
+          "declaration": "readonly token: string;"
+        },
+        {
+          "line": 151,
+          "declaration": "readonly body: Uint8Array;"
+        },
+        {
+          "line": 173,
+          "declaration": "readonly _tag: \"accepted\";"
+        },
+        {
+          "line": 174,
+          "declaration": "readonly deliveryId: ScheduledTaskWebhookDeliveryId;"
+        },
+        {
+          "line": 175,
+          "declaration": "readonly outcome: \"accepted\" | \"duplicate\" | \"coalesced\" | \"prompt_too_long\" | \"filtered\";"
+        },
+        {
+          "line": 182,
+          "declaration": "readonly _tag: \"rate_limited\";"
+        },
+        {
+          "line": 183,
+          "declaration": "readonly outcome: \"rate_limited\" | \"queue_full\";"
+        },
+        {
+          "line": 222,
+          "declaration": "readonly task_id: string;"
+        },
+        {
+          "line": 223,
+          "declaration": "readonly title: string;"
+        },
+        {
+          "line": 224,
+          "declaration": "readonly prompt: string;"
+        },
+        {
+          "line": 225,
+          "declaration": "readonly enabled: number;"
+        },
+        {
+          "line": 226,
+          "declaration": "readonly schedule_json: string;"
+        },
+        {
+          "line": 227,
+          "declaration": "readonly project_id: string;"
+        },
+        {
+          "line": 228,
+          "declaration": "readonly thread_id: string | null;"
+        },
+        {
+          "line": 229,
+          "declaration": "readonly thread_mode: string;"
+        },
+        {
+          "line": 230,
+          "declaration": "readonly workspace_strategy_json: string;"
+        },
+        {
+          "line": 231,
+          "declaration": "readonly model_selection_json: string;"
+        },
+        {
+          "line": 232,
+          "declaration": "readonly runtime_mode: string;"
+        },
+        {
+          "line": 233,
+          "declaration": "readonly interaction_mode: string;"
+        },
+        {
+          "line": 234,
+          "declaration": "readonly created_by: string;"
+        },
+        {
+          "line": 235,
+          "declaration": "readonly creation_source: string;"
+        },
+        {
+          "line": 236,
+          "declaration": "readonly created_at: string;"
+        },
+        {
+          "line": 237,
+          "declaration": "readonly updated_at: string;"
+        },
+        {
+          "line": 238,
+          "declaration": "readonly next_run_at: string | null;"
+        },
+        {
+          "line": 239,
+          "declaration": "readonly last_run_at: string | null;"
+        },
+        {
+          "line": 240,
+          "declaration": "readonly last_run_status: string;"
+        },
+        {
+          "line": 241,
+          "declaration": "readonly last_run_error: string | null;"
+        },
+        {
+          "line": 242,
+          "declaration": "readonly run_count: number;"
+        },
+        {
+          "line": 243,
+          "declaration": "readonly webhook_token: string | null;"
+        },
+        {
+          "line": 244,
+          "declaration": "readonly webhook_secret: string | null;"
+        },
+        {
+          "line": 248,
+          "declaration": "readonly delivery_id: string;"
+        },
+        {
+          "line": 249,
+          "declaration": "readonly task_id: string;"
+        },
+        {
+          "line": 250,
+          "declaration": "readonly received_at: string;"
+        },
+        {
+          "line": 251,
+          "declaration": "readonly method: string;"
+        },
+        {
+          "line": 252,
+          "declaration": "readonly query: string;"
+        },
+        {
+          "line": 253,
+          "declaration": "readonly headers_json: string;"
+        },
+        {
+          "line": 254,
+          "declaration": "readonly body: string;"
+        },
+        {
+          "line": 255,
+          "declaration": "readonly body_bytes: number;"
+        },
+        {
+          "line": 256,
+          "declaration": "readonly body_truncated: number;"
+        },
+        {
+          "line": 257,
+          "declaration": "readonly outcome: string;"
+        },
+        {
+          "line": 258,
+          "declaration": "readonly signature_verified: number;"
+        },
+        {
+          "line": 259,
+          "declaration": "readonly missing_fields_json: string;"
+        },
+        {
+          "line": 260,
+          "declaration": "readonly rendered_prompt: string | null;"
+        },
+        {
+          "line": 261,
+          "declaration": "readonly pending_window: number;"
+        },
+        {
+          "line": 262,
+          "declaration": "readonly error: string | null;"
+        },
+        {
+          "line": 268,
+          "declaration": "readonly list: () => Effect.Effect<ScheduledTaskListResult, ScheduledTaskError>;"
+        },
+        {
+          "line": 269,
+          "declaration": "readonly subscribeList: () => Stream.Stream<ScheduledTaskListResult, ScheduledTaskError>;"
+        },
+        {
+          "line": 270,
+          "declaration": "readonly upsert: ("
+        },
+        {
+          "line": 273,
+          "declaration": "readonly setEnabled: ("
+        },
+        {
+          "line": 276,
+          "declaration": "readonly delete: ("
+        },
+        {
+          "line": 280,
+          "declaration": "readonly deleteForThread: (threadId: ThreadId) => Effect.Effect<void, ScheduledTaskError>;"
+        },
+        {
+          "line": 282,
+          "declaration": "readonly moveThreadTasks: (input: {"
+        },
+        {
+          "line": 283,
+          "declaration": "readonly threadIds: ReadonlyArray<ThreadId>;"
+        },
+        {
+          "line": 284,
+          "declaration": "readonly projectId: ProjectId;"
+        },
+        {
+          "line": 287,
+          "declaration": "readonly runNow: ("
+        },
+        {
+          "line": 293,
+          "declaration": "readonly rotateWebhookToken: ("
+        },
+        {
+          "line": 296,
+          "declaration": "readonly listWebhookDeliveries: ("
+        },
+        {
+          "line": 299,
+          "declaration": "readonly getWebhookDelivery: ("
+        },
+        {
+          "line": 303,
+          "declaration": "readonly triggerWebhook: ("
+        },
+        {
+          "line": 652,
+          "declaration": "readonly token: string | null;"
+        },
+        {
+          "line": 653,
+          "declaration": "readonly secret: string | null;"
+        },
+        {
+          "line": 654,
+          "declaration": "readonly secretChanged: boolean;"
+        },
+        {
+          "line": 797,
+          "declaration": "readonly id: ScheduledTaskId;"
+        },
+        {
+          "line": 798,
+          "declaration": "readonly completedAtIso: string;"
+        },
+        {
+          "line": 799,
+          "declaration": "readonly nextRunAtIso: string | null;"
+        },
+        {
+          "line": 800,
+          "declaration": "readonly status: \"succeeded\" | \"failed\";"
+        },
+        {
+          "line": 801,
+          "declaration": "readonly error: string | null;"
+        },
+        {
+          "line": 802,
+          "declaration": "readonly startedAtIso: string;"
+        },
+        {
+          "line": 975,
+          "declaration": "readonly deliveryId: string;"
+        },
+        {
+          "line": 976,
+          "declaration": "readonly prompt: string;"
+        },
+        {
+          "line": 977,
+          "declaration": "readonly dispatched: Ref.Ref<boolean>;"
+        },
+        {
+          "line": 1930,
+          "declaration": "readonly id: string;"
+        },
+        {
+          "line": 1931,
+          "declaration": "readonly taskId: ScheduledTaskId;"
+        },
+        {
+          "line": 1932,
+          "declaration": "readonly receivedAt: string;"
+        },
+        {
+          "line": 1933,
+          "declaration": "readonly request: WebhookTriggerRequest;"
+        },
+        {
+          "line": 1934,
+          "declaration": "readonly outcome: ScheduledTaskWebhookDeliveryOutcome;"
+        },
+        {
+          "line": 1935,
+          "declaration": "readonly signatureVerified: boolean;"
+        },
+        {
+          "line": 1936,
+          "declaration": "readonly missing: ReadonlyArray<string>;"
+        },
+        {
+          "line": 1937,
+          "declaration": "readonly renderedPrompt: string | null;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/scheduledTasks/webhookDedupe.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/scheduledTasks/webhookDedupe.ts",
+      "span_named_operations": [
+        {
+          "line": 17,
+          "name": "ScheduledTaskService.releaseWebhookReplay"
+        },
+        {
+          "line": 45,
+          "name": "ScheduledTaskService.acceptWebhookDedupe"
+        },
+        {
+          "line": 94,
+          "name": "ScheduledTaskService.acceptImmediateWebhookDedupe"
+        }
+      ],
+      "readonly_declaration_candidates": []
+    },
+    {
+      "path": "apps/server/src/serverOwnership.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/serverOwnership.ts",
+      "span_named_operations": [
+        {
+          "line": 81,
+          "name": "legacyOwnerIsLive"
+        },
+        {
+          "line": 105,
+          "name": "olderBootServiceHome"
+        },
+        {
+          "line": 228,
+          "name": "holdServerOwnershipLock"
+        },
+        {
+          "line": 237,
+          "name": "acquireServerOwnership"
+        }
+      ],
+      "readonly_declaration_candidates": []
+    },
+    {
+      "path": "apps/server/src/serverSettings.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/serverSettings.ts",
+      "span_named_operations": [
+        {
+          "line": 292,
+          "name": "serverSettings.makeTest"
+        },
+        {
+          "line": 758,
+          "name": "serverSettings.moveInlineSettingsSecrets"
+        },
+        {
+          "line": 947,
+          "name": "serverSettings.materializeSettingsSecrets"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 104,
+          "declaration": "readonly enabled: boolean;"
+        },
+        {
+          "line": 258,
+          "declaration": "readonly start: Effect.Effect<void, ServerSettingsError>;"
+        },
+        {
+          "line": 260,
+          "declaration": "readonly ready: Effect.Effect<void, ServerSettingsError>;"
+        },
+        {
+          "line": 265,
+          "declaration": "readonly getSettings: Effect.Effect<ServerSettings, ServerSettingsError>;"
+        },
+        {
+          "line": 267,
+          "declaration": "readonly updateSettings: ("
+        },
+        {
+          "line": 271,
+          "declaration": "readonly updateProviderInstance: ("
+        },
+        {
+          "line": 276,
+          "declaration": "readonly withSettingsSnapshot: <A, E, R>("
+        },
+        {
+          "line": 280,
+          "declaration": "readonly streamChanges: Stream.Stream<ServerSettings>;"
+        },
+        {
+          "line": 283,
+          "declaration": "readonly subscribeChanges: Effect.Effect<Stream.Stream<ServerSettings>, never, Scope.Scope>;"
+        },
+        {
+          "line": 408,
+          "declaration": "readonly settings: ServerSettings;"
+        },
+        {
+          "line": 409,
+          "declaration": "readonly secretMoves: ReadonlyArray<{ readonly from: string; readonly to: string }>;"
+        },
+        {
+          "line": 444,
+          "declaration": "readonly providerName: string;"
+        },
+        {
+          "line": 445,
+          "declaration": "readonly providerInstanceId: string | null;"
+        },
+        {
+          "line": 601,
+          "declaration": "readonly projectId: string;"
+        },
+        {
+          "line": 602,
+          "declaration": "readonly defaultModelSelection: string | null;"
+        },
+        {
+          "line": 603,
+          "declaration": "readonly defaultThreadEnvMode: string | null;"
+        },
+        {
+          "line": 604,
+          "declaration": "readonly autoPull: number;"
+        },
+        {
+          "line": 605,
+          "declaration": "readonly scripts: string;"
+        },
+        {
+          "line": 836,
+          "declaration": "readonly providerName: string;"
+        },
+        {
+          "line": 837,
+          "declaration": "readonly providerInstanceId: string | null;"
+        },
+        {
+          "line": 1026,
+          "declaration": "readonly secretName: string;"
+        },
+        {
+          "line": 1118,
+          "declaration": "readonly secretName: string;"
+        },
+        {
+          "line": 1119,
+          "declaration": "readonly previousValue: Option.Option<Uint8Array>;"
+        },
+        {
+          "line": 1144,
+          "declaration": "readonly secretName: string;"
+        },
+        {
+          "line": 1145,
+          "declaration": "readonly previousValue: Option.Option<Uint8Array>;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/serviceLauncher.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/serviceLauncher.ts",
+      "span_named_operations": [],
+      "readonly_declaration_candidates": [
+        {
+          "line": 70,
+          "declaration": "readonly version: string;"
+        },
+        {
+          "line": 72,
+          "declaration": "readonly process: NodeChildProcess.ChildProcess;"
+        },
+        {
+          "line": 134,
+          "declaration": "readonly path: string;"
+        },
+        {
+          "line": 136,
+          "declaration": "readonly reload: () => Promise<void>;"
+        },
+        {
+          "line": 454,
+          "declaration": "readonly readFreeBytes: (directory: string) => Promise<number>;"
+        },
+        {
+          "line": 455,
+          "declaration": "readonly canClone: (dbPath: string, backupRoot: string) => Promise<boolean>;"
+        },
+        {
+          "line": 743,
+          "declaration": "readonly pending: PendingServiceUpdate;"
+        },
+        {
+          "line": 744,
+          "declaration": "readonly status: S;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/storageCleanup.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/storageCleanup.ts",
+      "span_named_operations": [
+        {
+          "line": 389,
+          "name": "storageCleanup.measureWorktree"
+        },
+        {
+          "line": 435,
+          "name": "storageCleanup.isDanglingGitfile"
+        },
+        {
+          "line": 517,
+          "name": "StorageCleanup.readThreads"
+        },
+        {
+          "line": 523,
+          "name": "StorageCleanup.containsProjectRoot"
+        },
+        {
+          "line": 543,
+          "name": "StorageCleanup.reportOrphanWorktrees"
+        },
+        {
+          "line": 713,
+          "name": "StorageCleanup.branchChanged"
+        },
+        {
+          "line": 794,
+          "name": "StorageCleanup.followBranch"
+        },
+        {
+          "line": 808,
+          "name": "StorageCleanup.hiddenTrackedChange"
+        },
+        {
+          "line": 903,
+          "name": "StorageCleanup.worktreeRepository"
+        },
+        {
+          "line": 915,
+          "name": "StorageCleanup.localChangesReason"
+        },
+        {
+          "line": 959,
+          "name": "StorageCleanup.submoduleRemoval"
+        },
+        {
+          "line": 1077,
+          "name": "StorageCleanup.cleanupGit"
+        },
+        {
+          "line": 1098,
+          "name": "StorageCleanup.cleanWorktrees"
+        },
+        {
+          "line": 1131,
+          "name": "StorageCleanup.scratchKeepReason"
+        },
+        {
+          "line": 1153,
+          "name": "StorageCleanup.worktreePathReason"
+        },
+        {
+          "line": 1170,
+          "name": "StorageCleanup.inspectCheckout"
+        },
+        {
+          "line": 1796,
+          "name": "StorageCleanup.cleanFiles"
+        },
+        {
+          "line": 1808,
+          "name": "StorageCleanup.visitFiles"
+        },
+        {
+          "line": 1837,
+          "name": "StorageCleanup.cleanCheckpointRefs"
+        },
+        {
+          "line": 1952,
+          "name": "StorageCleanup.sweep"
+        },
+        {
+          "line": 2086,
+          "name": "StorageCleanup.start"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 296,
+          "declaration": "readonly branch: string;"
+        },
+        {
+          "line": 297,
+          "declaration": "readonly defaultBranch: string;"
+        },
+        {
+          "line": 298,
+          "declaration": "readonly headSha: string;"
+        },
+        {
+          "line": 299,
+          "declaration": "readonly integrated: boolean;"
+        },
+        {
+          "line": 314,
+          "declaration": "readonly runNow: Effect.Effect<StorageCleanupReport, ServerSettingsError>;"
+        },
+        {
+          "line": 315,
+          "declaration": "readonly latestReport: Effect.Effect<StorageCleanupReport | null>;"
+        },
+        {
+          "line": 316,
+          "declaration": "readonly reports: Stream.Stream<StorageCleanupReport | null>;"
+        },
+        {
+          "line": 317,
+          "declaration": "readonly drain: Effect.Effect<void>;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/usage/CodexUsageHistory.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/usage/CodexUsageHistory.ts",
+      "span_named_operations": [
+        {
+          "line": 45,
+          "name": "CodexUsageHistory.resolve"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 26,
+          "declaration": "readonly sessionId: string;"
+        },
+        {
+          "line": 27,
+          "declaration": "readonly nativeTurnId: string;"
+        },
+        {
+          "line": 28,
+          "declaration": "readonly model: string;"
+        },
+        {
+          "line": 34,
+          "declaration": "readonly resolve: ("
+        },
+        {
+          "line": 57,
+          "declaration": "readonly native_thread_id: string | null;"
+        },
+        {
+          "line": 58,
+          "declaration": "readonly native_turn_id: string;"
+        },
+        {
+          "line": 59,
+          "declaration": "readonly selection_json: string | null;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/workspace/KnownWorkspaces.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/workspace/KnownWorkspaces.ts",
+      "span_named_operations": [
+        {
+          "line": 71,
+          "name": "KnownWorkspaces.contains"
+        },
+        {
+          "line": 143,
+          "name": "KnownWorkspaces.assertContains"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 43,
+          "declaration": "readonly contains: (realPath: string) => Effect.Effect<boolean>;"
+        },
+        {
+          "line": 45,
+          "declaration": "readonly assertContains: (cwd: string) => Effect.Effect<void, UnknownWorkspaceError>;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/workspace/TaskFolderStore.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/workspace/TaskFolderStore.ts",
+      "span_named_operations": [
+        {
+          "line": 96,
+          "name": "TaskFolderStore.findContaining"
+        },
+        {
+          "line": 108,
+          "name": "TaskFolderStore.put"
+        },
+        {
+          "line": 135,
+          "name": "TaskFolderStore.remove"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 20,
+          "declaration": "readonly findContaining: (target: string) => Effect.Effect<TaskFolder | null, TaskFolderError>;"
+        },
+        {
+          "line": 21,
+          "declaration": "readonly list: Effect.Effect<ReadonlyArray<TaskFolder>, TaskFolderError>;"
+        },
+        {
+          "line": 22,
+          "declaration": "readonly put: (taskFolder: TaskFolder) => Effect.Effect<void, TaskFolderError>;"
+        },
+        {
+          "line": 23,
+          "declaration": "readonly remove: (root: string) => Effect.Effect<void, TaskFolderError>;"
+        }
+      ]
+    },
+    {
+      "path": "apps/server/src/ws.ts",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/ws.ts",
+      "span_named_operations": [
+        {
+          "line": 325,
+          "name": "ws.resolveEditorConfig"
+        },
+        {
+          "line": 535,
+          "name": "ws.assets.persistChatAttachments"
+        },
+        {
+          "line": 551,
+          "name": "ws.assets.persistChatAttachment"
+        },
+        {
+          "line": 890,
+          "name": "ws.orchestrationV2.enrichProjectShells"
+        },
+        {
+          "line": 917,
+          "name": "ws.orchestrationV2.subscribeThread"
+        },
+        {
+          "line": 1001,
+          "name": "ws.orchestrationV2.threadSnapshotThenLive"
+        },
+        {
+          "line": 1150,
+          "name": "ws.orchestrationV2.subscribeShell"
+        },
+        {
+          "line": 1170,
+          "name": "ws.orchestrationV2.loadProjectMetadataSnapshot"
+        },
+        {
+          "line": 1185,
+          "name": "ws.orchestrationV2.loadShellSnapshot"
+        },
+        {
+          "line": 1211,
+          "name": "ws.orchestrationV2.projectShellItem"
+        },
+        {
+          "line": 1236,
+          "name": "ws.orchestrationV2.projectShellItems"
+        },
+        {
+          "line": 1632,
+          "name": "ws.acpRegistry.listSessions"
+        },
+        {
+          "line": 1681,
+          "name": "ws.acpRegistry.deleteSession"
+        },
+        {
+          "line": 1730,
+          "name": "ws.acpRegistry.listProviders"
+        },
+        {
+          "line": 1745,
+          "name": "ws.acpRegistry.setProvider"
+        },
+        {
+          "line": 1787,
+          "name": "ws.acpRegistry.disableProvider"
+        },
+        {
+          "line": 1836,
+          "name": "ws.loadServerConfig"
+        },
+        {
+          "line": 1975,
+          "name": "ws.orchestrationV2.readOmittableShellRows"
+        },
+        {
+          "line": 1994,
+          "name": "ws.projects.mutate"
+        }
+      ],
+      "readonly_declaration_candidates": [
+        {
+          "line": 428,
+          "declaration": "readonly editors: Effect.Effect<ReadonlyArray<EditorId>, E1, R1>;"
+        },
+        {
+          "line": 429,
+          "declaration": "readonly fileManagerRevealKind: Effect.Effect<FileManagerRevealKind | undefined, E2, R2>;"
+        },
+        {
+          "line": 430,
+          "declaration": "readonly remoteOpenTargets: Effect.Effect<ReadonlyArray<T>, E3, R3>;"
+        },
+        {
+          "line": 431,
+          "declaration": "readonly directEndpoints: Effect.Effect<ReadonlyArray<D>, E4, R4>;"
+        },
+        {
+          "line": 536,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 537,
+          "declaration": "readonly messageId: MessageId;"
+        },
+        {
+          "line": 538,
+          "declaration": "readonly attachments: ReadonlyArray<{"
+        },
+        {
+          "line": 539,
+          "declaration": "readonly type: \"image\";"
+        },
+        {
+          "line": 540,
+          "declaration": "readonly name: string;"
+        },
+        {
+          "line": 541,
+          "declaration": "readonly mimeType: string;"
+        },
+        {
+          "line": 542,
+          "declaration": "readonly sizeBytes: number;"
+        },
+        {
+          "line": 543,
+          "declaration": "readonly dataUrl: string;"
+        },
+        {
+          "line": 606,
+          "declaration": "readonly failure: ProjectEntriesFailure;"
+        },
+        {
+          "line": 663,
+          "declaration": "readonly failure: FilesystemBrowseFailure;"
+        },
+        {
+          "line": 690,
+          "declaration": "readonly failure: ProjectFileFailure;"
+        },
+        {
+          "line": 919,
+          "declaration": "readonly threadId: ThreadId;"
+        },
+        {
+          "line": 1332,
+          "declaration": "readonly snapshot: OrchestrationV2ShellSnapshot;"
+        },
+        {
+          "line": 1333,
+          "declaration": "readonly resolvedRepositoryIdentityRoots: ReadonlyArray<string>;"
+        },
+        {
+          "line": 1342,
+          "declaration": "readonly snapshot: OrchestrationV2ShellSnapshot;"
+        },
+        {
+          "line": 1343,
+          "declaration": "readonly resolvedRepositoryIdentityRoots: ReadonlyArray<string>;"
+        },
+        {
+          "line": 1837,
+          "declaration": "readonly usageLimitsCommand: boolean;"
+        },
+        {
+          "line": 1838,
+          "declaration": "readonly workspaceSnapshotsOnDemand: boolean;"
+        },
+        {
+          "line": 1839,
+          "declaration": "readonly deferNetworkDiscovery: boolean;"
+        }
+      ]
+    }
+  ]
+}

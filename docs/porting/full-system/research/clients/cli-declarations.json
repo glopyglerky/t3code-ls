@@ -1,0 +1,7414 @@
+[
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/acpMcpBridge.ts",
+    "blob_sha": "77ef020f4b6a6c71d9f7c3a3cee1b7af8ddc3a65",
+    "lines": [
+      {
+        "line": 6,
+        "text": "/** The credential stays in the environment, never on the command line. */"
+      },
+      {
+        "line": 7,
+        "text": "export const acpMcpBridgeCommand = Command.make(\"acp-mcp-bridge\").pipe("
+      },
+      {
+        "line": 8,
+        "text": "  Command.withDescription(\"Bridge T3 Code's MCP endpoint to stdio for ACP agents.\"),"
+      },
+      {
+        "line": 9,
+        "text": "  Command.unlisted,"
+      },
+      {
+        "line": 10,
+        "text": "  Command.withHandler(() => Effect.promise(() => runAcpMcpCliFastPath(\"acp-mcp-bridge\", []))),"
+      },
+      {
+        "line": 12,
+        "text": ""
+      },
+      {
+        "line": 13,
+        "text": "export const acpMcpCallCommand = Command.make(\"acp-mcp-call\", {"
+      },
+      {
+        "line": 14,
+        "text": "  tool: Argument.String(\"tool\"),"
+      },
+      {
+        "line": 15,
+        "text": "  argumentsJson: Argument.String(\"arguments-json\"),"
+      },
+      {
+        "line": 16,
+        "text": "}).pipe("
+      },
+      {
+        "line": 17,
+        "text": "  Command.withDescription(\"Call one T3 Code MCP tool from an ACP agent terminal.\"),"
+      },
+      {
+        "line": 18,
+        "text": "  Command.unlisted,"
+      },
+      {
+        "line": 19,
+        "text": "  Command.withHandler(({ tool, argumentsJson }) =>"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/app.ts",
+    "blob_sha": "e4182945215c31b7e1190af00d36d235431d34d0",
+    "lines": [
+      {
+        "line": 131,
+        "text": "      connected = true;"
+      },
+      {
+        "line": 132,
+        "text": "      socket.write(`${JSON.stringify(input.request)}\\n`);"
+      },
+      {
+        "line": 133,
+        "text": "    });"
+      },
+      {
+        "line": 134,
+        "text": "    socket.on(\"data\", (chunk) => {"
+      },
+      {
+        "line": 268,
+        "text": ""
+      },
+      {
+        "line": 269,
+        "text": "  yield* Console.log(`Opened ${workspaceRoot} in T3 Code.`);"
+      },
+      {
+        "line": 270,
+        "text": "});"
+      },
+      {
+        "line": 271,
+        "text": ""
+      },
+      {
+        "line": 272,
+        "text": "export const appCommand = Command.make(\"app\", {"
+      },
+      {
+        "line": 273,
+        "text": "  baseDir: baseDirFlag,"
+      },
+      {
+        "line": 274,
+        "text": "  workspaceRoot: Argument.String(\"path\").pipe("
+      },
+      {
+        "line": 275,
+        "text": "    Argument.withDescription(\"Project directory. Default: current directory.\"),"
+      },
+      {
+        "line": 276,
+        "text": "    Argument.optional,"
+      },
+      {
+        "line": 277,
+        "text": "  ),"
+      },
+      {
+        "line": 278,
+        "text": "}).pipe("
+      },
+      {
+        "line": 279,
+        "text": "  Command.withDescription(\"Open a project in the running T3 Code desktop app.\"),"
+      },
+      {
+        "line": 280,
+        "text": "  Command.withHandler(runAppCommand),"
+      },
+      {
+        "line": 281,
+        "text": ");"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/auth.ts",
+    "blob_sha": "b1483ef5701ca94a8fa4f399bbef2f072ef75c3a",
+    "lines": [
+      {
+        "line": 40,
+        "text": ") {"
+      },
+      {
+        "line": 41,
+        "text": "  const logLevel = yield* GlobalFlag.LogLevel;"
+      },
+      {
+        "line": 42,
+        "text": "  const config = yield* resolveCliAuthConfig(flags, logLevel, options);"
+      },
+      {
+        "line": 43,
+        "text": "  const minimumLogLevel = options?.quietLogs ? \"Error\" : config.logLevel;"
+      },
+      {
+        "line": 62,
+        "text": ""
+      },
+      {
+        "line": 63,
+        "text": "const ttlFlag = Flag.String(\"ttl\").pipe("
+      },
+      {
+        "line": 64,
+        "text": "  Flag.withSchema(DurationFromString),"
+      },
+      {
+        "line": 65,
+        "text": "  Flag.withDescription(\"TTL, for example `5m`, `1h`, `30d`, or `15 minutes`.\"),"
+      },
+      {
+        "line": 66,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 67,
+        "text": ");"
+      },
+      {
+        "line": 68,
+        "text": ""
+      },
+      {
+        "line": 69,
+        "text": "const jsonFlag = Flag.Boolean(\"json\").pipe("
+      },
+      {
+        "line": 70,
+        "text": "  Flag.withDescription(\"Emit JSON instead of human-readable output.\"),"
+      },
+      {
+        "line": 71,
+        "text": "  Flag.withDefault(false),"
+      },
+      {
+        "line": 72,
+        "text": ");"
+      },
+      {
+        "line": 73,
+        "text": ""
+      },
+      {
+        "line": 74,
+        "text": "const labelFlag = Flag.String(\"label\").pipe("
+      },
+      {
+        "line": 75,
+        "text": "  Flag.withDescription(\"Optional human-readable label.\"),"
+      },
+      {
+        "line": 76,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 77,
+        "text": ");"
+      },
+      {
+        "line": 78,
+        "text": ""
+      },
+      {
+        "line": 79,
+        "text": "const subjectFlag = Flag.String(\"subject\").pipe("
+      },
+      {
+        "line": 80,
+        "text": "  Flag.withDescription(\"Optional session subject.\"),"
+      },
+      {
+        "line": 81,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 82,
+        "text": ");"
+      },
+      {
+        "line": 83,
+        "text": ""
+      },
+      {
+        "line": 84,
+        "text": "const baseUrlFlag = Flag.String(\"base-url\").pipe("
+      },
+      {
+        "line": 85,
+        "text": "  Flag.withSchema("
+      },
+      {
+        "line": 86,
+        "text": "    Schema.URLFromString.pipe("
+      },
+      {
+        "line": 87,
+        "text": "      Schema.check("
+      },
+      {
+        "line": 93,
+        "text": "  ),"
+      },
+      {
+        "line": 94,
+        "text": "  Flag.withDescription(\"Optional public base URL used to print a ready `/pair#token=...` link.\"),"
+      },
+      {
+        "line": 95,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 96,
+        "text": ");"
+      },
+      {
+        "line": 97,
+        "text": ""
+      },
+      {
+        "line": 98,
+        "text": "const tokenOnlyFlag = Flag.Boolean(\"token-only\").pipe("
+      },
+      {
+        "line": 99,
+        "text": "  Flag.withDescription(\"Print only the issued bearer token.\"),"
+      },
+      {
+        "line": 100,
+        "text": "  Flag.withDefault(false),"
+      },
+      {
+        "line": 101,
+        "text": ");"
+      },
+      {
+        "line": 102,
+        "text": ""
+      },
+      {
+        "line": 103,
+        "text": "const pairingCreateCommand = Command.make(\"create\", {"
+      },
+      {
+        "line": 104,
+        "text": "  ...authLocationFlags,"
+      },
+      {
+        "line": 105,
+        "text": "  scopes: authScopesFlag(AuthStandardClientScopes),"
+      },
+      {
+        "line": 110,
+        "text": "}).pipe("
+      },
+      {
+        "line": 111,
+        "text": "  Command.withDescription(\"Issue a new client pairing token.\"),"
+      },
+      {
+        "line": 112,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 113,
+        "text": "    runWithEnvironmentAuth("
+      },
+      {
+        "line": 126,
+        "text": "          });"
+      },
+      {
+        "line": 127,
+        "text": "          yield* Console.log(output);"
+      },
+      {
+        "line": 128,
+        "text": "        }),"
+      },
+      {
+        "line": 129,
+        "text": "      {"
+      },
+      {
+        "line": 135,
+        "text": ""
+      },
+      {
+        "line": 136,
+        "text": "const pairingListCommand = Command.make(\"list\", {"
+      },
+      {
+        "line": 137,
+        "text": "  ...authLocationFlags,"
+      },
+      {
+        "line": 138,
+        "text": "  json: jsonFlag,"
+      },
+      {
+        "line": 139,
+        "text": "}).pipe("
+      },
+      {
+        "line": 140,
+        "text": "  Command.withDescription(\"List active client pairing tokens without revealing their secrets.\"),"
+      },
+      {
+        "line": 141,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 142,
+        "text": "    runWithEnvironmentAuth("
+      },
+      {
+        "line": 148,
+        "text": "          });"
+      },
+      {
+        "line": 149,
+        "text": "          yield* Console.log(formatPairingCredentialList(pairingLinks, { json: flags.json }));"
+      },
+      {
+        "line": 150,
+        "text": "        }),"
+      },
+      {
+        "line": 151,
+        "text": "      {"
+      },
+      {
+        "line": 157,
+        "text": ""
+      },
+      {
+        "line": 158,
+        "text": "const pairingRevokeCommand = Command.make(\"revoke\", {"
+      },
+      {
+        "line": 159,
+        "text": "  ...authLocationFlags,"
+      },
+      {
+        "line": 160,
+        "text": "  id: Argument.String(\"id\").pipe("
+      },
+      {
+        "line": 161,
+        "text": "    Argument.withDescription(\"Pairing credential id to revoke.\"),"
+      },
+      {
+        "line": 162,
+        "text": "    // Same schema the server applies, so both paths revoke the same id."
+      },
+      {
+        "line": 163,
+        "text": "    Argument.withSchema(AuthRevokePairingLinkInput.fields.id),"
+      },
+      {
+        "line": 164,
+        "text": "  ),"
+      },
+      {
+        "line": 165,
+        "text": "}).pipe("
+      },
+      {
+        "line": 166,
+        "text": "  Command.withDescription(\"Revoke an active client pairing token.\"),"
+      },
+      {
+        "line": 167,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 168,
+        "text": "    runWithEnvironmentAuth(flags, (environmentAuth) =>"
+      },
+      {
+        "line": 176,
+        "text": "        });"
+      },
+      {
+        "line": 177,
+        "text": "        yield* Console.log("
+      },
+      {
+        "line": 178,
+        "text": "          revoked"
+      },
+      {
+        "line": 179,
+        "text": "            ? `Revoked pairing credential ${flags.id}.\\n`"
+      },
+      {
+        "line": 186,
+        "text": ""
+      },
+      {
+        "line": 187,
+        "text": "const pairingCommand = Command.make(\"pairing\").pipe("
+      },
+      {
+        "line": 188,
+        "text": "  Command.withDescription(\"Manage one-time client pairing tokens.\"),"
+      },
+      {
+        "line": 189,
+        "text": "  Command.withSubcommands([pairingCreateCommand, pairingListCommand, pairingRevokeCommand]),"
+      },
+      {
+        "line": 190,
+        "text": ");"
+      },
+      {
+        "line": 191,
+        "text": ""
+      },
+      {
+        "line": 192,
+        "text": "const connectDeviceListCommand = Command.make(\"list\", {"
+      },
+      {
+        "line": 193,
+        "text": "  ...authLocationFlags,"
+      },
+      {
+        "line": 194,
+        "text": "  json: jsonFlag,"
+      },
+      {
+        "line": 195,
+        "text": "}).pipe("
+      },
+      {
+        "line": 196,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 197,
+        "text": "    \"List T3 Connect devices waiting for approval and those already trusted.\","
+      },
+      {
+        "line": 198,
+        "text": "  ),"
+      },
+      {
+        "line": 207,
+        "text": "          const trusted = yield* environmentAuth.listConnectDevices();"
+      },
+      {
+        "line": 208,
+        "text": "          yield* Console.log(formatConnectDeviceList({ waiting, trusted }, { json: flags.json }));"
+      },
+      {
+        "line": 209,
+        "text": "        }),"
+      },
+      {
+        "line": 210,
+        "text": "      { quietLogs: flags.json },"
+      },
+      {
+        "line": 214,
+        "text": ""
+      },
+      {
+        "line": 215,
+        "text": "const verificationCodeArgument = Argument.String(\"code\").pipe("
+      },
+      {
+        "line": 216,
+        "text": "  Argument.withDescription(\"The code the device shows, such as `K7QM-2XFD`.\"),"
+      },
+      {
+        "line": 217,
+        "text": ");"
+      },
+      {
+        "line": 218,
+        "text": ""
+      },
+      {
+        "line": 219,
+        "text": "const connectDeviceApproveCommand = Command.make(\"approve\", {"
+      },
+      {
+        "line": 220,
+        "text": "  ...authLocationFlags,"
+      },
+      {
+        "line": 221,
+        "text": "  code: verificationCodeArgument,"
+      },
+      {
+        "line": 222,
+        "text": "}).pipe("
+      },
+      {
+        "line": 223,
+        "text": "  Command.withDescription(\"Approve the waiting T3 Connect device that shows this code.\"),"
+      },
+      {
+        "line": 224,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 225,
+        "text": "    runWithEnvironmentAuth(flags, (environmentAuth) =>"
+      },
+      {
+        "line": 240,
+        "text": "          }));"
+      },
+      {
+        "line": 241,
+        "text": "        yield* Console.log("
+      },
+      {
+        "line": 242,
+        "text": "          approved"
+      },
+      {
+        "line": 243,
+        "text": "            ? `Approved ${flags.code}. The device connects on its next try.\\n`"
+      },
+      {
+        "line": 250,
+        "text": ""
+      },
+      {
+        "line": 251,
+        "text": "const connectDeviceRevokeCommand = Command.make(\"revoke\", {"
+      },
+      {
+        "line": 252,
+        "text": "  ...authLocationFlags,"
+      },
+      {
+        "line": 253,
+        "text": "  code: verificationCodeArgument,"
+      },
+      {
+        "line": 254,
+        "text": "}).pipe("
+      },
+      {
+        "line": 255,
+        "text": "  Command.withDescription(\"Stop trusting a T3 Connect device and end its sessions.\"),"
+      },
+      {
+        "line": 256,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 257,
+        "text": "    runWithEnvironmentAuth(flags, (environmentAuth) =>"
+      },
+      {
+        "line": 260,
+        "text": "        if (device === undefined) {"
+      },
+      {
+        "line": 261,
+        "text": "          return yield* Console.log(`No trusted device shows ${flags.code}.\\n`);"
+      },
+      {
+        "line": 262,
+        "text": "        }"
+      },
+      {
+        "line": 263,
+        "text": "        if (others.length > 0) {"
+      },
+      {
+        "line": 264,
+        "text": "          return yield* Console.log("
+      },
+      {
+        "line": 265,
+        "text": "            `More than one trusted device shows ${flags.code}; revoke it from a client.\\n`,"
+      },
+      {
+        "line": 266,
+        "text": "          );"
+      },
+      {
+        "line": 275,
+        "text": "        });"
+      },
+      {
+        "line": 276,
+        "text": "        yield* Console.log("
+      },
+      {
+        "line": 277,
+        "text": "          `Revoked ${flags.code}. If approval for new devices is off, it can connect again on its own.\\n`,"
+      },
+      {
+        "line": 278,
+        "text": "        );"
+      },
+      {
+        "line": 283,
+        "text": ""
+      },
+      {
+        "line": 284,
+        "text": "const connectDeviceCommand = Command.make(\"connect-device\").pipe("
+      },
+      {
+        "line": 285,
+        "text": "  Command.withDescription(\"Approve and revoke devices that reach this host through T3 Connect.\"),"
+      },
+      {
+        "line": 286,
+        "text": "  Command.withSubcommands(["
+      },
+      {
+        "line": 287,
+        "text": "    connectDeviceListCommand,"
+      },
+      {
+        "line": 288,
+        "text": "    connectDeviceApproveCommand,"
+      },
+      {
+        "line": 292,
+        "text": ""
+      },
+      {
+        "line": 293,
+        "text": "const sessionIssueCommand = Command.make(\"issue\", {"
+      },
+      {
+        "line": 294,
+        "text": "  ...authLocationFlags,"
+      },
+      {
+        "line": 295,
+        "text": "  scopes: authScopesFlag(AuthStandardClientScopes),"
+      },
+      {
+        "line": 301,
+        "text": "}).pipe("
+      },
+      {
+        "line": 302,
+        "text": "  Command.withDescription(\"Issue a scoped bearer access token for headless or remote clients.\"),"
+      },
+      {
+        "line": 303,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 304,
+        "text": "    runWithEnvironmentAuth("
+      },
+      {
+        "line": 313,
+        "text": "          });"
+      },
+      {
+        "line": 314,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 315,
+        "text": "            formatIssuedSession(issued, {"
+      },
+      {
+        "line": 316,
+        "text": "              json: flags.json,"
+      },
+      {
+        "line": 327,
+        "text": ""
+      },
+      {
+        "line": 328,
+        "text": "const sessionListCommand = Command.make(\"list\", {"
+      },
+      {
+        "line": 329,
+        "text": "  ...authLocationFlags,"
+      },
+      {
+        "line": 330,
+        "text": "  json: jsonFlag,"
+      },
+      {
+        "line": 331,
+        "text": "}).pipe("
+      },
+      {
+        "line": 332,
+        "text": "  Command.withDescription(\"List active sessions without revealing bearer tokens.\"),"
+      },
+      {
+        "line": 333,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 334,
+        "text": "    runWithEnvironmentAuth("
+      },
+      {
+        "line": 338,
+        "text": "          const sessions = yield* environmentAuth.listSessions();"
+      },
+      {
+        "line": 339,
+        "text": "          yield* Console.log(formatSessionList(sessions, { json: flags.json }));"
+      },
+      {
+        "line": 340,
+        "text": "        }),"
+      },
+      {
+        "line": 341,
+        "text": "      {"
+      },
+      {
+        "line": 347,
+        "text": ""
+      },
+      {
+        "line": 348,
+        "text": "const sessionRevokeCommand = Command.make(\"revoke\", {"
+      },
+      {
+        "line": 349,
+        "text": "  ...authLocationFlags,"
+      },
+      {
+        "line": 350,
+        "text": "  sessionId: Argument.String(\"session-id\").pipe("
+      },
+      {
+        "line": 351,
+        "text": "    Argument.withDescription(\"Session id to revoke.\"),"
+      },
+      {
+        "line": 352,
+        "text": "    Argument.withSchema(AuthSessionId),"
+      },
+      {
+        "line": 353,
+        "text": "  ),"
+      },
+      {
+        "line": 354,
+        "text": "}).pipe("
+      },
+      {
+        "line": 355,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 356,
+        "text": "    \"Revoke an active session. A T3 Connect device's session takes the device's trust and other sessions with it; if approval for new devices is off, the device can connect again on its own.\","
+      },
+      {
+        "line": 357,
+        "text": "  ),"
+      },
+      {
+        "line": 367,
+        "text": "        });"
+      },
+      {
+        "line": 368,
+        "text": "        yield* Console.log("
+      },
+      {
+        "line": 369,
+        "text": "          revoked"
+      },
+      {
+        "line": 370,
+        "text": "            ? `Revoked session ${flags.sessionId}.\\n`"
+      },
+      {
+        "line": 377,
+        "text": ""
+      },
+      {
+        "line": 378,
+        "text": "const sessionCommand = Command.make(\"session\").pipe("
+      },
+      {
+        "line": 379,
+        "text": "  Command.withDescription(\"Manage bearer sessions.\"),"
+      },
+      {
+        "line": 380,
+        "text": "  Command.withSubcommands([sessionIssueCommand, sessionListCommand, sessionRevokeCommand]),"
+      },
+      {
+        "line": 381,
+        "text": ");"
+      },
+      {
+        "line": 382,
+        "text": ""
+      },
+      {
+        "line": 383,
+        "text": "export const authCommand = Command.make(\"auth\").pipe("
+      },
+      {
+        "line": 384,
+        "text": "  Command.withDescription(\"Manage the local auth control plane for headless deployments.\"),"
+      },
+      {
+        "line": 385,
+        "text": "  Command.withSubcommands([pairingCommand, sessionCommand, connectDeviceCommand]),"
+      },
+      {
+        "line": 386,
+        "text": ");"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/authScopes.ts",
+    "blob_sha": "9294cc1a12ba7b4f84940632177d42110fc3231c",
+    "lines": [
+      {
+        "line": 4,
+        "text": "export const authScopesFlag = (defaults: ReadonlyArray<AuthGrantScope>) =>"
+      },
+      {
+        "line": 5,
+        "text": "  Flag.Literals(\"scope\", AuthGrantScope.literals).pipe("
+      },
+      {
+        "line": 6,
+        "text": "    Flag.withDescription("
+      },
+      {
+        "line": 7,
+        "text": "      `Authorization scope to grant. Repeat for multiple scopes; replaces the default set: ${defaults.join(\", \")}.`,"
+      },
+      {
+        "line": 8,
+        "text": "    ),"
+      },
+      {
+        "line": 9,
+        "text": "    Flag.atLeast(0),"
+      },
+      {
+        "line": 10,
+        "text": "    Flag.map((scopes) => [...new Set(scopes.length > 0 ? scopes : defaults)]),"
+      },
+      {
+        "line": 11,
+        "text": "  );"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/automaticPort.ts",
+    "blob_sha": "354de65d2519b950b50ec732f8098c41c38548c4",
+    "lines": []
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/browser.ts",
+    "blob_sha": "a82b84ef82d4bf867604841ada0679437a62cfad",
+    "lines": [
+      {
+        "line": 105,
+        "text": ""
+      },
+      {
+        "line": 106,
+        "text": "const browserSetupCommand = Command.make(\"setup\", { baseDir: baseDirFlag }).pipe("
+      },
+      {
+        "line": 107,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 108,
+        "text": "    \"Set up this Linux host for T3's browser: allow Chrome's sandbox and install its libraries and fonts.\","
+      },
+      {
+        "line": 109,
+        "text": "  ),"
+      },
+      {
+        "line": 112,
+        "text": "      if ((yield* HostProcess.Platform) !== \"linux\") {"
+      },
+      {
+        "line": 113,
+        "text": "        return yield* Console.log(\"Nothing to set up: T3's browser runs as is on this system.\");"
+      },
+      {
+        "line": 114,
+        "text": "      }"
+      },
+      {
+        "line": 115,
+        "text": "      const fs = yield* FileSystem.FileSystem;"
+      },
+      {
+        "line": 121,
+        "text": "        PreviewBrowserHost.SETUP_SUBCOMMAND,"
+      },
+      {
+        "line": 122,
+        "text": "        Option.isSome(baseDir) || env.T3CODE_HOME !== undefined ? [\"--base-dir\", baseDirPath] : [],"
+      },
+      {
+        "line": 123,
+        "text": "      );"
+      },
+      {
+        "line": 124,
+        "text": "      // Root, unless sudo came from another user, is likely the server's own account."
+      },
+      {
+        "line": 145,
+        "text": "      if (!needsProfile && missing.length === 0 && !needsFonts) {"
+      },
+      {
+        "line": 146,
+        "text": "        return yield* Console.log("
+      },
+      {
+        "line": 147,
+        "text": "          rootWarning ??"
+      },
+      {
+        "line": 148,
+        "text": "            (Option.isSome(browser)"
+      },
+      {
+        "line": 156,
+        "text": "        if (needsProfile) {"
+      },
+      {
+        "line": 157,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 158,
+        "text": "            `This host blocks the sandbox T3's browser runs in. Setup installs an AppArmor profile at ${PreviewBrowserHost.APPARMOR_PROFILE_PATH} that allows it.`,"
+      },
+      {
+        "line": 159,
+        "text": "          );"
+      },
+      {
+        "line": 161,
+        "text": "        if (missing.length > 0) {"
+      },
+      {
+        "line": 162,
+        "text": "          yield* Console.log(`T3's browser is missing ${missing.join(\", \")}; setup installs them.`);"
+      },
+      {
+        "line": 163,
+        "text": "        }"
+      },
+      {
+        "line": 164,
+        "text": "        if (needsFonts) {"
+      },
+      {
+        "line": 165,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 166,
+        "text": "            \"T3's browser needs fontconfig and system fonts; setup installs them.\","
+      },
+      {
+        "line": 167,
+        "text": "          );"
+      },
+      {
+        "line": 168,
+        "text": "        }"
+      },
+      {
+        "line": 169,
+        "text": "        return yield* Console.log(`\\nThis needs root. Run:\\n\\n  ${setupCommand}\\n`);"
+      },
+      {
+        "line": 170,
+        "text": "      }"
+      },
+      {
+        "line": 171,
+        "text": ""
+      },
+      {
+        "line": 196,
+        "text": "        ]);"
+      },
+      {
+        "line": 197,
+        "text": "        yield* Console.log("
+      },
+      {
+        "line": 198,
+        "text": "          profileOnDisk"
+      },
+      {
+        "line": 199,
+        "text": "            ? `Reloaded the AppArmor profile at ${PreviewBrowserHost.APPARMOR_PROFILE_PATH} that allows Chrome's sandbox for T3's browser.`"
+      },
+      {
+        "line": 205,
+        "text": "        if (missing.length > 0) {"
+      },
+      {
+        "line": 206,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 207,
+        "text": "            `T3's browser is missing ${missing.join(\", \")}. Install them with your package manager, then run this again.`,"
+      },
+      {
+        "line": 208,
+        "text": "          );"
+      },
+      {
+        "line": 210,
+        "text": "        if (needsFonts) {"
+      },
+      {
+        "line": 211,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 212,
+        "text": "            \"T3's browser needs fontconfig and system fonts. Install them with your package manager, then run this again.\","
+      },
+      {
+        "line": 213,
+        "text": "          );"
+      },
+      {
+        "line": 230,
+        "text": "        ]);"
+      },
+      {
+        "line": 231,
+        "text": "        yield* Console.log(\"Installed the browser's libraries.\");"
+      },
+      {
+        "line": 232,
+        "text": "      }"
+      },
+      {
+        "line": 233,
+        "text": ""
+      },
+      {
+        "line": 241,
+        "text": "        if (!(yield* fontAvailable)) {"
+      },
+      {
+        "line": 242,
+        "text": "          return yield* Console.log("
+      },
+      {
+        "line": 243,
+        "text": "            \"Font packages are installed, but Fontconfig still finds no system font. Check its configuration and run setup again.\","
+      },
+      {
+        "line": 244,
+        "text": "          );"
+      },
+      {
+        "line": 245,
+        "text": "        }"
+      },
+      {
+        "line": 246,
+        "text": "        yield* Console.log("
+      },
+      {
+        "line": 247,
+        "text": "          \"Installed the browser's fonts. Restart the T3 server if browser tabs were already open.\","
+      },
+      {
+        "line": 248,
+        "text": "        );"
+      },
+      {
+        "line": 250,
+        "text": ""
+      },
+      {
+        "line": 251,
+        "text": "      yield* Console.log(rootWarning ?? \"This host is ready for T3's browser.\");"
+      },
+      {
+        "line": 252,
+        "text": "    }),"
+      },
+      {
+        "line": 253,
+        "text": "  ),"
+      },
+      {
+        "line": 255,
+        "text": ""
+      },
+      {
+        "line": 256,
+        "text": "export const browserCommand = Command.make(\"browser\").pipe("
+      },
+      {
+        "line": 257,
+        "text": "  Command.withDescription(\"Manage T3's headless browser on this host.\"),"
+      },
+      {
+        "line": 258,
+        "text": "  Command.withSubcommands([browserSetupCommand]),"
+      },
+      {
+        "line": 259,
+        "text": ");"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/claudeHistory.ts",
+    "blob_sha": "d46540f3acba5bb043c9caef125424780505243f",
+    "lines": [
+      {
+        "line": 4,
+        "text": "/** Single-executable builds lack Node, so they use this subcommand instead of claudeHistoryWorker.mjs. */"
+      },
+      {
+        "line": 5,
+        "text": "export const claudeHistoryCommand = Command.make(\"__claude-history\", {"
+      },
+      {
+        "line": 6,
+        "text": "  method: Argument.String(\"method\"),"
+      },
+      {
+        "line": 7,
+        "text": "  sessionId: Argument.String(\"session-id\"),"
+      },
+      {
+        "line": 8,
+        "text": "  options: Argument.String(\"options\").pipe(Argument.optional),"
+      },
+      {
+        "line": 9,
+        "text": "}).pipe("
+      },
+      {
+        "line": 10,
+        "text": "  Command.unlisted,"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/config.ts",
+    "blob_sha": "a62682772bcce2a10813d97287f32087e68dbe10",
+    "lines": [
+      {
+        "line": 32,
+        "text": ""
+      },
+      {
+        "line": 33,
+        "text": "const modeFlag = Flag.Literals(\"mode\", ServerConfig.RuntimeMode.literals).pipe("
+      },
+      {
+        "line": 34,
+        "text": "  Flag.withDescription(\"Runtime mode. `desktop` keeps loopback defaults unless overridden.\"),"
+      },
+      {
+        "line": 35,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 36,
+        "text": ");"
+      },
+      {
+        "line": 37,
+        "text": "const portFlag = Flag.Int(\"port\").pipe("
+      },
+      {
+        "line": 38,
+        "text": "  Flag.withSchema(PortSchema),"
+      },
+      {
+        "line": 39,
+        "text": "  Flag.withDescription(\"Port for the HTTP/WebSocket server.\"),"
+      },
+      {
+        "line": 40,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 41,
+        "text": ");"
+      },
+      {
+        "line": 42,
+        "text": "const hostFlag = Flag.String(\"host\").pipe("
+      },
+      {
+        "line": 43,
+        "text": "  Flag.withDescription(\"Host/interface to bind (for example 127.0.0.1, 0.0.0.0, or a Tailnet IP).\"),"
+      },
+      {
+        "line": 44,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 45,
+        "text": ");"
+      },
+      {
+        "line": 46,
+        "text": "export const baseDirFlag = Flag.String(\"base-dir\").pipe("
+      },
+      {
+        "line": 47,
+        "text": "  Flag.withDescription("
+      },
+      {
+        "line": 48,
+        "text": "    \"Explicit T3 Code data directory; runtime state is stored under userdata (equivalent to T3CODE_HOME).\","
+      },
+      {
+        "line": 49,
+        "text": "  ),"
+      },
+      {
+        "line": 50,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 51,
+        "text": ");"
+      },
+      {
+        "line": 52,
+        "text": "const devUrlFlag = Flag.String(\"dev-url\").pipe("
+      },
+      {
+        "line": 53,
+        "text": "  Flag.withSchema(Schema.URLFromString),"
+      },
+      {
+        "line": 54,
+        "text": "  Flag.withDescription(\"Dev web URL to proxy/redirect to (equivalent to VITE_DEV_SERVER_URL).\"),"
+      },
+      {
+        "line": 55,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 56,
+        "text": ");"
+      },
+      {
+        "line": 57,
+        "text": "const noBrowserFlag = Flag.Boolean(\"no-browser\").pipe("
+      },
+      {
+        "line": 58,
+        "text": "  Flag.withDescription(\"Disable automatic browser opening.\"),"
+      },
+      {
+        "line": 59,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 60,
+        "text": ");"
+      },
+      {
+        "line": 61,
+        "text": "const bootstrapFdFlag = Flag.Int(\"bootstrap-fd\").pipe("
+      },
+      {
+        "line": 62,
+        "text": "  Flag.withSchema(Schema.Int),"
+      },
+      {
+        "line": 63,
+        "text": "  Flag.withDescription(\"Read one-time bootstrap secrets from the given file descriptor.\"),"
+      },
+      {
+        "line": 64,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 65,
+        "text": ");"
+      },
+      {
+        "line": 66,
+        "text": "const autoBootstrapProjectFromCwdFlag = Flag.Boolean(\"auto-bootstrap-project-from-cwd\").pipe("
+      },
+      {
+        "line": 67,
+        "text": "  Flag.withDescription("
+      },
+      {
+        "line": 68,
+        "text": "    \"Create a project for the current working directory on startup when missing.\","
+      },
+      {
+        "line": 69,
+        "text": "  ),"
+      },
+      {
+        "line": 70,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 71,
+        "text": ");"
+      },
+      {
+        "line": 72,
+        "text": "const logWebSocketEventsFlag = Flag.Boolean(\"log-websocket-events\").pipe("
+      },
+      {
+        "line": 73,
+        "text": "  Flag.withDescription("
+      },
+      {
+        "line": 74,
+        "text": "    \"Emit server-side logs for outbound WebSocket push traffic (equivalent to T3CODE_LOG_WS_EVENTS).\","
+      },
+      {
+        "line": 75,
+        "text": "  ),"
+      },
+      {
+        "line": 76,
+        "text": "  Flag.withAlias(\"log-ws-events\"),"
+      },
+      {
+        "line": 77,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 78,
+        "text": ");"
+      },
+      {
+        "line": 79,
+        "text": "const tailscaleServeFlag = Flag.Boolean(\"tailscale-serve\").pipe("
+      },
+      {
+        "line": 80,
+        "text": "  Flag.withDescription("
+      },
+      {
+        "line": 81,
+        "text": "    \"Configure Tailscale Serve to expose this backend over HTTPS on the Tailnet.\","
+      },
+      {
+        "line": 82,
+        "text": "  ),"
+      },
+      {
+        "line": 83,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 84,
+        "text": ");"
+      },
+      {
+        "line": 85,
+        "text": "const tailscaleServePortFlag = Flag.Int(\"tailscale-serve-port\").pipe("
+      },
+      {
+        "line": 86,
+        "text": "  Flag.withSchema(PortSchema),"
+      },
+      {
+        "line": 87,
+        "text": "  Flag.withDescription(\"HTTPS port for Tailscale Serve when --tailscale-serve is enabled.\"),"
+      },
+      {
+        "line": 88,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 89,
+        "text": ");"
+      },
+      {
+        "line": 90,
+        "text": "const lanFlag = Flag.Boolean(\"lan\").pipe("
+      },
+      {
+        "line": 91,
+        "text": "  Flag.withDescription("
+      },
+      {
+        "line": 92,
+        "text": "    \"Accept connections from your local network and tailnet, not only this machine (equivalent to T3CODE_LAN).\","
+      },
+      {
+        "line": 93,
+        "text": "  ),"
+      },
+      {
+        "line": 94,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 95,
+        "text": ");"
+      },
+      {
+        "line": 96,
+        "text": ""
+      },
+      {
+        "line": 233,
+        "text": "  baseDir: baseDirFlag,"
+      },
+      {
+        "line": 234,
+        "text": "  cwd: Argument.String(\"cwd\").pipe("
+      },
+      {
+        "line": 235,
+        "text": "    Argument.withDescription("
+      },
+      {
+        "line": 236,
+        "text": "      \"Working directory for provider sessions (defaults to the current directory).\","
+      },
+      {
+        "line": 237,
+        "text": "    ),"
+      },
+      {
+        "line": 238,
+        "text": "    Argument.optional,"
+      },
+      {
+        "line": 239,
+        "text": "  ),"
+      },
+      {
+        "line": 240,
+        "text": "  devUrl: devUrlFlag,"
+      },
+      {
+        "line": 364,
+        "text": "      const { command: pairCommand } = yield* resolveHostCliCommand(\"pair\", ["
+      },
+      {
+        "line": 365,
+        "text": "        \"--base-dir\","
+      },
+      {
+        "line": 366,
+        "text": "        baseDir,"
+      },
+      {
+        "line": 367,
+        "text": "      ]);"
+      },
+      {
+        "line": 368,
+        "text": "      return yield* new CliError.UserError({"
+      },
+      {
+        "line": 369,
+        "text": "        cause: `A T3 Code server is already running for ${baseDir} (pid ${runtime.value.pid}, ${runtime.value.origin}). To open it, run \\`${pairCommand}\\` and open the pairing URL it prints. To start another server, stop this one first or use a different --base-dir.`,"
+      },
+      {
+        "line": 370,
+        "text": "      });"
+      },
+      {
+        "line": 371,
+        "text": "    }"
+      },
+      {
+        "line": 565,
+        "text": "  );"
+      },
+      {
+        "line": 566,
+        "text": "  // Logs go to stdout, where --json and --token-only print, and resolving can"
+      },
+      {
+        "line": 567,
+        "text": "  // log, for example when it sweeps abandoned attachment uploads."
+      },
+      {
+        "line": 568,
+        "text": "  return options?.quietLogs === true"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/connect.ts",
+    "blob_sha": "8ef202c2d014f84587fc753498f2570d0bc76a51",
+    "lines": [
+      {
+        "line": 61,
+        "text": ""
+      },
+      {
+        "line": 62,
+        "text": "const jsonFlag = Flag.Boolean(\"json\").pipe("
+      },
+      {
+        "line": 63,
+        "text": "  Flag.withDescription(\"Emit JSON instead of human-readable output.\"),"
+      },
+      {
+        "line": 64,
+        "text": "  Flag.withDefault(false),"
+      },
+      {
+        "line": 65,
+        "text": ");"
+      },
+      {
+        "line": 66,
+        "text": ""
+      },
+      {
+        "line": 68,
+        "text": ""
+      },
+      {
+        "line": 69,
+        "text": "export const headlessFlag = Flag.Boolean(\"headless\").pipe("
+      },
+      {
+        "line": 70,
+        "text": "  Flag.withDescription("
+      },
+      {
+        "line": 71,
+        "text": "    \"Sign in with a URL and code on any device. Automatic without a terminal or over SSH.\","
+      },
+      {
+        "line": 72,
+        "text": "  ),"
+      },
+      {
+        "line": 73,
+        "text": "  Flag.withDefault(false),"
+      },
+      {
+        "line": 74,
+        "text": ");"
+      },
+      {
+        "line": 75,
+        "text": ""
+      },
+      {
+        "line": 88,
+        "text": "const showDeviceAuthorizationPrompt = (prompt: CliTokenManager.DeviceAuthorizationPrompt) =>"
+      },
+      {
+        "line": 89,
+        "text": "  Console.log(formatDeviceAuthorizationPrompt(prompt));"
+      },
+      {
+        "line": 90,
+        "text": ""
+      },
+      {
+        "line": 91,
+        "text": "function formatDeviceAuthorizationPrompt("
+      },
+      {
+        "line": 110,
+        "text": "    (yield* headlessSessionConfig) ||"
+      },
+      {
+        "line": 111,
+        "text": "    !(process.stdin.isTTY && process.stdout.isTTY);"
+      },
+      {
+        "line": 112,
+        "text": "  if (!useOutOfBandOAuth) {"
+      },
+      {
+        "line": 113,
+        "text": "    const authorization = yield* tokens.get;"
+      },
+      {
+        "line": 120,
+        "text": "      CloudCliCredentialRefreshError: () =>"
+      },
+      {
+        "line": 121,
+        "text": "        Console.log(\"T3 Connect sign-in expired. Sign in again.\").pipe(Effect.as(Option.none())),"
+      },
+      {
+        "line": 122,
+        "text": "    }),"
+      },
+      {
+        "line": 123,
+        "text": "  );"
+      },
+      {
+        "line": 192,
+        "text": "  if (options?.json) {"
+      },
+      {
+        "line": 193,
+        "text": "    return JSON.stringify(status, null, 2);"
+      },
+      {
+        "line": 194,
+        "text": "  }"
+      },
+      {
+        "line": 195,
+        "text": ""
+      },
+      {
+        "line": 278,
+        "text": "  event.type === \"progress\""
+      },
+      {
+        "line": 279,
+        "text": "    ? Console.log(`Relay client: ${relayClientInstallProgressMessage(event.stage)}...`)"
+      },
+      {
+        "line": 280,
+        "text": "    : Effect.void;"
+      },
+      {
+        "line": 281,
+        "text": ""
+      },
+      {
+        "line": 351,
+        "text": "  const width = Math.max(...lines.map((line) => line.length));"
+      },
+      {
+        "line": 352,
+        "text": "  const color = process.stdout.isTTY === true && !process.env.NO_COLOR;"
+      },
+      {
+        "line": 353,
+        "text": "  const red = (line: string) => (color ? `\\x1b[1;31m${line}\\x1b[0m` : line);"
+      },
+      {
+        "line": 354,
+        "text": "  return ["
+      },
+      {
+        "line": 367,
+        "text": "export const waitForReachability = Effect.fn(\"cloud.cli.wait_for_reachability\")(function* () {"
+      },
+      {
+        "line": 368,
+        "text": "  yield* Console.log(\"Checking T3 Connect...\");"
+      },
+      {
+        "line": 369,
+        "text": "  const deadline ="
+      },
+      {
+        "line": 370,
+        "text": "    (yield* Clock.currentTimeMillis) + Duration.toMillis(CLOUD_CLI_REACHABILITY_WAIT);"
+      },
+      {
+        "line": 374,
+        "text": "    if (last?.status === \"reachable\") {"
+      },
+      {
+        "line": 375,
+        "text": "      yield* Console.log(\"✓ T3 Connect is reachable.\");"
+      },
+      {
+        "line": 376,
+        "text": "      return;"
+      },
+      {
+        "line": 377,
+        "text": "    }"
+      },
+      {
+        "line": 380,
+        "text": "  }"
+      },
+      {
+        "line": 381,
+        "text": "  yield* Console.error("
+      },
+      {
+        "line": 382,
+        "text": "    formatAlertBox("
+      },
+      {
+        "line": 383,
+        "text": "      last === null"
+      },
+      {
+        "line": 388,
+        "text": "  yield* Effect.sync(() => {"
+      },
+      {
+        "line": 389,
+        "text": "    process.exitCode = 1;"
+      },
+      {
+        "line": 390,
+        "text": "  });"
+      },
+      {
+        "line": 391,
+        "text": "});"
+      },
+      {
+        "line": 458,
+        "text": "    } else {"
+      },
+      {
+        "line": 459,
+        "text": "      yield* Console.log(\"T3 Connect is disabled locally.\");"
+      },
+      {
+        "line": 460,
+        "text": "      // A killed server cannot stop the connector it started, and nothing adopts it on restart."
+      },
+      {
+        "line": 461,
+        "text": "      if (input.liveResult.status === \"server-gone\") {"
+      },
+      {
+        "line": 483,
+        "text": "    } else if (input.relayResult.value.status === \"revoked\") {"
+      },
+      {
+        "line": 484,
+        "text": "      yield* Console.log(\"Revoked the relay-side environment record.\");"
+      },
+      {
+        "line": 485,
+        "text": "    }"
+      },
+      {
+        "line": 486,
+        "text": "  },"
+      },
+      {
+        "line": 508,
+        "text": "  if (options.clearAuthorization) {"
+      },
+      {
+        "line": 509,
+        "text": "    yield* Console.log("
+      },
+      {
+        "line": 510,
+        "text": "      \"Signed out of T3 Connect locally.\\nThe background service is managed separately with `t3 service`.\","
+      },
+      {
+        "line": 511,
+        "text": "    );"
+      },
+      {
+        "line": 538,
+        "text": ") {"
+      },
+      {
+        "line": 539,
+        "text": "  const logLevel = yield* GlobalFlag.LogLevel;"
+      },
+      {
+        "line": 540,
+        "text": "  const config = yield* resolveCliAuthConfig(flags, logLevel, options);"
+      },
+      {
+        "line": 541,
+        "text": "  const minimumLogLevel = options?.quietLogs ? \"Error\" : config.logLevel;"
+      },
+      {
+        "line": 588,
+        "text": "            event.type === \"progress\" && event.stage === \"downloading\""
+      },
+      {
+        "line": 589,
+        "text": "              ? Console.log(\"Installing the T3 Connect relay client...\")"
+      },
+      {
+        "line": 590,
+        "text": "              : Effect.void"
+      },
+      {
+        "line": 591,
+        "text": "        : reportRelayClientInstallProgress,"
+      },
+      {
+        "line": 593,
+        "text": "    if (Option.isNone(installed)) {"
+      },
+      {
+        "line": 594,
+        "text": "      yield* Console.log(\"T3 Connect setup cancelled. The relay client was not installed.\");"
+      },
+      {
+        "line": 595,
+        "text": "      return null;"
+      },
+      {
+        "line": 596,
+        "text": "    }"
+      },
+      {
+        "line": 597,
+        "text": "    if (options.installRelayClient !== true) {"
+      },
+      {
+        "line": 598,
+        "text": "      yield* Console.log(formatRelayClientReady(installed.value.version));"
+      },
+      {
+        "line": 599,
+        "text": "    }"
+      },
+      {
+        "line": 600,
+        "text": "  }"
+      },
+      {
+        "line": 604,
+        "text": "  if (yield* CliState.dropRevokedCloudLink) {"
+      },
+      {
+        "line": 605,
+        "text": "    yield* Console.log(\"Replacing the link T3 Connect revoked.\");"
+      },
+      {
+        "line": 606,
+        "text": "  }"
+      },
+      {
+        "line": 607,
+        "text": "  if (publishOnly) {"
+      },
+      {
+        "line": 614,
+        "text": ""
+      },
+      {
+        "line": 615,
+        "text": "const connectLoginCommand = Command.make(\"login\", {"
+      },
+      {
+        "line": 616,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 617,
+        "text": "  headless: headlessFlag,"
+      },
+      {
+        "line": 618,
+        "text": "}).pipe("
+      },
+      {
+        "line": 619,
+        "text": "  Command.withDescription(\"Authorize the T3 Connect CLI without enabling remote access.\"),"
+      },
+      {
+        "line": 620,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 621,
+        "text": "    runCloudCommand("
+      },
+      {
+        "line": 624,
+        "text": "        yield* requireConnectAllowed;"
+      },
+      {
+        "line": 625,
+        "text": "        yield* Console.log(\"T3 Connect\\n\");"
+      },
+      {
+        "line": 626,
+        "text": "        const identity = yield* authorizeCli(flags);"
+      },
+      {
+        "line": 627,
+        "text": "        yield* Console.log(`✓ Signed in${connectedAs(identity)}`);"
+      },
+      {
+        "line": 628,
+        "text": "      }),"
+      },
+      {
+        "line": 629,
+        "text": "    ),"
+      },
+      {
+        "line": 632,
+        "text": ""
+      },
+      {
+        "line": 633,
+        "text": "const connectLinkCommand = Command.make(\"link\", {"
+      },
+      {
+        "line": 634,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 635,
+        "text": "  headless: headlessFlag,"
+      },
+      {
+        "line": 636,
+        "text": "  publishOnly: Flag.Boolean(\"publish-only\").pipe("
+      },
+      {
+        "line": 637,
+        "text": "    Flag.withDescription("
+      },
+      {
+        "line": 638,
+        "text": "      \"Link to publish agent activity only, with no managed tunnel. Reach this environment out of band (e.g. Tailscale).\","
+      },
+      {
+        "line": 639,
+        "text": "    ),"
+      },
+      {
+        "line": 640,
+        "text": "    Flag.withDefault(false),"
+      },
+      {
+        "line": 641,
+        "text": "  ),"
+      },
+      {
+        "line": 642,
+        "text": "}).pipe("
+      },
+      {
+        "line": 643,
+        "text": "  Command.withDescription(\"Authorize this environment for T3 Connect on next start.\"),"
+      },
+      {
+        "line": 644,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 645,
+        "text": "    runCloudCommand("
+      },
+      {
+        "line": 648,
+        "text": "        yield* requireConnectAllowed;"
+      },
+      {
+        "line": 649,
+        "text": "        yield* Console.log(\"T3 Connect\\n\");"
+      },
+      {
+        "line": 650,
+        "text": "        const linked = yield* linkEnvironmentForConnect(flags);"
+      },
+      {
+        "line": 651,
+        "text": "        if (linked) {"
+      },
+      {
+        "line": 652,
+        "text": "          const serveCommand = yield* resolveHostCliHint(\"serve\", flags.baseDir);"
+      },
+      {
+        "line": 653,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 654,
+        "text": "            flags.publishOnly"
+      },
+      {
+        "line": 655,
+        "text": "              ? `✓ Authorized${connectedAs(linked.identity)}\\n\\nNext\\n  Start T3 to publish agent activity (no managed tunnel).`"
+      },
+      {
+        "line": 663,
+        "text": ""
+      },
+      {
+        "line": 664,
+        "text": "const connectStatusCommand = Command.make(\"status\", {"
+      },
+      {
+        "line": 665,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 666,
+        "text": "  json: jsonFlag,"
+      },
+      {
+        "line": 667,
+        "text": "}).pipe("
+      },
+      {
+        "line": 668,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 669,
+        "text": "    \"Show T3 Connect setup and check that other devices can reach this machine.\","
+      },
+      {
+        "line": 670,
+        "text": "  ),"
+      },
+      {
+        "line": 728,
+        "text": "        };"
+      },
+      {
+        "line": 729,
+        "text": "        yield* Console.log(formatCloudStatus(status, commands, { json: flags.json }));"
+      },
+      {
+        "line": 730,
+        "text": "      }),"
+      },
+      {
+        "line": 731,
+        "text": "      {"
+      },
+      {
+        "line": 737,
+        "text": ""
+      },
+      {
+        "line": 738,
+        "text": "const connectPublishCommand = Command.make(\"publish\", {"
+      },
+      {
+        "line": 739,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 740,
+        "text": "  disable: Flag.Boolean(\"disable\").pipe("
+      },
+      {
+        "line": 741,
+        "text": "    Flag.withDescription(\"Stop publishing agent activity to your mobile clients.\"),"
+      },
+      {
+        "line": 742,
+        "text": "    Flag.withDefault(false),"
+      },
+      {
+        "line": 743,
+        "text": "  ),"
+      },
+      {
+        "line": 744,
+        "text": "}).pipe("
+      },
+      {
+        "line": 745,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 746,
+        "text": "    \"Toggle publishing agent activity (push notifications and Live Activities) to your mobile clients.\","
+      },
+      {
+        "line": 747,
+        "text": "  ),"
+      },
+      {
+        "line": 765,
+        "text": "            yield* CliState.setCliDesiredCloudLink(false);"
+      },
+      {
+        "line": 766,
+        "text": "            yield* Console.log(\"Cancelled the pending publish-only T3 Connect link.\");"
+      },
+      {
+        "line": 767,
+        "text": "          }"
+      },
+      {
+        "line": 768,
+        "text": "          yield* Console.log(\"Publishing agent activity disabled.\");"
+      },
+      {
+        "line": 769,
+        "text": "          return;"
+      },
+      {
+        "line": 770,
+        "text": "        }"
+      },
+      {
+        "line": 771,
+        "text": ""
+      },
+      {
+        "line": 772,
+        "text": "        yield* Console.log(\"Publishing agent activity enabled.\");"
+      },
+      {
+        "line": 773,
+        "text": "        const linked = Option.isSome(yield* secrets.get(CLOUD_LINKED_USER_ID));"
+      },
+      {
+        "line": 774,
+        "text": "        if (linked) {"
+      },
+      {
+        "line": 779,
+        "text": "          const loginCommand = yield* resolveHostCliHint(\"connect login\", flags.baseDir);"
+      },
+      {
+        "line": 780,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 781,
+        "text": "            `Run \\`${loginCommand}\\` first so this environment can be authorized to publish.`,"
+      },
+      {
+        "line": 782,
+        "text": "          );"
+      },
+      {
+        "line": 786,
+        "text": "        if (yield* CliState.readCliDesiredCloudLink) {"
+      },
+      {
+        "line": 787,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 788,
+        "text": "            \"A T3 Connect link is already pending. Start T3 to finish provisioning it; publishing starts once it links.\","
+      },
+      {
+        "line": 789,
+        "text": "          );"
+      },
+      {
+        "line": 792,
+        "text": "        yield* CliState.setCliDesiredCloudLink(true, \"publish_only\");"
+      },
+      {
+        "line": 793,
+        "text": "        yield* Console.log("
+      },
+      {
+        "line": 794,
+        "text": "          \"Restart T3 to finish authorizing this environment to publish (no managed tunnel is created).\","
+      },
+      {
+        "line": 795,
+        "text": "        );"
+      },
+      {
+        "line": 800,
+        "text": ""
+      },
+      {
+        "line": 801,
+        "text": "const connectUnlinkCommand = Command.make(\"unlink\", {"
+      },
+      {
+        "line": 802,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 803,
+        "text": "}).pipe("
+      },
+      {
+        "line": 804,
+        "text": "  Command.withDescription(\"Disable T3 Connect while retaining the stored authorization.\"),"
+      },
+      {
+        "line": 805,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 806,
+        "text": "    runCloudCommand(flags, disconnectCloud({ clearAuthorization: false })),"
+      },
+      {
+        "line": 809,
+        "text": ""
+      },
+      {
+        "line": 810,
+        "text": "const connectLogoutCommand = Command.make(\"logout\", {"
+      },
+      {
+        "line": 811,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 812,
+        "text": "}).pipe("
+      },
+      {
+        "line": 813,
+        "text": "  Command.withDescription(\"Disable T3 Connect and clear the stored CLI authorization.\"),"
+      },
+      {
+        "line": 814,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 815,
+        "text": "    runCloudCommand(flags, disconnectCloud({ clearAuthorization: true })),"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/consoleStdin.ts",
+    "blob_sha": "18ee7bed6d5a1af3eefa1c750b1b2871155e730e",
+    "lines": []
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/doctor.ts",
+    "blob_sha": "60af29ac41e7bdaf652e3700273e7d78da65a709",
+    "lines": [
+      {
+        "line": 71,
+        "text": "  const status = yield* maintenance.inspect(databasePath);"
+      },
+      {
+        "line": 72,
+        "text": "  yield* Console.log("
+      },
+      {
+        "line": 73,
+        "text": "    `Database: ${formatBytes(status.databaseBytes)}, ${formatBytes(status.reclaimableBytes)} reclaimable.`,"
+      },
+      {
+        "line": 74,
+        "text": "  );"
+      },
+      {
+        "line": 76,
+        "text": "  if (status.legacyDatabaseBytes !== null) {"
+      },
+      {
+        "line": 77,
+        "text": "    yield* Console.log("
+      },
+      {
+        "line": 78,
+        "text": "      `Database from before 0.1.0: ${formatBytes(status.legacyDatabaseBytes)}, kept for rolling back.`,"
+      },
+      {
+        "line": 79,
+        "text": "    );"
+      },
+      {
+        "line": 80,
+        "text": "    if (legacyRecords === null) {"
+      },
+      {
+        "line": 81,
+        "text": "      yield* Console.log("
+      },
+      {
+        "line": 82,
+        "text": "        \"  Could not check for missing projects or threads. Keep the old database.\","
+      },
+      {
+        "line": 83,
+        "text": "      );"
+      },
+      {
+        "line": 84,
+        "text": "    } else if (legacyRecords.projects > 0 || legacyRecords.threads > 0) {"
+      },
+      {
+        "line": 85,
+        "text": "      yield* Console.log("
+      },
+      {
+        "line": 86,
+        "text": "        `  The current database is missing legacy records. Projects missing: ${legacyRecords.projects}. Threads missing: ${legacyRecords.threads}. Keep the old database for recovery.`,"
+      },
+      {
+        "line": 87,
+        "text": "      );"
+      },
+      {
+        "line": 121,
+        "text": "  if (repairs.length === 0) {"
+      },
+      {
+        "line": 122,
+        "text": "    yield* Console.log(\"Nothing to repair.\");"
+      },
+      {
+        "line": 123,
+        "text": "    return;"
+      },
+      {
+        "line": 124,
+        "text": "  }"
+      },
+      {
+        "line": 125,
+        "text": "  for (const repair of repairs) {"
+      },
+      {
+        "line": 126,
+        "text": "    yield* Console.log("
+      },
+      {
+        "line": 127,
+        "text": "      `\\n${repair.title}${repair.recommended ? \" (recommended)\" : \"\"}\\n  ${repair.description}`,"
+      },
+      {
+        "line": 128,
+        "text": "    );"
+      },
+      {
+        "line": 130,
+        "text": "  if (options.dryRun) {"
+      },
+      {
+        "line": 131,
+        "text": "    yield* Console.log(\"\\nDry run: nothing changed.\");"
+      },
+      {
+        "line": 132,
+        "text": "    return;"
+      },
+      {
+        "line": 133,
+        "text": "  }"
+      },
+      {
+        "line": 134,
+        "text": "  const interactive = options.interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY);"
+      },
+      {
+        "line": 135,
+        "text": "  if (!options.fix && !interactive) {"
+      },
+      {
+        "line": 136,
+        "text": "    yield* Console.log("
+      },
+      {
+        "line": 137,
+        "text": "      \"\\nRun in a terminal to choose repairs, or pass --fix for the recommended ones.\","
+      },
+      {
+        "line": 138,
+        "text": "    );"
+      },
+      {
+        "line": 153,
+        "text": "  if (selected.length === 0) {"
+      },
+      {
+        "line": 154,
+        "text": "    yield* Console.log("
+      },
+      {
+        "line": 155,
+        "text": "      options.fix"
+      },
+      {
+        "line": 156,
+        "text": "        ? \"No recommended repairs; nothing changed.\""
+      },
+      {
+        "line": 162,
+        "text": "    const service = yield* BootService.BootService;"
+      },
+      {
+        "line": 163,
+        "text": "    yield* Console.log(\"\\nReclaiming database space. Each step is shown as it starts.\");"
+      },
+      {
+        "line": 164,
+        "text": "    const startedAt = yield* Clock.monotonicTimeNanos;"
+      },
+      {
+        "line": 165,
+        "text": "    const reportStep = (step: DatabaseMaintenance.DatabaseCompactStep) =>"
+      },
+      {
+        "line": 167,
+        "text": "        Effect.flatMap((now) =>"
+      },
+      {
+        "line": 168,
+        "text": "          Console.log(`  [${formatElapsed(now - startedAt)}] ${COMPACT_STEP_LABELS[step]}`),"
+      },
+      {
+        "line": 169,
+        "text": "        ),"
+      },
+      {
+        "line": 170,
+        "text": "      );"
+      },
+      {
+        "line": 177,
+        "text": "            Effect.flatMap((now) =>"
+      },
+      {
+        "line": 178,
+        "text": "              Console.log("
+      },
+      {
+        "line": 179,
+        "text": "                `Done in ${formatElapsed(now - startedAt)}: ${formatBytes(result.beforeBytes)} -> ${formatBytes(result.afterBytes)}, ${result.deletedEventCount} superseded events removed.`,"
+      },
+      {
+        "line": 180,
+        "text": "              ),"
+      },
+      {
+        "line": 190,
+        "text": "    yield* maintenance.removeLegacyDatabase(databasePath);"
+      },
+      {
+        "line": 191,
+        "text": "    yield* Console.log(\"\\nDeleted the database from before 0.1.0.\");"
+      },
+      {
+        "line": 192,
+        "text": "  }"
+      },
+      {
+        "line": 193,
+        "text": "});"
+      },
+      {
+        "line": 194,
+        "text": ""
+      },
+      {
+        "line": 195,
+        "text": "export const doctorCommand = Command.make(\"doctor\", {"
+      },
+      {
+        "line": 196,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 197,
+        "text": "  fix: Flag.Boolean(\"fix\").pipe("
+      },
+      {
+        "line": 198,
+        "text": "    Flag.withDescription(\"Apply the recommended repairs without prompting.\"),"
+      },
+      {
+        "line": 199,
+        "text": "    Flag.withDefault(false),"
+      },
+      {
+        "line": 200,
+        "text": "  ),"
+      },
+      {
+        "line": 201,
+        "text": "  dryRun: Flag.Boolean(\"dry-run\").pipe("
+      },
+      {
+        "line": 202,
+        "text": "    Flag.withDescription(\"Show the repairs without changing anything, even with --fix.\"),"
+      },
+      {
+        "line": 203,
+        "text": "    Flag.withDefault(false),"
+      },
+      {
+        "line": 204,
+        "text": "  ),"
+      },
+      {
+        "line": 205,
+        "text": "}).pipe("
+      },
+      {
+        "line": 206,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 207,
+        "text": "    \"Inspect this T3 Code data directory and repair it. Pauses and restarts the background service as needed.\","
+      },
+      {
+        "line": 208,
+        "text": "  ),"
+      },
+      {
+        "line": 210,
+        "text": "    Effect.gen(function* () {"
+      },
+      {
+        "line": 211,
+        "text": "      const logLevel = yield* GlobalFlag.LogLevel;"
+      },
+      {
+        "line": 212,
+        "text": "      const config = yield* resolveCliAuthConfig(flags, logLevel);"
+      },
+      {
+        "line": 213,
+        "text": "      yield* runDoctor(config, { fix: flags.fix, dryRun: flags.dryRun }).pipe("
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/environment.ts",
+    "blob_sha": "9243d0340eabf5f1a69e5cecdd36ee8c6a2c5a65",
+    "lines": [
+      {
+        "line": 42,
+        "text": ") {"
+      },
+      {
+        "line": 43,
+        "text": "  const logLevel = yield* GlobalFlag.LogLevel;"
+      },
+      {
+        "line": 44,
+        "text": "  const config = yield* resolveCliAuthConfig(flags, logLevel, options);"
+      },
+      {
+        "line": 45,
+        "text": "  return yield* PeerLinks.PeerLinks.pipe("
+      },
+      {
+        "line": 80,
+        "text": ""
+      },
+      {
+        "line": 81,
+        "text": "const jsonFlag = Flag.Boolean(\"json\").pipe("
+      },
+      {
+        "line": 82,
+        "text": "  Flag.withDescription(\"Emit JSON instead of human-readable output.\"),"
+      },
+      {
+        "line": 83,
+        "text": "  Flag.withDefault(false),"
+      },
+      {
+        "line": 84,
+        "text": ");"
+      },
+      {
+        "line": 85,
+        "text": ""
+      },
+      {
+        "line": 188,
+        "text": "  const failed = outcomes.filter((outcome) => !outcome.linked).length;"
+      },
+      {
+        "line": 189,
+        "text": "  yield* Console.log("
+      },
+      {
+        "line": 190,
+        "text": "    `${outcomes.map((outcome) => outcome.text).join(\"\\n\")}\\n\\n${outcomes.length - failed} of ${outcomes.length} linked.\\n`,"
+      },
+      {
+        "line": 191,
+        "text": "  );"
+      },
+      {
+        "line": 206,
+        "text": ""
+      },
+      {
+        "line": 207,
+        "text": "const environmentLinkCommand = Command.make(\"link\", {"
+      },
+      {
+        "line": 208,
+        "text": "  ...authLocationFlags,"
+      },
+      {
+        "line": 209,
+        "text": "  url: Argument.String(\"url\").pipe("
+      },
+      {
+        "line": 210,
+        "text": "    Argument.withDescription("
+      },
+      {
+        "line": 211,
+        "text": "      \"Where the other environment answers: its T3 Connect, Tailscale, LAN or loopback address.\","
+      },
+      {
+        "line": 212,
+        "text": "    ),"
+      },
+      {
+        "line": 213,
+        "text": "    Argument.optional,"
+      },
+      {
+        "line": 214,
+        "text": "  ),"
+      },
+      {
+        "line": 215,
+        "text": "  alternateUrl: Flag.String(\"url\").pipe("
+      },
+      {
+        "line": 216,
+        "text": "    Flag.withDescription(\"Another address for the same environment, tried after the first.\"),"
+      },
+      {
+        "line": 217,
+        "text": "    Flag.atLeast(0),"
+      },
+      {
+        "line": 218,
+        "text": "  ),"
+      },
+      {
+        "line": 219,
+        "text": "  pairingCode: Flag.String(\"pairing-code\").pipe("
+      },
+      {
+        "line": 220,
+        "text": "    Flag.withDescription(\"A pairing code from the other environment (`t3 pair` there).\"),"
+      },
+      {
+        "line": 221,
+        "text": "    Flag.optional,"
+      },
+      {
+        "line": 222,
+        "text": "  ),"
+      },
+      {
+        "line": 223,
+        "text": "  from: Flag.String(\"from\").pipe("
+      },
+      {
+        "line": 224,
+        "text": "    Flag.withDescription("
+      },
+      {
+        "line": 225,
+        "text": "      \"Link several environments: a file with one `<url> <pairing-code>` per line, or - for stdin. Environments already linked are left as they are.\","
+      },
+      {
+        "line": 226,
+        "text": "    ),"
+      },
+      {
+        "line": 227,
+        "text": "    Flag.optional,"
+      },
+      {
+        "line": 228,
+        "text": "  ),"
+      },
+      {
+        "line": 229,
+        "text": "  access: Flag.Literals(\"access\", AuthMcpClientAccess.literals).pipe("
+      },
+      {
+        "line": 230,
+        "text": "    Flag.withDescription("
+      },
+      {
+        "line": 231,
+        "text": "      \"What this environment's agents may do there: read-only, or the broadest runtime mode.\","
+      },
+      {
+        "line": 232,
+        "text": "    ),"
+      },
+      {
+        "line": 233,
+        "text": "    Flag.withDefault(\"approval-required\" as const),"
+      },
+      {
+        "line": 234,
+        "text": "  ),"
+      },
+      {
+        "line": 235,
+        "text": "}).pipe("
+      },
+      {
+        "line": 236,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 237,
+        "text": "    \"Link another T3 Code environment, so agents here can work there. It shows up there under Authorized clients in Settings → Sharing & access, where it can be revoked.\","
+      },
+      {
+        "line": 238,
+        "text": "  ),"
+      },
+      {
+        "line": 264,
+        "text": "          });"
+      },
+      {
+        "line": 265,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 266,
+        "text": "            `Linked ${linked.label} (${linked.environmentId}) with ${linked.access} access, until ${DateTime.formatIso(linked.expiresAt)}.\\n`,"
+      },
+      {
+        "line": 267,
+        "text": "          );"
+      },
+      {
+        "line": 273,
+        "text": ""
+      },
+      {
+        "line": 274,
+        "text": "const environmentListCommand = Command.make(\"list\", { ...authLocationFlags, json: jsonFlag }).pipe("
+      },
+      {
+        "line": 275,
+        "text": "  Command.withDescription(\"List linked environments and whether each answers now.\"),"
+      },
+      {
+        "line": 276,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 277,
+        "text": "    runWithPeerLinks("
+      },
+      {
+        "line": 281,
+        "text": "          const listed = yield* links.list;"
+      },
+      {
+        "line": 282,
+        "text": "          yield* Console.log(flags.json ? `${yield* encodeLinks(listed)}\\n` : formatLinks(listed));"
+      },
+      {
+        "line": 283,
+        "text": "        }),"
+      },
+      {
+        "line": 284,
+        "text": "      { quietLogs: flags.json },"
+      },
+      {
+        "line": 288,
+        "text": ""
+      },
+      {
+        "line": 289,
+        "text": "const environmentUnlinkCommand = Command.make(\"unlink\", {"
+      },
+      {
+        "line": 290,
+        "text": "  ...authLocationFlags,"
+      },
+      {
+        "line": 291,
+        "text": "  environmentId: Argument.String(\"environment-id\").pipe("
+      },
+      {
+        "line": 292,
+        "text": "    Argument.withDescription(\"The linked environment's id, from `t3 environment list`.\"),"
+      },
+      {
+        "line": 293,
+        "text": "  ),"
+      },
+      {
+        "line": 294,
+        "text": "}).pipe("
+      },
+      {
+        "line": 295,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 296,
+        "text": "    \"Forget a linked environment here, and end its session there when that environment answers.\","
+      },
+      {
+        "line": 297,
+        "text": "  ),"
+      },
+      {
+        "line": 303,
+        "text": "        );"
+      },
+      {
+        "line": 304,
+        "text": "        yield* Console.log("
+      },
+      {
+        "line": 305,
+        "text": "          !removed"
+      },
+      {
+        "line": 306,
+        "text": "            ? `No linked environment ${flags.environmentId}.\\n`"
+      },
+      {
+        "line": 315,
+        "text": ""
+      },
+      {
+        "line": 316,
+        "text": "export const environmentCommand = Command.make(\"environment\").pipe("
+      },
+      {
+        "line": 317,
+        "text": "  Command.withDescription(\"Link other T3 Code environments, so agents here can work there.\"),"
+      },
+      {
+        "line": 318,
+        "text": "  Command.withSubcommands(["
+      },
+      {
+        "line": 319,
+        "text": "    environmentLinkCommand,"
+      },
+      {
+        "line": 320,
+        "text": "    environmentListCommand,"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/install.ts",
+    "blob_sha": "4e6420842dc9dd201268fb7e04da181282418b2f",
+    "lines": [
+      {
+        "line": 138,
+        "text": "    Effect.catch(() =>"
+      },
+      {
+        "line": 139,
+        "text": "      Console.error("
+      },
+      {
+        "line": 140,
+        "text": "        `Warning: could not record ${recorded} in ${path.join(runtimeDir, \"launchers\")}. Cleanup may remove the version it runs.`,"
+      },
+      {
+        "line": 141,
+        "text": "      ),"
+      },
+      {
+        "line": 192,
+        "text": ") {"
+      },
+      {
+        "line": 193,
+        "text": "  yield* Console.log(`Installed t3 ${packageJson.version} at ${installed.link}.`);"
+      },
+      {
+        "line": 194,
+        "text": "  if (installed.shadowedBy !== undefined) {"
+      },
+      {
+        "line": 195,
+        "text": "    return yield* Console.log("
+      },
+      {
+        "line": 196,
+        "text": "      `Another t3 at ${installed.shadowedBy} runs first, so run ${installed.link} to use this one.`,"
+      },
+      {
+        "line": 197,
+        "text": "    );"
+      },
+      {
+        "line": 198,
+        "text": "  }"
+      },
+      {
+        "line": 199,
+        "text": "  if (installed.onPath) return yield* Console.log(\"Run `t3` to get started.\");"
+      },
+      {
+        "line": 200,
+        "text": "  if (installed.pathCommand === undefined) {"
+      },
+      {
+        "line": 201,
+        "text": "    return yield* Console.log(`Add ${installed.binDir} to your PATH, then run \\`t3\\`.`);"
+      },
+      {
+        "line": 202,
+        "text": "  }"
+      },
+      {
+        "line": 203,
+        "text": "  if ((yield* HostProcess.Platform) === \"win32\") {"
+      },
+      {
+        "line": 204,
+        "text": "    yield* Console.log("
+      },
+      {
+        "line": 205,
+        "text": "      `${installed.binDir} is not on your PATH yet. In this PowerShell window, run:`,"
+      },
+      {
+        "line": 206,
+        "text": "    );"
+      },
+      {
+        "line": 207,
+        "text": "    yield* Console.log(`  ${installed.pathCommand}`);"
+      },
+      {
+        "line": 208,
+        "text": "    return yield* Console.log(\"Then run `t3`. For new windows, add the folder to your PATH.\");"
+      },
+      {
+        "line": 209,
+        "text": "  }"
+      },
+      {
+        "line": 210,
+        "text": "  yield* Console.log(`${installed.binDir} is not on your PATH yet. Add it with:`);"
+      },
+      {
+        "line": 211,
+        "text": "  yield* Console.log(`  ${installed.pathCommand}`);"
+      },
+      {
+        "line": 212,
+        "text": "  yield* Console.log(\"Then open a new terminal and run `t3`.\");"
+      },
+      {
+        "line": 213,
+        "text": "});"
+      },
+      {
+        "line": 214,
+        "text": ""
+      },
+      {
+        "line": 215,
+        "text": "export const installCommand = Command.make(\"install\").pipe("
+      },
+      {
+        "line": 216,
+        "text": "  Command.withDescription(\"Install this version as the `t3` command.\"),"
+      },
+      {
+        "line": 217,
+        "text": "  Command.withHandler(() => installCli().pipe(Effect.flatMap(reportInstalled))),"
+      },
+      {
+        "line": 218,
+        "text": ");"
+      },
+      {
+        "line": 230,
+        "text": "  // Scripts and machine-readable output; a prompt would stall them or corrupt their output."
+      },
+      {
+        "line": 231,
+        "text": "  \"--json\","
+      },
+      {
+        "line": 232,
+        "text": "  \"--yes\","
+      },
+      {
+        "line": 233,
+        "text": "  \"-y\","
+      },
+      {
+        "line": 307,
+        "text": "  if (environment.npm_config_yes === \"true\") return true;"
+      },
+      {
+        "line": 308,
+        "text": "  // `--json=true` and `-y=true` are the same flags."
+      },
+      {
+        "line": 309,
+        "text": "  if (input.args.some((arg) => SKIPPED_ARGUMENTS.has(arg.split(\"=\")[0]!))) return true;"
+      },
+      {
+        "line": 310,
+        "text": "  const command = topLevelCommand(input.args);"
+      },
+      {
+        "line": 348,
+        "text": "    yield* saveDecline;"
+      },
+      {
+        "line": 349,
+        "text": "    yield* Console.log(`\\nNo answer, so t3 was not installed. ${installHint}\\n`);"
+      },
+      {
+        "line": 350,
+        "text": "    return true;"
+      },
+      {
+        "line": 351,
+        "text": "  }"
+      },
+      {
+        "line": 354,
+        "text": "    yield* saveDecline;"
+      },
+      {
+        "line": 355,
+        "text": "    yield* Console.log(`Skipped. ${installHint}\\n`);"
+      },
+      {
+        "line": 356,
+        "text": "    return true;"
+      },
+      {
+        "line": 357,
+        "text": "  }"
+      },
+      {
+        "line": 360,
+        "text": "    Effect.catch((error) =>"
+      },
+      {
+        "line": 361,
+        "text": "      Effect.andThen(saveDecline, Console.error(`Could not install t3: ${error.message}`)),"
+      },
+      {
+        "line": 362,
+        "text": "    ),"
+      },
+      {
+        "line": 363,
+        "text": "  );"
+      },
+      {
+        "line": 364,
+        "text": "  yield* Console.log(\"\");"
+      },
+      {
+        "line": 365,
+        "text": "  return true;"
+      },
+      {
+        "line": 366,
+        "text": "});"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/invocation.ts",
+    "blob_sha": "4804d44f0e324952767ed4375103f9a29525c670",
+    "lines": [
+      {
+        "line": 218,
+        "text": ""
+      },
+      {
+        "line": 219,
+        "text": "/** A hint's command, run against the caller's `--base-dir` when one was given. */"
+      },
+      {
+        "line": 220,
+        "text": "export const resolveHostCliHint = ("
+      },
+      {
+        "line": 221,
+        "text": "  subcommand: string,"
+      },
+      {
+        "line": 225,
+        "text": "  resolveHostCliCommand(subcommand, ["
+      },
+      {
+        "line": 226,
+        "text": "    ...Option.match(baseDir, { onNone: () => [], onSome: (dir) => [\"--base-dir\", dir] }),"
+      },
+      {
+        "line": 227,
+        "text": "    ...args,"
+      },
+      {
+        "line": 228,
+        "text": "  ]).pipe(Effect.map(({ command }) => command));"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/managedChatGptToken.ts",
+    "blob_sha": "84ed18fb5228a006a3e9db63a7898fb7b87ede45",
+    "lines": [
+      {
+        "line": 40,
+        "text": "  if (Exit.isFailure(result)) {"
+      },
+      {
+        "line": 41,
+        "text": "    process.stderr.write("
+      },
+      {
+        "line": 42,
+        "text": "      \"Could not access the managed ChatGPT connection. Reconnect in T3 Code.\\n\","
+      },
+      {
+        "line": 43,
+        "text": "    );"
+      },
+      {
+        "line": 44,
+        "text": "    process.exitCode = 1;"
+      },
+      {
+        "line": 45,
+        "text": "    return;"
+      },
+      {
+        "line": 46,
+        "text": "  }"
+      },
+      {
+        "line": 47,
+        "text": "  process.stdout.write(result.value.token);"
+      },
+      {
+        "line": 48,
+        "text": "}"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/pair.ts",
+    "blob_sha": "2d45d45befeec3b77f1f58f68dbd87895eee33bc",
+    "lines": [
+      {
+        "line": 77,
+        "text": "      ...(this.inLinkedWorktree"
+      },
+      {
+        "line": 78,
+        "text": "        ? [\"In a linked worktree, pass --base-dir to pair with a server outside it.\"]"
+      },
+      {
+        "line": 79,
+        "text": "        : []),"
+      },
+      {
+        "line": 80,
+        "text": "      `Start one with \\`${this.serveCommand}\\`, or connect this machine with T3 Connect: \\`${this.connectCommand}\\`.`,"
+      },
+      {
+        "line": 324,
+        "text": "  }"
+      },
+      {
+        "line": 325,
+        "text": "  const baseDirArgs = hasExplicitBaseDir ? [\"--base-dir\", explicitBaseDir] : [];"
+      },
+      {
+        "line": 326,
+        "text": "  return yield* new NoRunningServerError({"
+      },
+      {
+        "line": 327,
+        "text": "    checkedStatePaths,"
+      },
+      {
+        "line": 504,
+        "text": ""
+      },
+      {
+        "line": 505,
+        "text": "const ttlFlag = Flag.String(\"ttl\").pipe("
+      },
+      {
+        "line": 506,
+        "text": "  Flag.withSchema(DurationFromString),"
+      },
+      {
+        "line": 507,
+        "text": "  Flag.withDescription("
+      },
+      {
+        "line": 508,
+        "text": "    \"Token TTL, for example `5m`, `1h`, or `15 minutes`. Defaults to 5 minutes.\","
+      },
+      {
+        "line": 509,
+        "text": "  ),"
+      },
+      {
+        "line": 510,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 511,
+        "text": ");"
+      },
+      {
+        "line": 512,
+        "text": ""
+      },
+      {
+        "line": 513,
+        "text": "const labelFlag = Flag.String(\"label\").pipe("
+      },
+      {
+        "line": 514,
+        "text": "  Flag.withDescription(\"Optional label shown in the server's connections list.\"),"
+      },
+      {
+        "line": 515,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 516,
+        "text": ");"
+      },
+      {
+        "line": 517,
+        "text": ""
+      },
+      {
+        "line": 518,
+        "text": "const tailscaleFlag = Flag.Boolean(\"tailscale\").pipe("
+      },
+      {
+        "line": 519,
+        "text": "  Flag.withDescription("
+      },
+      {
+        "line": 520,
+        "text": "    \"Publish the server over Tailscale Serve HTTPS and pair through the tailnet URL.\","
+      },
+      {
+        "line": 521,
+        "text": "  ),"
+      },
+      {
+        "line": 522,
+        "text": "  Flag.withDefault(false),"
+      },
+      {
+        "line": 523,
+        "text": ");"
+      },
+      {
+        "line": 524,
+        "text": ""
+      },
+      {
+        "line": 525,
+        "text": "const tailscaleServePortFlag = Flag.Int(\"tailscale-serve-port\").pipe("
+      },
+      {
+        "line": 526,
+        "text": "  Flag.withSchema(PortSchema),"
+      },
+      {
+        "line": 527,
+        "text": "  Flag.withDescription(\"HTTPS port for Tailscale Serve when --tailscale is enabled.\"),"
+      },
+      {
+        "line": 528,
+        "text": "  Flag.withDefault(DEFAULT_TAILSCALE_SERVE_PORT),"
+      },
+      {
+        "line": 529,
+        "text": ");"
+      },
+      {
+        "line": 530,
+        "text": ""
+      },
+      {
+        "line": 531,
+        "text": "export const pairCommand = Command.make(\"pair\", {"
+      },
+      {
+        "line": 532,
+        "text": "  baseDir: baseDirFlag,"
+      },
+      {
+        "line": 533,
+        "text": "  scopes: authScopesFlag(AuthStandardClientScopes),"
+      },
+      {
+        "line": 538,
+        "text": "}).pipe("
+      },
+      {
+        "line": 539,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 540,
+        "text": "    \"Mint a pairing token for a running T3 Code server and print it as a QR code.\","
+      },
+      {
+        "line": 541,
+        "text": "  ),"
+      },
+      {
+        "line": 543,
+        "text": "    Effect.gen(function* () {"
+      },
+      {
+        "line": 544,
+        "text": "      const cliLogLevel = yield* GlobalFlag.LogLevel;"
+      },
+      {
+        "line": 545,
+        "text": "      const logLevel = Option.getOrElse(cliLogLevel, () => \"Warn\" as const);"
+      },
+      {
+        "line": 546,
+        "text": ""
+      },
+      {
+        "line": 556,
+        "text": "          explicitBaseDir !== undefined && explicitBaseDir.trim().length > 0"
+      },
+      {
+        "line": 557,
+        "text": "            ? ` --base-dir ${hostShellWord(platform, explicitBaseDir)}`"
+      },
+      {
+        "line": 558,
+        "text": "            : \"\";"
+      },
+      {
+        "line": 559,
+        "text": "        return yield* new IncompatibleServerProtocolError({"
+      },
+      {
+        "line": 609,
+        "text": ""
+      },
+      {
+        "line": 610,
+        "text": "      yield* Console.log("
+      },
+      {
+        "line": 611,
+        "text": "        formatPairOutput({"
+      },
+      {
+        "line": 612,
+        "text": "          serverLabel: target.descriptor.label,"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/policy.ts",
+    "blob_sha": "dafc5352166f0296661daf3c56b11e17653937ae",
+    "lines": [
+      {
+        "line": 34,
+        "text": "      ([path, setting]) =>"
+      },
+      {
+        "line": 35,
+        "text": "        `  ${path} = ${JSON.stringify(setting.value)} (${setting.locked ? \"locked\" : \"default\"})`,"
+      },
+      {
+        "line": 36,
+        "text": "    ),"
+      },
+      {
+        "line": 37,
+        "text": "  ];"
+      },
+      {
+        "line": 38,
+        "text": "  if (document.limits !== undefined) {"
+      },
+      {
+        "line": 39,
+        "text": "    lines.push(\"\", \"Limits:\", JSON.stringify(document.limits, null, 2));"
+      },
+      {
+        "line": 40,
+        "text": "  }"
+      },
+      {
+        "line": 41,
+        "text": "  return `${lines.join(\"\\n\")}\\n`;"
+      },
+      {
+        "line": 69,
+        "text": ""
+      },
+      {
+        "line": 70,
+        "text": "const showCommand = Command.make(\"show\", projectLocationFlags).pipe("
+      },
+      {
+        "line": 71,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 72,
+        "text": "    \"Show the policy installed on this machine, and whether the running server loaded it.\","
+      },
+      {
+        "line": 73,
+        "text": "  ),"
+      },
+      {
+        "line": 84,
+        "text": "      const installed = yield* ManagedPolicy.loadedPolicy(policy);"
+      },
+      {
+        "line": 85,
+        "text": "      yield* Console.log(describePolicy(policy, installed));"
+      },
+      {
+        "line": 86,
+        "text": "      const config = yield* resolveCliAuthConfig(flags, yield* GlobalFlag.LogLevel);"
+      },
+      {
+        "line": 87,
+        "text": "      yield* Console.log(yield* describeRunningServer(config.serverRuntimeStatePath, installed));"
+      },
+      {
+        "line": 88,
+        "text": "    }),"
+      },
+      {
+        "line": 89,
+        "text": "  ),"
+      },
+      {
+        "line": 91,
+        "text": ""
+      },
+      {
+        "line": 92,
+        "text": "const checkCommand = Command.make(\"check\", {"
+      },
+      {
+        "line": 93,
+        "text": "  file: Argument.String(\"file\").pipe(Argument.withDescription(\"Policy file to validate.\")),"
+      },
+      {
+        "line": 94,
+        "text": "}).pipe("
+      },
+      {
+        "line": 95,
+        "text": "  Command.withDescription(\"Validate a policy file before deploying it.\"),"
+      },
+      {
+        "line": 96,
+        "text": "  Command.withHandler("
+      },
+      {
+        "line": 97,
+        "text": "    Effect.fn(\"cli.policy.check\")(function* ({ file }) {"
+      },
+      {
+        "line": 105,
+        "text": "      const policy = yield* ManagedPolicy.load(file);"
+      },
+      {
+        "line": 106,
+        "text": "      yield* Console.log(describePolicy(policy, yield* ManagedPolicy.loadedPolicy(policy)));"
+      },
+      {
+        "line": 107,
+        "text": "    }),"
+      },
+      {
+        "line": 108,
+        "text": "  ),"
+      },
+      {
+        "line": 116,
+        "text": ""
+      },
+      {
+        "line": 117,
+        "text": "const templatesCommand = Command.make(\"templates\", {"
+      },
+      {
+        "line": 118,
+        "text": "  directory: Argument.String(\"directory\").pipe("
+      },
+      {
+        "line": 119,
+        "text": "    Argument.withDescription(\"Directory to write the templates to.\"),"
+      },
+      {
+        "line": 120,
+        "text": "  ),"
+      },
+      {
+        "line": 121,
+        "text": "  policy: Flag.String(\"policy\").pipe("
+      },
+      {
+        "line": 122,
+        "text": "    Flag.withDescription(\"Policy file to put in the macOS profile. Default: a small sample.\"),"
+      },
+      {
+        "line": 123,
+        "text": "    Flag.optional,"
+      },
+      {
+        "line": 124,
+        "text": "  ),"
+      },
+      {
+        "line": 125,
+        "text": "}).pipe("
+      },
+      {
+        "line": 126,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 127,
+        "text": "    \"Write the Windows Group Policy template and a macOS configuration profile.\","
+      },
+      {
+        "line": 128,
+        "text": "  ),"
+      },
+      {
+        "line": 159,
+        "text": "        yield* fs.writeFileString(file, contents);"
+      },
+      {
+        "line": 160,
+        "text": "        yield* Console.log(file);"
+      },
+      {
+        "line": 161,
+        "text": "      }"
+      },
+      {
+        "line": 162,
+        "text": "    }),"
+      },
+      {
+        "line": 169,
+        "text": "      ([path, value]) =>"
+      },
+      {
+        "line": 170,
+        "text": "        `${path} = ${value === undefined ? \"(no default)\" : JSON.stringify(value)}`,"
+      },
+      {
+        "line": 171,
+        "text": "    )"
+      },
+      {
+        "line": 172,
+        "text": "    .join(\"\\n\");"
+      },
+      {
+        "line": 173,
+        "text": ""
+      },
+      {
+        "line": 174,
+        "text": "const settingsCommand = Command.make(\"settings\").pipe("
+      },
+      {
+        "line": 175,
+        "text": "  Command.withDescription(\"List the settings a policy can manage, with their defaults.\"),"
+      },
+      {
+        "line": 176,
+        "text": "  Command.withHandler(() => Console.log(describeManageableSettings())),"
+      },
+      {
+        "line": 177,
+        "text": ");"
+      },
+      {
+        "line": 178,
+        "text": ""
+      },
+      {
+        "line": 179,
+        "text": "export const policyCommand = Command.make(\"policy\").pipe("
+      },
+      {
+        "line": 180,
+        "text": "  Command.withDescription(\"Inspect the administrator's managed policy.\"),"
+      },
+      {
+        "line": 181,
+        "text": "  Command.withSubcommands([showCommand, checkCommand, settingsCommand, templatesCommand]),"
+      },
+      {
+        "line": 182,
+        "text": ");"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/project.ts",
+    "blob_sha": "d2e84e0d4f4f501115be4df63215fa94f0f6f597",
+    "lines": [
+      {
+        "line": 317,
+        "text": ") {"
+      },
+      {
+        "line": 318,
+        "text": "  const logLevel = yield* GlobalFlag.LogLevel;"
+      },
+      {
+        "line": 319,
+        "text": "  const config = yield* resolveCliAuthConfig(flags, logLevel);"
+      },
+      {
+        "line": 320,
+        "text": "  const minimumLogLevel = config.logLevel;"
+      },
+      {
+        "line": 353,
+        "text": "    });"
+      },
+      {
+        "line": 354,
+        "text": "    yield* Console.log(output);"
+      },
+      {
+        "line": 355,
+        "text": "  }).pipe("
+      },
+      {
+        "line": 356,
+        "text": "    Effect.scoped,"
+      },
+      {
+        "line": 366,
+        "text": ""
+      },
+      {
+        "line": 367,
+        "text": "const projectAddCommand = Command.make(\"add\", {"
+      },
+      {
+        "line": 368,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 369,
+        "text": "  workspaceRoot: Argument.String(\"path\").pipe("
+      },
+      {
+        "line": 370,
+        "text": "    Argument.withDescription(\"Workspace root to add as a project.\"),"
+      },
+      {
+        "line": 371,
+        "text": "  ),"
+      },
+      {
+        "line": 372,
+        "text": "  title: Flag.String(\"title\").pipe(Flag.withDescription(\"Optional project title.\"), Flag.optional),"
+      },
+      {
+        "line": 373,
+        "text": "  track: Flag.String(\"track\").pipe("
+      },
+      {
+        "line": 374,
+        "text": "    Flag.withDescription("
+      },
+      {
+        "line": 375,
+        "text": "      \"A folder outside the path that the project also works in. Repositories inside the path are found on their own. Repeat for more.\","
+      },
+      {
+        "line": 376,
+        "text": "    ),"
+      },
+      {
+        "line": 377,
+        "text": "    Flag.atLeast(0),"
+      },
+      {
+        "line": 378,
+        "text": "  ),"
+      },
+      {
+        "line": 379,
+        "text": "}).pipe("
+      },
+      {
+        "line": 380,
+        "text": "  Command.withDescription(\"Add a project.\"),"
+      },
+      {
+        "line": 381,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 382,
+        "text": "    runProjectMutation("
+      },
+      {
+        "line": 478,
+        "text": ""
+      },
+      {
+        "line": 479,
+        "text": "const projectRemoveCommand = Command.make(\"remove\", {"
+      },
+      {
+        "line": 480,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 481,
+        "text": "  project: Argument.String(\"project\").pipe("
+      },
+      {
+        "line": 482,
+        "text": "    Argument.withDescription(\"Project id or workspace root to remove.\"),"
+      },
+      {
+        "line": 483,
+        "text": "  ),"
+      },
+      {
+        "line": 484,
+        "text": "  force: Flag.Boolean(\"force\").pipe("
+      },
+      {
+        "line": 485,
+        "text": "    Flag.withDescription(\"Delete the project and all of its threads.\"),"
+      },
+      {
+        "line": 486,
+        "text": "    Flag.withDefault(false),"
+      },
+      {
+        "line": 487,
+        "text": "  ),"
+      },
+      {
+        "line": 488,
+        "text": "}).pipe("
+      },
+      {
+        "line": 489,
+        "text": "  Command.withDescription(\"Remove a project.\"),"
+      },
+      {
+        "line": 490,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 491,
+        "text": "    runProjectMutation("
+      },
+      {
+        "line": 517,
+        "text": ""
+      },
+      {
+        "line": 518,
+        "text": "const projectRenameCommand = Command.make(\"rename\", {"
+      },
+      {
+        "line": 519,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 520,
+        "text": "  project: Argument.String(\"project\").pipe("
+      },
+      {
+        "line": 521,
+        "text": "    Argument.withDescription(\"Project id or workspace root to rename.\"),"
+      },
+      {
+        "line": 522,
+        "text": "  ),"
+      },
+      {
+        "line": 523,
+        "text": "  title: Argument.String(\"title\").pipe(Argument.withDescription(\"New project title.\")),"
+      },
+      {
+        "line": 524,
+        "text": "}).pipe("
+      },
+      {
+        "line": 525,
+        "text": "  Command.withDescription(\"Rename a project.\"),"
+      },
+      {
+        "line": 526,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 527,
+        "text": "    runProjectMutation("
+      },
+      {
+        "line": 558,
+        "text": ""
+      },
+      {
+        "line": 559,
+        "text": "export const projectCommand = Command.make(\"project\").pipe("
+      },
+      {
+        "line": 560,
+        "text": "  Command.withDescription(\"Manage projects.\"),"
+      },
+      {
+        "line": 561,
+        "text": "  Command.withSubcommands([projectAddCommand, projectRemoveCommand, projectRenameCommand]),"
+      },
+      {
+        "line": 562,
+        "text": ");"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/runningServer.ts",
+    "blob_sha": "cf315ff223ae5e1c5ee14fa1661b78309825c27c",
+    "lines": []
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/server.ts",
+    "blob_sha": "303402d46c2b44a4d0b260f46f76224d8b6b0dca",
+    "lines": [
+      {
+        "line": 28,
+        "text": "  const { runServer } = yield* Effect.promise(() => import(\"../server.ts\"));"
+      },
+      {
+        "line": 29,
+        "text": "  const logLevel = yield* GlobalFlag.LogLevel;"
+      },
+      {
+        "line": 30,
+        "text": "  const selectAutomaticPort = yield* AutomaticPort.make.pipe(Effect.provide(ProcessRunner.layer));"
+      },
+      {
+        "line": 31,
+        "text": "  const config = yield* resolveServerConfig(flags, logLevel, { ...options, selectAutomaticPort });"
+      },
+      {
+        "line": 75,
+        "text": ""
+      },
+      {
+        "line": 76,
+        "text": "export const startCommand = Command.make(\"start\", { ...sharedServerCommandFlags }).pipe("
+      },
+      {
+        "line": 77,
+        "text": "  Command.withDescription(\"Same as `t3`.\"),"
+      },
+      {
+        "line": 78,
+        "text": "  Command.unlisted,"
+      },
+      {
+        "line": 79,
+        "text": "  Command.withHandler((flags) => runServerCommand(flags, { rejectRunningServer: true })),"
+      },
+      {
+        "line": 84,
+        "text": ""
+      },
+      {
+        "line": 85,
+        "text": "export const serveCommand = Command.make(\"serve\", serveCommandFlags).pipe("
+      },
+      {
+        "line": 86,
+        "text": "  Command.withShortDescription(\"Run T3 Code in this terminal, with no browser.\"),"
+      },
+      {
+        "line": 87,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 88,
+        "text": "    \"Run T3 Code in this terminal without opening a browser, and print pairing details. The background service runs this. To set up access from your other devices, run `t3 up`.\","
+      },
+      {
+        "line": 89,
+        "text": "  ),"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/service.ts",
+    "blob_sha": "fc2aa8d0889aa238b8cea764d6239b54dba78fa8",
+    "lines": [
+      {
+        "line": 232,
+        "text": ") {"
+      },
+      {
+        "line": 233,
+        "text": "  const logLevel = yield* GlobalFlag.LogLevel;"
+      },
+      {
+        "line": 234,
+        "text": "  const config = yield* resolveCliAuthConfig(flags, logLevel);"
+      },
+      {
+        "line": 235,
+        "text": "  return yield* run.pipe(Effect.provide(Layer.merge(layer(config), ServerConfig.layer(config))));"
+      },
+      {
+        "line": 239,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 240,
+        "text": "  allowDowngrade: Flag.Boolean(\"allow-downgrade\").pipe("
+      },
+      {
+        "line": 241,
+        "text": "    Flag.withDescription(\"Allow replacing a newer installed service with this older CLI version.\"),"
+      },
+      {
+        "line": 242,
+        "text": "    Flag.withDefault(false),"
+      },
+      {
+        "line": 243,
+        "text": "  ),"
+      },
+      {
+        "line": 244,
+        "text": "};"
+      },
+      {
+        "line": 245,
+        "text": ""
+      },
+      {
+        "line": 246,
+        "text": "const serviceInstallCommand = Command.make(\"install\", serviceReconcileFlags).pipe("
+      },
+      {
+        "line": 247,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 248,
+        "text": "    \"Install T3 Code as a background service for this user. `t3 up` also chooses how your other devices reach it.\","
+      },
+      {
+        "line": 249,
+        "text": "  ),"
+      },
+      {
+        "line": 255,
+        "text": "        if (!result.changed) {"
+      },
+      {
+        "line": 256,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 257,
+        "text": "            `T3 Code service is already installed with t3@${packageJson.version} (${yield* resolveEntryPath}).`,"
+      },
+      {
+        "line": 258,
+        "text": "          );"
+      },
+      {
+        "line": 260,
+        "text": "        }"
+      },
+      {
+        "line": 261,
+        "text": "        yield* Console.log(formatServiceChange(result));"
+      },
+      {
+        "line": 262,
+        "text": "        if (!result.previouslyInstalled) {"
+      },
+      {
+        "line": 263,
+        "text": "          const upCommand = yield* resolveHostCliHint(\"up\", flags.baseDir);"
+      },
+      {
+        "line": 264,
+        "text": "          yield* Console.log(`Run \\`${upCommand}\\` to choose how your other devices reach it.`);"
+      },
+      {
+        "line": 265,
+        "text": "        }"
+      },
+      {
+        "line": 266,
+        "text": "      }),"
+      },
+      {
+        "line": 270,
+        "text": ""
+      },
+      {
+        "line": 271,
+        "text": "const serviceUpdateCommand = Command.make(\"update\", serviceReconcileFlags).pipe("
+      },
+      {
+        "line": 272,
+        "text": "  Command.withDescription(\"Deprecated. Run `t3 update` to move to a newer release.\"),"
+      },
+      {
+        "line": 273,
+        "text": "  Command.unlisted,"
+      },
+      {
+        "line": 274,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 277,
+        "text": "      Effect.gen(function* () {"
+      },
+      {
+        "line": 278,
+        "text": "        yield* Console.log("
+      },
+      {
+        "line": 279,
+        "text": "          \"`t3 service update` is deprecated: run `t3 update` to move to a newer release, or `t3 service install` to repair the service. Repairing now.\","
+      },
+      {
+        "line": 280,
+        "text": "        );"
+      },
+      {
+        "line": 282,
+        "text": "        if (!result.changed) {"
+      },
+      {
+        "line": 283,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 284,
+        "text": "            `T3 Code service is already using t3@${packageJson.version} (${yield* resolveEntryPath}).`,"
+      },
+      {
+        "line": 285,
+        "text": "          );"
+      },
+      {
+        "line": 287,
+        "text": "        }"
+      },
+      {
+        "line": 288,
+        "text": "        yield* Console.log(formatServiceChange(result));"
+      },
+      {
+        "line": 289,
+        "text": "      }),"
+      },
+      {
+        "line": 290,
+        "text": "    ),"
+      },
+      {
+        "line": 293,
+        "text": ""
+      },
+      {
+        "line": 294,
+        "text": "const serviceRestartCommand = Command.make(\"restart\", projectLocationFlags).pipe("
+      },
+      {
+        "line": 295,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 296,
+        "text": "    \"Restart the background service. Picks up a version installed by `t3 update` that was not restarted at the time.\","
+      },
+      {
+        "line": 297,
+        "text": "  ),"
+      },
+      {
+        "line": 306,
+        "text": "          status.installedVersion === undefined ? \"\" : ` on t3@${status.installedVersion}`;"
+      },
+      {
+        "line": 307,
+        "text": "        yield* Console.log("
+      },
+      {
+        "line": 308,
+        "text": "          outcome === \"restarted\""
+      },
+      {
+        "line": 309,
+        "text": "            ? `Restarted the T3 Code service${onVersion}.`"
+      },
+      {
+        "line": 320,
+        "text": ""
+      },
+      {
+        "line": 321,
+        "text": "const serviceUninstallCommand = Command.make(\"uninstall\", projectLocationFlags).pipe("
+      },
+      {
+        "line": 322,
+        "text": "  Command.withDescription(\"Stop and remove the T3 Code background service.\"),"
+      },
+      {
+        "line": 323,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 324,
+        "text": "    runServiceCommand("
+      },
+      {
+        "line": 338,
+        "text": "        ) {"
+      },
+      {
+        "line": 339,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 340,
+        "text": "            `The T3 Code service serves ${installedBaseDir}, so it was not removed. Pass \\`${BootService.formatBootServiceBaseDirOption(installedBaseDir)}\\` to remove it.`,"
+      },
+      {
+        "line": 341,
+        "text": "          );"
+      },
+      {
+        "line": 344,
+        "text": "        const removed = yield* service.uninstall;"
+      },
+      {
+        "line": 345,
+        "text": "        yield* Console.log("
+      },
+      {
+        "line": 346,
+        "text": "          removed ? \"Removed the T3 Code service.\" : \"T3 Code service is not installed.\","
+      },
+      {
+        "line": 347,
+        "text": "        );"
+      },
+      {
+        "line": 352,
+        "text": ""
+      },
+      {
+        "line": 353,
+        "text": "const serviceStatusCommand = Command.make(\"status\", projectLocationFlags).pipe("
+      },
+      {
+        "line": 354,
+        "text": "  Command.withDescription(\"Show whether the T3 Code background service is installed.\"),"
+      },
+      {
+        "line": 355,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 356,
+        "text": "    runServiceCommand("
+      },
+      {
+        "line": 374,
+        "text": "        };"
+      },
+      {
+        "line": 375,
+        "text": "        yield* Console.log(formatServiceStatus(status, packageJson.version, commands, protection));"
+      },
+      {
+        "line": 376,
+        "text": "      }),"
+      },
+      {
+        "line": 377,
+        "text": "    ),"
+      },
+      {
+        "line": 388,
+        "text": ""
+      },
+      {
+        "line": 389,
+        "text": "const serviceProtectCommand = Command.make(\"protect\", {"
+      },
+      {
+        "line": 390,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 391,
+        "text": "  undo: Flag.Boolean(\"undo\").pipe("
+      },
+      {
+        "line": 392,
+        "text": "    Flag.withDescription(\"Remove the protection this command set up.\"),"
+      },
+      {
+        "line": 393,
+        "text": "    Flag.withDefault(false),"
+      },
+      {
+        "line": 394,
+        "text": "  ),"
+      },
+      {
+        "line": 395,
+        "text": "  yes: Flag.Boolean(\"yes\").pipe("
+      },
+      {
+        "line": 396,
+        "text": "    Flag.withDescription(\"Answer yes to every question, including SSH and Tailscale.\"),"
+      },
+      {
+        "line": 397,
+        "text": "    Flag.withDefault(false),"
+      },
+      {
+        "line": 398,
+        "text": "  ),"
+      },
+      {
+        "line": 399,
+        "text": "}).pipe("
+      },
+      {
+        "line": 400,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 401,
+        "text": "    \"Protect the T3 Code server from agents under memory pressure (Linux with systemd). Asks for sudo.\","
+      },
+      {
+        "line": 402,
+        "text": "  ),"
+      },
+      {
+        "line": 405,
+        "text": "      const unsupported = \"Service protection needs Linux with systemd.\";"
+      },
+      {
+        "line": 406,
+        "text": "      if ((yield* HostProcess.Platform) !== \"linux\") return yield* Console.log(unsupported);"
+      },
+      {
+        "line": 407,
+        "text": "      // Before resolving config, which creates T3 directories that root would then own."
+      },
+      {
+        "line": 408,
+        "text": "      if ((yield* HostProcess.UserId) === 0) {"
+      },
+      {
+        "line": 409,
+        "text": "        return yield* Console.log("
+      },
+      {
+        "line": 410,
+        "text": "          \"Run `t3 service protect` as the user that runs T3 Code, without sudo. It asks for sudo when it needs root.\","
+      },
+      {
+        "line": 411,
+        "text": "        );"
+      },
+      {
+        "line": 419,
+        "text": "          if (uid === undefined || remote === undefined || unitPath === \"\") {"
+      },
+      {
+        "line": 420,
+        "text": "            return yield* Console.log(unsupported);"
+      },
+      {
+        "line": 421,
+        "text": "          }"
+      },
+      {
+        "line": 422,
+        "text": "          const userUnitDir = (yield* Path.Path).dirname(unitPath);"
+      },
+      {
+        "line": 432,
+        "text": "            if (installed === undefined) {"
+      },
+      {
+        "line": 433,
+        "text": "              return yield* Console.log(\"T3 Code service protection is not set up.\");"
+      },
+      {
+        "line": 434,
+        "text": "            }"
+      },
+      {
+        "line": 435,
+        "text": "            yield* Console.log("
+      },
+      {
+        "line": 436,
+        "text": "              ["
+      },
+      {
+        "line": 437,
+        "text": "                \"Removes:\","
+      },
+      {
+        "line": 445,
+        "text": "            yield* ServiceProtection.removeProtection(installed);"
+      },
+      {
+        "line": 446,
+        "text": "            return yield* Console.log("
+      },
+      {
+        "line": 447,
+        "text": "              \"Removed T3 Code service protection. The server's OOM score returns to normal after `t3 service restart`.\","
+      },
+      {
+        "line": 448,
+        "text": "            );"
+      },
+      {
+        "line": 450,
+        "text": ""
+      },
+      {
+        "line": 451,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 452,
+        "text": "            ["
+      },
+      {
+        "line": 453,
+        "text": "              \"Keeps T3 Code running when agents fill this machine's memory:\","
+      },
+      {
+        "line": 470,
+        "text": "          });"
+      },
+      {
+        "line": 471,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 472,
+        "text": "            ["
+      },
+      {
+        "line": 473,
+        "text": "              \"Drop-ins it writes, as root through sudo:\","
+      },
+      {
+        "line": 480,
+        "text": "          if (!memoryController) {"
+      },
+      {
+        "line": 481,
+        "text": "            yield* Console.log(`Only the OOM scores can apply: ${MEMORY_CONTROLLER_DISABLED}`);"
+      },
+      {
+        "line": 482,
+        "text": "          }"
+      },
+      {
+        "line": 483,
+        "text": "          if (!(yield* confirm(flags.yes, \"Apply these settings?\"))) return;"
+      },
+      {
+        "line": 484,
+        "text": "          yield* ServiceProtection.applyProtection(plan);"
+      },
+      {
+        "line": 485,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 486,
+        "text": "            memoryController"
+      },
+      {
+        "line": 487,
+        "text": "              ? \"Protected T3 Code. Memory protection applies now; the server takes its OOM score after `t3 service restart`. Undo with `t3 service protect --undo`.\""
+      },
+      {
+        "line": 495,
+        "text": ""
+      },
+      {
+        "line": 496,
+        "text": "export const serviceCommand = Command.make(\"service\").pipe("
+      },
+      {
+        "line": 497,
+        "text": "  Command.withDescription(\"Manage the T3 Code background service.\"),"
+      },
+      {
+        "line": 498,
+        "text": "  Command.withSubcommands(["
+      },
+      {
+        "line": 499,
+        "text": "    serviceInstallCommand,"
+      },
+      {
+        "line": 500,
+        "text": "    serviceRestartCommand,"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/serviceLauncher.ts",
+    "blob_sha": "fc5882cbf935a9ac494f25ba1ce508fab1178f37",
+    "lines": [
+      {
+        "line": 11,
+        "text": "    if (value === undefined) return undefined;"
+      },
+      {
+        "line": 12,
+        "text": "    if (flag === \"--base-dir\") baseDir = value;"
+      },
+      {
+        "line": 13,
+        "text": "    else if (flag === \"--log-file\") logFile = value;"
+      },
+      {
+        "line": 14,
+        "text": "    else if (flag === \"--service-unit\") serviceUnit = value;"
+      },
+      {
+        "line": 24,
+        "text": "    const message = cause instanceof Error ? cause.message : String(cause);"
+      },
+      {
+        "line": 25,
+        "text": "    process.stderr.write(`[service-launcher] ${message}\\n`);"
+      },
+      {
+        "line": 26,
+        "text": "    process.exitCode = 1;"
+      },
+      {
+        "line": 27,
+        "text": "  }"
+      },
+      {
+        "line": 28,
+        "text": "}"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/servicePreflight.ts",
+    "blob_sha": "eefb2a35d37cb7d2a74f9242e92268d082a93fef",
+    "lines": [
+      {
+        "line": 6,
+        "text": ""
+      },
+      {
+        "line": 7,
+        "text": "export const servicePreflightCommand = Command.make(\"__service-preflight\", {"
+      },
+      {
+        "line": 8,
+        "text": "  databasePath: Flag.String(\"database-path\"),"
+      },
+      {
+        "line": 9,
+        "text": "  launcherProtocol: Flag.Int(\"launcher-protocol\"),"
+      },
+      {
+        "line": 10,
+        "text": "}).pipe("
+      },
+      {
+        "line": 11,
+        "text": "  Command.unlisted,"
+      },
+      {
+        "line": 12,
+        "text": "  Command.withHandler(({ databasePath, launcherProtocol }) =>"
+      },
+      {
+        "line": 13,
+        "text": "    Console.log(JSON.stringify(runServicePreflight({ databasePath, launcherProtocol }))).pipe("
+      },
+      {
+        "line": 14,
+        "text": "      Effect.asVoid,"
+      },
+      {
+        "line": 15,
+        "text": "    ),"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/speechWorker.ts",
+    "blob_sha": "68be39836e8e36f638e21a751bfa74cc47d1f4ed",
+    "lines": [
+      {
+        "line": 4,
+        "text": ""
+      },
+      {
+        "line": 5,
+        "text": "export const speechWorkerCommand = Command.make(\"__speech-worker\", {"
+      },
+      {
+        "line": 6,
+        "text": "  mode: Argument.Literals(\"mode\", [\"discover\", \"model\"]),"
+      },
+      {
+        "line": 7,
+        "text": "  moduleUrl: Argument.String(\"module-url\").pipe(Argument.optional),"
+      },
+      {
+        "line": 8,
+        "text": "}).pipe("
+      },
+      {
+        "line": 9,
+        "text": "  Command.unlisted,"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/sshHelper.ts",
+    "blob_sha": "342b4107a54bdfce3a1df53369f522cd45457b94",
+    "lines": [
+      {
+        "line": 43,
+        "text": ""
+      },
+      {
+        "line": 44,
+        "text": "const pickPort = Command.make(\"pick-port\", {"
+      },
+      {
+        "line": 45,
+        "text": "  portFile: Argument.String(\"port-file\"),"
+      },
+      {
+        "line": 46,
+        "text": "  defaultPort: Argument.Int(\"default-port\"),"
+      },
+      {
+        "line": 47,
+        "text": "  scanWindow: Argument.Int(\"scan-window\"),"
+      },
+      {
+        "line": 48,
+        "text": "}).pipe("
+      },
+      {
+        "line": 49,
+        "text": "  Command.withHandler(({ portFile, defaultPort, scanWindow }) =>"
+      },
+      {
+        "line": 55,
+        "text": "        if ((await canBind(port)) && !(await answersOnLoopback(port))) {"
+      },
+      {
+        "line": 56,
+        "text": "          process.stdout.write(String(port));"
+      },
+      {
+        "line": 57,
+        "text": "          return;"
+      },
+      {
+        "line": 58,
+        "text": "        }"
+      },
+      {
+        "line": 59,
+        "text": "      }"
+      },
+      {
+        "line": 60,
+        "text": "      process.exitCode = 1;"
+      },
+      {
+        "line": 61,
+        "text": "    }),"
+      },
+      {
+        "line": 62,
+        "text": "  ),"
+      },
+      {
+        "line": 85,
+        "text": ""
+      },
+      {
+        "line": 86,
+        "text": "const waitReady = Command.make(\"wait-ready\", {"
+      },
+      {
+        "line": 87,
+        "text": "  port: Argument.Int(\"port\"),"
+      },
+      {
+        "line": 88,
+        "text": "  timeoutMs: Argument.Int(\"timeout-ms\"),"
+      },
+      {
+        "line": 89,
+        "text": "  probeTimeoutMs: Argument.Int(\"probe-timeout-ms\"),"
+      },
+      {
+        "line": 90,
+        "text": "}).pipe("
+      },
+      {
+        "line": 91,
+        "text": "  Command.withHandler(({ port, timeoutMs, probeTimeoutMs }) =>"
+      },
+      {
+        "line": 101,
+        "text": "      // The launcher reads 2 as \"nothing listens on this port\"."
+      },
+      {
+        "line": 102,
+        "text": "      process.exitCode = refusedOnly ? 2 : 1;"
+      },
+      {
+        "line": 103,
+        "text": "    }),"
+      },
+      {
+        "line": 104,
+        "text": "  ),"
+      },
+      {
+        "line": 107,
+        "text": "/** Prints `<pid> <port>` for a live default-home server, or exits 1. */"
+      },
+      {
+        "line": 108,
+        "text": "const runtimePort = Command.make(\"runtime-port\", {"
+      },
+      {
+        "line": 109,
+        "text": "  runtimeFile: Argument.String(\"runtime-file\"),"
+      },
+      {
+        "line": 110,
+        "text": "}).pipe("
+      },
+      {
+        "line": 111,
+        "text": "  Command.withHandler(({ runtimeFile }) =>"
+      },
+      {
+        "line": 122,
+        "text": "        if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(port)) {"
+      },
+      {
+        "line": 123,
+        "text": "          process.exitCode = 1;"
+      },
+      {
+        "line": 124,
+        "text": "          return;"
+      },
+      {
+        "line": 125,
+        "text": "        }"
+      },
+      {
+        "line": 127,
+        "text": "        if (origin.protocol !== \"http:\" || ![\"127.0.0.1\", \"localhost\"].includes(origin.hostname)) {"
+      },
+      {
+        "line": 128,
+        "text": "          process.exitCode = 1;"
+      },
+      {
+        "line": 129,
+        "text": "          return;"
+      },
+      {
+        "line": 130,
+        "text": "        }"
+      },
+      {
+        "line": 131,
+        "text": "        process.kill(pid, 0);"
+      },
+      {
+        "line": 132,
+        "text": "        process.stdout.write(`${pid} ${port}`);"
+      },
+      {
+        "line": 133,
+        "text": "      } catch {"
+      },
+      {
+        "line": 134,
+        "text": "        process.exitCode = 1;"
+      },
+      {
+        "line": 135,
+        "text": "      }"
+      },
+      {
+        "line": 136,
+        "text": "    }),"
+      },
+      {
+        "line": 154,
+        "text": "/** Exits 0 when the managed server `pid` runs this version or a newer one, else 1. */"
+      },
+      {
+        "line": 155,
+        "text": "const keepServer = Command.make(\"keep-server\", {"
+      },
+      {
+        "line": 156,
+        "text": "  runtimeFile: Argument.String(\"runtime-file\"),"
+      },
+      {
+        "line": 157,
+        "text": "  pid: Argument.Int(\"pid\"),"
+      },
+      {
+        "line": 158,
+        "text": "}).pipe("
+      },
+      {
+        "line": 159,
+        "text": "  Command.withHandler(({ runtimeFile, pid }) =>"
+      },
+      {
+        "line": 163,
+        "text": "        : \"\";"
+      },
+      {
+        "line": 164,
+        "text": "      if (!keepsRunningServer(runtimeJson, pid, packageJson.version)) process.exitCode = 1;"
+      },
+      {
+        "line": 165,
+        "text": "    }),"
+      },
+      {
+        "line": 166,
+        "text": "  ),"
+      },
+      {
+        "line": 168,
+        "text": ""
+      },
+      {
+        "line": 169,
+        "text": "const updateRemaining = Command.make(\"update-remaining\", {"
+      },
+      {
+        "line": 170,
+        "text": "  markerFile: Argument.String(\"marker-file\"),"
+      },
+      {
+        "line": 171,
+        "text": "}).pipe("
+      },
+      {
+        "line": 172,
+        "text": "  Command.withHandler(({ markerFile }) =>"
+      },
+      {
+        "line": 175,
+        "text": "        Effect.sync(() => {"
+      },
+      {
+        "line": 176,
+        "text": "          process.stdout.write(Option.match(remaining, { onNone: () => \"\", onSome: String }));"
+      },
+      {
+        "line": 177,
+        "text": "        }),"
+      },
+      {
+        "line": 178,
+        "text": "      ),"
+      },
+      {
+        "line": 184,
+        "text": "/** Exits 0 while a server holds this home or a boot service is about to start one. */"
+      },
+      {
+        "line": 185,
+        "text": "const homeOwned = Command.make(\"home-owned\", {"
+      },
+      {
+        "line": 186,
+        "text": "  baseDir: Argument.String(\"base-dir\"),"
+      },
+      {
+        "line": 187,
+        "text": "}).pipe("
+      },
+      {
+        "line": 188,
+        "text": "  Command.withHandler(({ baseDir }) =>"
+      },
+      {
+        "line": 190,
+        "text": "      if (!((await serviceLauncherIsServing(baseDir)) || (await stateDirOwned(baseDir)))) {"
+      },
+      {
+        "line": 191,
+        "text": "        process.exitCode = 1;"
+      },
+      {
+        "line": 192,
+        "text": "      }"
+      },
+      {
+        "line": 193,
+        "text": "    }),"
+      },
+      {
+        "line": 196,
+        "text": ""
+      },
+      {
+        "line": 197,
+        "text": "export const sshHelperCommand = Command.make(\"__ssh-helper\").pipe("
+      },
+      {
+        "line": 198,
+        "text": "  Command.unlisted,"
+      },
+      {
+        "line": 199,
+        "text": "  Command.withSubcommands(["
+      },
+      {
+        "line": 200,
+        "text": "    pickPort,"
+      },
+      {
+        "line": 201,
+        "text": "    waitReady,"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/theme.ts",
+    "blob_sha": "26048240d524898210fe9bcd07812b46bdcd9a6f",
+    "lines": [
+      {
+        "line": 439,
+        "text": ""
+      },
+      {
+        "line": 440,
+        "text": "const themeSetCommand = Command.make(\"set\", {"
+      },
+      {
+        "line": 441,
+        "text": "  baseDir: baseDirFlag,"
+      },
+      {
+        "line": 442,
+        "text": "  id: Flag.String(\"id\").pipe("
+      },
+      {
+        "line": 443,
+        "text": "    Flag.withDescription(\"Theme id to publish a file under, instead of its filename.\"),"
+      },
+      {
+        "line": 444,
+        "text": "    Flag.optional,"
+      },
+      {
+        "line": 445,
+        "text": "  ),"
+      },
+      {
+        "line": 446,
+        "text": "  theme: Argument.String(\"theme\").pipe("
+      },
+      {
+        "line": 447,
+        "text": "    Argument.withDescription("
+      },
+      {
+        "line": 448,
+        "text": "      'A theme id (a built-in, or one this machine publishes, where themes/nightfall.json is \"nightfall\"), or a path to a theme JSON file to publish and set in one step.',"
+      },
+      {
+        "line": 449,
+        "text": "    ),"
+      },
+      {
+        "line": 451,
+        "text": "}).pipe("
+      },
+      {
+        "line": 452,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 453,
+        "text": "    \"Set the environment's theme. The web app this server serves and the desktop app on this machine switch to it; a desktop app connected from another machine does not.\","
+      },
+      {
+        "line": 454,
+        "text": "  ),"
+      },
+      {
+        "line": 500,
+        "text": "      yield* cleanupPublish;"
+      },
+      {
+        "line": 501,
+        "text": "      yield* Console.log("
+      },
+      {
+        "line": 502,
+        "text": "        targetIsFile"
+      },
+      {
+        "line": 503,
+        "text": "          ? `Published ${target} as \"${themeId}\" and set it as the environment theme.\\n`"
+      },
+      {
+        "line": 509,
+        "text": ""
+      },
+      {
+        "line": 510,
+        "text": "const themeClearCommand = Command.make(\"clear\", { baseDir: baseDirFlag }).pipe("
+      },
+      {
+        "line": 511,
+        "text": "  Command.withDescription(\"Remove the environment's theme; clients keep what they have.\"),"
+      },
+      {
+        "line": 512,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 513,
+        "text": "    Effect.gen(function* () {"
+      },
+      {
+        "line": 515,
+        "text": "      yield* writeDefaultTheme({ settingsPath: paths.settingsPath, themeId: \"\" });"
+      },
+      {
+        "line": 516,
+        "text": "      yield* Console.log(`Environment theme cleared in ${paths.settingsPath}.\\n`);"
+      },
+      {
+        "line": 517,
+        "text": "    }),"
+      },
+      {
+        "line": 518,
+        "text": "  ),"
+      },
+      {
+        "line": 520,
+        "text": ""
+      },
+      {
+        "line": 521,
+        "text": "const themeShowCommand = Command.make(\"show\", { baseDir: baseDirFlag }).pipe("
+      },
+      {
+        "line": 522,
+        "text": "  Command.withDescription(\"Show the environment's theme and its published themes.\"),"
+      },
+      {
+        "line": 523,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 524,
+        "text": "    Effect.gen(function* () {"
+      },
+      {
+        "line": 535,
+        "text": ""
+      },
+      {
+        "line": 536,
+        "text": "      yield* Console.log("
+      },
+      {
+        "line": 537,
+        "text": "        defaultTheme === null"
+      },
+      {
+        "line": 538,
+        "text": "          ? \"Environment theme: not set.\\n\""
+      },
+      {
+        "line": 540,
+        "text": "      );"
+      },
+      {
+        "line": 541,
+        "text": "      yield* Console.log("
+      },
+      {
+        "line": 542,
+        "text": "        published.length === 0"
+      },
+      {
+        "line": 543,
+        "text": "          ? `Published themes: none (publish into ${paths.themesDir}).\\n`"
+      },
+      {
+        "line": 549,
+        "text": ""
+      },
+      {
+        "line": 550,
+        "text": "export const themeCommand = Command.make(\"theme\").pipe("
+      },
+      {
+        "line": 551,
+        "text": "  Command.withDescription(\"Inspect and set environment-wide theme defaults.\"),"
+      },
+      {
+        "line": 552,
+        "text": "  Command.withSubcommands([themeSetCommand, themeClearCommand, themeShowCommand]),"
+      },
+      {
+        "line": 553,
+        "text": ");"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/thread.ts",
+    "blob_sha": "48d62fb4575b77b9aec8e1090aac1ed427037606",
+    "lines": [
+      {
+        "line": 148,
+        "text": "    Effect.tapError((error) =>"
+      },
+      {
+        "line": 149,
+        "text": "      isThreadCliError(error) ? Console.error(error.message) : Effect.void,"
+      },
+      {
+        "line": 150,
+        "text": "    ),"
+      },
+      {
+        "line": 151,
+        "text": "  );"
+      },
+      {
+        "line": 154,
+        "text": "const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));"
+      },
+      {
+        "line": 155,
+        "text": "const printJson = (value: unknown) => Console.log(encodeJson(value));"
+      },
+      {
+        "line": 156,
+        "text": ""
+      },
+      {
+        "line": 157,
+        "text": "const ToolResult = Schema.Struct({"
+      },
+      {
+        "line": 222,
+        "text": ") {"
+      },
+      {
+        "line": 223,
+        "text": "  const logLevel = yield* GlobalFlag.LogLevel;"
+      },
+      {
+        "line": 224,
+        "text": "  const config = yield* resolveCliAuthConfig(flags, logLevel, { quietLogs: flags.json });"
+      },
+      {
+        "line": 225,
+        "text": "  const minimumLogLevel = flags.json ? \"Error\" : config.logLevel;"
+      },
+      {
+        "line": 677,
+        "text": "/**"
+      },
+      {
+        "line": 678,
+        "text": " * With --json the result always reaches stdout, so a script keeps the thread"
+      },
+      {
+        "line": 679,
+        "text": " * id even when the run fails."
+      },
+      {
+        "line": 680,
+        "text": " */"
+      },
+      {
+        "line": 711,
+        "text": "  } else if (reply !== null) {"
+      },
+      {
+        "line": 712,
+        "text": "    yield* Console.log(reply);"
+      },
+      {
+        "line": 713,
+        "text": "  }"
+      },
+      {
+        "line": 714,
+        "text": "  if (outcome.type === \"needs_input\") {"
+      },
+      {
+        "line": 793,
+        "text": ""
+      },
+      {
+        "line": 794,
+        "text": "const jsonFlag = Flag.Boolean(\"json\").pipe("
+      },
+      {
+        "line": 795,
+        "text": "  Flag.withDescription(\"Print JSON instead of text.\"),"
+      },
+      {
+        "line": 796,
+        "text": "  Flag.withDefault(false),"
+      },
+      {
+        "line": 797,
+        "text": ");"
+      },
+      {
+        "line": 798,
+        "text": "const waitFlag = Flag.Boolean(\"wait\").pipe("
+      },
+      {
+        "line": 799,
+        "text": "  Flag.withDescription("
+      },
+      {
+        "line": 800,
+        "text": "    \"Wait for the agent to finish and print its reply. Exits 1 if the run fails and 2 if it waits for an answer.\","
+      },
+      {
+        "line": 801,
+        "text": "  ),"
+      },
+      {
+        "line": 802,
+        "text": "  Flag.withDefault(false),"
+      },
+      {
+        "line": 803,
+        "text": ");"
+      },
+      {
+        "line": 804,
+        "text": "const outputSchemaFlag = Flag.String(\"output-schema\").pipe("
+      },
+      {
+        "line": 805,
+        "text": "  Flag.withDescription("
+      },
+      {
+        "line": 806,
+        "text": "    \"File holding a JSON Schema. The agent must return data matching it; --wait --json prints it as `output`.\","
+      },
+      {
+        "line": 807,
+        "text": "  ),"
+      },
+      {
+        "line": 808,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 809,
+        "text": ");"
+      },
+      {
+        "line": 810,
+        "text": "const decodeOutputSchema = Schema.decodeUnknownEffect("
+      },
+      {
+        "line": 822,
+        "text": "});"
+      },
+      {
+        "line": 823,
+        "text": "const messageArgument = Argument.String(\"message\").pipe("
+      },
+      {
+        "line": 824,
+        "text": "  Argument.withDescription(\"Message for the agent, or - to read it from stdin.\"),"
+      },
+      {
+        "line": 825,
+        "text": ");"
+      },
+      {
+        "line": 826,
+        "text": "const threadArgument = Argument.String(\"thread\").pipe(Argument.withDescription(\"Thread id.\"));"
+      },
+      {
+        "line": 827,
+        "text": ""
+      },
+      {
+        "line": 828,
+        "text": "const decodeThreadIdValue = Schema.decodeUnknownEffect(ThreadId);"
+      },
+      {
+        "line": 834,
+        "text": ""
+      },
+      {
+        "line": 835,
+        "text": "const threadListCommand = Command.make(\"list\", {"
+      },
+      {
+        "line": 836,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 837,
+        "text": "  project: Flag.String(\"project\").pipe("
+      },
+      {
+        "line": 838,
+        "text": "    Flag.withDescription(\"Project id or a path inside the project. Defaults to this directory.\"),"
+      },
+      {
+        "line": 839,
+        "text": "    Flag.withDefault(\".\"),"
+      },
+      {
+        "line": 840,
+        "text": "  ),"
+      },
+      {
+        "line": 841,
+        "text": "  json: jsonFlag,"
+      },
+      {
+        "line": 842,
+        "text": "}).pipe("
+      },
+      {
+        "line": 843,
+        "text": "  Command.withDescription(\"List a project's threads, newest first.\"),"
+      },
+      {
+        "line": 844,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 845,
+        "text": "    withThreadTools("
+      },
+      {
+        "line": 865,
+        "text": "        for (const thread of threads) {"
+      },
+      {
+        "line": 866,
+        "text": "          yield* Console.log(`${thread.threadId}  ${thread.status.padEnd(11)}  ${thread.title}`);"
+      },
+      {
+        "line": 867,
+        "text": "        }"
+      },
+      {
+        "line": 868,
+        "text": "      }),"
+      },
+      {
+        "line": 872,
+        "text": ""
+      },
+      {
+        "line": 873,
+        "text": "const threadStartCommand = Command.make(\"start\", {"
+      },
+      {
+        "line": 874,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 875,
+        "text": "  project: Argument.String(\"project\").pipe("
+      },
+      {
+        "line": 876,
+        "text": "    Argument.withDescription(\"Project id or a path inside the project, such as .\"),"
+      },
+      {
+        "line": 877,
+        "text": "  ),"
+      },
+      {
+        "line": 878,
+        "text": "  message: messageArgument,"
+      },
+      {
+        "line": 879,
+        "text": "  title: Flag.String(\"title\").pipe("
+      },
+      {
+        "line": 880,
+        "text": "    Flag.withDescription(\"Thread title. Defaults to the message's first line.\"),"
+      },
+      {
+        "line": 881,
+        "text": "    Flag.optional,"
+      },
+      {
+        "line": 882,
+        "text": "  ),"
+      },
+      {
+        "line": 883,
+        "text": "  generateTitle: Flag.Boolean(\"generate-title\").pipe("
+      },
+      {
+        "line": 884,
+        "text": "    Flag.withDescription("
+      },
+      {
+        "line": 885,
+        "text": "      \"Generate the thread's title from the message. Until it's ready, the thread shows --title or the first line.\","
+      },
+      {
+        "line": 886,
+        "text": "    ),"
+      },
+      {
+        "line": 887,
+        "text": "    Flag.withDefault(false),"
+      },
+      {
+        "line": 888,
+        "text": "  ),"
+      },
+      {
+        "line": 889,
+        "text": "  provider: Flag.String(\"provider\").pipe("
+      },
+      {
+        "line": 890,
+        "text": "    Flag.withDescription(\"Provider instance id. Pass with --model.\"),"
+      },
+      {
+        "line": 891,
+        "text": "    Flag.optional,"
+      },
+      {
+        "line": 892,
+        "text": "  ),"
+      },
+      {
+        "line": 893,
+        "text": "  model: Flag.String(\"model\").pipe("
+      },
+      {
+        "line": 894,
+        "text": "    Flag.withDescription(\"Model slug. Defaults to the project's default model.\"),"
+      },
+      {
+        "line": 895,
+        "text": "    Flag.optional,"
+      },
+      {
+        "line": 896,
+        "text": "  ),"
+      },
+      {
+        "line": 897,
+        "text": "  option: Flag.String(\"option\").pipe("
+      },
+      {
+        "line": 898,
+        "text": "    Flag.withDescription("
+      },
+      {
+        "line": 899,
+        "text": "      \"Model option as id=value, such as effort=high. Repeat for more. Needs --provider and --model.\","
+      },
+      {
+        "line": 900,
+        "text": "    ),"
+      },
+      {
+        "line": 901,
+        "text": "    Flag.atLeast(0),"
+      },
+      {
+        "line": 902,
+        "text": "  ),"
+      },
+      {
+        "line": 903,
+        "text": "  worktree: Flag.String(\"worktree\").pipe("
+      },
+      {
+        "line": 904,
+        "text": "    Flag.withDescription("
+      },
+      {
+        "line": 905,
+        "text": "      \"Run in a new git worktree based on this branch, tag, or commit, instead of the project folder.\","
+      },
+      {
+        "line": 906,
+        "text": "    ),"
+      },
+      {
+        "line": 907,
+        "text": "    Flag.optional,"
+      },
+      {
+        "line": 908,
+        "text": "  ),"
+      },
+      {
+        "line": 909,
+        "text": "  branch: Flag.String(\"branch\").pipe("
+      },
+      {
+        "line": 910,
+        "text": "    Flag.withDescription(\"Branch name for the new worktree.\"),"
+      },
+      {
+        "line": 911,
+        "text": "    Flag.optional,"
+      },
+      {
+        "line": 912,
+        "text": "  ),"
+      },
+      {
+        "line": 913,
+        "text": "  outputSchema: outputSchemaFlag,"
+      },
+      {
+        "line": 916,
+        "text": "}).pipe("
+      },
+      {
+        "line": 917,
+        "text": "  Command.withDescription(\"Start a thread in a project and print its id.\"),"
+      },
+      {
+        "line": 918,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 919,
+        "text": "    Effect.gen(function* () {"
+      },
+      {
+        "line": 944,
+        "text": "          if (flags.wait && launched.runId !== null) {"
+      },
+      {
+        "line": 945,
+        "text": "            if (!flags.json) yield* Console.error(`Thread ${launched.threadId}`);"
+      },
+      {
+        "line": 946,
+        "text": "            return yield* finishRun(tools, {"
+      },
+      {
+        "line": 947,
+        "text": "              threadId: launched.threadId,"
+      },
+      {
+        "line": 952,
+        "text": "          }"
+      },
+      {
+        "line": 953,
+        "text": "          yield* flags.json ? printJson(launched) : Console.log(launched.threadId);"
+      },
+      {
+        "line": 954,
+        "text": "        }),"
+      },
+      {
+        "line": 955,
+        "text": "      );"
+      },
+      {
+        "line": 959,
+        "text": ""
+      },
+      {
+        "line": 960,
+        "text": "const threadSendCommand = Command.make(\"send\", {"
+      },
+      {
+        "line": 961,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 962,
+        "text": "  thread: threadArgument,"
+      },
+      {
+        "line": 967,
+        "text": "}).pipe("
+      },
+      {
+        "line": 968,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 969,
+        "text": "    \"Send a message to a thread. A busy thread gets it as its next turn; nothing is interrupted.\","
+      },
+      {
+        "line": 970,
+        "text": "  ),"
+      },
+      {
+        "line": 995,
+        "text": "            ? printJson(sent)"
+      },
+      {
+        "line": 996,
+        "text": "            : Console.log(sent.delivery === \"queued\" ? \"Queued.\" : \"Sent.\");"
+      },
+      {
+        "line": 997,
+        "text": "        }),"
+      },
+      {
+        "line": 998,
+        "text": "      );"
+      },
+      {
+        "line": 1002,
+        "text": ""
+      },
+      {
+        "line": 1003,
+        "text": "const threadShowCommand = Command.make(\"show\", {"
+      },
+      {
+        "line": 1004,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 1005,
+        "text": "  thread: threadArgument,"
+      },
+      {
+        "line": 1006,
+        "text": "  messages: Flag.Int(\"messages\").pipe("
+      },
+      {
+        "line": 1007,
+        "text": "    Flag.withDescription(\"How many of the latest messages to print.\"),"
+      },
+      {
+        "line": 1008,
+        "text": "    Flag.withDefault(10),"
+      },
+      {
+        "line": 1009,
+        "text": "  ),"
+      },
+      {
+        "line": 1010,
+        "text": "  json: jsonFlag,"
+      },
+      {
+        "line": 1011,
+        "text": "}).pipe("
+      },
+      {
+        "line": 1012,
+        "text": "  Command.withDescription(\"Show a thread's state and its latest messages.\"),"
+      },
+      {
+        "line": 1013,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 1014,
+        "text": "    Effect.gen(function* () {"
+      },
+      {
+        "line": 1041,
+        "text": "          }"
+      },
+      {
+        "line": 1042,
+        "text": "          yield* Console.log(thread.title);"
+      },
+      {
+        "line": 1043,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 1044,
+        "text": "            [thread.threadId, thread.status, `${thread.providerInstanceId}/${thread.model}`].join("
+      },
+      {
+        "line": 1045,
+        "text": "              \"  \","
+      },
+      {
+        "line": 1048,
+        "text": "          if (thread.worktreePath !== null) {"
+      },
+      {
+        "line": 1049,
+        "text": "            yield* Console.log(`${thread.branch ?? \"(no branch)\"}  ${thread.worktreePath}`);"
+      },
+      {
+        "line": 1050,
+        "text": "          }"
+      },
+      {
+        "line": 1051,
+        "text": "          if (thread.pendingRequestCount > 0) {"
+      },
+      {
+        "line": 1052,
+        "text": "            yield* Console.log(`Waiting for ${thread.pendingRequestCount} answer(s).`);"
+      },
+      {
+        "line": 1053,
+        "text": "          }"
+      },
+      {
+        "line": 1054,
+        "text": "          if (error !== null) {"
+      },
+      {
+        "line": 1055,
+        "text": "            yield* Console.log(`Error: ${error}`);"
+      },
+      {
+        "line": 1056,
+        "text": "          }"
+      },
+      {
+        "line": 1057,
+        "text": "          for (const entry of messages) {"
+      },
+      {
+        "line": 1058,
+        "text": "            yield* Console.log(`\\n[${entry.role}]\\n${entry.text}`);"
+      },
+      {
+        "line": 1059,
+        "text": "          }"
+      },
+      {
+        "line": 1060,
+        "text": "        }),"
+      },
+      {
+        "line": 1065,
+        "text": ""
+      },
+      {
+        "line": 1066,
+        "text": "export const threadCommand = Command.make(\"thread\").pipe("
+      },
+      {
+        "line": 1067,
+        "text": "  Command.withDescription(\"Start, message, and read threads on the running server.\"),"
+      },
+      {
+        "line": 1068,
+        "text": "  Command.withSubcommands(["
+      },
+      {
+        "line": 1069,
+        "text": "    threadListCommand,"
+      },
+      {
+        "line": 1070,
+        "text": "    threadStartCommand,"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/trace.ts",
+    "blob_sha": "b2463dab0d98d8c525a009eac8d069f1faa5a6b7",
+    "lines": [
+      {
+        "line": 147,
+        "text": ""
+      },
+      {
+        "line": 148,
+        "text": "const traceSummaryCommand = Command.make(\"summary\", {"
+      },
+      {
+        "line": 149,
+        "text": "  baseDir: baseDirFlag,"
+      },
+      {
+        "line": 150,
+        "text": "  since: Flag.String(\"since\").pipe("
+      },
+      {
+        "line": 151,
+        "text": "    Flag.withSchema(DurationFromString),"
+      },
+      {
+        "line": 152,
+        "text": "    Flag.withDescription(\"Only count spans that ended in this window, for example 30m or 2h.\"),"
+      },
+      {
+        "line": 153,
+        "text": "    Flag.optional,"
+      },
+      {
+        "line": 154,
+        "text": "  ),"
+      },
+      {
+        "line": 155,
+        "text": "  limit: Flag.Int(\"limit\").pipe("
+      },
+      {
+        "line": 156,
+        "text": "    Flag.withSchema(PositiveInt),"
+      },
+      {
+        "line": 157,
+        "text": "    Flag.withDescription(\"Number of span names to show, busiest first.\"),"
+      },
+      {
+        "line": 158,
+        "text": "    Flag.withDefault(25),"
+      },
+      {
+        "line": 159,
+        "text": "  ),"
+      },
+      {
+        "line": 160,
+        "text": "}).pipe("
+      },
+      {
+        "line": 161,
+        "text": "  Command.withDescription(\"Summarize the local server trace file: counts, rates, and latency.\"),"
+      },
+      {
+        "line": 162,
+        "text": "  Command.withHandler("
+      },
+      {
+        "line": 163,
+        "text": "    Effect.fn(\"cli.trace.summary\")(function* (flags) {"
+      },
+      {
+        "line": 182,
+        "text": ""
+      },
+      {
+        "line": 183,
+        "text": "      yield* Console.log("
+      },
+      {
+        "line": 184,
+        "text": "        summary.spanCount === 0"
+      },
+      {
+        "line": 185,
+        "text": "          ? `No spans found in ${traceFilePath} or its rotated files${sinceMs === undefined ? \"\" : \" in that window\"}.${summary.skippedLineCount > 0 ? ` Skipped ${summary.skippedLineCount} lines that are not spans.` : \"\"}`"
+      },
+      {
+        "line": 191,
+        "text": ""
+      },
+      {
+        "line": 192,
+        "text": "export const traceCommand = Command.make(\"trace\").pipe("
+      },
+      {
+        "line": 193,
+        "text": "  Command.withDescription(\"Inspect the local server trace file.\"),"
+      },
+      {
+        "line": 194,
+        "text": "  Command.withSubcommands([traceSummaryCommand]),"
+      },
+      {
+        "line": 195,
+        "text": ");"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/triage.ts",
+    "blob_sha": "cb0f94b254589feff924290fe1ef670acb4df3c3",
+    "lines": [
+      {
+        "line": 91,
+        "text": "      input: process.stdin,"
+      },
+      {
+        "line": 92,
+        "text": "      output: process.stdout,"
+      },
+      {
+        "line": 93,
+        "text": "    });"
+      },
+      {
+        "line": 94,
+        "text": "    try {"
+      },
+      {
+        "line": 141,
+        "text": ""
+      },
+      {
+        "line": 142,
+        "text": "const agentFlag = Flag.Literals(\"agent\", [\"claude\", \"codex\", \"antigravity\"]).pipe("
+      },
+      {
+        "line": 143,
+        "text": "  Flag.withDescription(\"Agent CLI to use. Default: ask when multiple are installed.\"),"
+      },
+      {
+        "line": 144,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 145,
+        "text": ");"
+      },
+      {
+        "line": 146,
+        "text": ""
+      },
+      {
+        "line": 147,
+        "text": "const modelFlag = Flag.String(\"model\").pipe("
+      },
+      {
+        "line": 148,
+        "text": "  Flag.withDescription(\"Model passed through to the agent CLI. Default: the agent's default.\"),"
+      },
+      {
+        "line": 149,
+        "text": "  Flag.optional,"
+      },
+      {
+        "line": 150,
+        "text": ");"
+      },
+      {
+        "line": 151,
+        "text": ""
+      },
+      {
+        "line": 152,
+        "text": "export const triageCommand = Command.make(\"triage\", {"
+      },
+      {
+        "line": 153,
+        "text": "  baseDir: baseDirFlag,"
+      },
+      {
+        "line": 154,
+        "text": "  agent: agentFlag,"
+      },
+      {
+        "line": 156,
+        "text": "}).pipe("
+      },
+      {
+        "line": 157,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 158,
+        "text": "    \"Investigate a T3 Code problem on this machine with Claude Code, Codex, or Antigravity, and help file a good issue.\","
+      },
+      {
+        "line": 159,
+        "text": "  ),"
+      },
+      {
+        "line": 198,
+        "text": "        // The picker needs terminal output too, or its invisible prompt hangs."
+      },
+      {
+        "line": 199,
+        "text": "        if (!process.stdin.isTTY || !process.stdout.isTTY) {"
+      },
+      {
+        "line": 200,
+        "text": "          return yield* new TriageAgentChoiceRequiredError();"
+      },
+      {
+        "line": 201,
+        "text": "        }"
+      },
+      {
+        "line": 208,
+        "text": "      if (selected === undefined) {"
+      },
+      {
+        "line": 209,
+        "text": "        yield* Console.log("
+      },
+      {
+        "line": 210,
+        "text": "          ["
+      },
+      {
+        "line": 211,
+        "text": "            \"No supported agent CLI (claude, codex, agy) was found on this machine.\","
+      },
+      {
+        "line": 227,
+        "text": "      ]);"
+      },
+      {
+        "line": 228,
+        "text": "      yield* Console.log(`Starting ${selected.label}. It will ask what went wrong.\\n`);"
+      },
+      {
+        "line": 229,
+        "text": "      const exitCode = yield* runInteractiveSession({ ...spawnSpec, cwd: sessionDir });"
+      },
+      {
+        "line": 230,
+        "text": "      if (exitCode !== 0) {"
+      },
+      {
+        "line": 231,
+        "text": "        process.exitCode = exitCode;"
+      },
+      {
+        "line": 232,
+        "text": "        yield* Console.log("
+      },
+      {
+        "line": 233,
+        "text": "          ["
+      },
+      {
+        "line": 234,
+        "text": "            \"\","
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/uninstall.ts",
+    "blob_sha": "a0d47c73849105e48322b457785b687c04b44c3d",
+    "lines": [
+      {
+        "line": 178,
+        "text": ""
+      },
+      {
+        "line": 179,
+        "text": "export const uninstallCommand = Command.make(\"uninstall\", {"
+      },
+      {
+        "line": 180,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 181,
+        "text": "  yes: Flag.Boolean(\"yes\").pipe("
+      },
+      {
+        "line": 182,
+        "text": "    Flag.withAlias(\"y\"),"
+      },
+      {
+        "line": 183,
+        "text": "    Flag.withDescription("
+      },
+      {
+        "line": 184,
+        "text": "      \"Remove everything without asking. Required from a script, where there is no prompt.\","
+      },
+      {
+        "line": 185,
+        "text": "    ),"
+      },
+      {
+        "line": 186,
+        "text": "    Flag.withDefault(false),"
+      },
+      {
+        "line": 187,
+        "text": "  ),"
+      },
+      {
+        "line": 188,
+        "text": "}).pipe("
+      },
+      {
+        "line": 189,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 190,
+        "text": "    \"Remove t3 from this machine: the background service, the launcher, and every downloaded version. Your projects and threads are kept.\","
+      },
+      {
+        "line": 191,
+        "text": "  ),"
+      },
+      {
+        "line": 193,
+        "text": "    Effect.gen(function* () {"
+      },
+      {
+        "line": 194,
+        "text": "      const logLevel = yield* GlobalFlag.LogLevel;"
+      },
+      {
+        "line": 195,
+        "text": "      const config = yield* resolveCliAuthConfig(flags, logLevel);"
+      },
+      {
+        "line": 196,
+        "text": "      return yield* runUninstall({ baseDir: config.baseDir, assumeYes: flags.yes }).pipe("
+      },
+      {
+        "line": 205,
+        "text": "    ? Effect.void"
+      },
+      {
+        "line": 206,
+        "text": "    : Console.log("
+      },
+      {
+        "line": 207,
+        "text": "        `The T3 Code service serves ${plan.otherHomeService}, so it was not removed. Pass \\`${BootService.formatBootServiceBaseDirOption(plan.otherHomeService)}\\` to remove it.`,"
+      },
+      {
+        "line": 208,
+        "text": "      );"
+      },
+      {
+        "line": 220,
+        "text": "  if (!plan.service && plan.launchers.length === 0 && plan.runtimeDir === undefined) {"
+      },
+      {
+        "line": 221,
+        "text": "    yield* Console.log(`Nothing to remove: t3 is not installed for ${input.baseDir}.`);"
+      },
+      {
+        "line": 222,
+        "text": "    if (!(yield* HostProcess.IsExecutable)) {"
+      },
+      {
+        "line": 223,
+        "text": "      yield* Console.log("
+      },
+      {
+        "line": 224,
+        "text": "        \"  This t3 runs from a Node script, so it was installed by npm or built from source. Remove it the same way (`npm uninstall -g t3`, or delete the checkout).\","
+      },
+      {
+        "line": 225,
+        "text": "      );"
+      },
+      {
+        "line": 230,
+        "text": ""
+      },
+      {
+        "line": 231,
+        "text": "  yield* Console.log(\"This will remove:\");"
+      },
+      {
+        "line": 232,
+        "text": "  if (plan.service) yield* Console.log(\"  the background service (stopping it first)\");"
+      },
+      {
+        "line": 233,
+        "text": "  for (const launcher of plan.launchers) yield* Console.log(`  the launcher at ${launcher}`);"
+      },
+      {
+        "line": 234,
+        "text": "  if (plan.runtimeDir !== undefined) {"
+      },
+      {
+        "line": 235,
+        "text": "    yield* Console.log(`  every downloaded version under ${plan.runtimeDir}`);"
+      },
+      {
+        "line": 236,
+        "text": "  }"
+      },
+      {
+        "line": 237,
+        "text": "  yield* Console.log("
+      },
+      {
+        "line": 238,
+        "text": "    `Your projects, threads, and settings under ${plan.userdataDir} are kept. Delete that directory yourself if you want them gone too.`,"
+      },
+      {
+        "line": 239,
+        "text": "  );"
+      },
+      {
+        "line": 241,
+        "text": "  if (!input.assumeYes) {"
+      },
+      {
+        "line": 242,
+        "text": "    if (!(process.stdin.isTTY && process.stdout.isTTY)) {"
+      },
+      {
+        "line": 243,
+        "text": "      return yield* new CliUninstallError({"
+      },
+      {
+        "line": 244,
+        "text": "        reason:"
+      },
+      {
+        "line": 251,
+        "text": "    if (!confirmed) {"
+      },
+      {
+        "line": 252,
+        "text": "      yield* Console.log(\"Left as is.\");"
+      },
+      {
+        "line": 253,
+        "text": "      return;"
+      },
+      {
+        "line": 254,
+        "text": "    }"
+      },
+      {
+        "line": 258,
+        "text": "    yield* service.uninstall;"
+      },
+      {
+        "line": 259,
+        "text": "    yield* Console.log(\"Removed the background service.\");"
+      },
+      {
+        "line": 260,
+        "text": "  }"
+      },
+      {
+        "line": 261,
+        "text": "  for (const launcher of plan.launchers) {"
+      },
+      {
+        "line": 263,
+        "text": "    if (!(yield* ownsLauncher(launcher, plan.versionsDir))) {"
+      },
+      {
+        "line": 264,
+        "text": "      yield* Console.log(`Left ${launcher}: it no longer runs this t3.`);"
+      },
+      {
+        "line": 265,
+        "text": "      continue;"
+      },
+      {
+        "line": 266,
+        "text": "    }"
+      },
+      {
+        "line": 273,
+        "text": "      );"
+      },
+      {
+        "line": 274,
+        "text": "    yield* Console.log(`Removed ${launcher}.`);"
+      },
+      {
+        "line": 275,
+        "text": "  }"
+      },
+      {
+        "line": 276,
+        "text": "  if (plan.runtimeDir !== undefined) {"
+      },
+      {
+        "line": 287,
+        "text": "      );"
+      },
+      {
+        "line": 288,
+        "text": "      yield* Console.log(`${runtimeDir} will be removed once t3 exits.`);"
+      },
+      {
+        "line": 289,
+        "text": "    } else {"
+      },
+      {
+        "line": 290,
+        "text": "      yield* fs"
+      },
+      {
+        "line": 296,
+        "text": "        );"
+      },
+      {
+        "line": 297,
+        "text": "      yield* Console.log(`Removed ${plan.runtimeDir}.`);"
+      },
+      {
+        "line": 298,
+        "text": "    }"
+      },
+      {
+        "line": 299,
+        "text": "  }"
+      },
+      {
+        "line": 300,
+        "text": "  yield* Console.log(\"\");"
+      },
+      {
+        "line": 301,
+        "text": "  yield* Console.log(\"t3 is uninstalled. Thanks for trying T3 Code.\");"
+      },
+      {
+        "line": 302,
+        "text": "  yield* logOtherHomeService(plan);"
+      },
+      {
+        "line": 303,
+        "text": "});"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/up.ts",
+    "blob_sha": "a56e478c7f45c5878fe65042fe175bb9f6e40f9a",
+    "lines": [
+      {
+        "line": 127,
+        "text": ""
+      },
+      {
+        "line": 128,
+        "text": "/** The commands hints name, run with the caller's --base-dir and launcher. */"
+      },
+      {
+        "line": 129,
+        "text": "const resolveHints = Effect.fn(\"cli.up.resolve_hints\")(function* (baseDir: Option.Option<string>) {"
+      },
+      {
+        "line": 130,
+        "text": "  const baseDirArgs = Option.match(baseDir, {"
+      },
+      {
+        "line": 131,
+        "text": "    onNone: () => [],"
+      },
+      {
+        "line": 132,
+        "text": "    onSome: (dir) => [\"--base-dir\", dir],"
+      },
+      {
+        "line": 133,
+        "text": "  });"
+      },
+      {
+        "line": 134,
+        "text": "  const command = (subcommand: string, args: ReadonlyArray<string> = []) =>"
+      },
+      {
+        "line": 216,
+        "text": ""
+      },
+      {
+        "line": 217,
+        "text": "const interactiveTerminal = () => Boolean(process.stdin.isTTY && process.stdout.isTTY);"
+      },
+      {
+        "line": 218,
+        "text": ""
+      },
+      {
+        "line": 219,
+        "text": "const setUp = Effect.fn(\"cli.up\")(function* (flags: {"
+      },
+      {
+        "line": 229,
+        "text": "    onNone: () => [],"
+      },
+      {
+        "line": 230,
+        "text": "    onSome: (dir) => [\"--base-dir\", dir],"
+      },
+      {
+        "line": 231,
+        "text": "  });"
+      },
+      {
+        "line": 232,
+        "text": "  const hints = yield* resolveHints(flags.baseDir);"
+      },
+      {
+        "line": 258,
+        "text": "    if (before.service.installed)"
+      },
+      {
+        "line": 259,
+        "text": "      yield* Console.log(`Current setup\\n${formatSetup(before, hints)}\\n`);"
+      },
+      {
+        "line": 260,
+        "text": "    const picked = yield* Prompt.run("
+      },
+      {
+        "line": 261,
+        "text": "      Prompt.MultiSelect({"
+      },
+      {
+        "line": 272,
+        "text": "    ).pipe(Effect.catchTags({ QuitError: () => Effect.succeed(null) }));"
+      },
+      {
+        "line": 273,
+        "text": "    if (picked === null) return yield* Console.log(\"Nothing changed.\");"
+      },
+      {
+        "line": 274,
+        "text": "    routes = { connect: picked.includes(\"connect\"), lan: picked.includes(\"lan\") };"
+      },
+      {
+        "line": 275,
+        "text": "  } else if (plan.ask.length > 0 && !flags.yes && !before.service.installed) {"
+      },
+      {
+        "line": 295,
+        "text": "    if (current.lan) yield* CliService.writeServiceEnv(baseDir, { T3CODE_LAN: \"false\" });"
+      },
+      {
+        "line": 296,
+        "text": "    return yield* Console.log(formatNextSteps(routes, false, hints));"
+      },
+      {
+        "line": 297,
+        "text": "  }"
+      },
+      {
+        "line": 298,
+        "text": "  const { installedVersion } = before.service;"
+      },
+      {
+        "line": 321,
+        "text": "    ).pipe(Effect.catchTags({ QuitError: () => Effect.succeed(false) }));"
+      },
+      {
+        "line": 322,
+        "text": "    if (!confirmed) return yield* Console.log(\"Nothing changed.\");"
+      },
+      {
+        "line": 323,
+        "text": "  }"
+      },
+      {
+        "line": 324,
+        "text": ""
+      },
+      {
+        "line": 330,
+        "text": "    if (linked === null) return;"
+      },
+      {
+        "line": 331,
+        "text": "    yield* Console.log("
+      },
+      {
+        "line": 332,
+        "text": "      `✓ Signed in to T3 Connect${linked.identity ? ` as ${linked.identity}` : \"\"}`,"
+      },
+      {
+        "line": 333,
+        "text": "    );"
+      },
+      {
+        "line": 374,
+        "text": "    ]);"
+      },
+      {
+        "line": 375,
+        "text": "    yield* Console.log(`${reason} Keep this command running:\\n  ${command}`);"
+      },
+      {
+        "line": 376,
+        "text": "    // A host wins over --lan and --no-lan, as it does in service.env."
+      },
+      {
+        "line": 377,
+        "text": "    const shellHost = (yield* HostProcess.Environment).T3CODE_HOST;"
+      },
+      {
+        "line": 388,
+        "text": "    if (newer) {"
+      },
+      {
+        "line": 389,
+        "text": "      yield* Console.log(`Keeping installed service version t3@${installedVersion}.`);"
+      },
+      {
+        "line": 390,
+        "text": "    }"
+      },
+      {
+        "line": 391,
+        "text": "    if (update && !interactive) {"
+      },
+      {
+        "line": 392,
+        "text": "      yield* Console.log(\"Updating T3 Code. Running agent turns will stop.\");"
+      },
+      {
+        "line": 393,
+        "text": "    }"
+      },
+      {
+        "line": 394,
+        "text": "    const result = newer"
+      },
+      {
+        "line": 405,
+        "text": "      yield* restoreServiceEnv;"
+      },
+      {
+        "line": 406,
+        "text": "      yield* Console.log("
+      },
+      {
+        "line": 407,
+        "text": "        `Service setup failed: ${result.failed} Fix that, then run \\`${hints.up}\\` again.`,"
+      },
+      {
+        "line": 408,
+        "text": "      );"
+      },
+      {
+        "line": 411,
+        "text": "    } else if (result.changed) {"
+      },
+      {
+        "line": 412,
+        "text": "      yield* Console.log(CliService.formatServiceChange(result));"
+      },
+      {
+        "line": 413,
+        "text": "      started = true;"
+      },
+      {
+        "line": 414,
+        "text": "    } else if (restart || (unlinkFailed && before.service.installed)) {"
+      },
+      {
+        "line": 426,
+        "text": "        const { command } = yield* resolveHostCliCommand(\"service restart\", baseDirArgs);"
+      },
+      {
+        "line": 427,
+        "text": "        yield* Console.log(`Run \\`${command}\\` to turn T3 Connect off.`);"
+      },
+      {
+        "line": 428,
+        "text": "      } else {"
+      },
+      {
+        "line": 429,
+        "text": "        if (!interactive && !stopped) {"
+      },
+      {
+        "line": 430,
+        "text": "          yield* Console.log(\"Restarting T3 Code. Running agent turns will stop.\");"
+      },
+      {
+        "line": 431,
+        "text": "        }"
+      },
+      {
+        "line": 432,
+        "text": "        const outcome = yield* service.restart.pipe(Effect.tapError(() => rollBack));"
+      },
+      {
+        "line": 433,
+        "text": "        if (outcome === \"queued\") {"
+      },
+      {
+        "line": 434,
+        "text": "          yield* Console.log(\"Restart queued. This session will disconnect.\");"
+      },
+      {
+        "line": 435,
+        "text": "        }"
+      },
+      {
+        "line": 436,
+        "text": "        if (outcome === \"skipped\") {"
+      },
+      {
+        "line": 437,
+        "text": "          yield* Console.log("
+      },
+      {
+        "line": 438,
+        "text": "            \"The installed service was not restarted. Run `t3 service status` to see why.\","
+      },
+      {
+        "line": 439,
+        "text": "          );"
+      },
+      {
+        "line": 447,
+        "text": "  const after = yield* readSetup();"
+      },
+      {
+        "line": 448,
+        "text": "  yield* Console.log("
+      },
+      {
+        "line": 449,
+        "text": "    // From what took effect: a failed service step can undo a choice."
+      },
+      {
+        "line": 450,
+        "text": "    `\\nThis machine\\n${formatSetup(after, hints)}\\n\\n${formatNextSteps("
+      },
+      {
+        "line": 457,
+        "text": ""
+      },
+      {
+        "line": 458,
+        "text": "export const upCommand = Command.make(\"up\", {"
+      },
+      {
+        "line": 459,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 460,
+        "text": "  connect: Flag.Boolean(\"connect\").pipe("
+      },
+      {
+        "line": 461,
+        "text": "    Flag.withDescription("
+      },
+      {
+        "line": 462,
+        "text": "      \"Allow access through T3 Connect with your T3 account. Turn off with --no-connect.\","
+      },
+      {
+        "line": 463,
+        "text": "    ),"
+      },
+      {
+        "line": 464,
+        "text": "    Flag.optional,"
+      },
+      {
+        "line": 465,
+        "text": "  ),"
+      },
+      {
+        "line": 466,
+        "text": "  lan: Flag.Boolean(\"lan\").pipe("
+      },
+      {
+        "line": 467,
+        "text": "    Flag.withDescription("
+      },
+      {
+        "line": 468,
+        "text": "      \"Allow LAN and tailnet connections. Anyone there can reach the port; a pairing code is the only lock. Turn off with --no-lan.\","
+      },
+      {
+        "line": 469,
+        "text": "    ),"
+      },
+      {
+        "line": 470,
+        "text": "    Flag.optional,"
+      },
+      {
+        "line": 471,
+        "text": "  ),"
+      },
+      {
+        "line": 472,
+        "text": "  yes: Flag.Boolean(\"yes\").pipe("
+      },
+      {
+        "line": 473,
+        "text": "    Flag.withDescription("
+      },
+      {
+        "line": 474,
+        "text": "      \"Ask nothing. Keep the access settings; a new machine gets T3 Connect. A restart stops running agent turns.\","
+      },
+      {
+        "line": 475,
+        "text": "    ),"
+      },
+      {
+        "line": 476,
+        "text": "    Flag.withDefault(false),"
+      },
+      {
+        "line": 477,
+        "text": "  ),"
+      },
+      {
+        "line": 478,
+        "text": "  headless: headlessFlag,"
+      },
+      {
+        "line": 480,
+        "text": "  Command.withShortDescription(\"Set up remote access and the T3 Code background service.\"),"
+      },
+      {
+        "line": 481,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 482,
+        "text": "    \"Set up remote access and the T3 Code background service. Access flags skip the question, and routes not named keep their settings. Without a terminal, a needed restart runs without asking and stops running agent turns.\","
+      },
+      {
+        "line": 483,
+        "text": "  ),"
+      },
+      {
+        "line": 489,
+        "text": "    { command: \"t3 up --yes\", description: \"Take the defaults with no questions.\" },"
+      },
+      {
+        "line": 490,
+        "text": "    { command: \"t3 status --json\", description: \"Read the settings from a script.\" },"
+      },
+      {
+        "line": 491,
+        "text": "  ]),"
+      },
+      {
+        "line": 492,
+        "text": "  Command.withHandler((flags) => runCloudCommand(flags, setUp(flags), { quietLogs: true })),"
+      },
+      {
+        "line": 494,
+        "text": ""
+      },
+      {
+        "line": 495,
+        "text": "export const connectCommand = Command.make(\"connect\", {"
+      },
+      {
+        "line": 496,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 497,
+        "text": "  headless: headlessFlag,"
+      },
+      {
+        "line": 498,
+        "text": "}).pipe("
+      },
+      {
+        "line": 499,
+        "text": "  Command.withDescription(\"Set up T3 Connect for this machine. Same as `t3 up --connect`.\"),"
+      },
+      {
+        "line": 500,
+        "text": "  Command.withHandler((flags) =>"
+      },
+      {
+        "line": 501,
+        "text": "    runCloudCommand("
+      },
+      {
+        "line": 506,
+        "text": "  ),"
+      },
+      {
+        "line": 507,
+        "text": "  Command.withSubcommands(connectSubcommands),"
+      },
+      {
+        "line": 508,
+        "text": ");"
+      },
+      {
+        "line": 509,
+        "text": ""
+      },
+      {
+        "line": 510,
+        "text": "/** `t3 status --json`, for scripts and agents. */"
+      },
+      {
+        "line": 511,
+        "text": "const setupJson = (setup: Setup) =>"
+      },
+      {
+        "line": 512,
+        "text": "  JSON.stringify("
+      },
+      {
+        "line": 513,
+        "text": "    {"
+      },
+      {
+        "line": 514,
+        "text": "      service: {"
+      },
+      {
+        "line": 531,
+        "text": ""
+      },
+      {
+        "line": 532,
+        "text": "export const statusCommand = Command.make(\"status\", {"
+      },
+      {
+        "line": 533,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 534,
+        "text": "  json: Flag.Boolean(\"json\").pipe("
+      },
+      {
+        "line": 535,
+        "text": "    Flag.withDescription(\"Print the settings as JSON. Does not test connections.\"),"
+      },
+      {
+        "line": 536,
+        "text": "    Flag.withDefault(false),"
+      },
+      {
+        "line": 537,
+        "text": "  ),"
+      },
+      {
+        "line": 538,
+        "text": "}).pipe("
+      },
+      {
+        "line": 539,
+        "text": "  Command.withDescription(\"Show service setup and remote access settings.\"),"
+      },
+      {
+        "line": 540,
+        "text": "  Command.withExamples(["
+      },
+      {
+        "line": 541,
+        "text": "    { command: \"t3 status\", description: \"Show the settings.\" },"
+      },
+      {
+        "line": 542,
+        "text": "    { command: \"t3 status --json\", description: \"Print them for scripts and agents.\" },"
+      },
+      {
+        "line": 543,
+        "text": "  ]),"
+      },
+      {
+        "line": 544,
+        "text": "  Command.withHandler("
+      },
+      {
+        "line": 545,
+        "text": "    Effect.fn(\"cli.status\")(function* (flags) {"
+      },
+      {
+        "line": 546,
+        "text": "      const config = yield* resolveCliAuthConfig(flags, yield* GlobalFlag.LogLevel, {"
+      },
+      {
+        "line": 547,
+        "text": "        quietLogs: flags.json,"
+      },
+      {
+        "line": 548,
+        "text": "      });"
+      },
+      {
+        "line": 556,
+        "text": "      );"
+      },
+      {
+        "line": 557,
+        "text": "      if (flags.json) return yield* Console.log(setupJson(setup));"
+      },
+      {
+        "line": 558,
+        "text": "      const hints = yield* resolveHints(flags.baseDir);"
+      },
+      {
+        "line": 559,
+        "text": "      yield* Console.log("
+      },
+      {
+        "line": 560,
+        "text": "        setup.service.otherBaseDir !== undefined"
+      },
+      {
+        "line": 561,
+        "text": "          ? `This machine\\n${formatSetup(setup, hints)}`"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/update.ts",
+    "blob_sha": "07f3458fb3b66d405b4b67365799f194def6471e",
+    "lines": [
+      {
+        "line": 249,
+        "text": "  ...projectLocationFlags,"
+      },
+      {
+        "line": 250,
+        "text": "  channel: Flag.Literals(\"channel\", CLI_RELEASE_CHANNELS).pipe("
+      },
+      {
+        "line": 251,
+        "text": "    Flag.withDescription("
+      },
+      {
+        "line": 252,
+        "text": "      \"Release channel to follow. Defaults to the channel this t3 was published on.\","
+      },
+      {
+        "line": 253,
+        "text": "    ),"
+      },
+      {
+        "line": 254,
+        "text": "    Flag.optional,"
+      },
+      {
+        "line": 255,
+        "text": "  ),"
+      },
+      {
+        "line": 256,
+        "text": "  allowDowngrade: Flag.Boolean(\"allow-downgrade\").pipe("
+      },
+      {
+        "line": 257,
+        "text": "    Flag.withDescription(\"Allow moving to an older version than the one running.\"),"
+      },
+      {
+        "line": 258,
+        "text": "    Flag.withDefault(false),"
+      },
+      {
+        "line": 259,
+        "text": "  ),"
+      },
+      {
+        "line": 260,
+        "text": "  yes: Flag.Boolean(\"yes\").pipe("
+      },
+      {
+        "line": 261,
+        "text": "    Flag.withAlias(\"y\"),"
+      },
+      {
+        "line": 262,
+        "text": "    Flag.withDescription("
+      },
+      {
+        "line": 263,
+        "text": "      \"Restart the background service without asking. Required to restart it from a script, where there is no prompt.\","
+      },
+      {
+        "line": 264,
+        "text": "    ),"
+      },
+      {
+        "line": 265,
+        "text": "    Flag.withDefault(false),"
+      },
+      {
+        "line": 266,
+        "text": "  ),"
+      },
+      {
+        "line": 267,
+        "text": "};"
+      },
+      {
+        "line": 268,
+        "text": ""
+      },
+      {
+        "line": 269,
+        "text": "const versionArgument = Argument.String(\"version\").pipe("
+      },
+      {
+        "line": 270,
+        "text": "  Argument.withDescription("
+      },
+      {
+        "line": 271,
+        "text": "    \"Exact version to install. Defaults to the newest release on the channel.\","
+      },
+      {
+        "line": 272,
+        "text": "  ),"
+      },
+      {
+        "line": 273,
+        "text": "  Argument.optional,"
+      },
+      {
+        "line": 274,
+        "text": ");"
+      },
+      {
+        "line": 275,
+        "text": ""
+      },
+      {
+        "line": 276,
+        "text": "export const updateCommand = Command.make(\"update\", {"
+      },
+      {
+        "line": 277,
+        "text": "  ...updateFlags,"
+      },
+      {
+        "line": 278,
+        "text": "  version: versionArgument,"
+      },
+      {
+        "line": 279,
+        "text": "}).pipe("
+      },
+      {
+        "line": 280,
+        "text": "  Command.withDescription("
+      },
+      {
+        "line": 281,
+        "text": "    \"Download a newer t3 and switch this machine to it, including the background service when one is installed.\","
+      },
+      {
+        "line": 282,
+        "text": "  ),"
+      },
+      {
+        "line": 284,
+        "text": "    Effect.gen(function* () {"
+      },
+      {
+        "line": 285,
+        "text": "      const logLevel = yield* GlobalFlag.LogLevel;"
+      },
+      {
+        "line": 286,
+        "text": "      const config = yield* resolveCliAuthConfig(flags, logLevel);"
+      },
+      {
+        "line": 287,
+        "text": "      return yield* runUpdate({"
+      },
+      {
+        "line": 400,
+        "text": "  if (targetChannel === \"preview\" && currentChannel !== \"preview\") {"
+      },
+      {
+        "line": 401,
+        "text": "    yield* Console.log("
+      },
+      {
+        "line": 402,
+        "text": "      ["
+      },
+      {
+        "line": 403,
+        "text": "        `t3@${targetVersion} is a preview build.`,"
+      },
+      {
+        "line": 408,
+        "text": "    );"
+      },
+      {
+        "line": 409,
+        "text": "    if (!(process.stdin.isTTY && process.stdout.isTTY)) {"
+      },
+      {
+        "line": 410,
+        "text": "      return yield* new CliUpdateError({"
+      },
+      {
+        "line": 411,
+        "text": "        reason:"
+      },
+      {
+        "line": 418,
+        "text": "    if (!confirmed) {"
+      },
+      {
+        "line": 419,
+        "text": "      yield* Console.log(\"Left as is.\");"
+      },
+      {
+        "line": 420,
+        "text": "      return;"
+      },
+      {
+        "line": 421,
+        "text": "    }"
+      },
+      {
+        "line": 446,
+        "text": "  if (executableCurrent && serviceCurrent) {"
+      },
+      {
+        "line": 447,
+        "text": "    yield* Console.log("
+      },
+      {
+        "line": 448,
+        "text": "      serviceVersion !== undefined"
+      },
+      {
+        "line": 449,
+        "text": "        ? `t3 and its background service are already on ${targetVersion} (${targetChannel}).`"
+      },
+      {
+        "line": 480,
+        "text": "  if (serviceInstalled && !serviceCurrent) {"
+      },
+      {
+        "line": 481,
+        "text": "    yield* Console.log("
+      },
+      {
+        "line": 482,
+        "text": "      \"  A background service is installed for this T3 home. Restarting it interrupts anything running in it: agent turns, terminals, remote clients.\","
+      },
+      {
+        "line": 483,
+        "text": "    );"
+      },
+      {
+        "line": 485,
+        "text": "      restartService = true;"
+      },
+      {
+        "line": 486,
+        "text": "    } else if (process.stdin.isTTY && process.stdout.isTTY) {"
+      },
+      {
+        "line": 487,
+        "text": "      restartService = yield* Prompt.run("
+      },
+      {
+        "line": 488,
+        "text": "        Prompt.Confirm({"
+      },
+      {
+        "line": 493,
+        "text": "    } else {"
+      },
+      {
+        "line": 494,
+        "text": "      yield* Console.log("
+      },
+      {
+        "line": 495,
+        "text": "        \"  Not a terminal, so the service keeps running its current version. Rerun with --yes to restart it now, or run `t3 service restart` later.\","
+      },
+      {
+        "line": 496,
+        "text": "      );"
+      },
+      {
+        "line": 565,
+        "text": "  if (serviceInstalled && !serviceCurrent) {"
+      },
+      {
+        "line": 566,
+        "text": "    yield* Console.log("
+      },
+      {
+        "line": 567,
+        "text": "      restartService"
+      },
+      {
+        "line": 568,
+        "text": "        ? \"Restarting the background service...\""
+      },
+      {
+        "line": 605,
+        "text": "  if (Option.isSome(repointed)) {"
+      },
+      {
+        "line": 606,
+        "text": "    yield* Console.log(\"  Run t3 to get started.\\n\");"
+      },
+      {
+        "line": 607,
+        "text": "  } else {"
+      },
+      {
+        "line": 608,
+        "text": "    yield* Console.log(`  Run ${runtime.entryPath}\\n`);"
+      },
+      {
+        "line": 609,
+        "text": "  }"
+      },
+      {
+        "line": 610,
+        "text": "  if (servicePlan?.handedOff === true) {"
+      },
+      {
+        "line": 611,
+        "text": "    yield* Console.log("
+      },
+      {
+        "line": 612,
+        "text": "      `  Background service switching to ${targetVersion} outside this session, since this session runs inside it and disconnects when it restarts. Result: ${servicePlan.logPath}`,"
+      },
+      {
+        "line": 613,
+        "text": "    );"
+      },
+      {
+        "line": 614,
+        "text": "  } else if (servicePlan !== undefined && restartService) {"
+      },
+      {
+        "line": 615,
+        "text": "    yield* Console.log(`  Background service restarted on ${targetVersion}`);"
+      },
+      {
+        "line": 616,
+        "text": "  } else if (serviceInstalled && serviceCurrent) {"
+      },
+      {
+        "line": 617,
+        "text": "    yield* Console.log(`  Background service already on ${targetVersion}`);"
+      },
+      {
+        "line": 618,
+        "text": "  } else if (serviceInstalled) {"
+      },
+      {
+        "line": 619,
+        "text": "    // A pending restart means the service already points at serviceVersion but runs an older one."
+      },
+      {
+        "line": 625,
+        "text": "          : serviceVersion;"
+      },
+      {
+        "line": 626,
+        "text": "    yield* Console.log("
+      },
+      {
+        "line": 627,
+        "text": "      `  Background service still running ${running}. Run \\`t3 service restart\\` when you are ready to switch it to ${targetVersion}.`,"
+      },
+      {
+        "line": 628,
+        "text": "    );"
+      },
+      {
+        "line": 629,
+        "text": "  } else if (status.installed && !servesThisHome) {"
+      },
+      {
+        "line": 630,
+        "text": "    yield* Console.log("
+      },
+      {
+        "line": 631,
+        "text": "      `  The background service serves ${status.installedBaseDir ?? \"another T3 home\"} and was left unchanged.`,"
+      },
+      {
+        "line": 632,
+        "text": "    );"
+      },
+      {
+        "line": 634,
+        "text": "  if (foreground !== undefined) {"
+      },
+      {
+        "line": 635,
+        "text": "    yield* Console.log("
+      },
+      {
+        "line": 636,
+        "text": "      `  A server started by hand is still running at ${foreground.origin} (pid ${foreground.pid}). Stop it and start it again to pick up ${targetVersion}.`,"
+      },
+      {
+        "line": 637,
+        "text": "    );"
+      }
+    ]
+  },
+  {
+    "kind": "cli_declarations",
+    "path": "apps/server/src/cli/updateProgress.ts",
+    "blob_sha": "5014bde9930edc9f19013a8b64211d9704aa481a",
+    "lines": [
+      {
+        "line": 3,
+        "text": "export function createUpdateProgress("
+      },
+      {
+        "line": 4,
+        "text": "  output: Pick<NodeJS.WriteStream, \"write\" | \"isTTY\" | \"columns\"> = process.stderr,"
+      },
+      {
+        "line": 5,
+        "text": ") {"
+      },
+      {
+        "line": 6,
+        "text": "  const interactive = output.isTTY && process.env.TERM !== \"dumb\";"
+      }
+    ]
+  }
+]

@@ -1,0 +1,20 @@
+{
+  "source": "https://github.com/russellromney/sqlite-tantivy/tree/ee1692c65ef9ed1ae29dbbe15660ab73fb75922e",
+  "reviewed": [
+    "BENCHMARK_RESULTS.md",
+    "bin/tantivy-bench.rs",
+    "src/query.rs",
+    "src/schema.rs",
+    "benchmarks/db_manager.py"
+  ],
+  "assessment": "Not evidence of a T3 performance win",
+  "reasons": [
+    "Different document counts in reported corpus",
+    "Engine-specific sampling and title-derived query terms",
+    "Tantivy text schema uses en_stem, FTS5 creation omits tokenizer (default unicode61)",
+    "Query uses MATCH LIMIT 10 without T3 eligibility/custom ranking",
+    "Code reports query count / sum of thread latency, not aggregate wall time throughput",
+    "Iteration uses while let Ok(Some(_row)) and does not validate returned result identity or ranking",
+    "Separate transaction domain acknowledged by author"
+  ]
+}

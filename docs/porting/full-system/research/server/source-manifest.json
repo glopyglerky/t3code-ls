@@ -1,0 +1,830 @@
+[
+  {
+    "path": "README.md",
+    "blob_sha": "24dc0f8f7f6669ee439bc13f496e0451239f0e31",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/README.md",
+    "bytes": 5362
+  },
+  {
+    "path": "apps/server/package.json",
+    "blob_sha": "780cc64f0b2e502d523d555a73ab28eceff04d98",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/package.json",
+    "bytes": 4135
+  },
+  {
+    "path": "apps/server/src/auth/EnvironmentAuthPolicy.ts",
+    "blob_sha": "1a5ad39c35853cf9cc1775ef0c5fcb2274ee783b",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/auth/EnvironmentAuthPolicy.ts",
+    "bytes": 2289
+  },
+  {
+    "path": "apps/server/src/auth/RpcAuthorization.ts",
+    "blob_sha": "ffe84c428a67a9efc5cb4e35baf7768bfba4ac2d",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/auth/RpcAuthorization.ts",
+    "bytes": 19961
+  },
+  {
+    "path": "apps/server/src/binCli.ts",
+    "blob_sha": "995b207e7c78186c71a9abadda54756a0094a7d2",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/binCli.ts",
+    "bytes": 5478
+  },
+  {
+    "path": "apps/server/src/bootstrap.ts",
+    "blob_sha": "af9521f70145574179f438358a43e8cc4cdf3cff",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/bootstrap.ts",
+    "bytes": 6631
+  },
+  {
+    "path": "apps/server/src/cli/app.ts",
+    "blob_sha": "e4182945215c31b7e1190af00d36d235431d34d0",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/cli/app.ts",
+    "bytes": 9730
+  },
+  {
+    "path": "apps/server/src/cli/server.ts",
+    "blob_sha": "303402d46c2b44a4d0b260f46f76224d8b6b0dca",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/cli/server.ts",
+    "bytes": 4263
+  },
+  {
+    "path": "apps/server/src/device/DeviceHubProxy.ts",
+    "blob_sha": "9778cf084b0175336c82155bb6e8a41107be7558",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/device/DeviceHubProxy.ts",
+    "bytes": 10589
+  },
+  {
+    "path": "apps/server/src/guest/http.ts",
+    "blob_sha": "6d1747274e76a5e363b0c041d60ce42c70dee6a5",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/guest/http.ts",
+    "bytes": 14055
+  },
+  {
+    "path": "apps/server/src/http.ts",
+    "blob_sha": "47215bef97f7d3ce4cd6edbe84bbe15c5617ef50",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/http.ts",
+    "bytes": 30328
+  },
+  {
+    "path": "apps/server/src/issue/IssueTrackerRegistry.ts",
+    "blob_sha": "6f2343e9904799e8e6634ce1133f70dc47756159",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/issue/IssueTrackerRegistry.ts",
+    "bytes": 2087
+  },
+  {
+    "path": "apps/server/src/mcp/McpHttpServer.ts",
+    "blob_sha": "4c9d9dca1081a880483fe1180a1fa69530e2c5f4",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/McpHttpServer.ts",
+    "bytes": 58027
+  },
+  {
+    "path": "apps/server/src/mcp/McpToolAccess.ts",
+    "blob_sha": "bbf090809c682bfb73e14526b579cbdd3f5b51b5",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/McpToolAccess.ts",
+    "bytes": 18029
+  },
+  {
+    "path": "apps/server/src/mcp/McpToolExposure.ts",
+    "blob_sha": "cb1ff850717d1a6832029748d8e93339cfe41118",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/McpToolExposure.ts",
+    "bytes": 2779
+  },
+  {
+    "path": "apps/server/src/mcp/OrchestratorMcpService.ts",
+    "blob_sha": "156555c74d6957926a20ff01865b0a49a1448139",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/OrchestratorMcpService.ts",
+    "bytes": 158393
+  },
+  {
+    "path": "apps/server/src/mcp/threadAccess.ts",
+    "blob_sha": "d21495f0ff7c71aac8c26182da11e274a6cbfdab",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/threadAccess.ts",
+    "bytes": 11183
+  },
+  {
+    "path": "apps/server/src/mcp/toolkits/attachment/tools.ts",
+    "blob_sha": "59cecace843866ad574f2edd3088c017a6cc0c64",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/attachment/tools.ts",
+    "bytes": 2887
+  },
+  {
+    "path": "apps/server/src/mcp/toolkits/device/tools.ts",
+    "blob_sha": "c87b579843ad83e0c66f1cb9e135ac956b8e63f6",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/device/tools.ts",
+    "bytes": 4284
+  },
+  {
+    "path": "apps/server/src/mcp/toolkits/environment/tools.ts",
+    "blob_sha": "9e10380295de25ab421ecd69fe7eb93e0a348c24",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/environment/tools.ts",
+    "bytes": 3203
+  },
+  {
+    "path": "apps/server/src/mcp/toolkits/html/tools.ts",
+    "blob_sha": "0cb6153025466036dbfe4e158b614fa5f2045e30",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/html/tools.ts",
+    "bytes": 4500
+  },
+  {
+    "path": "apps/server/src/mcp/toolkits/issues/tools.ts",
+    "blob_sha": "6af757999134dac5d88fd146b4249ae02c84a3c3",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/issues/tools.ts",
+    "bytes": 13013
+  },
+  {
+    "path": "apps/server/src/mcp/toolkits/message/tools.ts",
+    "blob_sha": "418a252eb9ead02c535515c1d503ef163c2fc1b1",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/message/tools.ts",
+    "bytes": 1953
+  },
+  {
+    "path": "apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+    "blob_sha": "f617b61fabaa3467b1f36de1e163dca52f3234fd",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/orchestrator/tools.ts",
+    "bytes": 16801
+  },
+  {
+    "path": "apps/server/src/mcp/toolkits/preview/tools.ts",
+    "blob_sha": "37f09c8c8223d17285e6ef702307bba3d035d19f",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/preview/tools.ts",
+    "bytes": 11250
+  },
+  {
+    "path": "apps/server/src/mcp/toolkits/previewControls/tools.ts",
+    "blob_sha": "ca92f57f408b8673da243469ca2a75716f2eae80",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/previewControls/tools.ts",
+    "bytes": 2165
+  },
+  {
+    "path": "apps/server/src/mcp/toolkits/project/tools.ts",
+    "blob_sha": "52e9b77ab3df2b2f23206fc608cf6ef42dd730bc",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/project/tools.ts",
+    "bytes": 8375
+  },
+  {
+    "path": "apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+    "blob_sha": "1e75c5bbaa19f7ff171ec52daee42dd0e708ac20",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/pullRequests/tools.ts",
+    "bytes": 32056
+  },
+  {
+    "path": "apps/server/src/mcp/toolkits/theme/tools.ts",
+    "blob_sha": "716c540b2c41ec7994d73b1b5aef251da8d52460",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/theme/tools.ts",
+    "bytes": 2699
+  },
+  {
+    "path": "apps/server/src/mcp/toolkits/thread/tools.ts",
+    "blob_sha": "9803e8b4fa690eb0101e7e01e47b54f2bfc9e078",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/thread/tools.ts",
+    "bytes": 10438
+  },
+  {
+    "path": "apps/server/src/mcp/toolkits/toolSearch/tools.ts",
+    "blob_sha": "74741ccca557d9866c6c7bf9f6f802915d8555f8",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/toolSearch/tools.ts",
+    "bytes": 1278
+  },
+  {
+    "path": "apps/server/src/mcp/toolkits/worktree/tools.ts",
+    "blob_sha": "ce9dd39f7938fa566464224800a7643da6c5d8d9",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/mcp/toolkits/worktree/tools.ts",
+    "bytes": 3832
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/Adapters/AntigravityAdapterV2.ts",
+    "blob_sha": "c20afa04e31b8c1bf9563d62f537d3afe532f688",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/Adapters/AntigravityAdapterV2.ts",
+    "bytes": 13855
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts",
+    "blob_sha": "5b8c5fabd54b78f20074c6e225b95cc357626ae7",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts",
+    "bytes": 641655
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts",
+    "blob_sha": "181ed17fd5c16c1a545d0ddf29c87749d4d39513",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts",
+    "bytes": 400881
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/Adapters/ProviderTextDeltaCoalescer.ts",
+    "blob_sha": "3729cb7073f9e1ef27d00468bb4fd0ba55eb4dca",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/Adapters/ProviderTextDeltaCoalescer.ts",
+    "bytes": 5511
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/CheckpointCaptureService.ts",
+    "blob_sha": "dd7f27079a4e5ad35c891e55a70f5a7a408b1b5f",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/CheckpointCaptureService.ts",
+    "bytes": 16750
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/CheckpointRollbackService.ts",
+    "blob_sha": "8d6fd1c09441d0577ac1ee2f87c2a908e24567fe",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/CheckpointRollbackService.ts",
+    "bytes": 24014
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/CommandPolicy.ts",
+    "blob_sha": "1319083cca03053f591a62ae3b1f60123efbab86",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/CommandPolicy.ts",
+    "bytes": 16027
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/EffectWorker.ts",
+    "blob_sha": "6c805cfc4592f310b0400d1f306679d3c1747ce8",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/EffectWorker.ts",
+    "bytes": 48892
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/LiveStreamBudget.ts",
+    "blob_sha": "9ae18c0000769cd788115820bfb82fbb9e11abdc",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/LiveStreamBudget.ts",
+    "bytes": 13866
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/Orchestrator.ts",
+    "blob_sha": "5936f57ad501424d81cc5fa62bf4461342178118",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/Orchestrator.ts",
+    "bytes": 668784
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/ProviderAdapterRegistry.ts",
+    "blob_sha": "dd0e8f8cb48e27c5ca2f2574ff1217b2ff893f48",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProviderAdapterRegistry.ts",
+    "bytes": 9019
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/ProviderEventIngestor.ts",
+    "blob_sha": "118a13a33426683f26debb6207a7e74307ce625b",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProviderEventIngestor.ts",
+    "bytes": 38333
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/ProviderSessionManager.ts",
+    "blob_sha": "dd573acb1fe178d53fbe017460d75699eb72e83b",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProviderSessionManager.ts",
+    "bytes": 160772
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/ProviderTurnStartService.ts",
+    "blob_sha": "1cb77e387f950bc38723ac383a43e7e74f254907",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ProviderTurnStartService.ts",
+    "bytes": 104888
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/RunExecutionService.ts",
+    "blob_sha": "a5eeaa9cb8b956c4da0f472c09bf32281242ae9d",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/RunExecutionService.ts",
+    "bytes": 107455
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/RunFinalizationService.ts",
+    "blob_sha": "62195de5ee362282339b037a0ef8540adba5c395",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/RunFinalizationService.ts",
+    "bytes": 8827
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/RuntimePolicy.ts",
+    "blob_sha": "aac7a859423fbdd5ac5fda29cf1f901e390db002",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/RuntimePolicy.ts",
+    "bytes": 8957
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/RuntimeRequestService.ts",
+    "blob_sha": "6bd421058c4c98da1b3f9721fb90ab890945bad5",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/RuntimeRequestService.ts",
+    "bytes": 5692
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/ThreadCommandExecutor.ts",
+    "blob_sha": "aa9a1f1ca7ab35057c308f9b0b494a4f41ab4842",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadCommandExecutor.ts",
+    "bytes": 1187
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/ThreadLaunchService.ts",
+    "blob_sha": "0382415179bfcc0b74345e7353fad90e62beb861",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadLaunchService.ts",
+    "bytes": 69369
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/ThreadLiveEventCoalescer.ts",
+    "blob_sha": "33c82dfe4ef4c9652bbf1c87ebe5e91019f58b34",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadLiveEventCoalescer.ts",
+    "bytes": 9221
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/ThreadMessageIntake.ts",
+    "blob_sha": "5d9ec263b0b0df50bcd5c859b6bd6f6886ef7a07",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadMessageIntake.ts",
+    "bytes": 13913
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/ThreadStream.ts",
+    "blob_sha": "c16a1b9e095aaa4246c795542cc83ec654aefcaf",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/ThreadStream.ts",
+    "bytes": 3931
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/WireProjection.ts",
+    "blob_sha": "19857405aaff9b5ef841558a0abc2456604e7098",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/WireProjection.ts",
+    "bytes": 16316
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/assistantStreaming.ts",
+    "blob_sha": "8963ec2ede204222a2b076d3a3f2bb6e67a590dd",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/assistantStreaming.ts",
+    "bytes": 9277
+  },
+  {
+    "path": "apps/server/src/orchestration-v2/runtimeLayer.ts",
+    "blob_sha": "18ee960fc9e4db73f566ff74331b1dd9c54b79c1",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/orchestration-v2/runtimeLayer.ts",
+    "bytes": 16191
+  },
+  {
+    "path": "apps/server/src/peer/RemoteDelegation.ts",
+    "blob_sha": "5ed03b795b686076aa95efc7838425aa17c2eb25",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/peer/RemoteDelegation.ts",
+    "bytes": 45713
+  },
+  {
+    "path": "apps/server/src/preview/PreviewTunnel.ts",
+    "blob_sha": "6ace3cec1c456f2e2b331e2ddb4a1ce71fcd820c",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/preview/PreviewTunnel.ts",
+    "bytes": 8768
+  },
+  {
+    "path": "apps/server/src/preview/ServerBrowser.ts",
+    "blob_sha": "26203fc1a63c88e8da8d6b155a415759df47f925",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/preview/ServerBrowser.ts",
+    "bytes": 140623
+  },
+  {
+    "path": "apps/server/src/preview/ServerBrowserStream.ts",
+    "blob_sha": "649af3b31d0db7d5f5d988bcc422ae16e8535695",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/preview/ServerBrowserStream.ts",
+    "bytes": 12617
+  },
+  {
+    "path": "apps/server/src/provider/Drivers/AntigravityDriver.ts",
+    "blob_sha": "b0d11b453dc610b4dcb1c710732148be752d8d30",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/Drivers/AntigravityDriver.ts",
+    "bytes": 29005
+  },
+  {
+    "path": "apps/server/src/provider/Drivers/ClaudeDriver.ts",
+    "blob_sha": "a03c72c7de458e1bd12f2be39eed3713cebcd6c1",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/Drivers/ClaudeDriver.ts",
+    "bytes": 17407
+  },
+  {
+    "path": "apps/server/src/provider/Drivers/CodexDriver.ts",
+    "blob_sha": "ee7716e59e0bd582186dedcf6d72e75d7b7cfebc",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/Drivers/CodexDriver.ts",
+    "bytes": 17178
+  },
+  {
+    "path": "apps/server/src/provider/EventNdjsonLogger.ts",
+    "blob_sha": "5a7b3578578f126759665b8c7c67fd6e825816fd",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/EventNdjsonLogger.ts",
+    "bytes": 26563
+  },
+  {
+    "path": "apps/server/src/provider/builtInDrivers.ts",
+    "blob_sha": "342a6780e9ad05a9e5a37d6b7dcb45811a3e7491",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/provider/builtInDrivers.ts",
+    "bytes": 2288
+  },
+  {
+    "path": "apps/server/src/scheduledTasks/ScheduledTaskService.ts",
+    "blob_sha": "3db6f783f649a6942a37ce027b43fba43585eb72",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/scheduledTasks/ScheduledTaskService.ts",
+    "bytes": 114000
+  },
+  {
+    "path": "apps/server/src/scheduledTasks/webhookRoute.ts",
+    "blob_sha": "a7e0c512cbe411c707ce057d71c40e9541f81197",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/scheduledTasks/webhookRoute.ts",
+    "bytes": 6614
+  },
+  {
+    "path": "apps/server/src/server.ts",
+    "blob_sha": "d06186beb198813683cf12e9a276d32c2aa39ecf",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/server.ts",
+    "bytes": 64435
+  },
+  {
+    "path": "apps/server/src/sourceControl/builtInDrivers.ts",
+    "blob_sha": "33aa77ffefd8ffd273206667d1bb517bf2dd2e49",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/sourceControl/builtInDrivers.ts",
+    "bytes": 1764
+  },
+  {
+    "path": "apps/server/src/sourceControl/sourceControlDefinitions.ts",
+    "blob_sha": "6dff3fe3c696225f8a69b0b6d608ff34cb9ba01e",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/sourceControl/sourceControlDefinitions.ts",
+    "bytes": 3276
+  },
+  {
+    "path": "apps/server/src/terminal/Manager.ts",
+    "blob_sha": "e87ba67cf5837c37ca8942b912cbb156eedf8b10",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/terminal/Manager.ts",
+    "bytes": 140822
+  },
+  {
+    "path": "apps/server/src/terminal/OutputProtocol.ts",
+    "blob_sha": "84f6e4092341783c1e455034519606f3747c026f",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/terminal/OutputProtocol.ts",
+    "bytes": 9866
+  },
+  {
+    "path": "apps/server/src/vcs/GitVcsDriver.ts",
+    "blob_sha": "3a4dd7cedf10ae50d813412e34241c343b4a6be5",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/vcs/GitVcsDriver.ts",
+    "bytes": 97993
+  },
+  {
+    "path": "apps/server/src/vcs/VcsStatusBroadcaster.ts",
+    "blob_sha": "d1e9a9c5496c6bf0e59978cb2c37d8a3595377a7",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/vcs/VcsStatusBroadcaster.ts",
+    "bytes": 50834
+  },
+  {
+    "path": "apps/server/src/workspace/WorkspaceEntries.ts",
+    "blob_sha": "738268f95558bad023de6f33e781bdbdd5ca0ce2",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/workspace/WorkspaceEntries.ts",
+    "bytes": 27570
+  },
+  {
+    "path": "apps/server/src/workspace/WorkspaceSearchIndex.ts",
+    "blob_sha": "a5503a50f55b822007d07f704abf0de5b544e183",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/workspace/WorkspaceSearchIndex.ts",
+    "bytes": 55089
+  },
+  {
+    "path": "apps/server/src/ws.ts",
+    "blob_sha": "b5faaaa16f97c38469686d7d8c958ef52e3915f8",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/ws.ts",
+    "bytes": 176700
+  },
+  {
+    "path": "docs/internals/adding-a-provider.md",
+    "blob_sha": "14ac6db1eb68cebc2e77ece20a40040aee0366db",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/adding-a-provider.md",
+    "bytes": 8896
+  },
+  {
+    "path": "docs/internals/connection-runtime.md",
+    "blob_sha": "58eb388a12a13f473d631300ddd00fdabbed65fb",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/connection-runtime.md",
+    "bytes": 10201
+  },
+  {
+    "path": "docs/internals/context-handoffs.md",
+    "blob_sha": "965a4623f796269afed6384a9f87d8a0994c3941",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/context-handoffs.md",
+    "bytes": 1215
+  },
+  {
+    "path": "docs/internals/devices.md",
+    "blob_sha": "051f57411d07bebda59d72756df4598d2627d950",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/devices.md",
+    "bytes": 9451
+  },
+  {
+    "path": "docs/internals/environment-auth.md",
+    "blob_sha": "ea64b8523541bf76f94d648ad31211c02fff5fb5",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/environment-auth.md",
+    "bytes": 11498
+  },
+  {
+    "path": "docs/internals/overview.md",
+    "blob_sha": "19029cd1d9f3fcbbbe2ea9c35a13cd1893a4a630",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/overview.md",
+    "bytes": 10851
+  },
+  {
+    "path": "docs/internals/providers.md",
+    "blob_sha": "102bffe4f065cf4007f797ff4483336c0af84d69",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/providers.md",
+    "bytes": 13034
+  },
+  {
+    "path": "docs/internals/remote.md",
+    "blob_sha": "c4d52681cb606b4571d28151c7eb4cf403be7f60",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/remote.md",
+    "bytes": 15166
+  },
+  {
+    "path": "docs/internals/terminal-runtime.md",
+    "blob_sha": "ca5f0d46ead6e5eed89c61ce5a23ff2d2ca587fe",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/terminal-runtime.md",
+    "bytes": 2535
+  },
+  {
+    "path": "docs/internals/voice-input.md",
+    "blob_sha": "c455388dac491850293c02bd028388dfaf6962af",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/internals/voice-input.md",
+    "bytes": 5658
+  },
+  {
+    "path": "package.json",
+    "blob_sha": "9f1d2bee11b58d3fc77103242dd5ed327c3e2efe",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/package.json",
+    "bytes": 6870
+  },
+  {
+    "path": "packages/contracts/src/auth.ts",
+    "blob_sha": "5a630a6b7abe989984b2e7d86acc504f18bc8e9b",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/auth.ts",
+    "bytes": 27642
+  },
+  {
+    "path": "packages/contracts/src/environmentHttp.ts",
+    "blob_sha": "2a6c0dc43d50c83126e71d74f489a833538615cc",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/environmentHttp.ts",
+    "bytes": 40485
+  },
+  {
+    "path": "packages/contracts/src/orchestrationDispatch.ts",
+    "blob_sha": "696e4acd3017e3f4bd80c4cff8815c7518531e63",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/orchestrationDispatch.ts",
+    "bytes": 441
+  },
+  {
+    "path": "packages/contracts/src/orchestrationProject.ts",
+    "blob_sha": "e060c7da8059e05df33e7a0e82adb72dabf94aba",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/orchestrationProject.ts",
+    "bytes": 1683
+  },
+  {
+    "path": "packages/contracts/src/orchestrationV2.ts",
+    "blob_sha": "8b05c12e17871ae9b75442b8438e2bbab60de915",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/orchestrationV2.ts",
+    "bytes": 185453
+  },
+  {
+    "path": "packages/contracts/src/orchestratorMcp.ts",
+    "blob_sha": "49595364ad78677fe9d15f26e2314c692ec4a2cd",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/orchestratorMcp.ts",
+    "bytes": 41073
+  },
+  {
+    "path": "packages/contracts/src/provider.ts",
+    "blob_sha": "accd66de064c8e217546122973f482c53080ed60",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/provider.ts",
+    "bytes": 3667
+  },
+  {
+    "path": "packages/contracts/src/providerInstance.ts",
+    "blob_sha": "1a93350bbdf5341bde3795b7e1b4e5885c3d582c",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/providerInstance.ts",
+    "bytes": 4645
+  },
+  {
+    "path": "packages/contracts/src/providerRuntime.ts",
+    "blob_sha": "4769bfd7955c7e6fad74f9927916a48347ce97bc",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/providerRuntime.ts",
+    "bytes": 5920
+  },
+  {
+    "path": "packages/contracts/src/rpc.ts",
+    "blob_sha": "e30bf9af2937cf1846a19a7814031e174d158ebb",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts",
+    "bytes": 93435
+  },
+  {
+    "path": "packages/effect-acp/src/client.ts",
+    "blob_sha": "b1dcf700e62e1d32a38538db2f9d96f384139486",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/effect-acp/src/client.ts",
+    "bytes": 56774
+  },
+  {
+    "path": "packages/effect-acp/src/protocol.ts",
+    "blob_sha": "e61ba8ab638a014835ea27ea7b05aceaf231f1bf",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/effect-acp/src/protocol.ts",
+    "bytes": 41850
+  },
+  {
+    "path": "packages/effect-codex-app-server/src/client.ts",
+    "blob_sha": "4bc5873688d2d10b4f4d20399eb456be2f6f46d0",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/effect-codex-app-server/src/client.ts",
+    "bytes": 13059
+  },
+  {
+    "path": "packages/effect-codex-app-server/src/protocol.ts",
+    "blob_sha": "0faf9e44e4b4437454500ce49c972f37fe932a89",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/effect-codex-app-server/src/protocol.ts",
+    "bytes": 22131
+  },
+  {
+    "path": "packages/provider-acp/src/server/AcpSessionRuntime.ts",
+    "blob_sha": "b08eef243fc3e351243cebfb67d5e0923ad99c73",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-acp/src/server/AcpSessionRuntime.ts",
+    "bytes": 127841
+  },
+  {
+    "path": "packages/provider-acp/src/server/adapter.ts",
+    "blob_sha": "908c99e4eaeb3ac704554933fbe3a046e4f73d0e",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-acp/src/server/adapter.ts",
+    "bytes": 480748
+  },
+  {
+    "path": "packages/provider-acp/src/server/clientPolicy.ts",
+    "blob_sha": "022d96dd956f618e19c37dff037d388316ee9abc",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-acp/src/server/clientPolicy.ts",
+    "bytes": 8490
+  },
+  {
+    "path": "packages/provider-acp-registry/src/server/adapter.ts",
+    "blob_sha": "8eb5dbb30b8cc48e6c6f57b82093c6f1794ed450",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-acp-registry/src/server/adapter.ts",
+    "bytes": 19682
+  },
+  {
+    "path": "packages/provider-acp-registry/src/server/driver.ts",
+    "blob_sha": "46d8ed3219aa48ad9ccb4495e90f8297a91e2afb",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-acp-registry/src/server/driver.ts",
+    "bytes": 41614
+  },
+  {
+    "path": "packages/provider-core/src/server/ProviderAdapter.ts",
+    "blob_sha": "796ec9541d29513086f77b2efd3e3a6d231f7203",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-core/src/server/ProviderAdapter.ts",
+    "bytes": 34308
+  },
+  {
+    "path": "packages/provider-core/src/server/driver.ts",
+    "blob_sha": "c0474da3b55d96d66956ea574d71a231b8f346fd",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-core/src/server/driver.ts",
+    "bytes": 5567
+  },
+  {
+    "path": "packages/provider-cursor/src/server/CursorAgentSdk.ts",
+    "blob_sha": "81b8208a5dda857238c42f37ce6824b2efb1d20a",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/CursorAgentSdk.ts",
+    "bytes": 43561
+  },
+  {
+    "path": "packages/provider-cursor/src/server/CursorAgentSdkProcessRunner.ts",
+    "blob_sha": "ed97c62288829221213cf053432995b9e0087bc3",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/CursorAgentSdkProcessRunner.ts",
+    "bytes": 45544
+  },
+  {
+    "path": "packages/provider-cursor/src/server/CursorAgentSdkWorker.ts",
+    "blob_sha": "1481795f4ad6ae5b8723e3f2cb0d029f4ad41b77",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/CursorAgentSdkWorker.ts",
+    "bytes": 21754
+  },
+  {
+    "path": "packages/provider-cursor/src/server/CursorAgentSdkWorkerProtocol.ts",
+    "blob_sha": "e39323ef67925382057bb8325f8b034881037c95",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/CursorAgentSdkWorkerProtocol.ts",
+    "bytes": 8386
+  },
+  {
+    "path": "packages/provider-cursor/src/server/CursorSdk.ts",
+    "blob_sha": "71eb9d28ff0761aad396940689566ecd88f66590",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/CursorSdk.ts",
+    "bytes": 5944
+  },
+  {
+    "path": "packages/provider-cursor/src/server/adapter.ts",
+    "blob_sha": "b4dd1033c2a9faa8d88656f85260850a2d56c539",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/adapter.ts",
+    "bytes": 148867
+  },
+  {
+    "path": "packages/provider-cursor/src/server/driver.ts",
+    "blob_sha": "eca22bb61e607418b27da8afd4d510dc2b8f520c",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/driver.ts",
+    "bytes": 11537
+  },
+  {
+    "path": "packages/provider-cursor/src/server/sdk.ts",
+    "blob_sha": "4350dd95a357606bf014355f7ca9f2f29b9d6564",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-cursor/src/server/sdk.ts",
+    "bytes": 2711
+  },
+  {
+    "path": "packages/provider-fx/src/server/adapter.ts",
+    "blob_sha": "d4a94e1bf16d608a1b2944d457f83784d88b033d",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-fx/src/server/adapter.ts",
+    "bytes": 11496
+  },
+  {
+    "path": "packages/provider-fx/src/server/driver.ts",
+    "blob_sha": "b069b12a4de7d249edd9e46b538651df6e8bae1f",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-fx/src/server/driver.ts",
+    "bytes": 8251
+  },
+  {
+    "path": "packages/provider-grok/src/server/adapter.ts",
+    "blob_sha": "db5a136697c10836d8640d677b3254c3464b5a23",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-grok/src/server/adapter.ts",
+    "bytes": 20799
+  },
+  {
+    "path": "packages/provider-grok/src/server/driver.ts",
+    "blob_sha": "660324d4f1d0a1b8031422f8be80bcb8735c5a52",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-grok/src/server/driver.ts",
+    "bytes": 12109
+  },
+  {
+    "path": "packages/provider-kiro/src/server/adapter.ts",
+    "blob_sha": "67e837a35b354c9fb6e118948e560f5938494245",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-kiro/src/server/adapter.ts",
+    "bytes": 26335
+  },
+  {
+    "path": "packages/provider-kiro/src/server/driver.ts",
+    "blob_sha": "0a4e9b85fa28757e618fd78a731daa1b506fb981",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-kiro/src/server/driver.ts",
+    "bytes": 6198
+  },
+  {
+    "path": "packages/provider-muse/src/server/adapter.ts",
+    "blob_sha": "0b5835e0bad12956c1bc88db2a1272a29b1f9a5f",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-muse/src/server/adapter.ts",
+    "bytes": 103376
+  },
+  {
+    "path": "packages/provider-muse/src/server/driver.ts",
+    "blob_sha": "197a219e54ecbb478851afe2035372400b5634c2",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-muse/src/server/driver.ts",
+    "bytes": 10391
+  },
+  {
+    "path": "packages/provider-muse/src/server/protocol.ts",
+    "blob_sha": "87c9c922ef59248fcf13a47f2ad9ebb5ee40437d",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-muse/src/server/protocol.ts",
+    "bytes": 9695
+  },
+  {
+    "path": "packages/provider-muse/src/server/sdk.ts",
+    "blob_sha": "aece589b1e188d7b5ca459c0b73bff5d246e23ec",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-muse/src/server/sdk.ts",
+    "bytes": 9699
+  },
+  {
+    "path": "packages/provider-opencode/src/server/adapter.ts",
+    "blob_sha": "d0e1d27cc2a7bded68fa90ff78d78a77c0152b5e",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-opencode/src/server/adapter.ts",
+    "bytes": 188320
+  },
+  {
+    "path": "packages/provider-opencode/src/server/driver.ts",
+    "blob_sha": "37cedde2e9a183592c07b338e0b1d1f5057b9e0e",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-opencode/src/server/driver.ts",
+    "bytes": 33287
+  },
+  {
+    "path": "packages/provider-opencode/src/server/v2/OpenCode2Client.ts",
+    "blob_sha": "1cc1190de00dcf8f38aea0f3526927170d2b015e",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-opencode/src/server/v2/OpenCode2Client.ts",
+    "bytes": 14520
+  },
+  {
+    "path": "packages/provider-opencode/src/server/v2/adapter.ts",
+    "blob_sha": "5cbc012de984d5b7e7d9b5a273916f29a523cff1",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-opencode/src/server/v2/adapter.ts",
+    "bytes": 222426
+  },
+  {
+    "path": "packages/provider-pi/src/server/adapter.ts",
+    "blob_sha": "e7803bbe9c5ee886ff01dfd4b603b149f66588d5",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-pi/src/server/adapter.ts",
+    "bytes": 189157
+  },
+  {
+    "path": "packages/provider-pi/src/server/driver.ts",
+    "blob_sha": "6a9e07bc60fc2b22a8f7070aac3dca7364e1c955",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-pi/src/server/driver.ts",
+    "bytes": 8413
+  },
+  {
+    "path": "packages/provider-pi/src/server/rpc.ts",
+    "blob_sha": "3cdb2058f1cf3f2239c06c77396a24b3191a5364",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/provider-pi/src/server/rpc.ts",
+    "bytes": 17020
+  },
+  {
+    "path": "packages/shared/src/htmlRender.ts",
+    "blob_sha": "6b28ee648d1fd920c2f2f20d0c2225ccd0589710",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/shared/src/htmlRender.ts",
+    "bytes": 27403
+  },
+  {
+    "path": "packages/shared/src/toolOutput.ts",
+    "blob_sha": "d636e80351bea4cbf5ccf6efb72e05476ff3a25d",
+    "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/shared/src/toolOutput.ts",
+    "bytes": 13383
+  }
+]

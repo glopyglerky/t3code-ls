@@ -1,0 +1,993 @@
+{
+  "revision": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  "read_method": "git show, git ls-tree and git log against explicit revision using immutable repository objects",
+  "restrictions": "No checkout mutations, product edits, running state reads, builds/tests/benchmarks or publication.",
+  "inventory_scope": {
+    "scoped_paths": 5385,
+    "all_apps_paths": 6296,
+    "all_apps_counts": {
+      "desktop": 332,
+      "marketing": 105,
+      "mobile": 1911,
+      "server": 1766,
+      "web": 2182
+    },
+    "meaning": "Filenames only, including tests/assets; not reviewed implementation counts."
+  },
+  "source_capture_count": 84,
+  "review_counts": {
+    "selected_sections_review": 46,
+    "captured_not_semantically_reviewed": 10,
+    "full_file_review": 25,
+    "headings_or_declarations_only": 3
+  },
+  "sources": [
+    {
+      "path": "apps/desktop/package.json",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "bd770e285e71b7f1e642634c23c3a811fcbe70eb",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/desktop/package.json",
+      "lines": 49,
+      "status": "selected_sections_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/desktop/src/main.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "8c32805a94463363b84f93291ad14e4581f0b036",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/desktop/src/main.ts",
+      "lines": 260,
+      "status": "captured_not_semantically_reviewed",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/desktop/src/preload.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "ac52fbc73d8681376eabb3d5fef0b7ec26302446",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/desktop/src/preload.ts",
+      "lines": 574,
+      "status": "captured_not_semantically_reviewed",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/desktop/src/preview/DesktopBrowserHost.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "ce5d7074a786c42d854c6bd9b5d4ab221c126883",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/desktop/src/preview/DesktopBrowserHost.ts",
+      "lines": 714,
+      "status": "captured_not_semantically_reviewed",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/desktop/src/updates/updateMachine.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "80751315657c0ca338268937ffce6e78d5571338",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/desktop/src/updates/updateMachine.ts",
+      "lines": 238,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/marketing/astro.config.mjs",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "45fb17a8e9622b22246861a7af85439b23e5c325",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/marketing/astro.config.mjs",
+      "lines": 27,
+      "status": "full_file_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/marketing/package.json",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "8e447d16b2c0e53d73ef052ff2f5045e9cebd3f5",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/marketing/package.json",
+      "lines": 25,
+      "status": "full_file_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/marketing/scripts/stage-install-scripts.mjs",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "bac757976a23bd88ff7c08679a3c8630eff534e7",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/marketing/scripts/stage-install-scripts.mjs",
+      "lines": 12,
+      "status": "full_file_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/marketing/src/layouts/Layout.astro",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "fa7fa30bc0b18128e92ebbcce0fde135b1ea8c6a",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/marketing/src/layouts/Layout.astro",
+      "lines": 706,
+      "status": "selected_sections_review",
+      "notes": "HTML/locale/canonical/hreflang/social metadata and selected navigation/motion sections."
+    },
+    {
+      "path": "apps/marketing/src/lib/platform.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "be17e789a6bb2c73e4fd20417dba30897d711ff2",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/marketing/src/lib/platform.ts",
+      "lines": 23,
+      "status": "full_file_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/marketing/src/lib/releases.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "f50103972cdd8f2b488046d8cd0221cb893fb8ae",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/marketing/src/lib/releases.ts",
+      "lines": 60,
+      "status": "full_file_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/marketing/src/pages/[...locale]/download.astro",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "1bf425a6d015166dbf36f58fe6e24b24ba4207da",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/marketing/src/pages/[...locale]/download.astro",
+      "lines": 627,
+      "status": "selected_sections_review",
+      "notes": "Release channel, download selection, install commands and selected accessible controls; style body not semantically audited."
+    },
+    {
+      "path": "apps/marketing/src/pages/[...locale]/index.astro",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "e8f4b5f1b5fa5a24f5773fc1b2a29b940d3c63fd",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/marketing/src/pages/[...locale]/index.astro",
+      "lines": 1275,
+      "status": "selected_sections_review",
+      "notes": "Static generation, download/link/platform declarations and selected motion/interaction sections; SVG/style body not semantically audited."
+    },
+    {
+      "path": "apps/mobile/app.config.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "a868851d5c9dabb3d6a71ace60fb50216fc2bd2c",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/app.config.ts",
+      "lines": 505,
+      "status": "selected_sections_review",
+      "notes": "Variants, links, credential domains, widgets, orientation, OS permissions/back behavior and update runtime configuration."
+    },
+    {
+      "path": "apps/mobile/eas.json",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "3667f582e1edb140dd6ff6b1da529a14555d86e4",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/eas.json",
+      "lines": 98,
+      "status": "captured_not_semantically_reviewed",
+      "notes": ""
+    },
+    {
+      "path": "apps/mobile/modules/t3-composer-editor/ios/T3ComposerEditorView.swift",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "253376fe5e4d3866cb5ea4ed80253de3d1aeddd6",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/modules/t3-composer-editor/ios/T3ComposerEditorView.swift",
+      "lines": 1424,
+      "status": "selected_sections_review",
+      "notes": "Native IME, hardware keys, paste, chip accessibility and stale-event handling excerpts."
+    },
+    {
+      "path": "apps/mobile/modules/t3-review-diff/ios/ReviewDiffCodeLayout.swift",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "4c60b20c1add580b303dcd8a3ee010f23ea4abba",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/modules/t3-review-diff/ios/ReviewDiffCodeLayout.swift",
+      "lines": 170,
+      "status": "full_file_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/mobile/modules/t3-review-diff/ios/T3ReviewDiffView.swift",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "0c65ddf19460ad5d068d9ae66bf864114706de15",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/modules/t3-review-diff/ios/T3ReviewDiffView.swift",
+      "lines": 2978,
+      "status": "selected_sections_review",
+      "notes": "Decode queue, discarded obsolete work, viewport drawing and layout-cache excerpts."
+    },
+    {
+      "path": "apps/mobile/package.json",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "d86ac2320328b09cc11dad0d0ab07118286adcf0",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/package.json",
+      "lines": 203,
+      "status": "selected_sections_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/mobile/src/App.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "16a77b049efa35f45486d2ac1e749f89486ea2d9",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/App.tsx",
+      "lines": 332,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/mobile/src/features/layout/AdaptiveWorkspaceLayout.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "8216a08c31f85842707945b9861b848257d29532",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/features/layout/AdaptiveWorkspaceLayout.tsx",
+      "lines": 1195,
+      "status": "headings_or_declarations_only",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/mobile/src/features/terminal/terminalOutputWriter.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "74c1225b76f1b61c157049a7f084a554a8b6da18",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/features/terminal/terminalOutputWriter.ts",
+      "lines": 57,
+      "status": "full_file_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/mobile/src/features/terminal/useTerminalSurfaceBuffer.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "a4fcfd1bf01792a6f960bafd5f7401627d1ed621",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/features/terminal/useTerminalSurfaceBuffer.ts",
+      "lines": 18,
+      "status": "full_file_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/mobile/src/features/threads/ThreadDetailScreen.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "2a627454b77cdf4123e838b4330f2d8a4f719d05",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/features/threads/ThreadDetailScreen.tsx",
+      "lines": 2015,
+      "status": "selected_sections_review",
+      "notes": "LegendList, viewport/layout state and lifetime search excerpts only."
+    },
+    {
+      "path": "apps/mobile/src/features/updates/app-updates.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "716385dd5873e44c98a00550f1f95582efa62d0e",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/features/updates/app-updates.ts",
+      "lines": 522,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/mobile/src/lib/rootNavigation.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "ec2bd3f5f98dcb881958e5ff3f26a9f1b97f2a4a",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/lib/rootNavigation.ts",
+      "lines": 63,
+      "status": "full_file_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/mobile/src/Stack.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "42403edbb1e7d8ac16786d78604fd8f1ea4b80e0",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/mobile/src/Stack.tsx",
+      "lines": 952,
+      "status": "selected_sections_review",
+      "notes": "Screen import/registration inventory and selected root navigation; individual screens not reviewed."
+    },
+    {
+      "path": "apps/server/package.json",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "780cc64f0b2e502d523d555a73ab28eceff04d98",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/package.json",
+      "lines": 109,
+      "status": "selected_sections_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/server/src/cli/app.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "e4182945215c31b7e1190af00d36d235431d34d0",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/cli/app.ts",
+      "lines": 282,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/server/src/cli/sshHelper.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "342b4107a54bdfce3a1df53369f522cd45457b94",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/cli/sshHelper.ts",
+      "lines": 208,
+      "status": "full_file_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/server/src/cli/thread.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "48d62fb4575b77b9aec8e1090aac1ed427037606",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/cli/thread.ts",
+      "lines": 1075,
+      "status": "selected_sections_review",
+      "notes": "Declaration inventory plus output, wait, stdin, status/exit contract and selected handler sections."
+    },
+    {
+      "path": "apps/server/src/cli/updateProgress.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "5014bde9930edc9f19013a8b64211d9704aa481a",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/cli/updateProgress.ts",
+      "lines": 72,
+      "status": "selected_sections_review",
+      "notes": "stderr, TTY, NO_COLOR, progress stages, width and throttling; final formatting tail not fully reviewed."
+    },
+    {
+      "path": "apps/web/package.json",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "a60eb801260cfb03a26d80dd0081c22d8b68600e",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/package.json",
+      "lines": 115,
+      "status": "selected_sections_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/web/src/components/chat/MessagesTimeline.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "fe60471993e365493af5653f014845f9c1d0ca51",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/components/chat/MessagesTimeline.tsx",
+      "lines": 1937,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/web/src/components/ChatMarkdown.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "979d1858cafc1a4b1f52af23ee9fb796e013504e",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/components/ChatMarkdown.tsx",
+      "lines": 2106,
+      "status": "selected_sections_review",
+      "notes": "Incremental block path, shared renderer/cache and source offsets; not all render extensions."
+    },
+    {
+      "path": "apps/web/src/components/ComposerPromptEditorTiptap.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "634b7a9389e93fc39ce6f29ca245d3457d25d79f",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/components/ComposerPromptEditorTiptap.tsx",
+      "lines": 2095,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/web/src/components/DiffWorkerPoolProvider.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "ddbf4868df6a1500174db3b244b1abdfa36d0d4f",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/components/DiffWorkerPoolProvider.tsx",
+      "lines": 163,
+      "status": "full_file_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/web/src/components/files/FilePreviewPanel.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "2c27cfb8d80d11f92a96ac0514f5e86559751cd5",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/components/files/FilePreviewPanel.tsx",
+      "lines": 2091,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/web/src/main.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "51aeeade6863d448f2e793e06be4550cc3a3d343",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/main.tsx",
+      "lines": 50,
+      "status": "full_file_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/web/src/routes/__root.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "3cbef77306c8e7404433cb5f957a7aca8288fc66",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/routes/__root.tsx",
+      "lines": 417,
+      "status": "captured_not_semantically_reviewed",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/web/src/routes/_chat.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "c65ed390288f818bb15f970e553ea6828189e5c0",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/routes/_chat.tsx",
+      "lines": 60,
+      "status": "full_file_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/web/src/routes/connect.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "30750a977ea416fff9e144215875571a15a6d0b1",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/routes/connect.tsx",
+      "lines": 14,
+      "status": "full_file_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/web/src/routes/pair.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "a71f44e3e2a720e96e2ba38223a2e1b7e4fa95e3",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/routes/pair.tsx",
+      "lines": 62,
+      "status": "full_file_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/web/src/routes/welcome.tsx",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "5fbb52359a1cfe6bd7c66510ff7822178c657484",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/routes/welcome.tsx",
+      "lines": 63,
+      "status": "full_file_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/web/src/shortcuts/commandPaletteCommands.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "0d4dfb698074caa9e537e1bd24c79d4e9b0e52af",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/shortcuts/commandPaletteCommands.ts",
+      "lines": 133,
+      "status": "selected_sections_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/web/src/shortcuts/dispatcher.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "9e361e825db7fbff877cb3059e3fe0a48659b330",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/shortcuts/dispatcher.ts",
+      "lines": 167,
+      "status": "selected_sections_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/web/src/terminal/ghostty/core.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "fe02a706e6e811a37a80270724b5634564db428e",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/terminal/ghostty/core.ts",
+      "lines": 1423,
+      "status": "selected_sections_review",
+      "notes": ""
+    },
+    {
+      "path": "apps/web/src/terminal/ghostty/README.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "9b78af3bf80ded97a6db25c2bf710f721b4c75dd",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/terminal/ghostty/README.md",
+      "lines": 20,
+      "status": "full_file_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/web/src/terminal/ghostty/renderer.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "cf09106e0c3f168cc658e33709e0dd5e2eea1488",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/terminal/ghostty/renderer.ts",
+      "lines": 471,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/web/src/terminal/ghostty/runtime.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "762fb0f6ef13dcbd91ec18a704170c14f36bef87",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/terminal/ghostty/runtime.ts",
+      "lines": 247,
+      "status": "captured_not_semantically_reviewed",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "apps/web/src/terminal/ghostty/surface.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "2e450cff91fb74666d0b064be83ba47eaf1ed9de",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/web/src/terminal/ghostty/surface.ts",
+      "lines": 2314,
+      "status": "selected_sections_review",
+      "notes": ""
+    },
+    {
+      "path": "docs/operations/connect-setup.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "899d5c4a33a8e9d52dcd51cd5607481170f97c33",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/operations/connect-setup.md",
+      "lines": 140,
+      "status": "full_file_review",
+      "notes": ""
+    },
+    {
+      "path": "docs/operations/release.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "831c70cf2776301345ea8f0a77d0ffa04ffefa79",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/operations/release.md",
+      "lines": 722,
+      "status": "selected_sections_review",
+      "notes": "Release topology and selected mobile/desktop/hosted/CLI/signing/update invariants; not every workflow procedure."
+    },
+    {
+      "path": "docs/user/browser-import.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "194249d691022c256e12f4abc750c28bbd6bc9d0",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/browser-import.md",
+      "lines": 21,
+      "status": "full_file_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "docs/user/composer.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "53017052a2a0177d650435a0e1f10fa286498ef9",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/composer.md",
+      "lines": 452,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "docs/user/devices.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "3130e4aa45c6cdaf42e7c244a549c0d9072fc911",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/devices.md",
+      "lines": 172,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "docs/user/guest-links.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "30720f4fb00d93b7577a2e9f1cc2a7768cb653b5",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/guest-links.md",
+      "lines": 50,
+      "status": "full_file_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "docs/user/html-renders.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "3a1c3de9474d18884f2bbc979aaae986ef41067c",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/html-renders.md",
+      "lines": 20,
+      "status": "full_file_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "docs/user/install.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "91e3237d1d5c64f347d5ef4e0db8285cd8d75207",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/install.md",
+      "lines": 300,
+      "status": "full_file_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "docs/user/keybindings.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "eab9e88ec98f0eab13a6ce39b7867a745d7d38bb",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/keybindings.md",
+      "lines": 226,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "docs/user/keyboard-focus.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "2a8edd62b2fa14e6f995aec0c99058bfb623ba2f",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/keyboard-focus.md",
+      "lines": 38,
+      "status": "full_file_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "docs/user/mobile-notifications.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "992efd5b7b29a6d9e22f98beed6f03e19135714c",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/mobile-notifications.md",
+      "lines": 16,
+      "status": "full_file_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "docs/user/multi-repo-projects.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "796277041717540b8f924559509ace3fe6aecd6f",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/multi-repo-projects.md",
+      "lines": 177,
+      "status": "headings_or_declarations_only",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "docs/user/remote-access.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "051445f03eb0768af00edd40c9c8efdec9dd3512",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/remote-access.md",
+      "lines": 684,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "docs/user/snap-shot.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "ec554b5161f6c312b60fef4e95643b3085b23fa2",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/snap-shot.md",
+      "lines": 100,
+      "status": "headings_or_declarations_only",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "docs/user/source-control.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "b6702c13de5d961a56039ebd154f0e0398d7cbad",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/source-control.md",
+      "lines": 446,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "docs/user/terminal.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "a92ddc1ab6458799ee55554bf886a23f653292a0",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/terminal.md",
+      "lines": 63,
+      "status": "full_file_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "docs/user/updating.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "388e9035ca77083b20913eaa4f7f2fc274b265ea",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/updating.md",
+      "lines": 215,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "docs/user/voice-input.md",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "9831eeafd49f89389531da847ff3ba6ef021f759",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/docs/user/voice-input.md",
+      "lines": 173,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "package.json",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "9f1d2bee11b58d3fc77103242dd5ed327c3e2efe",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/package.json",
+      "lines": 80,
+      "status": "selected_sections_review",
+      "notes": ""
+    },
+    {
+      "path": "packages/client-runtime/package.json",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "92fad6b57ac9dea32f3501bf2b48b22d27451e36",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/client-runtime/package.json",
+      "lines": 700,
+      "status": "selected_sections_review",
+      "notes": ""
+    },
+    {
+      "path": "packages/client-runtime/src/platform/capabilities.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "f05c835dda290ab1236e8907518f203ec87f4a26",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/client-runtime/src/platform/capabilities.ts",
+      "lines": 96,
+      "status": "captured_not_semantically_reviewed",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "packages/client-runtime/src/state/entities.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "61b81f164216d41642dd82530c51d782970efe30",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/client-runtime/src/state/entities.ts",
+      "lines": 126,
+      "status": "captured_not_semantically_reviewed",
+      "notes": ""
+    },
+    {
+      "path": "packages/client-runtime/src/state/terminalOutput.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "e01785bc30f1119a0f4f30d30cc301afbcd57cff",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/client-runtime/src/state/terminalOutput.ts",
+      "lines": 359,
+      "status": "selected_sections_review",
+      "notes": ""
+    },
+    {
+      "path": "packages/client-runtime/src/state/terminalSession.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "cedc25ec62d48f2ad762ab75bdbb82e07691f770",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/client-runtime/src/state/terminalSession.ts",
+      "lines": 250,
+      "status": "selected_sections_review",
+      "notes": ""
+    },
+    {
+      "path": "packages/contracts/package.json",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "70b5d50d2e5dfab2cb1a065ed3378a99176b8210",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/package.json",
+      "lines": 35,
+      "status": "selected_sections_review",
+      "notes": ""
+    },
+    {
+      "path": "packages/contracts/src/desktopBrowser.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "1fa572ca662ae49c01c52004fc9a8966d5fa52be",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/desktopBrowser.ts",
+      "lines": 49,
+      "status": "captured_not_semantically_reviewed",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "packages/contracts/src/device.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "ab77114980b9a7b6ae8da3b40cf101c05b26bfcb",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/device.ts",
+      "lines": 740,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "packages/contracts/src/ipc.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "962cfd089dd2b6fb6ea65001603907baddef50e7",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/ipc.ts",
+      "lines": 1451,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "packages/contracts/src/rpc.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "e30bf9af2937cf1846a19a7814031e174d158ebb",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/rpc.ts",
+      "lines": 2622,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "packages/contracts/src/speech.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "0784c92be4ab64fbd497e34528adc02ebbd1183e",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/speech.ts",
+      "lines": 367,
+      "status": "captured_not_semantically_reviewed",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "packages/contracts/src/terminal.ts",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "09678600764b2efe7494d459518b94316fdd1cf5",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/packages/contracts/src/terminal.ts",
+      "lines": 534,
+      "status": "selected_sections_review",
+      "notes": "Review depth is intentionally conservative; selected excerpts do not imply full handler or screen coverage."
+    },
+    {
+      "path": "scripts/install.ps1",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "d767c7060890540d96f18dbd91cbb35729a20067",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/scripts/install.ps1",
+      "lines": 286,
+      "status": "selected_sections_review",
+      "notes": "Version/platform selection, checksum/staging/probe/publish and command ownership/PATH sections."
+    },
+    {
+      "path": "scripts/install.sh",
+      "commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "blob_sha": "4f30deda6858c48ce9a372f8bc6f24d9eb6a9e9d",
+      "url": "https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/scripts/install.sh",
+      "lines": 402,
+      "status": "selected_sections_review",
+      "notes": "Version/platform selection, checksum/staging/probe/publish and command ownership/PATH sections."
+    }
+  ],
+  "cli_declaration_inventory": [
+    {
+      "path": "apps/server/src/cli/acpMcpBridge.ts",
+      "blob_sha": "77ef020f4b6a6c71d9f7c3a3cee1b7af8ddc3a65",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 13
+    },
+    {
+      "path": "apps/server/src/cli/app.ts",
+      "blob_sha": "e4182945215c31b7e1190af00d36d235431d34d0",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 18
+    },
+    {
+      "path": "apps/server/src/cli/auth.ts",
+      "blob_sha": "b1483ef5701ca94a8fa4f399bbef2f072ef75c3a",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 186
+    },
+    {
+      "path": "apps/server/src/cli/authScopes.ts",
+      "blob_sha": "9294cc1a12ba7b4f84940632177d42110fc3231c",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 8
+    },
+    {
+      "path": "apps/server/src/cli/automaticPort.ts",
+      "blob_sha": "354de65d2519b950b50ec732f8098c41c38548c4",
+      "status": "no_matching_declarations",
+      "line_count": 0
+    },
+    {
+      "path": "apps/server/src/cli/browser.ts",
+      "blob_sha": "a82b84ef82d4bf867604841ada0679437a62cfad",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 65
+    },
+    {
+      "path": "apps/server/src/cli/claudeHistory.ts",
+      "blob_sha": "d46540f3acba5bb043c9caef125424780505243f",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 7
+    },
+    {
+      "path": "apps/server/src/cli/config.ts",
+      "blob_sha": "a62682772bcce2a10813d97287f32087e68dbe10",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 85
+    },
+    {
+      "path": "apps/server/src/cli/connect.ts",
+      "blob_sha": "8ef202c2d014f84587fc753498f2570d0bc76a51",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 181
+    },
+    {
+      "path": "apps/server/src/cli/consoleStdin.ts",
+      "blob_sha": "18ee7bed6d5a1af3eefa1c750b1b2871155e730e",
+      "status": "no_matching_declarations",
+      "line_count": 0
+    },
+    {
+      "path": "apps/server/src/cli/doctor.ts",
+      "blob_sha": "60af29ac41e7bdaf652e3700273e7d78da65a709",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 72
+    },
+    {
+      "path": "apps/server/src/cli/environment.ts",
+      "blob_sha": "9243d0340eabf5f1a69e5cecdd36ee8c6a2c5a65",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 80
+    },
+    {
+      "path": "apps/server/src/cli/install.ts",
+      "blob_sha": "4e6420842dc9dd201268fb7e04da181282418b2f",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 54
+    },
+    {
+      "path": "apps/server/src/cli/invocation.ts",
+      "blob_sha": "4804d44f0e324952767ed4375103f9a29525c670",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 8
+    },
+    {
+      "path": "apps/server/src/cli/managedChatGptToken.ts",
+      "blob_sha": "84ed18fb5228a006a3e9db63a7898fb7b87ede45",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 9
+    },
+    {
+      "path": "apps/server/src/cli/pair.ts",
+      "blob_sha": "2d45d45befeec3b77f1f58f68dbd87895eee33bc",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 54
+    },
+    {
+      "path": "apps/server/src/cli/policy.ts",
+      "blob_sha": "dafc5352166f0296661daf3c56b11e17653937ae",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 61
+    },
+    {
+      "path": "apps/server/src/cli/project.ts",
+      "blob_sha": "d2e84e0d4f4f501115be4df63215fa94f0f6f597",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 55
+    },
+    {
+      "path": "apps/server/src/cli/runningServer.ts",
+      "blob_sha": "cf315ff223ae5e1c5ee14fa1661b78309825c27c",
+      "status": "no_matching_declarations",
+      "line_count": 0
+    },
+    {
+      "path": "apps/server/src/cli/server.ts",
+      "blob_sha": "303402d46c2b44a4d0b260f46f76224d8b6b0dca",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 15
+    },
+    {
+      "path": "apps/server/src/cli/service.ts",
+      "blob_sha": "fc2aa8d0889aa238b8cea764d6239b54dba78fa8",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 132
+    },
+    {
+      "path": "apps/server/src/cli/serviceLauncher.ts",
+      "blob_sha": "fc5882cbf935a9ac494f25ba1ce508fab1178f37",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 9
+    },
+    {
+      "path": "apps/server/src/cli/servicePreflight.ts",
+      "blob_sha": "eefb2a35d37cb7d2a74f9242e92268d082a93fef",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 10
+    },
+    {
+      "path": "apps/server/src/cli/speechWorker.ts",
+      "blob_sha": "68be39836e8e36f638e21a751bfa74cc47d1f4ed",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 6
+    },
+    {
+      "path": "apps/server/src/cli/sshHelper.ts",
+      "blob_sha": "342b4107a54bdfce3a1df53369f522cd45457b94",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 79
+    },
+    {
+      "path": "apps/server/src/cli/theme.ts",
+      "blob_sha": "26048240d524898210fe9bcd07812b46bdcd9a6f",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 46
+    },
+    {
+      "path": "apps/server/src/cli/thread.ts",
+      "blob_sha": "48d62fb4575b77b9aec8e1090aac1ed427037606",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 164
+    },
+    {
+      "path": "apps/server/src/cli/trace.ts",
+      "blob_sha": "b2463dab0d98d8c525a009eac8d069f1faa5a6b7",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 26
+    },
+    {
+      "path": "apps/server/src/cli/triage.ts",
+      "blob_sha": "cb0f94b254589feff924290fe1ef670acb4df3c3",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 38
+    },
+    {
+      "path": "apps/server/src/cli/uninstall.ts",
+      "blob_sha": "a0d47c73849105e48322b457785b687c04b44c3d",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 70
+    },
+    {
+      "path": "apps/server/src/cli/up.ts",
+      "blob_sha": "a56e478c7f45c5878fe65042fe175bb9f6e40f9a",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 144
+    },
+    {
+      "path": "apps/server/src/cli/update.ts",
+      "blob_sha": "07f3458fb3b66d405b4b67365799f194def6471e",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 97
+    },
+    {
+      "path": "apps/server/src/cli/updateProgress.ts",
+      "blob_sha": "5014bde9930edc9f19013a8b64211d9704aa481a",
+      "status": "declaration_and_selected_output_line_inventory",
+      "line_count": 4
+    }
+  ],
+  "historical_evidence": "See upstream-optimization-history.json and its primary PR links, plus pinned-optimization-presence.json. Selected patches were reviewed during research but are omitted from this publication. Metadata and patch review do not constitute full current-file review.",
+  "remaining_gaps": [
+    "Complete route-state coverage",
+    "Android native rendering and text/IME implementation",
+    "All OS accessibility and screen-reader combinations",
+    "Complete media/codec format support",
+    "SnapShot implementation",
+    "Device stream implementation",
+    "Every CLI handler and signal/pipe behavior",
+    "All packaging workflows and store compatibility"
+  ]
+}

@@ -1,5 +1,7 @@
 # CI and the Rust porting queue
 
+[The full-system implementation guide](porting/full-system/README.md) maps the complete Rust product to dependency-ordered work and user-journey acceptance. The generated queue below still owns upstream-impact ordering, and the port map and receipts still own implementation/qualification state.
+
 Upstream `pingdotgg/t3code`'s default branch is trusted as working. CI qualifies our Rust replacements, their production adapters, and their integration with the retained application. It does not rerun the inherited application test suite or the client flow using only the original services.
 
 ## What each run checks
@@ -68,4 +70,7 @@ For an already fetched upstream snapshot, replace `--fetch-default` with `--upst
 
 `ci_plan.py --offline` skips remote receipt lookup and plans full fork qualification. `--full` explicitly forces that scope even when reusable evidence exists. These commands write plans; the workflow executes the selected checks.
 
-The current integrated upstream pin is recorded in [upstream.lock.json](../upstream.lock.json). The [9e12eca1 integration](porting/default-9e12eca1.md) follows the [4c361199 integration](porting/default-4c361199.md) and adds Rust provider update verification. Application Rust still uses the pinned rustc-derived BlueFe package through Lustr's compatibility coordinator. Native Lust and platform retirement acceptance remain separately recorded in the [toolchain lock](../toolchain.lock.json) and [port map](../port-map.json).
+The current integrated upstream pin and integration report are recorded in [upstream.lock.json](../upstream.lock.json). Historical integration reports retain their original scope; a newer research or detection revision is not automatically integrated. Application Rust uses the pinned rustc-derived BlueFe package through Lustr's compatibility coordinator. Native Lust and platform retirement acceptance remain separately recorded in the [toolchain lock](../toolchain.lock.json) and [port map](../port-map.json).
+
+README and AGENTS navigation changes are currently mapped persistence inputs. The planner processes those mappings before its general Markdown exemption, so a documentation change there can select Rust/storage checks. Missing qualified ancestry can also widen scope. Keep the actual generated selection and run result; do not infer lightweight or successful CI from the document format or the existence of a PR.
+
