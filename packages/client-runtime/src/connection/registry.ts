@@ -54,8 +54,8 @@ import {
   findRouteToSameAddress,
   hasSavedBearerRoute,
   mergeLearnedRoutes,
+  replaceRouteForPairing,
   routesAfterRemoving,
-  upsertRoute,
   type ReportedEndpoint,
 } from "./routes.ts";
 
@@ -586,14 +586,8 @@ export const make = Effect.gen(function* () {
         const previous = (yield* SubscriptionRef.get(entries)).get(environmentId);
         let entry = registered;
         if (previous !== undefined) {
-          const existing = connectionRoutes(previous);
-          const sameAddress = findRouteToSameAddress(existing, route);
-          const routes = existing.filter(
-            (existing) =>
-              existing !== sameAddress ||
-              connectionRouteId(existing.target) === connectionRouteId(route.target),
-          );
-          const next = withRoutes(previous, upsertRoute(routes, route));
+          const routes = replaceRouteForPairing(connectionRoutes(previous), route);
+          const next = withRoutes(previous, routes);
           if (next.addressesChanged) {
             yield* forgetRoutingTrust(environmentId, "register-connection");
           }

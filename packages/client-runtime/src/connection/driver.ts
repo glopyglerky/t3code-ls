@@ -266,13 +266,15 @@ export const make = Effect.gen(function* () {
         yield* session.ready;
         // The server closes a socket when its session expires, unless the same key renewed it.
         if (prepared.httpAuthorization?._tag === "Dpop") {
+          const directConnection = prepared.httpAuthorization.directConnection;
+          const useLearnedAddress =
+            directConnection === undefined && prepared.target._tag !== "RelayConnectionTarget";
           yield* remote
             .renewDpopBeforeExpiry({
               expectedEnvironmentId: prepared.environmentId,
               expiresAtEpochMs: prepared.httpAuthorization.expiresAtEpochMs,
-              ...(prepared.httpAuthorization.directConnection
-                ? { directConnection: prepared.httpAuthorization.directConnection }
-                : {}),
+              ...(directConnection === undefined ? {} : { directConnection }),
+              ...(useLearnedAddress ? { directHttpBaseUrl: prepared.httpBaseUrl } : {}),
             })
             .pipe(
               Effect.catch((error) =>

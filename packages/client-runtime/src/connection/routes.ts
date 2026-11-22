@@ -183,6 +183,52 @@ export function findRouteToSameAddress(
   return key === null ? undefined : routes.find((existing) => routeAddressKey(existing) === key);
 }
 
+export function replaceRouteForPairing(
+  routes: ReadonlyArray<ConnectionRoute>,
+  route: ConnectionRoute,
+): ReadonlyArray<ConnectionRoute> {
+  const previous = findRouteToSameAddress(routes, route);
+  const nextId = connectionRouteId(route.target);
+  if (previous === undefined || connectionRouteId(previous.target) === nextId) {
+    return upsertRoute(routes, route);
+  }
+
+  const remaining = routes.filter((saved) => saved !== previous);
+  if (
+    previous.target._tag !== "BearerConnectionTarget" ||
+    route.target._tag !== "BearerConnectionTarget" ||
+    isLearned(previous) ||
+    isLearned(route)
+  ) {
+    return upsertRoute(remaining, route);
+  }
+
+  const previousId = previous.target.connectionId;
+  const updated = remaining.map((saved) => {
+    const profile = Option.getOrNull(saved.profile);
+    if (
+      saved.target._tag !== "BearerConnectionTarget" ||
+      profile?._tag !== "BearerConnectionProfile" ||
+      profile.learned !== true ||
+      profile.authorization === "t3-connect"
+    ) {
+      return saved;
+    }
+    const id = saved.target.connectionId;
+    const at = id.indexOf("@");
+    if (!id.startsWith("learned:") || at === -1 || id.slice(at + 1) !== previousId) {
+      return saved;
+    }
+    // Preserve the learned address, including Iroh identity and network hints.
+    const connectionId = id.slice(0, at + 1) + nextId;
+    return {
+      target: new BearerConnectionTarget({ ...saved.target, connectionId }),
+      profile: Option.some(new BearerConnectionProfile({ ...profile, connectionId })),
+    };
+  });
+  return upsertRoute(updated, route);
+}
+
 function routeAddressKey(route: ConnectionRoute): string | null {
   const profile = Option.getOrNull(route.profile);
   switch (profile?._tag) {

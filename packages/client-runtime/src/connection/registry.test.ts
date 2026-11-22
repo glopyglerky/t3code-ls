@@ -2093,6 +2093,54 @@ describe("EnvironmentRegistry routes", () => {
     }),
   );
 
+  it.effect("re-pairing the credential owner refreshes its learned routes", () =>
+    Effect.gen(function* () {
+      const learnedId = (parent: string) =>
+        `learned:${LAN_TARGET.environmentId}:https://tailnet.example.test@${parent}`;
+      const learned = new BearerConnectionTarget({
+        ...LAN_TARGET,
+        connectionId: learnedId(LAN_TARGET.connectionId),
+      });
+      const learnedProfile = new BearerConnectionProfile({
+        ...LAN_PROFILE,
+        connectionId: learned.connectionId,
+        httpBaseUrl: "https://tailnet.example.test/",
+        wsBaseUrl: "wss://tailnet.example.test/",
+        learned: true,
+        network: "tailscale",
+      });
+      const harness = yield* makeHarness(
+        [LAN_TARGET, learned, RELAY_TARGET],
+        [LAN_PROFILE, learnedProfile],
+        [[LAN_TARGET.connectionId, BEARER_CREDENTIAL]],
+      );
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        const repaired = new BearerConnectionTarget({
+          ...LAN_TARGET,
+          connectionId: "bearer:lan-again",
+        });
+        yield* registry.register(
+          lanRegistration(
+            repaired,
+            new BearerConnectionProfile({ ...LAN_PROFILE, connectionId: repaired.connectionId }),
+          ),
+        );
+
+        const newId = learnedId(repaired.connectionId);
+        expect(routesOf(yield* Ref.get(harness.storedTargets), LAN_TARGET.environmentId)).toEqual([
+          repaired,
+          new BearerConnectionTarget({ ...learned, connectionId: newId }),
+          RELAY_TARGET,
+        ]);
+        const entry = (yield* SubscriptionRef.get(registry.entries)).get(LAN_TARGET.environmentId);
+        expect(entry?.alternateRoutes?.[0]?.profile).toEqual(
+          Option.some(new BearerConnectionProfile({ ...learnedProfile, connectionId: newId })),
+        );
+      }).pipe(Effect.provide(harness.layer), Effect.scoped);
+    }),
+  );
+
   it.effect("re-pairing at another loopback address prefers the new route", () =>
     Effect.gen(function* () {
       const loopback = (connectionId: string, host: string) =>

@@ -683,6 +683,68 @@ describe("RemoteEnvironmentAuthorization", () => {
     }),
   );
 
+  it.effect.each(["socket", "http"] as const)(
+    "renews an expired T3 Connect credential through a learned route for %s access",
+    (kind) =>
+      Effect.gen(function* () {
+        const base = "http://192.168.1.10:3773/";
+        const harness = yield* makeHarness({
+          initialToken: persistedToken({ expiresAtEpochMs: 0 }),
+          responses: [
+            Response.json(DESCRIPTOR),
+            accessToken("direct-access-token"),
+            ...(kind === "socket" ? [websocketTicket("direct-ticket")] : []),
+          ],
+        });
+        const authorized = yield* Effect.gen(function* () {
+          const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+          return kind === "socket"
+            ? yield* remote.authorizeDpop({
+                expectedEnvironmentId: ENVIRONMENT_ID,
+                directEndpoint: { httpBaseUrl: base, wsBaseUrl: "ws://192.168.1.10:3773/" },
+              })
+            : yield* remote.authorizeDpopHttp({
+                expectedEnvironmentId: ENVIRONMENT_ID,
+                directHttpBaseUrl: base,
+              });
+        }).pipe(Effect.provide(harness.layer));
+
+        expect(authorized.httpBaseUrl).toBe(base);
+        expect(authorized.httpAuthorization).toMatchObject({ accessToken: "direct-access-token" });
+        expect(yield* Ref.get(harness.bootstrapCalls)).toBe(1);
+        expect(harness.fetch.calls.map(([url]) => String(url))).toEqual([
+          base + ".well-known/t3/environment",
+          base + "oauth/token",
+          ...(kind === "socket" ? [base + "api/auth/websocket-ticket/rpc"] : []),
+        ]);
+        expect((yield* Ref.get(harness.tokens)).get(ENVIRONMENT_ID)?.endpoint).toEqual(ENDPOINT);
+      }),
+  );
+
+  it.effect("checks a learned HTTP host before minting a credential", () =>
+    Effect.gen(function* () {
+      const base = "http://192.168.1.10:3773/";
+      const harness = yield* makeHarness({
+        initialToken: persistedToken({ expiresAtEpochMs: 0 }),
+        responses: [
+          Response.json({ ...DESCRIPTOR, environmentId: EnvironmentId.make("another-host") }),
+        ],
+      });
+      const failure = yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        return yield* remote
+          .authorizeDpopHttp({ expectedEnvironmentId: ENVIRONMENT_ID, directHttpBaseUrl: base })
+          .pipe(Effect.flip);
+      }).pipe(Effect.provide(harness.layer));
+
+      expect(failure).toMatchObject({ _tag: "ConnectionBlockedError", reason: "configuration" });
+      expect(yield* Ref.get(harness.bootstrapCalls)).toBe(0);
+      expect(harness.fetch.calls.map(([url]) => String(url))).toEqual([
+        base + ".well-known/t3/environment",
+      ]);
+    }),
+  );
+
   it.effect("sends no token to a direct address that answers as another machine", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({
@@ -882,6 +944,36 @@ describe("RemoteEnvironmentAuthorization", () => {
         yield* Queue.take(puts);
         expect(yield* Ref.get(harness.bootstrapCalls)).toBe(3);
       }).pipe(Effect.scoped, Effect.provide(Layer.merge(harness.layer, TestClock.layer())));
+    }),
+  );
+
+  it.effect("renews a live learned-route socket through the same host", () =>
+    Effect.gen(function* () {
+      const base = "https://direct.example.test/";
+      const puts = yield* Queue.unbounded<void>();
+      const harness = yield* makeHarness({
+        initialToken: persistedToken({ expiresAtEpochMs: 3_600_000 }),
+        responses: [Response.json(DESCRIPTOR), accessToken("renewed-on-host")],
+        beforePut: Queue.offer(puts, undefined).pipe(Effect.asVoid),
+      });
+
+      yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        yield* remote
+          .renewDpopBeforeExpiry({
+            expectedEnvironmentId: ENVIRONMENT_ID,
+            expiresAtEpochMs: 3_600_000,
+            directHttpBaseUrl: base,
+          })
+          .pipe(Effect.forkScoped);
+        yield* TestClock.adjust(3_540_000);
+        yield* Queue.take(puts);
+      }).pipe(Effect.scoped, Effect.provide(Layer.merge(harness.layer, TestClock.layer())));
+
+      expect(harness.fetch.calls.map(([url]) => String(url))).toEqual([
+        base + ".well-known/t3/environment",
+        base + "oauth/token",
+      ]);
     }),
   );
 

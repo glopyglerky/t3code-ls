@@ -105,6 +105,7 @@ export class RemoteEnvironmentAuthorization extends Context.Service<
     readonly authorizeDpopHttp: (input: {
       readonly expectedEnvironmentId: EnvironmentId;
       readonly rejectedAccessToken?: string;
+      readonly directHttpBaseUrl?: string;
     }) => Effect.Effect<AuthorizedRemoteHttpEnvironment, ConnectionAttemptError>;
     /**
      * Lets the next direct authorization of this address skip its own descriptor
@@ -123,6 +124,7 @@ export class RemoteEnvironmentAuthorization extends Context.Service<
       readonly expectedEnvironmentId: EnvironmentId;
       readonly expiresAtEpochMs: number;
       readonly directConnection?: DirectDpopConnection;
+      readonly directHttpBaseUrl?: string;
     }) => Effect.Effect<void, ConnectionAttemptError>;
   }
 >()("@t3tools/client-runtime/authorization/service/RemoteEnvironmentAuthorization") {}
@@ -191,7 +193,7 @@ export const make = Effect.gen(function* () {
     { readonly accessToken: string; readonly identity: ClientCapabilities.CloudSessionIdentity }
   >();
   const pendingTokens = new Map<
-    EnvironmentId,
+    string,
     {
       readonly id: object;
       readonly identity: ClientCapabilities.CloudSessionIdentity;
@@ -380,12 +382,25 @@ export const make = Effect.gen(function* () {
       environmentId: EnvironmentId,
       thumbprint: string,
       identity: ClientCapabilities.CloudSessionIdentity,
+      directHttpBaseUrl?: string,
+      checkedDescriptor?: ExecutionEnvironmentDescriptor,
     ) {
+      let descriptor = checkedDescriptor;
+      if (directHttpBaseUrl !== undefined && descriptor === undefined) {
+        descriptor = yield* verifyDirectEndpoint({
+          expectedEnvironmentId: environmentId,
+          httpBaseUrl: directHttpBaseUrl,
+          connectionMethod: "direct",
+        });
+      }
       const bootstrap = yield* obtainBootstrap(environmentId, identity);
-      const descriptor = yield* fetchDescriptor(bootstrap.endpoint.httpBaseUrl, "relay").pipe(
-        Effect.provideService(HttpClient.HttpClient, httpClient),
-        Effect.withSpan("environment.authorization.descriptor"),
-      );
+      const httpBaseUrl = directHttpBaseUrl ?? bootstrap.endpoint.httpBaseUrl;
+      if (descriptor === undefined) {
+        descriptor = yield* fetchDescriptor(httpBaseUrl, "relay").pipe(
+          Effect.provideService(HttpClient.HttpClient, httpClient),
+          Effect.withSpan("environment.authorization.descriptor"),
+        );
+      }
       if (descriptor.environmentId !== environmentId) {
         return yield* environmentMismatchError({
           expected: environmentId,
@@ -395,7 +410,7 @@ export const make = Effect.gen(function* () {
       const bootstrapProof = yield* signer
         .createProof({
           method: "POST",
-          url: environmentEndpointUrl(bootstrap.endpoint.httpBaseUrl, "/oauth/token"),
+          url: environmentEndpointUrl(httpBaseUrl, "/oauth/token"),
         })
         .pipe(
           Effect.mapError(
@@ -408,7 +423,7 @@ export const make = Effect.gen(function* () {
         );
       yield* assertSession(identity);
       const access = yield* exchangeRemoteDpopAccessToken({
-        httpBaseUrl: bootstrap.endpoint.httpBaseUrl,
+        httpBaseUrl,
         credential: bootstrap.credential,
         dpopProof: bootstrapProof,
         clientMetadata: presentation.metadata,
@@ -437,6 +452,7 @@ export const make = Effect.gen(function* () {
 
   const getDpopToken = Effect.fn("clientRuntime.connection.remote.getDpopToken")(function* (
     input: Parameters<RemoteEnvironmentAuthorization["Service"]["authorizeDpopHttp"]>[0],
+    checkedDescriptor?: ExecutionEnvironmentDescriptor,
   ) {
     const session = yield* cloudSession.identity;
     if (Option.isNone(session)) {
@@ -482,16 +498,21 @@ export const make = Effect.gen(function* () {
         if (input.rejectedAccessToken !== undefined) {
           yield* removeRejectedToken(input.expectedEnvironmentId, input.rejectedAccessToken);
         }
-        const pending = pendingTokens.get(input.expectedEnvironmentId);
+        // A delayed relay exchange must not hold up renewal on a reachable direct route.
+        const id = input.expectedEnvironmentId;
+        const pendingKey = `${id.length}:${id}${input.directHttpBaseUrl ?? ""}`;
+        const pending = pendingTokens.get(pendingKey);
         if (pending?.identity === identity && pending.thumbprint === thumbprint) {
           return { issued: pending.issued, fromCache: false };
         }
 
-        const id = {};
+        const mint = {};
         const fiber = yield* exchangeDpopToken(
           input.expectedEnvironmentId,
           thumbprint,
           identity,
+          input.directHttpBaseUrl,
+          checkedDescriptor,
         ).pipe(
           Effect.flatMap((issued) =>
             tokenLock.withPermits(1)(
@@ -510,8 +531,8 @@ export const make = Effect.gen(function* () {
                   accessToken: token.accessToken,
                   identity,
                 });
-                if (pendingTokens.get(input.expectedEnvironmentId)?.id === id) {
-                  pendingTokens.delete(input.expectedEnvironmentId);
+                if (pendingTokens.get(pendingKey)?.id === mint) {
+                  pendingTokens.delete(pendingKey);
                 }
                 return issued;
               }),
@@ -530,8 +551,8 @@ export const make = Effect.gen(function* () {
           Effect.ensuring(
             tokenLock.withPermits(1)(
               Effect.sync(() => {
-                if (pendingTokens.get(input.expectedEnvironmentId)?.id === id) {
-                  pendingTokens.delete(input.expectedEnvironmentId);
+                if (pendingTokens.get(pendingKey)?.id === mint) {
+                  pendingTokens.delete(pendingKey);
                 }
               }),
             ),
@@ -540,7 +561,7 @@ export const make = Effect.gen(function* () {
           Effect.forkIn(serviceScope),
         );
         const issued = Fiber.join(fiber);
-        pendingTokens.set(input.expectedEnvironmentId, { id, identity, thumbprint, issued });
+        pendingTokens.set(pendingKey, { id: mint, identity, thumbprint, issued });
         return { issued, fromCache: false };
       }),
     );
@@ -716,7 +737,11 @@ export const make = Effect.gen(function* () {
       }
       return Result.succeed(authorized(issued.token, opened.success, yield* Fiber.join(reading)));
     });
-    let selected = yield* getDpopToken(input);
+    const tokenRequest = {
+      expectedEnvironmentId: input.expectedEnvironmentId,
+      ...(endpoint === undefined ? {} : { directHttpBaseUrl: endpoint.httpBaseUrl }),
+    };
+    let selected = yield* getDpopToken(tokenRequest, directDescriptor);
     if (selected.fromCache) {
       const cachedSocket = yield* openSocket(selected, CACHED_ENDPOINT_SOCKET_TIMEOUT_MS);
       if (Result.isSuccess(cachedSocket)) {
@@ -732,10 +757,10 @@ export const make = Effect.gen(function* () {
         return yield* mapDpopSocketError(cachedSocket.failure);
       }
       yield* assertSession(selected.identity);
-      selected = yield* getDpopToken({
-        ...input,
-        rejectedAccessToken: selected.token.accessToken,
-      });
+      selected = yield* getDpopToken(
+        { ...tokenRequest, rejectedAccessToken: selected.token.accessToken },
+        directDescriptor,
+      );
     }
     const socket = yield* openSocket(selected);
     if (Result.isFailure(socket)) {
@@ -776,7 +801,7 @@ export const make = Effect.gen(function* () {
     // The relay tracer must wrap span creation, not just the token request.
     authorizeDpopHttp: Effect.fnUntraced(function* (input) {
       return yield* getDpopToken(input).pipe(
-        Effect.map(({ token }) => httpAuthorization(token)),
+        Effect.map(({ token }) => httpAuthorization(token, input.directHttpBaseUrl)),
         Effect.withSpan("environment.authorization.http"),
         withRelayClientTracing,
       );
@@ -797,9 +822,12 @@ export const make = Effect.gen(function* () {
         );
         const renewed = yield* (
           direct === undefined
-            ? getDpopToken({ expectedEnvironmentId: input.expectedEnvironmentId }).pipe(
-                Effect.map(({ token }) => token.expiresAtEpochMs),
-              )
+            ? getDpopToken({
+                expectedEnvironmentId: input.expectedEnvironmentId,
+                ...(input.directHttpBaseUrl === undefined
+                  ? {}
+                  : { directHttpBaseUrl: input.directHttpBaseUrl }),
+              }).pipe(Effect.map(({ token }) => token.expiresAtEpochMs))
             : directDpopToken(direct).pipe(Effect.map((credential) => credential.expiresAtEpochMs))
         ).pipe(
           Effect.withSpan("environment.authorization.renewSocket"),
