@@ -4,9 +4,9 @@
     "repository": "pingdotgg/t3code",
     "channel": "default-branch",
     "branch": "main",
-    "source_url": "https://github.com/pingdotgg/t3code/commit/380676302298e5515fd58cf02009e9961743db53",
-    "commit": "380676302298e5515fd58cf02009e9961743db53",
-    "root_tree": "d9b67c691acb954608c8877e791d7b8d54cd5f87"
+    "source_url": "https://github.com/pingdotgg/t3code/commit/25440f5bd5050e262bab4a01b21895f52476e3b7",
+    "commit": "25440f5bd5050e262bab4a01b21895f52476e3b7",
+    "root_tree": "7d345347d4c1421d2390f2b42d43d30d40e768a2"
   },
   "qualification": {
     "status": "unqualified",
@@ -34,7 +34,7 @@
     "web": {
       "path_prefixes": ["apps/web/"],
       "entries": 2182,
-      "inventory_sha256": "c897c5e26e787a3564c45b51c8c0903032990fe376c7127f50860a12ae717e2f"
+      "inventory_sha256": "a9bb99ed619efb84b59f7a1c12772b2e1adbe7d8a45c224b836eaef8771255bf"
     },
     "desktop": {
       "path_prefixes": ["apps/desktop/"],
