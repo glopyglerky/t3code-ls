@@ -49,11 +49,14 @@ jobs:
       - name: Verify the pinned compiler package for the measurement tool
         working-directory: measurement
         run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/stock-probe-toolchain"
-      - name: Sample built server startup and retain exact inputs
+      - name: Sample built server startup and first authenticated workspace
         working-directory: measurement
         run: |
           export CARGO_HOME="$RUNNER_TEMP/stock-probe-cargo-home"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/stock-probe-target"
+          chrome="$(command -v google-chrome)"
+          driver="$(command -v chromedriver || printf '%s/chromedriver' "$CHROMEWEBDRIVER")"
+          test -x "$driver"
           evidence="$RUNNER_TEMP/stock-startup-evidence"
           mkdir "$evidence"
           (
@@ -63,15 +66,19 @@ jobs:
           ) > "$evidence/build.sha256"
           jq -n --arg commit "$STOCK_COMMIT" --arg tree "$STOCK_TREE" \
             --arg probe_commit "$(git rev-parse HEAD)" --arg node "$(node --version)" \
+            --arg chrome "$("$chrome" --version)" --arg driver "$("$driver" --version)" \
             --arg platform "$(uname -sm)" --arg load "$(uptime)" --argjson cores "$(nproc)" \
-            '{commit:$commit,tree:$tree,probe_commit:$probe_commit,node:$node,platform:$platform,initial_load:$load,cores:$cores,cache_profile:"fresh process and home, unmanaged filesystem cache",durability:"SQLite WAL/NORMAL"}' \
+            '{commit:$commit,tree:$tree,probe_commit:$probe_commit,node:$node,chrome:$chrome,driver:$driver,platform:$platform,initial_load:$load,cores:$cores,cache_profile:"fresh server and profile, headless browser launched before server, unmanaged filesystem cache",durability:"SQLite WAL/NORMAL"}' \
             > "$evidence/inputs.json"
           for sample in 1 2 3 4 5 6 7; do
             "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" run \
               --release --locked -p t3code-ls-tools -- probe-startup "$(command -v node)" \
               ../stock/apps/server/dist/bin.mjs "$RUNNER_TEMP/stock-trial-$sample" \
+              "$driver" "$chrome" \
               > "$evidence/sample-$sample.json"
-            jq -e '.descriptor_micros > 0 and .html_micros >= .descriptor_micros' \
+            jq -e '.descriptor_micros > 0 and .html_micros >= .descriptor_micros and
+              .browser.authenticated and .browser.welcome_micros >= .html_micros and
+              .browser.workspace_micros >= .browser.welcome_micros' \
               "$evidence/sample-$sample.json" > /dev/null
           done
       - name: Retain stock startup evidence

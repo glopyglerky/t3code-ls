@@ -1,11 +1,15 @@
+mod browser;
+
 use crate::Result;
 use serde_json::{Value, json};
 use std::{
     env,
     ffi::OsString,
     fs,
+    io::{BufRead, BufReader},
     path::Path,
     process::{Child, Command, Stdio},
+    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -15,8 +19,10 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     let args: Vec<_> = args.collect();
-    let [node, bundle, trial] = args.as_slice() else {
-        return Err("usage: t3code-ls-tools probe-startup NODE BUNDLE NEW_TRIAL_DIRECTORY".into());
+    let (node, bundle, trial, browsers) = match args.as_slice() {
+        [node, bundle, trial] => (node, bundle, trial, None),
+        [node, bundle, trial, driver, chrome] => (node, bundle, trial, Some((driver, chrome))),
+        _ => return Err("usage: t3code-ls-tools probe-startup NODE BUNDLE NEW_TRIAL_DIRECTORY [CHROMEDRIVER CHROME]".into()),
     };
     let node = fs::canonicalize(node)?;
     let bundle = fs::canonicalize(bundle)?;
@@ -25,6 +31,11 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     let trial = fs::canonicalize(trial)?;
     let base = trial.join("profile");
     let state = base.join("userdata");
+    let browser = browsers
+        .map(|(driver, chrome)| {
+            browser::Browser::start(Path::new(driver), Path::new(chrome), &trial)
+        })
+        .transpose()?;
     let mut command = Command::new(node);
     command
         .arg(bundle)
@@ -36,32 +47,86 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
         .env("HOME", &trial)
         .env("T3CODE_TELEMETRY_ENABLED", "false")
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(if browser.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stderr(Stdio::null());
 
     let start = Instant::now();
-    let mut child = command.spawn()?;
-    let outcome = sample(&mut child, &state, start);
-    if child.try_wait()?.is_none() {
-        child.kill()?;
-    }
-    child.wait()?;
-    let (descriptor_micros, html_micros, database_migration) = outcome?;
+    let mut child = OwnedChild(command.spawn()?);
+    let pairing = child.0.stdout.take().map(pairing_link);
+    let (origin, descriptor_micros, html_micros, database_migration) =
+        sample(&mut child.0, &state, start)?;
+    let browser = if let Some(browser) = browser {
+        let pairing = pairing.ok_or("missing server pairing output pipe")?;
+        let link = pairing.recv_timeout(STARTUP_TIMEOUT.saturating_sub(start.elapsed()))?;
+        let prefix = format!("{origin}/pair#token=");
+        if !link
+            .strip_prefix(&prefix)
+            .is_some_and(|token| !token.is_empty())
+        {
+            return Err("pairing link does not target the owned loopback application".into());
+        }
+        let result = browser.attach(&link, start);
+        let closed = browser.close();
+        let result = result?;
+        closed?;
+        Some(result)
+    } else {
+        None
+    };
+    child.stop()?;
     println!(
         "{}",
         json!({
             "schema_version": 1,
-            "profile": "new-stock-linux-server-home",
+            "profile": if browser.is_some() {"new-stock-linux-browser-profile"} else {"new-stock-linux-server-home"},
             "poll_interval_micros": POLL_INTERVAL.as_micros(),
             "descriptor_micros": descriptor_micros,
             "html_micros": html_micros,
             "database_migration": database_migration,
+            "browser": browser,
         })
     );
     Ok(())
 }
 
-fn sample(child: &mut Child, state: &Path, start: Instant) -> Result<(u128, u128, u64)> {
+struct OwnedChild(Child);
+
+impl OwnedChild {
+    fn stop(&mut self) -> Result<()> {
+        if self.0.try_wait()?.is_none() {
+            self.0.kill()?;
+        }
+        self.0.wait()?;
+        Ok(())
+    }
+}
+
+impl Drop for OwnedChild {
+    fn drop(&mut self) {
+        let _ = self.stop();
+    }
+}
+
+fn pairing_link(stdout: std::process::ChildStdout) -> mpsc::Receiver<String> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        for line in BufReader::new(stdout)
+            .lines()
+            .map_while(std::result::Result::ok)
+        {
+            if let Some(link) = line.strip_prefix("Pairing URL: ") {
+                let _ = sender.send(link.trim().to_owned());
+            }
+        }
+    });
+    receiver
+}
+
+fn sample(child: &mut Child, state: &Path, start: Instant) -> Result<(String, u128, u128, u64)> {
     let runtime_path = state.join("server-runtime.json");
     let (origin, descriptor, descriptor_micros) = loop {
         if let Some(status) = child.try_wait()? {
@@ -96,7 +161,7 @@ fn sample(child: &mut Child, state: &Path, start: Instant) -> Result<(u128, u128
     if !std::str::from_utf8(&html)?.contains("id=\"root\"") {
         return Err("web entry did not contain the application root".into());
     }
-    Ok((descriptor_micros, html_micros, migration))
+    Ok((origin, descriptor_micros, html_micros, migration))
 }
 
 fn runtime_origin(path: &Path, pid: u32) -> Result<Option<String>> {
