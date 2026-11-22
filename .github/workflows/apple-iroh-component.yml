@@ -44,11 +44,32 @@ jobs:
           cp "$RUNNER_TEMP/bindings/t3_iroh_appleFFI.h" "$RUNNER_TEMP/iroh-headers/"
           cp "$RUNNER_TEMP/bindings/t3_iroh_appleFFI.modulemap" "$RUNNER_TEMP/iroh-headers/module.modulemap"
           cp "$RUNNER_TEMP/bindings/t3_iroh_apple.swift" "$RUNNER_TEMP/iroh-result/Generated/"
+          cat >"$RUNNER_TEMP/bindings/Smoke.swift" <<'SWIFT'
+          import Foundation
+
+          @main
+          struct Smoke {
+              static func main() throws {
+                  let seed = Data(repeating: 0x41, count: 32)
+                  let endpoint = try deviceEndpointId(secretKey: seed)
+                  precondition(endpoint.count == 64)
+              }
+          }
+          SWIFT
           for target in aarch64-apple-ios aarch64-apple-ios-sim; do
-            archive="$CARGO_TARGET_DIR/$target/release/libt3_iroh_apple.a"
-            xcrun nm -gU "$archive" >"$RUNNER_TEMP/$target.symbols"
-            grep -q '_uniffi_t3_iroh_apple_fn_func_device_endpoint_id$' "$RUNNER_TEMP/$target.symbols"
-            grep -q '_uniffi_t3_iroh_apple_checksum_func_device_endpoint_id$' "$RUNNER_TEMP/$target.symbols"
+            sdk=iphoneos
+            swift_target=arm64-apple-ios18.0
+            if test "$target" = aarch64-apple-ios-sim; then
+              sdk=iphonesimulator
+              swift_target=arm64-apple-ios18.0-simulator
+            fi
+            sdk_path="$(xcrun --sdk "$sdk" --show-sdk-path)"
+            SDKROOT="$sdk_path" xcrun --sdk "$sdk" swiftc \
+              -target "$swift_target" -sdk "$sdk_path" -module-cache-path "$RUNNER_TEMP/iroh-swift-cache" \
+              -I "$RUNNER_TEMP/iroh-headers" "$RUNNER_TEMP/bindings/t3_iroh_apple.swift" \
+              "$RUNNER_TEMP/bindings/Smoke.swift" "$CARGO_TARGET_DIR/$target/release/libt3_iroh_apple.a" \
+              -framework Network -framework Security -framework SystemConfiguration -lresolv \
+              -o "$RUNNER_TEMP/$target-link-check"
           done
           xcodebuild -create-xcframework \
             -library "$CARGO_TARGET_DIR/aarch64-apple-ios/release/libt3_iroh_apple.a" -headers "$RUNNER_TEMP/iroh-headers" \
