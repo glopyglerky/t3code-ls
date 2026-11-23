@@ -1,8 +1,10 @@
 # Windows amd64 CLI archive proof
 
-The `cli-archive-proof.yml` Windows job is a qualification lane for candidate
-branches named `candidate/t3code-ls-t14-windows-cli-*`. It builds the existing
-SEA and ZIP through the release builders, without releasing or signing them.
+The `cli-archive-proof.yml` workflow qualifies candidate branches named
+`candidate/t3code-ls-t14-windows-cli-*`. Ubuntu runs the existing cross-target
+SEA and ZIP builders. A Windows runner compiles the resource monitor, then a
+Windows runner exercises the assembled archive. The jobs check source and
+artifact hashes at both transfers. The workflow uses unsigned test artifacts.
 The existing Linux native job remains selected for its original branches.
 
 The lane pins Node 26.12.1, Rust 1.99.1, frozen pnpm dependencies and the
@@ -43,10 +45,10 @@ and archive naming code. That source coverage does not establish available
 ARM64 runtime externals, execution, installation or acceptance. This lane
 intentionally exercises only amd64.
 
-The focused retained-platform packaging test passed locally. Node syntax,
-workflow YAML and both embedded PowerShell scripts also parsed successfully.
-The Windows archive build and smoke have not run locally. The hosted result
-must qualify the exact commit before claiming this package outcome.
+The focused retained-platform packaging test passed locally. The first hosted
+Windows attempt compiled the monitor, then timed out before producing an
+archive. The split build follows the [stock packaging route](https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/.github/workflows/release-desktop.yml).
+The exact archive needs a passing Windows smoke before it qualifies.
 
 The stock product denominator remains
 `28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`; this is no performance comparison.
