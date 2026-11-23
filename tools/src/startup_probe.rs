@@ -32,19 +32,20 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
             node, bundle, trial, Some((driver, chrome)),
             match mode.to_str() {
                 Some("stock") => None,
-                Some("native") => Some("native"),
+                Some("native" | "native-single-reads") => Some("native"),
                 Some("fork-sqlite") => Some("upstream"),
-                _ => return Err("conversation implementation must be stock, native or fork-sqlite".into()),
+                _ => return Err("conversation implementation must be stock, native, native-single-reads or fork-sqlite".into()),
             },
             Some(fs::canonicalize(replay)?),
             trace.first().map(|wrapper| {
                 Ok::<_, std::io::Error>((fs::canonicalize(wrapper)?, trace.len() == 2))
             }).transpose()?,
         ),
-        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|native|fork-sqlite [TRACE_WRAPPER [server-spans]]".into()),
+        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|native|native-single-reads|fork-sqlite [TRACE_WRAPPER [server-spans]]".into()),
         _ => return Err("usage: t3code-ls-tools probe-startup NODE BUNDLE NEW_TRIAL_DIRECTORY [CHROMEDRIVER CHROME [fork-sqlite]]".into()),
     };
     let node = fs::canonicalize(node)?;
+    let single_projection_reads = conversation && args[6] == "native-single-reads";
     let bundle = fs::canonicalize(bundle)?;
     let trial = Path::new(trial);
     fs::create_dir(trial)?;
@@ -107,6 +108,9 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
         .stderr(Stdio::null());
     if let Some(implementation) = implementation {
         command.env("T3_CODE_LS_IMPLEMENTATION", implementation);
+    }
+    if single_projection_reads {
+        command.env("T3_CODE_LS_SINGLE_PROJECTION_READS", "1");
     }
     if record_server_spans {
         command
@@ -196,6 +200,7 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
         json!({
             "schema_version": 1,
             "profile": profile,
+            "single_projection_reads": single_projection_reads,
             "poll_interval_micros": POLL_INTERVAL.as_micros(),
             "descriptor_micros": descriptor_micros,
             "html_micros": html_micros,

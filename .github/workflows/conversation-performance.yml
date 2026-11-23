@@ -14,8 +14,8 @@ jobs:
     env:
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
       STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
-      CANDIDATE_COMMIT: c8e1245f85f48699f91de99e749635d8d06c2c6e
-      CANDIDATE_TREE: 0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a
+      CANDIDATE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
+      CANDIDATE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') && '78647c8e507b6b677fa6f1585839bd8bdc12bc55' || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
       CATALOG_COMMIT: 2bb6ae9e57559bde6cff0feeddcff8ddf02de009
       CATALOG_TREE: 55e2c8aba6fc06642b06a8d60861c7bdaf3c67f9
       WASM_BINDGEN_VERSION: "0.2.130"
@@ -27,9 +27,10 @@ jobs:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
       GIT_TERMINAL_PROMPT: "0"
-      TRACE_CONVERSATION: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-diagnose-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-catalog-') }}
+      TRACE_CONVERSATION: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-diagnose-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-catalog-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') }}
       TRACE_SERVER_SPANS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-diagnose-server-') }}
       COMPARE_CATALOG: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-catalog-') }}
+      COMPARE_SINGLE_READS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -155,6 +156,7 @@ jobs:
             bundles+=(catalog)
             pairs=8
           fi
+          if [[ "$COMPARE_SINGLE_READS" == true ]]; then pairs=8; fi
           for profile in "${bundles[@]}"; do
             (
               cd "$profile"
@@ -165,12 +167,13 @@ jobs:
           jq -n --arg stock "$STOCK_COMMIT" --arg stockTree "$STOCK_TREE" \
             --arg candidate "$CANDIDATE_COMMIT" --arg candidateTree "$CANDIDATE_TREE" \
             --arg catalog "$CATALOG_COMMIT" --arg catalogTree "$CATALOG_TREE" --argjson compareCatalog "$COMPARE_CATALOG" \
+            --argjson compareSingleReads "$COMPARE_SINGLE_READS" \
             --arg probe "$(git -C measurement rev-parse HEAD)" --arg node "$(node --version)" \
             --arg chrome "$("$chrome" --version)" --arg driver "$("$driver" --version)" \
             --arg image "${ImageOS:-unknown}/${ImageVersion:-unknown}" --arg kernel "$(uname -r)" \
             --arg cpu "$(LC_ALL=C lscpu | sed -n 's/^Model name:[[:space:]]*//p')" --argjson trace "$TRACE_CONVERSATION" \
             --arg systemLoad "$(uptime)" --argjson cpus "$(nproc)" \
-            '{stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},catalog:(if $compareCatalog then {commit:$catalog,tree:$catalogTree,durability:"omdb Immediate"} else null end),forkSqliteControl:$trace,providerTrace:$trace,probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
+            '{stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},catalog:(if $compareCatalog then {commit:$catalog,tree:$catalogTree,durability:"omdb Immediate"} else null end),singleProjectionReads:$compareSingleReads,forkSqliteControl:$trace,providerTrace:$trace,probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
             > "$evidence/inputs.json"
           printf 'pair\tposition\tprofile\tfirst_visible_ms\tterminal_ms\tmax_frame_gap_ms\n' > "$evidence/trials.tsv"
           for ((pair=1; pair<=pairs; pair++)); do
@@ -178,6 +181,7 @@ jobs:
             if (( pair % 2 == 0 )); then profiles=(candidate stock); fi
             if [[ "$TRACE_CONVERSATION" == true ]]; then profiles=(stock candidate fork-sqlite); fi
             if [[ "$COMPARE_CATALOG" == true ]]; then profiles+=(catalog); fi
+            if [[ "$COMPARE_SINGLE_READS" == true ]]; then profiles+=(single-reads); fi
             for ((position=0; position<${#profiles[@]}; position++)); do
               index="$position"
               if [[ "$TRACE_CONVERSATION" == true ]]; then index="$(((position + pair - 1) % ${#profiles[@]}))"; fi
@@ -188,6 +192,7 @@ jobs:
               bundle_profile="$profile"
               if [[ "$profile" == candidate || "$profile" == catalog ]]; then mode=native; fi
               if [[ "$profile" == fork-sqlite ]]; then mode=fork-sqlite; bundle_profile=candidate; fi
+              if [[ "$profile" == single-reads ]]; then mode=native-single-reads; bundle_profile=candidate; fi
               sudo -n unshare --net -- bash -euc '
                 ip link set dev lo up
                 user="$1"
@@ -197,7 +202,7 @@ jobs:
                 "$PWD/$bundle_profile/apps/server/dist/bin.mjs" "$RUNNER_TEMP/conversation-trial-$trial" \
                 "$driver" "$chrome" "$replay" "$mode" "${trace[@]}" | tee "$result" > /dev/null
               jq -er --argjson pair "$pair" --argjson position "$((position + 1))" --arg profile "$profile" \
-                'select(.browser.loaded_rust_composer == ($profile != "stock") and .browser.conversation.snapshot.valid) | .browser.conversation.timing | [$pair,$position,$profile,.firstVisibleMillis,.terminalMillis,.maxFrameGapMillis] | @tsv' \
+                'select(.single_projection_reads == ($profile == "single-reads") and .browser.loaded_rust_composer == ($profile != "stock") and .browser.conversation.snapshot.valid) | .browser.conversation.timing | [$pair,$position,$profile,.firstVisibleMillis,.terminalMillis,.maxFrameGapMillis] | @tsv' \
                 "$result" >> "$evidence/trials.tsv"
               rm -r "$RUNNER_TEMP/conversation-trial-$trial"
             done
