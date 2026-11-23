@@ -3,6 +3,7 @@
 use super::*;
 use crate::application::validate_row_identity;
 use crate::application_json::JsonField;
+use std::borrow::Cow;
 
 const MAX_CHAIN: usize = 8;
 const MAX_PAYLOAD_BYTES: usize = 256 * 1024;
@@ -192,9 +193,10 @@ async fn restore(
     definition: &ApplicationTable,
     encoded_key: &[u8],
     bytes: &[u8],
+    replay_base: Option<&ReplayBase>,
 ) -> Result<(EventRecord, usize)> {
     let mut links = vec![physical_revision(catalog, definition, encoded_key, bytes)?];
-    let mut base = loop {
+    let (mut base, base_depth) = loop {
         let (event, revision) = links.last().expect("at least one revision");
         let sequence = revision.previous.sequence;
         let dependent: EventRef = decode(
@@ -205,6 +207,14 @@ async fn restore(
         if dependent != EventRef::from(event) {
             return Err(Error::IncompatibleStore);
         }
+        // An earlier event in this same ordered read already verified its chain.
+        // Keep verifying this link's witness and the total depth on the fast path.
+        if let Some(base) = replay_base.filter(|base| base.event.sequence == sequence) {
+            if base.depth + links.len() > MAX_CHAIN {
+                return Err(Error::IncompatibleStore);
+            }
+            break (Cow::Borrowed(&base.event), base.depth);
+        }
         let encoded_key = event_key(catalog, sequence)?;
         let bytes = tx
             .get(&encoded_key)
@@ -214,7 +224,7 @@ async fn restore(
             return Err(Error::IncompatibleStore);
         }
         if let Ok(row) = decode_row(catalog, definition, &encoded_key, &bytes) {
-            break EventRecord::from_row(row.row)?;
+            break (Cow::Owned(EventRecord::from_row(row.row)?), 0);
         }
         if links.len() >= MAX_CHAIN {
             return Err(Error::IncompatibleStore);
@@ -226,9 +236,11 @@ async fn restore(
             &bytes,
         )?);
     };
-    let depth = links.len();
+    let depth = base_depth + links.len();
     for (mut event, revision) in links.into_iter().rev() {
-        if EventRef::from(&base) != revision.previous || base.row.stream_id != event.row.stream_id {
+        if EventRef::from(base.as_ref()) != revision.previous
+            || base.row.stream_id != event.row.stream_id
+        {
             return Err(Error::IncompatibleStore);
         }
         let prev = TextPayload::parse(&base)?.ok_or(Error::IncompatibleStore)?;
@@ -247,9 +259,9 @@ async fn restore(
         if event.row.payload_json.len() != revision.payload_bytes {
             return Err(Error::IncompatibleStore);
         }
-        base = event;
+        base = Cow::Owned(event);
     }
-    Ok((base, depth))
+    Ok((base.into_owned(), depth))
 }
 
 pub(super) async fn decode_row_or_revision(
@@ -262,8 +274,46 @@ pub(super) async fn decode_row_or_revision(
     if let Ok(row) = decode_row(catalog, definition, encoded_key, bytes) {
         return Ok(row);
     }
-    let (event, _) = restore(tx, catalog, definition, encoded_key, bytes).await?;
+    let (event, _) = restore(tx, catalog, definition, encoded_key, bytes, None).await?;
     Ok(event.stored())
+}
+
+pub(super) struct ReplayBase {
+    event: EventRecord,
+    depth: usize,
+}
+
+/// Keep one bounded base local to the immutable view of an ordered page.
+pub(super) async fn read_for_replay(
+    tx: &mut Transaction,
+    catalog: &ApplicationCatalog,
+    definition: &ApplicationTable,
+    encoded_key: &[u8],
+    bytes: &[u8],
+    previous: &mut Option<ReplayBase>,
+) -> Result<EventRecord> {
+    let (event, depth) = match decode_row(catalog, definition, encoded_key, bytes) {
+        Ok(row) => (EventRecord::from_row(row.row)?, 0),
+        Err(_) => {
+            restore(
+                tx,
+                catalog,
+                definition,
+                encoded_key,
+                bytes,
+                previous.as_ref(),
+            )
+            .await?
+        }
+    };
+    *previous = (message_update(&event)
+        && bytes.len() <= MAX_ROW_BYTES
+        && event.row.payload_json.len() <= MAX_PAYLOAD_BYTES)
+        .then(|| ReplayBase {
+            event: event.clone(),
+            depth,
+        });
+    Ok(event)
 }
 
 async fn encode_append(
@@ -286,7 +336,7 @@ async fn encode_append(
     }
     let (base, depth) = match decode_row(catalog, definition, &previous_key, &previous) {
         Ok(row) => (EventRecord::from_row(row.row)?, 0),
-        Err(_) => restore(tx, catalog, definition, &previous_key, &previous).await?,
+        Err(_) => restore(tx, catalog, definition, &previous_key, &previous, None).await?,
     };
     if EventRef::from(&base) != head.event
         || base.row.stream_id != head.thread_id
@@ -394,7 +444,7 @@ pub(super) async fn before_delete(
         if EventRef::from(&stored_child) != child || revision.previous != EventRef::from(event) {
             return Err(Error::IncompatibleStore);
         }
-        let (restored, _) = restore(tx, catalog, definition, &child_key, &bytes).await?;
+        let (restored, _) = restore(tx, catalog, definition, &child_key, &bytes, None).await?;
         tx.put(child_key, encode_row(&restored.stored())?).await?;
         tx.delete(dependency).await?;
     }

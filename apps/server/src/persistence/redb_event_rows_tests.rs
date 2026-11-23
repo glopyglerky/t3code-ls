@@ -764,8 +764,9 @@ async fn assistant_text_revisions_store_suffixes_and_replay_exactly_after_rollba
         (base_key.clone(), None),
         (base_key, Some(encode_row(&wrong_base).unwrap())),
         (suffix_key, Some(encode(&forward).unwrap())),
+        (key(&catalog, "text-v1/dependent/1"), None),
     ] {
-        for through_replay in [false, true] {
+        for after_sequence in [None, Some(0), Some(1)] {
             // Inject a fault inside a disposable transaction. An incompatible
             // row must abort the read and leave the committed witness untouched.
             app.begin("damaged").await.unwrap();
@@ -780,11 +781,11 @@ async fn assistant_text_revisions_store_suffixes_and_replay_exactly_after_rollba
                 session.transaction.delete(key.clone()).await.unwrap();
             }
             app.finish("damaged", session, Ok(())).await.unwrap();
-            let read = if through_replay {
+            let read = if let Some(after_sequence) = after_sequence {
                 app.events_read(
                     "damaged",
                     EventRead {
-                        after_sequence: 1,
+                        after_sequence,
                         ..read_all()
                     },
                 )

@@ -253,6 +253,9 @@ jobs:
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
             -p t3-code-ls-storage --lib \
             assistant_text_layout_preserves_logical_replay_with_less_retained_storage -- --ignored --nocapture
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-storage --lib \
+            assistant_text_revisions_store_suffixes_and_replay_exactly_after_rollback_reopen_and_prune
       - name: Install the pinned compiler for the outbox checks
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
         run: |
