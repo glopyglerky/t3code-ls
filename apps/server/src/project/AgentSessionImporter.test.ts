@@ -429,10 +429,28 @@ it.effect(
       expect(yield* runtimes.list()).toEqual([]);
       yield* sql`DROP TRIGGER fail_runtime`;
 
+      const fields = ["messages", "turnItems"] as const;
+      const original = yield* projections.getThreadRecords(threadId, fields);
+      const changed = candidate(CODEX_MODEL_SELECTION, "retry");
+      changed.source.size += 1;
+      changed.thread.messages.splice(1, 1, {
+        role: "assistant",
+        text: "Changed",
+        createdAt: timestamp,
+      });
+      const changedImporter = yield* makeImporter([changed]);
+      expect(yield* changedImporter.run).toEqual({ importedCount: 0, skippedCount: 1 });
+      expect(yield* runtimes.getByThreadId({ threadId })).toEqual(Option.none());
+      expect(yield* events.read({ threadId }).pipe(Stream.runCollect)).toEqual(committed);
+      expect(yield* projections.getThreadRecords(threadId, fields)).toEqual(original);
+      expect(changedImporter.published).toEqual([]);
+
       expect(yield* importer.run).toEqual({ importedCount: 1, skippedCount: 0 });
       expect(yield* importer.run).toEqual({ importedCount: 1, skippedCount: 0 });
+      expect(yield* changedImporter.run).toEqual({ importedCount: 0, skippedCount: 1 });
       expect(yield* events.read({ threadId }).pipe(Stream.runCollect)).toEqual(committed);
       expect(importer.published).toHaveLength(6);
+      expect(yield* projections.getThreadRecords(threadId, fields)).toEqual(original);
       expect(
         (yield* projections.getThreadRecords(threadId, ["messages"])).messages.map(
           (message) => message.text,

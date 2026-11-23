@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -10,11 +12,13 @@ import {
   ProviderSessionRuntimeRawDbRowSchema,
   ProviderSessionRuntimeRepository,
   RecordImportedTranscriptRequestSchema,
+  type RecoverImportedTranscriptInput,
   repositoryFromRows,
 } from "./ProviderSessionRuntime.ts";
 import { RedbClient } from "./RedbClient.ts";
 
 const Written = Schema.Struct({ written: Schema.Literal(true) });
+const Recovered = Schema.Struct({ recovered: Schema.Boolean });
 
 export const make = Effect.gen(function* () {
   const client = yield* RedbClient;
@@ -48,6 +52,37 @@ export const make = Effect.gen(function* () {
         ),
         Effect.asVoid,
       ),
+    recoverImportedTranscriptRow: Effect.fn(function* ({
+      runtime,
+      source,
+      projectId,
+      messages,
+    }: RecoverImportedTranscriptInput) {
+      const encodedRuntime = yield* Schema.encodeEffect(ProviderSessionRuntimeDbRowSchema)(runtime);
+      const encodedSource = yield* Schema.encodeEffect(RecordImportedTranscriptRequestSchema)({
+        threadId: runtime.threadId,
+        source,
+      });
+      // Hash JSON strings so recovery keeps the helper frame small without losing Unicode escapes.
+      const witnesses = messages.map(({ role, text }) => ({
+        role,
+        text_sha256: createHash("sha256").update(JSON.stringify(text)).digest("hex"),
+      }));
+      const { recovered } = yield* client.request(
+        "application_runtime_state_write",
+        {
+          request: {
+            kind: "runtime_recover_import",
+            runtime: encodedRuntime,
+            source: encodedSource.source,
+            project_id: projectId,
+            messages: witnesses,
+          },
+        },
+        Recovered,
+      );
+      return recovered;
+    }),
     getRuntimeRowByThreadId: (input) =>
       Schema.encodeEffect(GetProviderSessionRuntimeInput)(input).pipe(
         Effect.flatMap(({ threadId }) =>
