@@ -45,6 +45,7 @@ const FIXTURES = "../src/orchestration-v2/testkit/fixtures";
 export const SCENARIOS = [
   { id: "showcase", name: "Showcase", file: "./dev-replay/showcase_transcript.ndjson" },
   { id: "text-appends", name: "Text appends", file: "./dev-replay/text_appends_transcript.ndjson" },
+  { id: "text-splices", name: "Text splices", file: "./dev-replay/text_splices_transcript.ndjson" },
   {
     id: "todo-list",
     name: "Plan and reads",
@@ -70,6 +71,7 @@ export const SCENARIOS = [
 // Session setup and vendor state stay out: they would replace the replay agent's own models.
 const REPLAYED_UPDATES = new Set([
   "agent_message_chunk",
+  "agent_message",
   "agent_thought_chunk",
   "tool_call",
   "tool_call_update",

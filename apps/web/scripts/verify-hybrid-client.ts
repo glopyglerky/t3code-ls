@@ -962,6 +962,12 @@ async function exercise(implementation: Implementation): Promise<void> {
       messageUpdates: Array<{ sequence: number; length: number; streaming: boolean }>;
       storedUpdates: ReturnType<typeof inspectNativeMessageUpdates>;
     } | null,
+    messageSplice: null as {
+      baseSequence: number;
+      sequence: number;
+      rustDecoder: boolean;
+      reopenedTextMatches: boolean;
+    } | null,
     terminalReattach: null as { sameShell: boolean; unicodeOutput: boolean } | null,
     terminalFailure: null as string | null,
     terminalInitialOutput: false,
@@ -1010,6 +1016,13 @@ async function exercise(implementation: Implementation): Promise<void> {
   let messageAppendFrames = 0;
   let messageAppendRequests = 0;
   let messageSpliceRequests = 0;
+  const spliceFrames = new Map<string, {
+    readonly baseSequence: number;
+    readonly sequence: number;
+    readonly startUtf16: number;
+    readonly endUtf16: number;
+    readonly inserted: string;
+  }>();
   const wireMessages = new Map<string, Array<{ sequence: number; length: number; streaming: boolean }>>();
   const fileWrites = new EventEmitter();
   function observePage(current: Page): void {
@@ -1038,7 +1051,11 @@ async function exercise(implementation: Implementation): Promise<void> {
         if (!json.includes('"message.updated"')) return;
         let envelope: {
           values?: Array<{
+            kind?: string;
+            baseSequence?: number;
             sequence?: number;
+            startUtf16?: number;
+            endUtf16?: number;
             event?: { type?: string; payload?: { threadId?: string; text?: string; streaming?: boolean } };
           }>;
         };
@@ -1055,6 +1072,20 @@ async function exercise(implementation: Implementation): Promise<void> {
             message.text === undefined ||
             frame.sequence === undefined
           ) continue;
+          if (
+            frame.kind === "message-text-splice" &&
+            frame.baseSequence !== undefined &&
+            frame.startUtf16 !== undefined &&
+            frame.endUtf16 !== undefined
+          ) {
+            spliceFrames.set(message.threadId, {
+              baseSequence: frame.baseSequence,
+              sequence: frame.sequence,
+              startUtf16: frame.startUtf16,
+              endUtf16: frame.endUtf16,
+              inserted: message.text,
+            });
+          }
           const messages = wireMessages.get(message.threadId) ?? [];
           if (messages.length < 64) {
             messages.push({
@@ -1320,6 +1351,48 @@ async function exercise(implementation: Implementation): Promise<void> {
       );
       Assert.ok(rustDecoder, "The Rust binding must apply a received append");
       completed("Applied negotiated WebSocket text appends in the Rust browser reducer");
+    }
+
+    if (spliceNegotiationProof && implementation === "native") {
+      starting("negotiated Rust Unicode text splice");
+      const prefix =
+        "The replacement fixture keeps the opening sentence in the same assistant message. Its original status is ";
+      const suffix =
+        ". All of this trailing text stays visible when the provider revises the status, including the final sentence.";
+      const original = `${prefix}🐟 queued${suffix}`;
+      const revised = `${prefix}🦀 ready${suffix}`;
+      const finalText = `${revised} End of revised fixture.`;
+      const thread = await submitReplay(page, "Text splices", "Replay: text splices");
+      await page.getByRole("button", { name: /^(Yes|Approve)$/u }).first().click();
+      await page.getByText(original, { exact: true }).last().waitFor({ state: "visible" });
+      await page.getByText(revised, { exact: true }).last().waitFor({ state: "visible" });
+      const frame = spliceFrames.get(thread);
+      Assert.ok(frame, "The revised streaming reply must arrive as a splice");
+      Assert.ok(frame.baseSequence < frame.sequence);
+      Assert.equal(frame.startUtf16, prefix.length);
+      Assert.equal(frame.endUtf16, prefix.length + "🐟 queued".length);
+      Assert.equal(frame.inserted, "🦀 ready");
+      const rustDecoder = await page.evaluate(
+        () => performance.getEntriesByName("t3-thread-rust-text-splice").length === 1,
+      );
+      Assert.ok(rustDecoder, "The displayed splice must pass through the Rust decoder");
+      const snapshot = await readThreadSnapshot(page, thread);
+      const identity = replayTurnIdentity(snapshot, "text-splices");
+      const result = await assertCompleted(page, thread, identity, finalText);
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await assertCompleted(page, thread, identity, finalText);
+      const reopened = await readThreadSnapshot(page, thread);
+      Assert.equal(
+        reopened.projection.messages.find((message) => message.id === result.assistantMessageId)?.text,
+        finalText,
+      );
+      proof.messageSplice = {
+        baseSequence: frame.baseSequence,
+        sequence: frame.sequence,
+        rustDecoder,
+        reopenedTextMatches: true,
+      };
+      completed("Rendered an exact Unicode splice in Rust and recovered the completed reply after reload");
     }
 
     if (fileEditorProof) {
