@@ -286,6 +286,71 @@ const smokePipedThread = Effect.fn("smokePipedThread")(function* (
   yield* Effect.log("[cli-smoke] Piped Unicode prompt preserved, with JSON waiting status and exit 2.");
 });
 
+const smokeThreadTerminal = Effect.fn("smokeThreadTerminal")(function* (
+  executable: string,
+  home: string,
+  workspace: string,
+) {
+  const quote = (argument: string) => `'${argument.replaceAll("'", "'\\''")}'`;
+  for (const [model, exitCode, text] of [
+    ["todo-list", 0, "todo list fixture complete"],
+    ["question", 2, "is waiting for an answer"],
+  ] as const) {
+    const command = [
+      executable, "thread", "start", workspace, "Fixture message from a real terminal", "--base-dir", home,
+      "--provider", "devReplay", "--model", model, "--wait",
+    ].map(quote).join(" ");
+    // util-linux script allocates the PTY. Check all three streams from inside it.
+    const result = yield* runExecutable(
+      "/usr/bin/script",
+      ["-q", "-e", "-c", `test -t 0 && test -t 1 && test -t 2 && exec ${command}`, "/dev/null"],
+      workspace,
+      "",
+    );
+    if (
+      result.exitCode !== exitCode ||
+      result.stderr !== "" ||
+      !result.stdout.includes(text) ||
+      result.stdout.includes("\u001b")
+    ) {
+      return yield* new CliArchiveSmokeError({
+        step: `waiting for the ${model} replay from a real terminal with NO_COLOR`,
+        detail: `exit ${String(result.exitCode)}\n${result.stdout}${result.stderr}`,
+      });
+    }
+  }
+  yield* Effect.log("[cli-smoke] PTY wait returned exit 0 on success and exit 2 on a question, with no ANSI escapes.");
+});
+
+const smokeSshHelper = Effect.fn("smokeSshHelper")(function* (
+  executable: string,
+  home: string,
+  port: number,
+  pid: number,
+) {
+  const path = yield* Path.Path;
+  const fs = yield* FileSystem.FileSystem;
+  const runtime = path.join(home, "userdata", "server-runtime.json");
+  const badRuntime = path.join(home, "fixture-nonloopback-runtime.json");
+  yield* fs.writeFileString(badRuntime, JSON.stringify({ pid, port, origin: "http://fixture.invalid" }));
+  const cases = [
+    { args: ["runtime-port", runtime], exitCode: 0, stdout: `${pid} ${port}` },
+    { args: ["runtime-port", badRuntime], exitCode: 1, stdout: "" },
+    { args: ["wait-ready", String(port), "3000", "500"], exitCode: 0, stdout: "" },
+    { args: ["pick-port", path.join(home, "fixture-unset-port"), String(port), "1"], exitCode: 1, stdout: "" },
+  ];
+  for (const test of cases) {
+    const actual = yield* runExecutable(executable, ["__ssh-helper", ...test.args], home);
+    if (actual.exitCode !== test.exitCode || actual.stdout !== test.stdout || actual.stderr !== "") {
+      return yield* new CliArchiveSmokeError({
+        step: `checking private SSH helper output for ${test.args[0]}`,
+        detail: `exit ${String(actual.exitCode)} with ${String(actual.stdout.length)} stdout characters and ${String(actual.stderr.length)} stderr characters`,
+      });
+    }
+  }
+  yield* Effect.log("[cli-smoke] Private SSH helper output matched the live loopback runtime and refused an occupied port.");
+});
+
 const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
   readonly archive: string;
   readonly expectVersion: string;
@@ -446,7 +511,13 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
     Effect.timeout(Duration.seconds(30)),
     Effect.orElseSucceed(() => false),
   );
-  if (ready && input.expectNative) yield* smokePipedThread(executable, home, workspace);
+  if (ready && input.expectNative) {
+    yield* smokePipedThread(executable, home, workspace);
+    if (platform === "linux") {
+      yield* smokeThreadTerminal(executable, home, workspace);
+      yield* smokeSshHelper(executable, home, port, Number(server.pid));
+    }
+  }
   yield* server.kill({ killSignal: "SIGTERM" }).pipe(Effect.ignore);
   yield* server.exitCode.pipe(Effect.timeout(Duration.seconds(10)), Effect.ignore);
   const [stdout, stderr] = yield* Fiber.join(output).pipe(
