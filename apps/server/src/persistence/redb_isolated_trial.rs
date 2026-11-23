@@ -97,8 +97,12 @@ pub(super) async fn prepare(
     {
         return Err(Error::IncompatibleStore);
     }
+    let staged_identity = path_identity(&working)?;
+    if staged_identity != copied {
+        return Err(Error::IncompatibleStore);
+    }
     let candidate = Store {
-        db: Backend::open_exclusive_trial(working.clone(), copied.clone()).await?,
+        db: Backend::open_exclusive_trial(working.clone(), staged_identity).await?,
     };
     if candidate.bootstrap_application().await?.initialized {
         return Err(Error::IncompatibleStore);
