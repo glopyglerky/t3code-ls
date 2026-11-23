@@ -1,0 +1,63 @@
+name: Browser process resource witness
+
+on:
+  push:
+    branches: ["measure/t3code-ls-t16-resources-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  browser-witness:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 6
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Build only the resource probe with the pinned compiler
+        run: |
+          set -euo pipefail
+          node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/witness-toolchain"
+          export CARGO_HOME="$RUNNER_TEMP/witness-cargo"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/witness-target"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test \
+            --locked -p t3code-ls-tools startup_probe::resources::tests
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
+            --locked --release -p t3code-ls-tools
+      - name: Attribute the real renderer on a synthetic page
+        run: |
+          set -euo pipefail
+          proof="$RUNNER_TEMP/browser-resource-proof"
+          mkdir "$proof"
+          probe="$RUNNER_TEMP/witness-target/release/t3code-ls-tools"
+          chrome="$(command -v google-chrome)"
+          driver="$(command -v chromedriver || printf '%s/chromedriver' "$CHROMEWEBDRIVER")"
+          test -x "$driver"
+          sha256sum "$probe" > "$proof/probe.sha256"
+          "$chrome" --version > "$proof/chrome-version.txt"
+          "$driver" --version > "$proof/driver-version.txt"
+          trial="$RUNNER_TEMP/browser-resource-trial"
+          trap 'rm -rf "${trial:?}"' EXIT
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            user="$1"
+            shift
+            exec runuser -u "$user" -- "$@"
+          ' _ "$(id -un)" "$probe" probe-browser-resources "$driver" "$chrome" "$trial" |
+            tee "$proof/witness.json"
+          jq -e '.renderer_witnessed and any(.witnesses[]; .role == "browser-renderer" and .process_type == "renderer" and (.image_basename == "chrome" or .image_basename == "chromium" or .image_basename == "chromium-browser"))' "$proof/witness.json"
+      - name: Retain bounded process-role facts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: browser-resource-proof
+          path: ${{ runner.temp }}/browser-resource-proof/
+          if-no-files-found: warn
+          retention-days: 14

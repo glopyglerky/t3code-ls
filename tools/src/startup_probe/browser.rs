@@ -25,6 +25,20 @@ pub(super) struct Browser {
 }
 
 impl Browser {
+    pub(super) fn open_resource_fixture(&self) -> Result<()> {
+        self.command(
+            "POST",
+            "/url",
+            Some(json!({
+                "url": "data:text/html,<title>Resource fixture</title><main>Resource fixture</main>"
+            })),
+        )?;
+        if self.script("return document.title === 'Resource fixture' && document.querySelector('main').textContent === 'Resource fixture';")? != true {
+            return Err("browser did not render its synthetic resource fixture".into());
+        }
+        Ok(())
+    }
+
     pub(super) fn driver_pid(&self) -> u32 {
         self.driver.0.id()
     }

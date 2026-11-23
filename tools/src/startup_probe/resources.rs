@@ -1,12 +1,15 @@
 //! Linux observation adapter. Stat fields follow proc_pid_stat(5), fields 14/15/22/24.
 //! https://www.kernel.org/doc/html/latest/filesystems/proc.html#process-specific-subdirectories
 //! The native resource monitor uses the same final-parenthesis boundary for comm.
+use super::browser::Browser;
 use crate::Result;
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
+    ffi::OsString,
     fs::File,
     io::Read,
+    path::Path,
     process::Command,
     sync::mpsc,
     thread::{self, JoinHandle},
@@ -115,17 +118,93 @@ struct Observation {
     role: &'static str,
 }
 
-fn process_role(stat: Stat) -> Result<&'static str> {
+struct RoleWitness {
+    role: &'static str,
+    layout: &'static str,
+    image: Option<String>,
+    process_type: Option<&'static str>,
+}
+
+impl RoleWitness {
+    fn missing(role: &'static str) -> Self {
+        Self {
+            role,
+            layout: "unavailable",
+            image: None,
+            process_type: None,
+        }
+    }
+
+    fn report(&self, stat: Stat) -> Value {
+        json!({
+            "pid": stat.pid, "start_ticks": stat.started,
+            "role": self.role, "command_layout": self.layout,
+            "image_basename": self.image, "process_type": self.process_type,
+        })
+    }
+}
+
+// Chromium rewrites Linux argv into a process title.
+// https://chromium.googlesource.com/chromium/src/+/HEAD/base/process/set_process_title_linux_unittest.cc
+fn command_role(bytes: &[u8], image: &str) -> RoleWitness {
+    let args: Vec<_> = bytes
+        .split(|byte| *byte == 0)
+        .filter(|arg| !arg.is_empty())
+        .collect();
+    let flattened = args.len() == 1 && args[0].contains(&b' ');
+    let tokens: Vec<_> = if flattened {
+        args[0]
+            .split(u8::is_ascii_whitespace)
+            .filter(|arg| !arg.is_empty())
+            .collect()
+    } else {
+        args
+    };
+    let types: Vec<_> = tokens
+        .iter()
+        .filter_map(|arg| arg.strip_prefix(b"--type="))
+        .collect();
+    let process_type = match types.as_slice() {
+        [value] if *value == b"renderer" => Some("renderer"),
+        [value] if *value == b"zygote" => Some("zygote"),
+        [value] if *value == b"gpu-process" => Some("gpu-process"),
+        [value] if *value == b"utility" => Some("utility"),
+        [] => None,
+        _ => Some("other-or-ambiguous"),
+    };
+    let role = if image == "t3-code-ls-db" {
+        "native-database-helper"
+    } else if matches!(image, "chrome" | "chromium" | "chromium-browser")
+        && process_type == Some("renderer")
+    {
+        "browser-renderer"
+    } else {
+        "other-process"
+    };
+    RoleWitness {
+        role,
+        layout: if flattened {
+            "flattened-process-title"
+        } else {
+            "nul-separated-argv"
+        },
+        image: Some(image.to_owned()),
+        process_type,
+    }
+}
+
+fn process_witness(stat: Stat) -> Result<RoleWitness> {
     let directory = format!("/proc/{}", stat.pid);
     let mut bytes = Vec::new();
     let read = File::open(format!("{directory}/cmdline"))
         .and_then(|file| file.take(MAX_STAT_BYTES + 1).read_to_end(&mut bytes));
     if read.is_err() {
-        return Ok("unavailable");
+        return Ok(RoleWitness::missing("unavailable"));
     }
     if bytes.len() > MAX_STAT_BYTES as usize {
-        return Ok("command-exceeded-observation-bound");
+        return Ok(RoleWitness::missing("command-exceeded-observation-bound"));
     }
+    let image = std::fs::read_link(format!("{directory}/exe"));
     let mut current = Vec::new();
     let read = File::open(format!("{directory}/stat"))
         .and_then(|file| file.take(MAX_STAT_BYTES + 1).read_to_end(&mut current));
@@ -137,17 +216,84 @@ fn process_role(stat: Stat) -> Result<&'static str> {
             .map(|value| value.identity())
             != Some(stat.identity())
     {
-        return Ok("exited-before-role-observation");
+        return Ok(RoleWitness::missing("exited-before-role-observation"));
     }
-    let mut arguments = bytes.split(|byte| *byte == 0);
-    let executable = arguments.next().unwrap_or_default();
-    if executable.rsplit(|byte| *byte == b'/').next() == Some(b"t3-code-ls-db") {
-        return Ok("native-database-helper");
+    let image = image
+        .ok()
+        .and_then(|image| image.file_name()?.to_str().map(str::to_owned));
+    Ok(match image {
+        Some(image) => command_role(&bytes, &image),
+        None => RoleWitness::missing("unavailable-image"),
+    })
+}
+
+fn process_role(stat: Stat) -> Result<&'static str> {
+    Ok(process_witness(stat)?.role)
+}
+
+pub(crate) fn run_browser_witness(args: impl Iterator<Item = OsString>) -> Result<()> {
+    let args: Vec<_> = args.collect();
+    let [driver, chrome, trial] = args.as_slice() else {
+        return Err("usage: t3code-ls-tools probe-browser-resources CHROMEDRIVER CHROME NEW_TRIAL_DIRECTORY".into());
+    };
+    if !cfg!(target_os = "linux") {
+        return Err("browser resource witnesses require Linux".into());
     }
-    if arguments.any(|argument| argument == b"--type=renderer") {
-        return Ok("browser-renderer");
+    std::fs::create_dir(trial)?;
+    let trial = std::fs::canonicalize(trial)?;
+    let browser = Browser::start(Path::new(driver), Path::new(chrome), &trial)?;
+    browser.open_resource_fixture()?;
+    let mut group = Group::default();
+    let started = Instant::now();
+    let (initial, _) = process_table()?;
+    let root = initial
+        .get(&browser.driver_pid())
+        .ok_or("missing owned browser root")?
+        .identity();
+    let mut witnesses = Value::Null;
+    let mut observed = false;
+    let mut samples = 0;
+    while started.elapsed() < Duration::from_secs(10) {
+        let (table, _) = process_table()?;
+        group.observe(&table, root, false, &BTreeMap::new())?;
+        group.observe_roles(&table, process_role)?;
+        witnesses = Value::Array(
+            group
+                .seen
+                .keys()
+                .filter_map(|identity| {
+                    table
+                        .get(&identity.0)
+                        .filter(|stat| stat.identity() == *identity)
+                })
+                .map(|stat| process_witness(*stat).map(|witness| witness.report(*stat)))
+                .collect::<Result<Vec<_>>>()?,
+        );
+        samples += 1;
+        observed = group
+            .seen
+            .values()
+            .any(|process| process.role == "browser-renderer");
+        if observed {
+            break;
+        }
+        thread::sleep(INTERVAL);
     }
-    Ok("other-process")
+    browser.close()?;
+    println!(
+        "{}",
+        json!({
+            "schema_version": 1, "renderer_witnessed": observed, "samples": samples,
+            "elapsed_millis": started.elapsed().as_millis(),
+            "root_pid": root.0, "root_start_ticks": root.1,
+            "witnesses": witnesses,
+            "scope": "Owned ChromeDriver descendants on a synthetic data page",
+        })
+    );
+    if !observed {
+        return Err("No attributed renderer process was observed".into());
+    }
+    Ok(())
 }
 
 #[derive(Default)]
@@ -426,6 +572,28 @@ mod tests {
             ticks,
             rss,
         }
+    }
+
+    #[test]
+    fn chrome_roles_accept_process_titles_with_an_image_and_exact_type() {
+        for bytes in [
+            b"/opt/google/chrome/chrome\0--type=renderer\0--lang=en-US\0".as_slice(),
+            b"/opt/google/chrome/chrome --type=renderer --lang=en-US\0\0".as_slice(),
+        ] {
+            assert_eq!(command_role(bytes, "chrome").role, "browser-renderer");
+            assert_eq!(command_role(bytes, "unrelated").role, "other-process");
+        }
+        for bytes in [
+            b"chrome\0--title=fixture --type=renderer\0".as_slice(),
+            b"chrome --type=renderer-other\0".as_slice(),
+            b"chrome --type=renderer --type=zygote\0".as_slice(),
+        ] {
+            assert_eq!(command_role(bytes, "chrome").role, "other-process");
+        }
+        assert_eq!(
+            command_role(b"/fixture/helper\0", "t3-code-ls-db").role,
+            "native-database-helper"
+        );
     }
 
     #[test]
