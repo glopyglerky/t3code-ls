@@ -3,7 +3,7 @@ import * as FS from "node:fs/promises";
 import { createHash } from "node:crypto";
 import * as OS from "node:os";
 import * as Path from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it } from "vite-plus/test";
 import { isQualifiedNativeHost } from "@t3tools/shared/nativeExecutable";
 import {
   controlledClaudeStdioDisablesMcp as disablesMcp,
