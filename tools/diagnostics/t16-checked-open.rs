@@ -26,15 +26,20 @@ fn launch(mode: &OsString, database: &Path) -> Result<()> {
         .parent()
         .ok_or("missing diagnostic directory")?
         .join("trials");
+    let allowed_path = if mode == "owner-lock" {
+        Path::new("profile/userdata/server-owner.sqlite")
+    } else {
+        Path::new("profile/userdata/statev2.omdb")
+    };
     let relative = database.strip_prefix(trials.canonicalize()?)?;
     let mut components = relative.components();
     if !matches!(components.next(), Some(Component::Normal(_)))
-        || components.as_path() != Path::new("profile/userdata/statev2.omdb")
+        || components.as_path() != allowed_path
         || database.canonicalize()? != database
     {
         return Err("helper override requires the disposable J02 fixture database".into());
     }
-    if mode == "read-only-local" {
+    if mode != "local" {
         return Err(Command::new(helper).arg(mode).arg(database).exec().into());
     }
     let trace = database
@@ -279,7 +284,12 @@ fn run() -> Result<()> {
             print!("{}", summarize(&traces, file)?);
             Ok(())
         }
-        [mode, path] if matches!(mode.to_str(), Some("local" | "read-only-local")) => {
+        [mode, path]
+            if matches!(
+                mode.to_str(),
+                Some("local" | "read-only-local" | "owner-lock")
+            ) =>
+        {
             launch(mode, Path::new(path))
         }
         _ => Err("usage: t16-checked-open summarize TRIAL_DIRECTORY".into()),

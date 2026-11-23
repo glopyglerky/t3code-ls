@@ -19,8 +19,8 @@ database files can differ despite equivalent logical work.
 The plain run uses ordinary bundle resolution. In the traced run, the
 reopened server uses the existing executable override. The override runs the
 packaged helper with its original arguments and streams. It traces only the
-`local` helper, after fixture import and clean shutdown. The prior read-only
-inspection runs without tracing. Each trial uses a fresh directory and a
+`local` helper, after fixture import and clean shutdown. The same packaged helper
+runs the owner lock and the prior read-only inspection without tracing. Each trial uses a fresh directory and a
 loopback-only network namespace. Its PID namespace ends with the trial so
 leftover fixture processes cannot outlive it.
 

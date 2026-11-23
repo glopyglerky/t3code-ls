@@ -31,7 +31,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          fetch-depth: 2
+          fetch-depth: 8
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -39,7 +39,7 @@ jobs:
       - name: Verify source and stage the disposable checkouts
         shell: bash
         run: |
-          test "$(git rev-parse HEAD^)" = "$NATIVE_COMMIT"
+          git merge-base --is-ancestor "$NATIVE_COMMIT" HEAD
           test "$(git rev-parse "${NATIVE_COMMIT}^{tree}")" = "$NATIVE_TREE"
           test "$(uname -m)" = x86_64
           scratch="$(mktemp -d "$RUNNER_TEMP/t16-checked-open.XXXXXX")"
@@ -171,6 +171,9 @@ jobs:
           case "$DIAGNOSTIC_WORK" in "$RUNNER_TEMP"/t16-checked-open.??????) ;; *) exit 1 ;; esac
           if [[ -f "$DIAGNOSTIC_WORK/native/.git" ]]; then
             git worktree remove --force "$DIAGNOSTIC_WORK/native"
+          fi
+          if [[ -d "$DIAGNOSTIC_WORK/toolchain" ]]; then
+            find "$DIAGNOSTIC_WORK/toolchain" -type d ! -perm -u+w -exec chmod u+w '{}' +
           fi
           rm -r -- "$DIAGNOSTIC_WORK"
           printf 'after\t%s\n' "$(df -Pk "$RUNNER_TEMP" | awk 'END {print $4}')" >> "$RUNNER_TEMP/checked-open-evidence/available-kib.tsv"
