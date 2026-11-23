@@ -56,6 +56,20 @@ def x11(*args):
     return subprocess.run(["xdotool", *args], check=True, text=True, capture_output=True).stdout
 
 
+def click_window_point(window, x, y):
+    geometry = dict(
+        line.split("=", 1)
+        for line in x11("getwindowgeometry", "--shell", window).splitlines()
+        if line.startswith(("WIDTH=", "HEIGHT="))
+    )
+    width, height = int(geometry["WIDTH"]), int(geometry["HEIGHT"])
+    assert 0 <= x < width and 0 <= y < height, "Click target is outside the X11 client window"
+    # Resolve accessibility bounds in the centered window through X11.
+    x11("mousemove", "--window", window, str(x), str(y))
+    x11("click", "1")
+    return [width, height]
+
+
 def find_window():
     try:
         return x11("search", "--onlyvisible", "--name", "T3 Code").splitlines()[0]
@@ -155,9 +169,8 @@ def check_thread_workspace_race(executable):
     worker.start()
     application = subprocess.Popen([executable, "--thread-workspace"], stdin=subprocess.PIPE, text=True)
     def click(node):
-        bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
-        x11("mousemove", str(bounds.x + bounds.width // 2), str(bounds.y + bounds.height // 2))
-        x11("click", "1")
+        bounds = node.queryComponent().getExtents(pyatspi.WINDOW_COORDS)
+        click_window_point(window, bounds.x + bounds.width // 2, bounds.y + bounds.height // 2)
     def text():
         node = find("Server thread snapshot", application)
         field = node.queryText()
@@ -253,17 +266,8 @@ def check_thread_workspace(executable):
         assert observed["ownProcess"] and observed["showing"] and observed["visible"], "Click target is not current and visible"
         assert bounds[2] > 0 and bounds[3] > 0, "Click target has empty bounds"
         x, y = bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2
-        geometry = dict(
-            line.split("=", 1)
-            for line in x11("getwindowgeometry", "--shell", window).splitlines()
-            if line.startswith(("WIDTH=", "HEIGHT="))
-        )
-        width, height = int(geometry["WIDTH"]), int(geometry["HEIGHT"])
-        assert 0 <= x < width and 0 <= y < height, "Click target is outside the X11 client window"
-        # Resolve accessibility bounds in the centered window through X11.
-        x11("mousemove", "--window", window, str(x), str(y))
-        x11("click", "1")
-        return {**observed, "windowPoint": [x, y], "windowSize": [width, height]}
+        size = click_window_point(window, x, y)
+        return {**observed, "windowPoint": [x, y], "windowSize": size}
     def select(thread):
         try:
             clicked = click(current("Open thread " + thread))
