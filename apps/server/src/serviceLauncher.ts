@@ -147,7 +147,7 @@ const runtimeSpawnArguments = (paths: ReturnType<typeof runtimePaths>) => ({
   args: ["serve"],
 });
 
-async function readBundledNativeTrialHelper(entry: string, executable: string): Promise<{
+export async function readBundledNativeTrialHelper(entry: string, executable: string): Promise<{
   readonly engineRevision: string;
   readonly targetSchemaSha256: string;
   readonly sealedTrialRollback: boolean;
