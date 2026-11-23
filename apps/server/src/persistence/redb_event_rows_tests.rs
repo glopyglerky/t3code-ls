@@ -831,3 +831,90 @@ async fn assistant_text_revisions_store_suffixes_and_replay_exactly_after_rollba
     app.rollback("after-prune").await.unwrap();
     store.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn preparation_metadata_pair_revalidates_completed_state_and_fails_closed() {
+    let state = |version, ready, indexed_rows| {
+        encode(&Preparation {
+            version,
+            ready,
+            after: None,
+            indexed_rows,
+        })
+        .unwrap()
+    };
+    let valid_marker = || Some(encode(&"event-index-v1").unwrap());
+    let cases = [
+        ("fresh", None, None, Some(0)),
+        (
+            "completed",
+            Some(state(1, true, 73)),
+            valid_marker(),
+            Some(73),
+        ),
+        (
+            "unfinished",
+            Some(state(1, false, 0)),
+            valid_marker(),
+            Some(0),
+        ),
+        ("orphan marker", None, valid_marker(), None),
+        ("missing marker", Some(state(1, true, 73)), None, None),
+        (
+            "wrong marker",
+            Some(state(1, true, 73)),
+            Some(encode(&"wrong").unwrap()),
+            None,
+        ),
+        (
+            "malformed marker",
+            Some(state(1, true, 73)),
+            Some(b"{".to_vec()),
+            None,
+        ),
+        (
+            "wrong version",
+            Some(state(2, true, 73)),
+            valid_marker(),
+            None,
+        ),
+        ("malformed state", Some(b"{".to_vec()), valid_marker(), None),
+    ];
+    for (name, stored, stored_marker, expected_rows) in cases {
+        let fixture = TestFixture::start().await;
+        let store = fixture.initialize().await;
+        let app = initialize(&store).await;
+        let mut seed = store.db.begin().await.unwrap();
+        let bytes = seed.get(&schema_key()).await.unwrap().unwrap();
+        let catalog = decode_catalog(&bytes).unwrap();
+        let keys = [key(&catalog, "preparation"), marker(&catalog)];
+        for (key, value) in keys.iter().zip([&stored, &stored_marker]) {
+            if let Some(value) = value {
+                seed.put(key.clone(), value.clone()).await.unwrap();
+            }
+        }
+        seed.commit().await.unwrap();
+        for _ in 0..2 {
+            let result = store.prepare_application_events().await;
+            match expected_rows {
+                Some(expected) => {
+                    let result = result.unwrap();
+                    assert!(result.prepared, "{name}");
+                    assert_eq!(result.indexed_rows, expected, "{name}");
+                }
+                None => {
+                    assert!(matches!(result, Err(Error::IncompatibleStore)), "{name}");
+                    let mut check = store.db.begin_read_only().await.unwrap();
+                    assert_eq!(
+                        check.get_many(&keys).await.unwrap(),
+                        [stored.clone(), stored_marker.clone()],
+                        "{name}"
+                    );
+                    check.rollback().await.unwrap();
+                }
+            }
+        }
+        drop(app);
+        store.shutdown().await.unwrap();
+    }
+}
