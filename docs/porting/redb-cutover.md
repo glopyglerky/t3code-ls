@@ -499,3 +499,47 @@ passed the native startup gate. The separate environment layer unit tests await
 execution. Source lineage remains MIT T3 Code at
 `28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`, under method SHA-256
 `5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
+
+## T04 inherited history and reconnect cursors
+
+A run fork's visible history includes ancestor records. The selected Rust
+window reader resolves those records and pairs the window with the child's
+`snapshotSequence` in one read transaction. That sequence remains the child's
+replay watermark. An ancestor-only edit can change an inherited row without
+adding an event to the child's stream. The indexed in-thread find owner already
+tracks ancestor sequences for its separate revision; a child cursor cannot stand
+in for that revision.
+
+The shared web/mobile/desktop client previously reconnected a cached run fork
+with `afterSequence` set to that child watermark. The WebSocket resume path
+checked the same child stream, found no missed events and sent its synchronization
+marker without replacing the stale inherited row. HTTP snapshots do not validate
+a warm cache on this path: the client loads HTTP only when it has no projection.
+
+Run-fork reconnects now omit `afterSequence` and request the existing bounded
+snapshot before synchronization. This preserves the replay watermark, older
+server protocol, snapshot error handling and the native read transaction. Other
+fork kinds do not inherit app-run history and retain normal event resume. A
+negotiated ancestor-view revision can later avoid this conservative reload.
+Live propagation of ancestor edits into an already-open child subscription is a
+separate gap; this slice repairs cache reopen and reconnect.
+
+`tools/check-redb-projection-windows.mjs` uses a real native reader and a second
+writer. It commits a main-thread item update between a grandchild's anchored
+window read and watermark lookup. The old window and existing ancestry revision
+must stay coherent in the held snapshot. A fresh read and reopen must contain
+the changed inherited text and increased ancestry revision, while the child's
+watermark stays fixed. The shared-client regression models this server behavior
+for disk and retained caches and another parent edit across session replacement.
+It fails before the fix by retaining the old inherited row after synchronization.
+The root qualification owner must execute that before/after claim.
+
+The hosted `Client recovery` workflow accepts
+`candidate/t3code-ls-t04-inherited-history-*` and runs the shared-client suite plus
+the registered native projection-window check with pinned Lustr/BlueFe. No local
+runtime result is claimed. Stock T3
+`28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f` remains the product denominator. The
+method pin is
+`5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
+This is a reconnect correctness slice, not complete J04 or engine comparison
+acceptance. No database layout, engine, public wire schema or toolchain changes.
