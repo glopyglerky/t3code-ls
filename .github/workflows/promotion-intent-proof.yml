@@ -84,6 +84,8 @@ jobs:
             -- --ignored --exact --nocapture 2>&1 | tee "$RUNNER_TEMP/promotion-proof/forward-decision.log"
           grep -F 'T05 forward decision interruption and rollback refusal verified with installed helpers' \
             "$RUNNER_TEMP/promotion-proof/forward-decision.log"
+          grep -F 'T05 forward selection recovered without unsealing or allowing restore' \
+            "$RUNNER_TEMP/promotion-proof/forward-decision.log"
           timeout -k 5s 180s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
             test --locked -j 2 -p t3-code-ls-storage --test store \
             isolated_trial_cli_restarts_from_checkpoint_after_interruption \

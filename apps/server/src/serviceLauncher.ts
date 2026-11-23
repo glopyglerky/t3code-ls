@@ -91,22 +91,30 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const hasKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
   Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 
-function parseSealedPendingState(contents: string, baseDir: string): SealedPendingState | undefined {
+function parseSealedRecoveryState(contents: string, baseDir: string): SealedPendingState | undefined {
   const state: unknown = JSON.parse(contents);
-  if (!isRecord(state) || !hasKeys(state, ["protocol", "activeVersion", "update"]) ||
-    state.protocol !== 5 || typeof state.activeVersion !== "string" ||
-    state.activeVersion.length > 256 || !isExactServiceVersion(state.activeVersion) ||
+  if (!isRecord(state) || state.protocol !== 5 ||
     !isRecord(state.update)) return undefined;
   const update = state.update;
   if (!hasKeys(update, ["id", "fromVersion", "targetVersion", "dbPath", "status"]) ||
     typeof update.id !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(update.id) ||
-    update.fromVersion !== state.activeVersion || typeof update.targetVersion !== "string" ||
+    typeof update.fromVersion !== "string" || update.fromVersion.length > 256 ||
+    !isExactServiceVersion(update.fromVersion) || typeof update.targetVersion !== "string" ||
     update.targetVersion.length > 256 || !isExactServiceVersion(update.targetVersion) ||
-    compareExactServiceVersions(update.targetVersion, state.activeVersion) <= 0 ||
+    compareExactServiceVersions(update.targetVersion, update.fromVersion) <= 0 ||
     update.status !== "pending" || typeof update.dbPath !== "string" || !NodePath.isAbsolute(baseDir) ||
     update.dbPath !== NodePath.join(baseDir, "userdata", "statev2.omdb")) return undefined;
+
+  if (hasKeys(state, ["protocol", "phase", "activeVersion", "forwardReceiptSha256", "update"]) &&
+    state.phase === "forward-selected" && state.activeVersion === update.targetVersion &&
+    typeof state.forwardReceiptSha256 === "string" &&
+    /^[0-9a-f]{64}$/u.test(state.forwardReceiptSha256)) {
+    throw new Error("The forward-selected native trial is sealed and requires forward recovery.");
+  }
+  if (!hasKeys(state, ["protocol", "activeVersion", "update"]) ||
+    state.activeVersion !== update.fromVersion) return undefined;
   return { protocol: 5, activeVersion: state.activeVersion, update: {
-    id: update.id, fromVersion: state.activeVersion, targetVersion: update.targetVersion,
+    id: update.id, fromVersion: update.fromVersion, targetVersion: update.targetVersion,
     dbPath: update.dbPath, status: "pending",
   } };
 }
@@ -130,7 +138,7 @@ async function readLauncherState(
   if (ordinary !== undefined) return ordinary;
   if (environment.T3_CODE_LS_SEALED_TRIAL_RECOVERY === "1" &&
     Buffer.byteLength(contents) <= 8192) {
-    const sealed = parseSealedPendingState(contents, baseDir);
+    const sealed = parseSealedRecoveryState(contents, baseDir);
     if (sealed !== undefined) return sealed;
   }
   throw new Error("Service state is invalid or unsupported.");

@@ -610,6 +610,10 @@ async fn isolated_trial_publish_interrupt_fixture() {
                 .await
                 .unwrap();
         }
+    } else if boundary.starts_with("forward-selection-") {
+        crate::application_storage::record_fixture_forward_selection(home, ISOLATED_UPDATE.into())
+            .await
+            .unwrap();
     } else if boundary.starts_with("forward-commit-") {
         crate::application_storage::record_fixture_forward_commit(home, ISOLATED_UPDATE.into())
             .await
@@ -1859,7 +1863,9 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
     use crate::application_storage::{
         IsolatedTrialVerification, TrialRestorePhase, TrialRestoreRequest,
         publish_intended_isolated_service_trial, record_fixture_forward_commit,
+        record_fixture_forward_selection,
     };
+    use sha2::{Digest, Sha256};
     use std::fs;
     use std::io::Write;
     use std::os::unix::fs::MetadataExt;
@@ -1945,6 +1951,8 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
     let sealed = capture(&live);
     let published = capture(&receipt);
     let decide = || record_fixture_forward_commit(home.to_owned(), ISOLATED_UPDATE.into());
+    let select = || record_fixture_forward_selection(home.to_owned(), ISOLATED_UPDATE.into());
+    assert!(matches!(select().await, Err(Error::IncompatibleStore)));
     let boundary = match case {
         ForwardCommitCase::RefuseSourceWithoutFence
         | ForwardCommitCase::RefuseTargetWithoutFence => {
@@ -1985,6 +1993,7 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
         assert_eq!(capture(&failed), sealed);
         assert!(!original.exists());
         assert!(matches!(decide().await, Err(Error::IncompatibleStore)));
+        assert_eq!(capture(&selection), selection_before);
     } else {
         let durable = capture(&receipt);
         let decoded: Value = serde_json::from_slice(&durable.3).unwrap();
@@ -2002,39 +2011,88 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
             "preparation": preparation,
             "witness": { "kind": "offline-pre-activation", "target_file_sha256": pending.preparation.file_sha256 }
         });
-        for helper in [&source_helper, &target_helper] {
-            for (command, input) in [
-                ("trial-rollback-sealed", None),
-                ("trial-prepare-restore", Some(json!(legacy_request))),
-                (
-                    "trial-publish-restore-offline",
-                    Some(generic_publication.clone()),
-                ),
-                ("trial-publish-intended-sealed", None),
-            ] {
-                let frame = run(helper, command, input);
-                assert_eq!(frame["ok"], false, "{command}: {frame}");
-                assert_eq!(
-                    frame["error"]["kind"], "incompatible_store",
-                    "{command}: {frame}"
-                );
+        let assert_restore_refused = || {
+            for helper in [&source_helper, &target_helper] {
+                for (command, input) in [
+                    ("trial-rollback-sealed", None),
+                    ("trial-prepare-restore", Some(json!(legacy_request))),
+                    (
+                        "trial-publish-restore-offline",
+                        Some(generic_publication.clone()),
+                    ),
+                    ("trial-publish-intended-sealed", None),
+                ] {
+                    let frame = run(helper, command, input);
+                    assert_eq!(frame["ok"], false, "{command}: {frame}");
+                    assert_eq!(
+                        frame["error"]["kind"], "incompatible_store",
+                        "{command}: {frame}"
+                    );
+                }
             }
+        };
+        assert_restore_refused();
+        for helper in [&source_helper, &target_helper] {
             let bytes = fs::read(helper).unwrap();
             fs::write(helper, b"changed installed helper").unwrap();
             assert!(matches!(decide().await, Err(Error::IncompatibleStore)));
+            assert!(matches!(select().await, Err(Error::IncompatibleStore)));
             fs::write(helper, bytes).unwrap();
         }
         let mut changed_selection = selection_before.3.clone();
         changed_selection.push(b'\n');
         fs::write(&selection, changed_selection).unwrap();
         assert!(matches!(decide().await, Err(Error::IncompatibleStore)));
+        assert!(matches!(select().await, Err(Error::IncompatibleStore)));
         fs::write(&selection, &selection_before.3).unwrap();
         let moved = state.join("fixture-held-candidate.omdb");
         fs::rename(&live, &moved).unwrap();
         fs::write(&live, &sealed.3).unwrap();
         assert!(matches!(decide().await, Err(Error::IncompatibleStore)));
+        assert!(matches!(select().await, Err(Error::IncompatibleStore)));
         fs::rename(moved, &live).unwrap();
         assert!(decide().await.unwrap());
+
+        interrupt("forward-selection-written", None);
+        assert_eq!(capture(&selection), selection_before);
+        assert_eq!(capture(&receipt), durable);
+        interrupt("forward-selection-renamed", None);
+        let selected = capture(&selection);
+        assert_ne!(selected.1, selection_before.1);
+        let mut expected: Value = serde_json::from_slice(&selection_before.3).unwrap();
+        expected["activeVersion"] = json!("1.2.4");
+        expected["phase"] = json!("forward-selected");
+        let receipt_digest: String = Sha256::digest(&durable.3)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        expected["forwardReceiptSha256"] = json!(receipt_digest);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&selected.3).unwrap(),
+            expected
+        );
+        interrupt("forward-selection-durable", None);
+        assert!(select().await.unwrap());
+        assert_eq!(capture(&selection), selected);
+        assert_restore_refused();
+
+        for changed in [
+            b"{".to_vec(),
+            [selected.3.as_slice(), b"\n"].concat(),
+            serde_json::to_vec(&{
+                let mut foreign = expected;
+                foreign["forwardReceiptSha256"] = json!("0".repeat(64));
+                foreign
+            })
+            .unwrap(),
+        ] {
+            fs::write(&selection, &changed).unwrap();
+            assert!(matches!(select().await, Err(Error::IncompatibleStore)));
+            assert_eq!(fs::read(&selection).unwrap(), changed);
+        }
+        fs::write(&selection, &selected.3).unwrap();
+        assert!(select().await.unwrap());
+        assert_eq!(capture(&selection), selected);
 
         let store = Store::open_read_only(&live).await.unwrap();
         assert!(matches!(
@@ -2046,13 +2104,14 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
         assert_eq!(capture(&live), sealed);
         assert_eq!(capture(&original), source);
         assert_eq!(capture(&stage), stage_before);
+        assert_eq!(capture(&selection), selected);
         assert!(!failed.exists());
         assert!(
             !state
                 .join(format!(".statev2-failed-{ISOLATED_UPDATE}.omdb"))
                 .exists()
         );
+        println!("T05 forward selection recovered without unsealing or allowing restore");
     }
     assert_eq!(capture(&checkpoint), checkpoint_before);
-    assert_eq!(capture(&selection), selection_before);
 }
