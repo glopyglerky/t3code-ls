@@ -1,3 +1,4 @@
+import { DioxusThreadLink } from "../chat/DioxusThreadLink";
 import { useAtomMount } from "@effect/atom-react";
 import { asLaunchingThread } from "@t3tools/client-runtime/state/thread-inbox";
 import { ThreadHoverCard, ThreadHoverCardPopup } from "../ThreadHoverCard";
@@ -846,6 +847,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     />
   );
 
+  const semanticTitle = variant === "card" && !isRenaming &&
+    import.meta.env.VITE_T3_CODE_LS_SIDEBAR_THREAD_LINK_RENDERER === "dioxus";
+
   const handleClick = (event: ReactMouseEvent) => {
     onThreadClick(event, threadRef);
   };
@@ -856,6 +860,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     onAcknowledgeWoke(threadRef, props.wokeAt);
   };
   const handleContextMenu = (event: ReactMouseEvent) => {
+    if (semanticTitle && (event.target as HTMLElement).closest("a[href]")) return;
     event.preventDefault();
     onContextMenu(threadRef, { x: event.clientX, y: event.clientY });
   };
@@ -1039,7 +1044,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     />
   ) : (
     <span
-      aria-hidden
+      aria-hidden={semanticTitle ? undefined : true}
       className={cn(
         "min-w-0 flex-1 text-start text-sm transition-opacity motion-reduce:transition-none",
         shouldRecede ? "font-normal" : "font-medium",
@@ -1066,7 +1071,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       )}
       dir={textDirection(thread.title)}
     >
-      {thread.title}
+      {semanticTitle ? <DioxusThreadLink environmentId={thread.environmentId}
+        threadId={thread.id} label={thread.title}
+        className="block truncate rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onNavigate={() => onThreadActivate(threadRef)} /> : thread.title}
     </span>
   );
   const accessibleTitle = isRenaming ? null : <span className="sr-only">{thread.title}</span>;
@@ -1430,7 +1438,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           render={
             <div
               ref={rowRef}
-              role="button"
+              role={semanticTitle ? "group" : "button"}
               tabIndex={0}
               data-sidebar-row={threadKey}
               data-sidebar-parent={props.navigationParent}

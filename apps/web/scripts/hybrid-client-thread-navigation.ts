@@ -2,7 +2,7 @@
 import * as Assert from "node:assert/strict";
 import type { Locator, Page } from "playwright";
 
-/** Called only with a real thread-read title link from the controlled replay
+/** Called only with a real timeline or sidebar title link from the controlled replay
  * fixture. The owner must create its target through normal application routes.
  * This helper creates no DOM and never bypasses the selected-thread router. */
 export async function verifyThreadNavigation(
@@ -11,16 +11,40 @@ export async function verifyThreadNavigation(
   expectedTarget: string,
   targetText: string,
   renderer: "dioxus" | "dioxus-fallback",
+  entry: "thread-read" | "sidebar" = "thread-read",
 ) {
   const sourceUrl = page.url();
+  const reveal = async () => {
+    if (entry === "thread-read") await revealThreadReadLink(page, anchor);
+    else {
+      await anchor.waitFor({ state: "visible" });
+      Assert.equal(await anchor.locator("xpath=ancestor::*[@data-testid='sidebar-row-card']").count(), 1);
+    }
+  };
   const editor = page.getByTestId("composer-editor");
   const draft = "Navigation must retain this unsent 雪 draft.";
   await editor.fill(draft);
-  await revealThreadReadLink(page, anchor);
+  await reveal();
   if (renderer === "dioxus") {
     await assertEventuallyNative(anchor);
   } else {
     Assert.equal(await anchor.getAttribute("data-thread-link-renderer"), null);
+  }
+  if (entry === "sidebar") {
+    const nativeBehavior = await anchor.evaluate((node) => {
+      const contextAllowed = node.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+      const modifiers = ["ctrlKey", "metaKey", "shiftKey", "altKey"].every((key) => {
+        let preserved = false;
+        const cancel = (event: MouseEvent) => { preserved = !event.defaultPrevented; event.preventDefault(); };
+        document.addEventListener("click", cancel, { once: true });
+        node.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, [key]: true }));
+        document.removeEventListener("click", cancel);
+        return preserved;
+      });
+      return { contextAllowed, modifiers };
+    });
+    Assert.deepEqual(nativeBehavior, { contextAllowed: true, modifiers: true });
+    Assert.equal(page.url(), sourceUrl);
   }
   const href = await anchor.getAttribute("href");
   Assert.equal(new URL(href!, sourceUrl).href, expectedTarget);
@@ -29,6 +53,10 @@ export async function verifyThreadNavigation(
   await page.keyboard.press("Enter");
   await page.waitForURL(expectedTarget);
   await page.getByText(targetText, { exact: true }).waitFor({ state: "visible" });
+  if (entry === "sidebar") {
+    await page.waitForFunction((href) => [...document.querySelectorAll<HTMLElement>('[data-sidebar-row][aria-current="page"] a')]
+      .some((node) => node.getAttribute("href") === href), new URL(expectedTarget).pathname);
+  }
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForURL(expectedTarget);
   await page.getByText(targetText, { exact: true }).waitFor({ state: "visible" });
@@ -36,10 +64,24 @@ export async function verifyThreadNavigation(
   await page.waitForURL(sourceUrl);
   await editor.waitFor({ state: "visible" });
   await page.waitForFunction((expected) => document.querySelector<HTMLElement>('[data-testid="composer-editor"]')?.innerText === expected, draft);
-  await revealThreadReadLink(page, anchor);
+  await reveal();
   await anchor.focus();
   Assert.ok(await anchor.evaluate((node) => document.activeElement === node));
-  return { renderer, sourceUrl, targetUrl: expectedTarget, keyboard: true, reopened: true, back: true, draftPreserved: true };
+  if (entry === "sidebar") {
+    // Plain pointer activation must take the same selected-thread route as Enter.
+    await anchor.click();
+    await page.waitForURL(expectedTarget);
+    await page.getByText(targetText, { exact: true }).waitFor({ state: "visible" });
+    await page.waitForFunction((href) => [...document.querySelectorAll<HTMLElement>('[data-sidebar-row][aria-current="page"] a')]
+      .some((node) => node.getAttribute("href") === href), new URL(expectedTarget).pathname);
+    await page.goBack();
+    await page.waitForURL(sourceUrl);
+    await page.waitForFunction((expected) => document.querySelector<HTMLElement>('[data-testid="composer-editor"]')?.innerText === expected, draft);
+    await reveal();
+    await anchor.focus();
+    Assert.ok(await anchor.evaluate((node) => document.activeElement === node));
+  }
+  return { renderer, entry, pointer: entry === "sidebar", selectedThread: entry === "sidebar", sourceUrl, targetUrl: expectedTarget, keyboard: true, reopened: true, back: true, draftPreserved: true };
 }
 
 async function assertEventuallyNative(anchor: Locator) {

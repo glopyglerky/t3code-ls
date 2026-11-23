@@ -1,6 +1,6 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { Link, useLinkProps } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type FocusEventHandler, type TouchEventHandler, type MouseEventHandler } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type FocusEventHandler, type TouchEventHandler, type MouseEventHandler, type MouseEvent as ReactMouseEvent } from "react";
 import { loadOnboardingBindings, type ThreadLinkMount } from "../../onboarding/dioxusBindings";
 
 type Props = {
@@ -8,6 +8,7 @@ type Props = {
   threadId: ThreadId;
   label: string;
   className: string;
+  onNavigate?: (() => void) | undefined;
 };
 
 // Only the plain thread-read title link opts in. Rich chips and row actions keep
@@ -18,8 +19,16 @@ export function SemanticThreadLink(props: Props) {
     : <RetainedThreadLink {...props} />;
 }
 
-function RetainedThreadLink({ environmentId, threadId, label, className }: Props) {
-  return <Link to="/$environmentId/$threadId" params={{ environmentId, threadId }} className={className}>{label}</Link>;
+function RetainedThreadLink({ environmentId, threadId, label, className, onNavigate }: Props) {
+  return <Link to="/$environmentId/$threadId" params={{ environmentId, threadId }} className={className} onClick={onNavigate ? (event) => navigateWithOwner(event, onNavigate) : undefined}>{label}</Link>;
+}
+
+// The sidebar owns selection and mobile dismissal. Modified activation remains
+// native; a normal activation enters the same owner as row whitespace/shortcuts.
+function navigateWithOwner(event: ReactMouseEvent, onNavigate: () => void) {
+  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  if (event.detail <= 1) onNavigate();
 }
 
 export function DioxusThreadLink(props: Props) {
@@ -29,8 +38,9 @@ export function DioxusThreadLink(props: Props) {
   const mount = useRef<ThreadLinkMount | undefined>(undefined);
   const [anchor, setAnchor] = useState<HTMLAnchorElement | null>(null);
   // Reuse Link's modifier/default-prevented checks, preload and guarded router
-  // dispatch. This bounded link has no target, download, style or custom handlers.
-  const link = useLinkProps({ to: "/$environmentId/$threadId", params: { environmentId, threadId }, className });
+  // dispatch. The optional sidebar callback preserves its existing navigation owner.
+  const link = useLinkProps({ to: "/$environmentId/$threadId", params: { environmentId, threadId }, className,
+    onClick: props.onNavigate ? (event) => navigateWithOwner(event, props.onNavigate!) : undefined });
   const attributes = link as typeof link & { "data-status"?: string; "data-transitioning"?: string };
   const href = link.href ?? "";
   const currentHref = useRef(href);
