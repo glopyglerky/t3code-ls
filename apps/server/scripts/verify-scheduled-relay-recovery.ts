@@ -35,7 +35,9 @@ const root = FS.realpathSync(Path.resolve(import.meta.dirname, "../../.."));
 const outputPath = process.argv[2];
 const boundary = process.argv[3] ?? "before-claim";
 Assert.ok(outputPath && Path.isAbsolute(outputPath) && process.argv.length <= 4);
-Assert.ok(boundary === "before-claim" || boundary === "after-claim" || boundary === "after-dispatch");
+Assert.ok(boundary === "before-claim" || boundary === "after-claim" ||
+  boundary === "after-dispatch" || boundary === "after-provider-prompt");
+const afterProviderPrompt = boundary === "after-provider-prompt";
 const proof = Path.join(FS.realpathSync(Path.dirname(outputPath)), Path.basename(outputPath));
 Assert.ok(Path.relative(root, proof).startsWith(`..${Path.sep}`));
 Assert.equal(process.platform, "linux");
@@ -103,6 +105,7 @@ try {
   ChildProcess.execFileSync(Path.join(bin, "git"), ["init", "--quiet"], { cwd: workspaceRoot, env });
   const provider = ProviderInstanceId.make("devReplay");
   const providerWitness = Path.join(scratch, "provider-prompts.txt");
+  const providerProgress = Path.join(scratch, "provider-progress.txt");
   FS.writeFileSync(providerWitness, "", { mode: 0o600 });
   const promptsObserved = () => FS.readFileSync(providerWitness, "utf8").split("prompt\n").length - 1;
   write(Path.join(userdata, "settings.json"), {
@@ -120,6 +123,7 @@ try {
             Path.join(root, "apps/server/scripts/scheduled-relay-provider-probe.mjs"),
             Path.join(root, "apps/server/scripts/dev-replay-agent.ts"),
             providerWitness,
+            ...(afterProviderPrompt ? [providerProgress] : []),
           ],
         },
       },
@@ -160,7 +164,7 @@ try {
   };
 
   checkpoint("create idle replay thread and webhook through authenticated RPC");
-  const initial = await start("initial", gate);
+  const initial = await start("initial", afterProviderPrompt ? undefined : gate);
   const client = await authenticatePackagedServer(initial, abort.signal);
   const projectId = ProjectId.make("fixture-relay-recovery");
   const title = "Scheduled relay recovery";
@@ -229,19 +233,36 @@ try {
 
   checkpoint("acknowledge durable admission and interrupt the selected boundary");
   report.initialStatus = await post(initial.origin, "accepted");
-  for (let i = 0; !FS.existsSync(witnessPath) && i < 200; i++) await delay(50, undefined, { signal: abort.signal });
-  const witness = JSON.parse(FS.readFileSync(witnessPath, "utf8"));
-  Assert.equal(witness.deliveryId, deliveryId);
-  Assert.equal(witness.admissionCommitted, true);
-  Assert.equal(witness.workerClaimCommitted, boundary !== "before-claim");
-  Assert.equal(witness.dispatchCommitted, boundary === "after-dispatch");
-  Assert.match(witness.promptSha256, /^[0-9a-f]{64}$/u);
+  const readyPath = afterProviderPrompt ? providerProgress : witnessPath;
+  for (let i = 0; !FS.existsSync(readyPath) && i < 300; i++) await delay(50, undefined, { signal: abort.signal });
+  let promptSha256: string;
+  if (afterProviderPrompt) {
+    Assert.equal(FS.readFileSync(readyPath, "utf8"), "prompt-observed\n");
+    const { delivery } = await client.rpc((rpc) => rpc[WS_METHODS.scheduledTasksGetWebhookDelivery]({
+      id: task.id, deliveryId, acceptAnyOutcome: true,
+    }));
+    Assert.ok(delivery.renderedPrompt?.includes(marker));
+    promptSha256 = hash(delivery.renderedPrompt);
+    const active = await client.rpc((rpc) => rpc[ORCHESTRATION_V2_WS_METHODS.getThreadProjection]({ threadId }));
+    Assert.equal(active.runs.length, 1);
+    Assert.ok(!["completed", "failed", "cancelled", "interrupted"].includes(active.runs[0]!.status));
+    report.providerProgressReceived = true;
+  } else {
+    const witness = JSON.parse(FS.readFileSync(witnessPath, "utf8"));
+    Assert.equal(witness.deliveryId, deliveryId);
+    Assert.equal(witness.admissionCommitted, true);
+    Assert.equal(witness.workerClaimCommitted, boundary !== "before-claim");
+    Assert.equal(witness.dispatchCommitted, boundary === "after-dispatch");
+    Assert.match(witness.promptSha256, /^[0-9a-f]{64}$/u);
+    promptSha256 = witness.promptSha256;
+  }
   const exit = await initial.stop("SIGKILL");
   owned = undefined;
   Assert.deepEqual(exit, { code: null, signal: "SIGKILL" });
   report.processExit = exit;
   const promptsBeforeReopen = promptsObserved();
-  Assert.ok(promptsBeforeReopen <= (boundary === "after-dispatch" ? 1 : 0));
+  if (afterProviderPrompt) Assert.equal(promptsBeforeReopen, 1);
+  else Assert.ok(promptsBeforeReopen <= (boundary === "after-dispatch" ? 1 : 0));
 
   const expectedRunCount = boundary === "after-claim" ? 0 : 1;
   const expectedTaskStatus = boundary === "after-claim" ? "failed" : "succeeded";
@@ -252,7 +273,7 @@ try {
     Stream.map(({ tasks }) => tasks.find(({ id }) => id === task.id)),
     Stream.filter((candidate) => candidate !== undefined &&
       candidate.runCount === expectedRunCount &&
-      (boundary === "after-dispatch" || candidate.lastRunStatus === expectedTaskStatus)),
+      (boundary === "after-dispatch" || afterProviderPrompt || candidate.lastRunStatus === expectedTaskStatus)),
     Stream.runHead,
   ));
   Assert.ok(Option.isSome(settled) && settled.value);
@@ -270,7 +291,7 @@ try {
     Assert.equal(settled.value.lastRunError, delivery.error);
   }
   Assert.ok(delivery.renderedPrompt?.includes(marker));
-  Assert.equal(hash(delivery.renderedPrompt), witness.promptSha256);
+  Assert.equal(hash(delivery.renderedPrompt), promptSha256);
 
   checkpoint("verify the thread matches the durable delivery disposition");
   const readProjection = () => resumed.rpc((rpc) => rpc[ORCHESTRATION_V2_WS_METHODS.getThreadProjection]({ threadId }));
@@ -294,13 +315,17 @@ try {
     Assert.equal(final.runs[0]?.userMessageId, user[0]!.id);
   }
   Assert.equal(final.runs.length, expectedRunCount);
+  if (afterProviderPrompt) {
+    Assert.ok(["failed", "cancelled", "interrupted"].includes(final.runs[0]!.status));
+    report.reopenedRunStatus = final.runs[0]!.status;
+  }
   const promptsAfterReopen = promptsObserved();
   Assert.equal(promptsAfterReopen, boundary === "before-claim" ? 1 : promptsBeforeReopen);
   report.providerPrompts = { beforeReopen: promptsBeforeReopen, afterReopen: promptsAfterReopen };
   Assert.ok(FS.lstatSync(database).isFile());
   assertNoApplicationSqlite(baseDir);
   report.durableDelivery = {
-    deliveryId, outcome: delivery.outcome, runCount: expectedRunCount, promptSha256: witness.promptSha256,
+    deliveryId, outcome: delivery.outcome, runCount: expectedRunCount, promptSha256,
   };
   report.status = "passed";
 } catch (error) {
