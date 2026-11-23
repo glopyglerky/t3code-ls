@@ -846,8 +846,11 @@
       ],
       "rust_paths": ["apps/server/rust/git-workspace/src/main.rs"],
       "adapter_paths": [
+        ".github/workflows/cli-archive-proof.yml",
         ".github/workflows/workspace-edits.yml",
-        "apps/server/src/vcs/GitVcsDriverCore.ts"
+        "apps/server/src/vcs/GitVcsDriverCore.ts",
+        "apps/server/src/vcs/NativeGitWorkspace.ts",
+        "tools/build-native.mjs"
       ],
       "platform_routes": [
         {
@@ -858,12 +861,16 @@
           "acceptance_evidence": {}
         }
       ],
-      "acceptance_tests": ["apps/server/src/vcs/GitVcsDriverCore.test.ts"],
+      "acceptance_tests": [
+        "apps/server/src/vcs/GitVcsDriverCore.test.ts",
+        "apps/server/scripts/verify-packaged-git-workspace.ts"
+      ],
       "hosted_acceptance": {
-        "apps/server/src/vcs/GitVcsDriverCore.test.ts": ".github/workflows/workspace-edits.yml"
+        "apps/server/src/vcs/GitVcsDriverCore.test.ts": ".github/workflows/workspace-edits.yml",
+        "apps/server/scripts/verify-packaged-git-workspace.ts": ".github/workflows/cli-archive-proof.yml"
       },
       "retired_paths": [],
-      "notes": "T06. Opt-in repository directory, HEAD, exact remote branch reads and bounded local branch names for rename collision checks through gix. Includes, explicit discovery overrides, bare repositories, unsupported symbolic local branches and missing or failed helpers retain the Git route. Branch mutation uses Git. Full Git workflow and performance qualification remain open.",
+      "notes": "T06. Opt-in repository directory, HEAD, exact remote branch reads and bounded local branch names for rename collision checks through gix. The optional Linux x64 archive helper and its verified runtime selection passed packaged work-tree, nested and linked worktree checks in run 45173544459. Git handles repository admission and branch mutation. Includes, explicit discovery overrides, unsupported symbolic local branches and missing or failed helpers retain Git reads. Full Git workflow and performance qualification remain open.",
       "rust_crates": ["apps/server/rust/git-workspace"]
     },
     {

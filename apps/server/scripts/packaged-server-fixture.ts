@@ -37,11 +37,23 @@ export function startPackagedServer(input: {
   baseDir: string;
   env: NodeJS.ProcessEnv;
   port: number;
+  /** Linux-only fixture tracing. No production adapter or helper override. */
+  execTrace?: string;
+  /** Execute an extracted SEA archive entry directly. */
+  executable?: boolean;
 }) {
   const bootstrap = Crypto.randomBytes(32).toString("hex");
   const origin = `http://127.0.0.1:${input.port}`;
   const args = [input.bundle, "start", "--bootstrap-fd", "3", "--log-level", "debug"];
-  const child = ChildProcess.spawn(process.execPath, args, {
+  if (input.execTrace !== undefined) Assert.ok(Path.isAbsolute(input.execTrace));
+  const targetCommand = input.executable === true ? input.bundle : process.execPath;
+  const targetArgs = input.executable === true ? args.slice(1) : args;
+  const command = input.execTrace === undefined ? targetCommand : "/usr/bin/strace";
+  const launchArgs = input.execTrace === undefined ? targetArgs : [
+    "-f", "--kill-on-exit", "-s", "4096", "-e", "trace=execve,chdir", "-o", input.execTrace,
+    targetCommand, ...targetArgs,
+  ];
+  const child = ChildProcess.spawn(command, launchArgs, {
     cwd: input.baseDir,
     env: input.env,
     detached: true,
@@ -90,7 +102,9 @@ export function startPackagedServer(input: {
     origin,
     bootstrap,
     pid: child.pid,
-    argv: [Path.basename(process.execPath), "apps/server/dist/bin.mjs", ...args.slice(1)],
+    argv: input.executable === true
+      ? [Path.basename(input.bundle), ...targetArgs]
+      : [Path.basename(process.execPath), "apps/server/dist/bin.mjs", ...args.slice(1)],
     stop: async (signal: "SIGTERM" | "SIGKILL" = "SIGTERM") => {
       const pid = child.pid;
       if (pid === undefined) return;
@@ -102,7 +116,12 @@ export function startPackagedServer(input: {
         }
       };
       if (signal === "SIGKILL" && child.exitCode === null && child.signalCode === null) killGroup();
-      else child.kill("SIGTERM");
+      else if (input.execTrace !== undefined) {
+        if (child.exitCode === null && child.signalCode === null) {
+          try { process.kill(-pid, "SIGTERM"); }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+        }
+      } else child.kill("SIGTERM");
       const kill = setTimeout(killGroup, 8_000);
       const deadline = Promise.withResolvers<void>();
       const timeout = setTimeout(() => deadline.reject(new Error("Owned server did not close")), 12_000);

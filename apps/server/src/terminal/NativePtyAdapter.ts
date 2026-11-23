@@ -1,10 +1,9 @@
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalJsonInEffect:off - owns the Linux PTY helper's Node stdio transport.
 import * as ChildProcess from "node:child_process";
-import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
+import { nativeExecutable, verifyBundledNativeExecutable } from "@t3tools/shared/nativeExecutable";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -289,41 +288,6 @@ class BundledPtyVerificationError extends Schema.TaggedError<BundledPtyVerificat
   }
 }
 
-async function verifyBundledHost(executable: string): Promise<void> {
-  const flags = NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW | NodeFS.constants.O_NONBLOCK;
-  const manifestFile = await NodeFS.open(NodePath.join(NodePath.dirname(executable), "manifest.json"), flags);
-  let manifest;
-  try {
-    const metadata = await manifestFile.stat();
-    if (!metadata.isFile() || metadata.size > 1_048_576) throw new Error("Invalid native PTY manifest.");
-    manifest = JSON.parse(await manifestFile.readFile("utf8"));
-  } finally {
-    await manifestFile.close();
-  }
-  const declared = manifest?.files?.["t3-code-ls-pty-host"];
-  if (manifest?.target !== "linux-x64" || manifest.rustTarget !== "x86_64-unknown-linux-gnu" ||
-    (manifest.implementation !== undefined && manifest.implementation !== "native") ||
-    typeof declared !== "string" || !/^[0-9a-f]{64}$/u.test(declared)) {
-    throw new Error("The bundled native manifest does not select the Linux PTY host.");
-  }
-  const helper = await NodeFS.open(executable, flags);
-  try {
-    const before = await helper.stat();
-    if (!before.isFile() || before.size > 134_217_728) throw new Error("Invalid bundled native PTY host.");
-    const hash = NodeCrypto.createHash("sha256");
-    for await (const chunk of helper.createReadStream({ autoClose: false })) hash.update(chunk);
-    const after = await NodeFS.lstat(executable);
-    if (hash.digest("hex") !== declared || !after.isFile() ||
-      before.dev !== after.dev || before.ino !== after.ino ||
-      before.size !== after.size || before.ctimeMs !== after.ctimeMs) {
-      throw new Error("The bundled native PTY host does not match its manifest.");
-    }
-    await NodeFS.access(executable, NodeFS.constants.X_OK);
-  } finally {
-    await helper.close();
-  }
-}
-
 const select = Effect.fn("NativePtyAdapter.select")(function* () {
   const env = yield* HostProcess.Environment;
   const override = env.T3_CODE_LS_PTY_HOST_EXECUTABLE;
@@ -345,7 +309,7 @@ const select = Effect.fn("NativePtyAdapter.select")(function* () {
   }
   if (bundled === "1") {
     yield* Effect.tryPromise({
-      try: () => verifyBundledHost(executable),
+      try: () => verifyBundledNativeExecutable("pty-host", executable),
       catch: (cause) => new BundledPtyVerificationError({ cause }),
     }).pipe(Effect.orDie);
   }
