@@ -632,6 +632,7 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t04-ordered-application-wire-* ]]; then
             export T3_CODE_LS_TEST_RUNTIME="$scratch/test-runtime"
             node tools/install-server-tests.mjs
+            node tools/fetch-migration-sources.mjs
             "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --locked --release \
               -p t3-code-ls-storage --features ordered-engine-fixture --bin t3-code-ls-db
             helper="$CARGO_TARGET_DIR/release/t3-code-ls-db"
