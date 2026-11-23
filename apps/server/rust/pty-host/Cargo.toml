@@ -1,0 +1,18 @@
+[package]
+name = "t3-code-ls-pty-host"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+
+[workspace]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+portable-pty = { version = "=0.9.0", default-features = false }
+nix = { version = "=0.28.0", default-features = false, features = ["fs", "signal", "process"] }
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+
+[lints.rust]
+unsafe_code = "forbid"
