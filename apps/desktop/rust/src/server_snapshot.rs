@@ -96,6 +96,36 @@ impl Connection {
         parse_snapshot(&snapshot, &self.thread_id)
     }
 
+    pub(super) fn port(&self) -> u16 {
+        self.port
+    }
+    pub(super) fn token(&self) -> &str {
+        &self.token
+    }
+    pub(super) fn thread_id(&self) -> &str {
+        &self.thread_id
+    }
+    pub(super) fn projection(&self) -> Result<Value, &'static str> {
+        self.verify_environment()?;
+        self.get(
+            &format!(
+                "/api/orchestration/threads/{}/bounded",
+                encode_component(&self.thread_id)
+            ),
+            true,
+        )
+    }
+    pub(super) fn snapshot_from(&self, value: &Value) -> Result<Snapshot, &'static str> {
+        parse_snapshot(value, &self.thread_id)
+    }
+    fn verify_environment(&self) -> Result<(), &'static str> {
+        let descriptor = self.get("/.well-known/t3/environment", false)?;
+        if descriptor["environmentId"].as_str() != Some(self.environment_id.as_str()) {
+            return Err(FAILED);
+        }
+        Ok(())
+    }
+
     fn get(&self, path: &str, authenticated: bool) -> Result<Value, &'static str> {
         let started = Instant::now();
         let address = SocketAddr::from((Ipv4Addr::LOCALHOST, self.port));
@@ -135,6 +165,19 @@ impl Connection {
         }
         decode_response(&bytes)
     }
+}
+
+fn encode_component(value: &str) -> String {
+    let mut result = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            result.push(char::from(byte));
+        } else {
+            use std::fmt::Write;
+            write!(result, "%{byte:02X}").expect("Writing to a String cannot fail");
+        }
+    }
+    result
 }
 
 fn decode_response(bytes: &[u8]) -> Result<Value, &'static str> {

@@ -1,7 +1,15 @@
 mod replay;
 mod server_snapshot;
+mod server_submit;
 
-use std::{ffi::OsStr, process::ExitCode};
+use std::{
+    ffi::OsStr,
+    process::ExitCode,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use gpui::{
     App, AppContext, Bounds, Context, Entity, EntityInputHandler, Focusable, InteractiveElement,
@@ -21,19 +29,29 @@ const TEXTAREA_CONTEXT: &str = "ShowcaseWorkspace > Input";
 const COMPOSER_LABEL: &str = "Message";
 const SUBMIT_LABEL: &str = "Submit message";
 const REPLY_LABEL: &str = "Recorded assistant reply";
-const USAGE: &str =
-    "Usage: t3-code-ls-desktop-gpui --fixture showcase | --thread-snapshot < CONNECTION_JSON";
+const USAGE: &str = "Usage: t3-code-ls-desktop-gpui --fixture showcase | --thread-snapshot | --thread-compose < CONNECTION_JSON";
 const SHORTCUT: &str = if cfg!(target_os = "macos") {
     "Command+Enter"
 } else {
     "Ctrl+Enter"
 };
 
+#[derive(Clone, Copy)]
+enum SubmissionStatus {
+    Pending,
+    Completed,
+    Refused(&'static str),
+}
+
 struct Workspace {
     composer: Entity<TextareaState>,
     reply: Option<RecordedReply>,
-    status: Option<Result<(), &'static str>>,
+    status: Option<SubmissionStatus>,
     _composer_events: Subscription,
+    server: Option<Arc<server_submit::Session>>,
+    server_attempted: bool,
+    cancelled: Arc<AtomicBool>,
+    _submission: Option<gpui::Task<()>>,
 }
 
 struct RecordedReply {
@@ -43,15 +61,28 @@ struct RecordedReply {
 
 impl Workspace {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::new_with_server(None, window, cx)
+    }
+
+    fn new_with_server(
+        server: Option<server_submit::Session>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let placeholder = if server.is_some() {
+            "Message for selected thread"
+        } else {
+            replay::PROMPT
+        };
         let composer = cx.new(|cx| {
             let mut state = TextareaState::new(window, cx)
                 .rows(4)
-                .placeholder(replay::PROMPT)
+                .placeholder(placeholder)
                 .context_menu(false);
             state.set_accessibility(
                 InputAccessibility::new(Some(Role::MultilineTextInput))
                     .with_label(Some(COMPOSER_LABEL.into()))
-                    .with_placeholder(Some(replay::PROMPT.into()))
+                    .with_placeholder(Some(placeholder.into()))
                     .with_accessibility_id(Some("fixture-compose".into())),
             );
             state.focus(window, cx);
@@ -66,7 +97,10 @@ impl Workspace {
                     shift: false,
                 } => workspace.submit(window, cx),
                 InputEvent::Focus | InputEvent::Blur => cx.notify(),
-                InputEvent::Change if matches!(workspace.status, Some(Err(_))) => {
+                InputEvent::Change
+                    if matches!(workspace.status, Some(SubmissionStatus::Refused(_)))
+                        && !workspace.server_attempted =>
+                {
                     workspace.status = None;
                     cx.notify();
                 }
@@ -78,6 +112,10 @@ impl Workspace {
             reply: None,
             status: None,
             _composer_events: composer_events,
+            server: server.map(Arc::new),
+            server_attempted: false,
+            cancelled: Arc::new(AtomicBool::new(false)),
+            _submission: None,
         }
     }
 
@@ -89,44 +127,110 @@ impl Workspace {
                 .then(|| state.value())
         });
         let Some(draft) = draft else {
-            self.status = Some(Err("Finish composing text before submitting."));
+            self.status = Some(SubmissionStatus::Refused(
+                "Finish composing text before submitting.",
+            ));
             cx.notify();
             return;
         };
 
+        if let Some(server) = &self.server {
+            if self.server_attempted {
+                return;
+            }
+            if draft.trim().is_empty() || draft.len() > 4096 {
+                self.status = Some(SubmissionStatus::Refused(
+                    "Enter a message of at most 4096 UTF-8 bytes.",
+                ));
+                cx.notify();
+                return;
+            }
+            self.server_attempted = true;
+            self.status = Some(SubmissionStatus::Pending);
+            let server = Arc::clone(server);
+            let cancelled = Arc::clone(&self.cancelled);
+            let submitted = draft.to_string();
+            let request = submitted.clone();
+            let task = cx
+                .background_executor()
+                .spawn(async move { server.submit(&request, &cancelled) });
+            self._submission = Some(cx.spawn_in(window, async move |workspace, cx| {
+                let result = task.await;
+                let _ = workspace.update_in(cx, |workspace, window, cx| {
+                    match result {
+                        Ok(snapshot) => {
+                            workspace.set_reply(snapshot.text, server_snapshot::LABEL, window, cx);
+                            workspace.composer.update(cx, |state, cx| {
+                                if state.marked_text_range(window, cx).is_none()
+                                    && state.value().as_ref() == submitted.as_str()
+                                {
+                                    state.set_value("", window, cx);
+                                }
+                            });
+                            workspace.status = Some(SubmissionStatus::Completed);
+                        }
+                        Err(_) => {
+                            workspace.status =
+                                Some(SubmissionStatus::Refused(server_submit::FAILED))
+                        }
+                    }
+                    workspace
+                        .composer
+                        .update(cx, |state, cx| state.focus(window, cx));
+                    cx.notify();
+                });
+            }));
+            cx.notify();
+            return;
+        }
         match replay::submit(draft.as_ref()) {
             Ok(reply) => {
-                let editor = cx.new(|cx| {
-                    let mut state = TextareaState::new(window, cx)
-                        .rows(6)
-                        .default_value(reply)
-                        .context_menu(false);
-                    state.set_accessibility(
-                        InputAccessibility::new(Some(Role::Document))
-                            .with_label(Some(REPLY_LABEL.into()))
-                            .with_accessibility_id(Some("fixture-reply".into())),
-                    );
-                    state.set_readonly(true, cx);
-                    state
-                });
-                let focus_events = cx.subscribe_in(&editor, window, |_, _, event, _, cx| {
-                    if matches!(event, InputEvent::Focus | InputEvent::Blur) {
-                        cx.notify();
-                    }
-                });
-                self.reply = Some(RecordedReply {
-                    editor,
-                    _focus_events: focus_events,
-                });
+                self.set_reply(reply.to_owned(), REPLY_LABEL, window, cx);
                 self.composer
                     .update(cx, |state, cx| state.set_value("", window, cx));
-                self.status = Some(Ok(()));
+                self.status = Some(SubmissionStatus::Completed);
             }
-            Err(error) => self.status = Some(Err(error.message())),
+            Err(error) => self.status = Some(SubmissionStatus::Refused(error.message())),
         }
         self.composer
             .update(cx, |state, cx| state.focus(window, cx));
         cx.notify();
+    }
+    fn set_reply(
+        &mut self,
+        reply: String,
+        label: &'static str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let editor = cx.new(|cx| {
+            let mut state = TextareaState::new(window, cx)
+                .rows(6)
+                .default_value(reply)
+                .context_menu(false);
+            state.set_accessibility(
+                InputAccessibility::new(Some(Role::Document))
+                    .with_label(Some(label.into()))
+                    .with_accessibility_id(Some("fixture-reply".into())),
+            );
+            state.set_readonly(true, cx);
+            state
+        });
+        let focus_events = cx.subscribe_in(&editor, window, |_, _, event, _, cx| {
+            if matches!(event, InputEvent::Focus | InputEvent::Blur) {
+                cx.notify();
+            }
+        });
+        self.reply = Some(RecordedReply {
+            editor,
+            _focus_events: focus_events,
+        });
+    }
+}
+
+impl Drop for Workspace {
+    fn drop(&mut self) {
+        self.cancelled.store(true, Ordering::Release);
     }
 }
 
@@ -134,14 +238,24 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let composer_focused = self.composer.read(cx).focus_handle(cx).is_focused(window);
         let (status, status_color) = match self.status {
-            Some(Ok(())) => ("Recorded reply loaded.", 0x126647),
-            Some(Err(message)) => (message, 0xa32726),
+            Some(SubmissionStatus::Pending) => ("Submitting to the selected thread…", 0x49596a),
+            Some(SubmissionStatus::Completed) if self.server.is_some() => {
+                (server_submit::CONFIRMED, 0x126647)
+            }
+            Some(SubmissionStatus::Completed) => ("Recorded reply loaded.", 0x126647),
+            Some(SubmissionStatus::Refused(message)) => (message, 0xa32726),
+            None if self.server.is_some() => ("Submit to the selected server thread.", 0x49596a),
             None => (
                 "Only the recorded showcase runs in this workspace.",
                 0x49596a,
             ),
         };
 
+        let title = if self.server.is_some() {
+            "Server conversation"
+        } else {
+            "hybrid-fixture"
+        };
         div()
             .id("fixture-workspace")
             .role(Role::Main)
@@ -166,9 +280,9 @@ impl Render for Workspace {
                             .id("workspace-title")
                             .role(Role::Heading)
                             .aria_level(1)
-                            .aria_label("hybrid-fixture")
+                            .aria_label(title)
                             .text_2xl()
-                            .child("hybrid-fixture"),
+                            .child(title),
                     )
                     .child(
                         div()
@@ -198,6 +312,9 @@ impl Render for Workspace {
                                     .gap_3()
                                     .child(
                                         Button::new("submit-message")
+                                            .disabled(
+                                                self.server.is_some() && self.server_attempted,
+                                            )
                                             .accessibility_label(SUBMIT_LABEL)
                                             .border_2()
                                             .border_color(rgb(0x174887))
@@ -226,17 +343,30 @@ impl Render for Workspace {
                     .when_some(self.reply.as_ref(), |view, reply| {
                         let focused = reply.editor.read(cx).focus_handle(cx).is_focused(window);
                         view.child(
-                            div().flex().flex_col().gap_2().child(REPLY_LABEL).child(
-                                div()
-                                    .id("reply-field")
-                                    .border_2()
-                                    .border_color(rgb(if focused { 0x225cb4 } else { 0x9ea9b6 }))
-                                    .rounded_md()
-                                    .bg(rgb(0xffffff))
-                                    .p_2()
-                                    .h(px(180.))
-                                    .child(Textarea::new(&reply.editor)),
-                            ),
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap_2()
+                                .child(if self.server.is_some() {
+                                    server_snapshot::LABEL
+                                } else {
+                                    REPLY_LABEL
+                                })
+                                .child(
+                                    div()
+                                        .id("reply-field")
+                                        .border_2()
+                                        .border_color(rgb(if focused {
+                                            0x225cb4
+                                        } else {
+                                            0x9ea9b6
+                                        }))
+                                        .rounded_md()
+                                        .bg(rgb(0xffffff))
+                                        .p_2()
+                                        .h(px(180.))
+                                        .child(Textarea::new(&reply.editor)),
+                                ),
                         )
                     }),
             )
@@ -326,23 +456,34 @@ fn main() -> ExitCode {
         println!("{USAGE}");
         return ExitCode::SUCCESS;
     }
-    let snapshot =
-        if first.as_deref() == Some(OsStr::new("--thread-snapshot")) && args.next().is_none() {
-            Some(
-                server_snapshot::Connection::read(std::io::stdin().lock())
-                    .and_then(|connection| connection.snapshot()),
-            )
-        } else if first.as_deref() == Some(OsStr::new("--fixture"))
-            && args.next().as_deref() == Some(OsStr::new("showcase"))
-            && args.next().is_none()
-        {
-            None
-        } else {
-            eprintln!("{USAGE}");
+    let mut server_session = None;
+    let snapshot = if first.as_deref() == Some(OsStr::new("--thread-compose"))
+        && args.next().is_none()
+    {
+        let Ok(session) = server_submit::Session::read(std::io::stdin().lock()) else {
+            eprintln!("Invalid server connection input.");
             return ExitCode::from(2);
         };
+        server_session = Some(session);
+        None
+    } else if first.as_deref() == Some(OsStr::new("--thread-snapshot")) && args.next().is_none() {
+        Some(
+            server_snapshot::Connection::read(std::io::stdin().lock())
+                .and_then(|connection| connection.snapshot()),
+        )
+    } else if first.as_deref() == Some(OsStr::new("--fixture"))
+        && args.next().as_deref() == Some(OsStr::new("showcase"))
+        && args.next().is_none()
+    {
+        None
+    } else {
+        eprintln!("{USAGE}");
+        return ExitCode::from(2);
+    };
 
-    let title = if snapshot.is_some() {
+    let title = if server_session.is_some() {
+        "T3 Code · Server composer"
+    } else if snapshot.is_some() {
         "T3 Code · Server conversation"
     } else {
         "T3 Code · Showcase fixture"
@@ -368,7 +509,11 @@ fn main() -> ExitCode {
                     ..Default::default()
                 },
                 move |window, cx| {
-                    if let Some(snapshot) = snapshot {
+                    if let Some(server) = server_session {
+                        let workspace =
+                            cx.new(|cx| Workspace::new_with_server(Some(server), window, cx));
+                        cx.new(|cx| Root::new(workspace, window, cx))
+                    } else if let Some(snapshot) = snapshot {
                         let workspace = cx.new(|cx| ServerThreadView::new(snapshot, window, cx));
                         cx.new(|cx| Root::new(workspace, window, cx))
                     } else {
