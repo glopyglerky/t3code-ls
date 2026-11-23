@@ -25,8 +25,9 @@ import {
 import { inspectNativeReplay } from "../apps/web/scripts/hybrid-client-database.ts";
 import { verifyNativeSchemaUpgrade } from "./omdb-schema-upgrade-fixture.mjs";
 
-const [executable, proofPath] = process.argv.slice(2);
+const [executable, guestExecutable, proofPath] = process.argv.slice(2);
 NodeAssert.ok(executable && NodePath.isAbsolute(executable));
+NodeAssert.ok(guestExecutable && NodePath.isAbsolute(guestExecutable));
 NodeChildProcess.execFileSync(process.execPath, ["tools/generate-omdb-schema.mjs", "--check"], {
   stdio: "inherit",
 });
@@ -48,6 +49,7 @@ const ServerSecretStore = await import("../apps/server/src/auth/ServerSecretStor
 const ManagedPolicy = await import("../apps/server/src/policy/ManagedPolicy.ts");
 const Transactions = await import("../apps/server/src/persistence/PersistenceTransactions.ts");
 const Sqlite = await import("../apps/server/src/persistence/Sqlite.ts");
+const { verifyGuestRedeem } = await import("./omdb-guest-redeem-fixture.ts");
 NodeAssert.equal(Selected.selection.kind, "omdb");
 
 const fixture = await createFixture();
@@ -277,6 +279,16 @@ try {
     "retained SQLite configuration refuses an authoritative omdb home instead of forking state",
   );
   checks.push(await verifyNativeSchemaUpgrade(executable));
+  const threadEvent = sampleEvents.find((event) => event.type === "thread.created");
+  NodeAssert.ok(threadEvent);
+  checks.push(
+    ...(await verifyGuestRedeem({
+      root: NodePath.join(fixture.root, "guest-redeem"),
+      databaseExecutable: executable,
+      guestExecutable,
+      threadEvent,
+    })),
+  );
   await finishProof({
     executable,
     fixture,
@@ -304,6 +316,15 @@ try {
       "apps/server/src/orchestration-v2/runtimeLayer.ts",
       "apps/server/src/orchestration-v2/nativeRuntimeLayer.ts",
       "apps/server/src/orchestration-v2/selectedRuntimeLayer.ts",
+      "apps/server/src/orchestration-v2/NativeGuestShare.ts",
+      "apps/server/src/guest/GuestShareService.ts",
+      "apps/server/src/guest/http.ts",
+      "crates/core/src/bin/t3-code-ls-guest-share.rs",
+      "crates/core/src/guest_share.rs",
+      "crates/core/src/guest_share_wire.rs",
+      "tools/check-omdb-production.mjs",
+      "tools/omdb-guest-redeem-fixture.ts",
+      "tools/redb-event-sink-fixtures.mjs",
       "packages/shared/src/applicationDatabase.ts",
       "apps/web/scripts/hybrid-client-database.ts",
       "apps/web/scripts/verify-hybrid-client.ts",

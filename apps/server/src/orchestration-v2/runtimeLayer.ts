@@ -321,6 +321,10 @@ export const makeRuntimeLayers = <
     ),
   );
 
+  const layerGuestShare = GuestShareService.layer.pipe(
+    Layer.provide(Layer.merge(layerOrchestratorProvided, layerCommandOutputHubProvided)),
+  );
+
   const layerAgentSessionScannerProvided = AgentSessionScanner.layer.pipe(
     Layer.provide(persistence.providerRuntime),
   );
@@ -475,9 +479,7 @@ export const makeRuntimeLayers = <
     layerScheduledTaskProvided,
     layerScratchThreadPromotionProvided,
     layerSecretRequestsProvided,
-    GuestShareService.layer.pipe(
-      Layer.provide(Layer.merge(layerOrchestratorProvided, layerCommandOutputHubProvided)),
-    ),
+    layerGuestShare,
     UsageLimitRecoveryWorker.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
@@ -500,6 +502,7 @@ export const makeRuntimeLayers = <
   return {
     layerEventInfrastructure,
     layerEventSink,
+    layerGuestShare,
     layerProjectService,
     layerProjectSetupScriptRunner,
     layer,
@@ -528,6 +531,7 @@ const sqliteRuntime = makeRuntimeLayers({
 export const {
   layerEventInfrastructure,
   layerEventSink,
+  layerGuestShare,
   layerProjectService,
   layerProjectSetupScriptRunner,
   layer,

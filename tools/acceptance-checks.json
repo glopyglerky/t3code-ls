@@ -319,6 +319,12 @@
   "tools/check-omdb-production.mjs": {
     "package": "t3-code-ls-storage",
     "executable": "t3-code-ls-db",
+    "additional_executables": [
+      {
+        "package": "t3-code-ls-core",
+        "executable": "t3-code-ls-guest-share"
+      }
+    ],
     "extra_arguments": [],
     "proof_argument": true,
     "typecheck_project": "tools/omdb-production-tsconfig.json"

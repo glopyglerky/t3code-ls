@@ -2,6 +2,7 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {"types": ["node"], "lib": ["ESNext", "esnext.disposable"]},
   "files": [
+    "./omdb-guest-redeem-fixture.ts",
     "./omdb-production-types.ts",
     "../apps/server/src/server.ts",
     "../apps/server/src/cli/project.ts",
