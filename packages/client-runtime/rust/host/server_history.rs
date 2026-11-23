@@ -327,6 +327,7 @@ mod tests {
                         Err(_) => panic!("History replay peer did not receive its bounded request"),
                     }
                 };
+                socket.set_nonblocking(false).unwrap();
                 socket
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
