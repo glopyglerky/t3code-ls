@@ -179,6 +179,11 @@ export const DurableRelayWebhooks = Context.Reference<boolean>(
   { defaultValue: () => false },
 );
 
+export const SingleProjectionReads = Context.Reference<boolean>(
+  "t3/persistence/RedbClient/SingleProjectionReads",
+  { defaultValue: () => false },
+);
+
 export interface PreparationResult {
   readonly prepared: boolean;
   readonly indexed_rows: number;
@@ -251,6 +256,7 @@ function terminal(error: RedbClientError): boolean {
 export const make = Effect.gen(function* () {
   const database = yield* NativeDatabase.NativeDatabase;
   const durableRelayWebhooks = yield* DurableRelayWebhooks;
+  const singleProjectionReads = yield* SingleProjectionReads;
   const constructionSql = yield* Effect.serviceOption(SqlClient.SqlClient);
   const clientIdentity = {};
   let transactionSequence = 0;
@@ -644,6 +650,16 @@ export const make = Effect.gen(function* () {
       input: Readonly<Record<string, unknown>>,
       response: Schema.Decoder<A>,
     ) {
+      if (singleProjectionReads && operation === "application_projections_records" &&
+        (yield* CurrentTransaction) === undefined) {
+        yield* outsideSqlTransaction;
+        if (Object.hasOwn(input, "operation") || Object.hasOwn(input, "transaction_id"))
+          return yield* new NativeDatabase.NativeDatabaseInputError({ stage: "request" });
+        yield* decodeRequestJson(input).pipe(Effect.mapError(
+          (cause) => new NativeDatabase.NativeDatabaseInputError({ stage: "request", cause }),
+        ));
+        return yield* database.request({ ...input, operation }, response);
+      }
       return yield* inTransaction(
         (transaction) =>
           Effect.gen(function* () {

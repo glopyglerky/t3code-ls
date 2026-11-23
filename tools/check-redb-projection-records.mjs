@@ -47,6 +47,8 @@ const fields = [
   "contextTransfers",
 ];
 const checks = [];
+let standaloneReads = 0;
+let scopedReads = 0;
 const failed = (body) =>
   Effect.exit(body).pipe(
     Effect.tap((exit) => Effect.sync(() => NodeAssert.ok(Exit.isFailure(exit)))),
@@ -55,16 +57,39 @@ const ids = (records) => records.map((record) => record.id);
 
 async function withServices(kind, filename, use) {
   if (kind === "redb")
-    return withNative(executable, fixture, (client) =>
-      Effect.gen(function* () {
-        const store = yield* NativeProjectionStore.make;
-        return yield* use({
-          read: store.getThreadRecords,
-          readMessages: store.getMessagesById,
-          apply: store.apply,
-          transaction: client.withTransaction,
-        });
+    return withNative(
+      executable,
+      fixture,
+      (client) => Effect.gen(function* () {
+          const store = yield* NativeProjectionStore.make;
+          return yield* use({
+            read: store.getThreadRecords,
+            readMessages: store.getMessagesById,
+            apply: store.apply,
+            transaction: client.withTransaction,
+          });
+        }),
+      (database) => ({
+        ...database,
+        request: (input, response) => {
+          if (input.operation === "application_projections_records") {
+            NodeAssert.equal(Object.hasOwn(input, "transaction_id"), false);
+            standaloneReads += 1;
+          }
+          return database.request(input, response);
+        },
+        withSession: (useSession) => database.withSession((session) => useSession({
+          ...session,
+          request: (input, response) => {
+            if (input.operation === "application_projections_records") {
+              NodeAssert.equal(typeof input.transaction_id, "string");
+              scopedReads += 1;
+            }
+            return session.request(input, response);
+          },
+        })),
       }),
+      { singleProjectionReads: true },
     );
   return withSqlite(filename, (sql) =>
     Effect.gen(function* () {
@@ -874,7 +899,9 @@ try {
     expected,
     "Native selected records match immutable upstream behavior",
   );
+  NodeAssert.ok(standaloneReads > 0 && scopedReads > 0);
   checks.push(
+    `Observed ${standaloneReads} standalone projection reads and ${scopedReads} reads sharing their caller's transaction`,
     `All 15 selected-record families and ${queries.length} filter combinations match immutable upstream and retained SQLite`,
     "Filtered turn items and message ordering avoid more than 16 MiB of excluded history bodies, including inside the live writer transaction",
     "Message order uses all relevant turn-item ordinals even when the requested turn-item fields are filtered",

@@ -903,6 +903,16 @@ async fn query(
 pub mod window;
 
 impl ApplicationTransactions {
+    pub async fn projection_records_once(
+        &mut self,
+        input: ProjectionRecordsQuery,
+    ) -> Result<ProjectionRecordResult> {
+        let mut session = self.open_read_session().await?;
+        let result = query(&mut session, input).await;
+        let closed = session.transaction.rollback().await;
+        result.and_then(|value| closed.map(|()| value))
+    }
+
     pub async fn projection_records(
         &mut self,
         id: &str,

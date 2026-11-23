@@ -497,6 +497,21 @@ impl ApplicationTransactions {
         if self.sessions.len() >= MAX_SESSIONS {
             return Err(invalid("too many application transactions"));
         }
+        let session = self.open_session(mode, lock_timeout_ms).await?;
+        self.sessions.insert(transaction_id.into(), session);
+        Ok(())
+    }
+
+    pub(crate) async fn open_read_session(&mut self) -> Result<Session> {
+        self.open_session(ApplicationTransactionMode::Read, DEFAULT_LOCK_TIMEOUT_MS)
+            .await
+    }
+
+    async fn open_session(
+        &mut self,
+        mode: ApplicationTransactionMode,
+        lock_timeout_ms: u64,
+    ) -> Result<Session> {
         let mut transaction = match mode {
             ApplicationTransactionMode::Read => self.store.db.begin_read_only().await?,
             ApplicationTransactionMode::Write => {
@@ -525,17 +540,13 @@ impl ApplicationTransactions {
             }
         };
         verify_generation_identity(&mut transaction, &cached.catalog, &cached.identity).await?;
-        self.sessions.insert(
-            transaction_id.into(),
-            Session {
-                transaction,
-                catalog: Arc::clone(&cached.catalog),
-                touched: Instant::now(),
-                savepoints: Vec::new(),
-                savepoint_bytes: 0,
-            },
-        );
-        Ok(())
+        Ok(Session {
+            transaction,
+            catalog: Arc::clone(&cached.catalog),
+            touched: Instant::now(),
+            savepoints: Vec::new(),
+            savepoint_bytes: 0,
+        })
     }
 
     fn take_control(&mut self, transaction_id: &str) -> Result<Session> {
