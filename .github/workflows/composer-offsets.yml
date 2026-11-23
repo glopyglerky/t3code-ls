@@ -73,16 +73,23 @@ jobs:
         working-directory: apps/web
         run: pnpm exec vp test run --project unit --maxWorkers 2 src/composerDraftStore.test.ts
       - name: Exercise the text splice encoder and legacy fallback
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-splice-')
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-splice-')
         working-directory: apps/server
         run: pnpm exec vp test run --maxWorkers 2 src/orchestration-v2/WireProjection.test.ts
+      - name: Exercise fenced update and rollback selection
+        if: env.INTEGRATED_NATIVE == 'true'
+        run: node --test tools/service-launcher-trial.test.mjs
+      - name: Recover mobile preferences across database faults and reopen
+        if: env.INTEGRATED_NATIVE == 'true'
+        working-directory: apps/mobile
+        run: pnpm exec vp test run --project unit --maxWorkers 2 src/persistence/mobile-database.test.ts
       - name: Build and open the application with the Rust composer binding
         if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
         env:
           T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
-          T3_CODE_LS_SPLICE_NEGOTIATION_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-splice-') }}
+          T3_CODE_LS_SPLICE_NEGOTIATION_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-splice-') }}
           T3_CODE_LS_MULTI_TAB_DRAFT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-') }}
-          T3_CODE_LS_DRAFT_STORAGE_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-storage-') }}
+          T3_CODE_LS_DRAFT_STORAGE_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-storage-') }}
           T3_CODE_LS_FILE_EDITOR_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
           T3_CODE_LS_DURABLE_TEXT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-durable-') }}
           T3_CODE_LS_PDF_LINK_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-') }}
