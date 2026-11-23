@@ -1,7 +1,8 @@
-// @effect-diagnostics nodeBuiltinImport:off -- spawns only the Cargo fixture executable
-import { spawn } from "node:child_process";
-import { basename, isAbsolute } from "node:path";
-import { createInterface } from "node:readline";
+// @effect-diagnostics nodeBuiltinImport:off -- starts the scoped helper with a deterministic child
+import * as NodeChildProcess from "node:child_process";
+import * as NodePath from "node:path";
+import * as NodeReadline from "node:readline";
+import * as NodeUtil from "node:util";
 
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import * as Effect from "effect/Effect";
@@ -9,6 +10,7 @@ import * as Stream from "effect/Stream";
 
 import {
   ClaudeAgentSdkQueryRunnerError,
+  type ClaudeAgentSdkQueryOptions,
   type ClaudeAgentSdkQueryRunnerShape,
 } from "./ClaudeAdapterV2.ts";
 
@@ -31,56 +33,126 @@ type FixtureEvent =
 const failure = (method: string, cause: unknown) =>
   new ClaudeAgentSdkQueryRunnerError({ method, cause });
 
-export function makeClaudeStdioFixture(executable: string, directory: string) {
-  if (!isAbsolute(executable) || !/^claude_stdio_host-[a-f0-9]+$/.test(basename(executable))) {
-    throw new Error("Use the absolute Cargo claude_stdio_host test executable path.");
+async function within<A>(pending: Promise<A>, milliseconds: number): Promise<A> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      pending,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("Claude stdio helper timed out.")), milliseconds);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
+}
 
-  const child = spawn(executable, ["--adapter-bridge"], {
+function startHelper(executable: string, peer: string, directory: string) {
+  const child = NodeChildProcess.spawn(executable, [], {
     cwd: directory,
-    env: { TMPDIR: directory },
-    stdio: ["pipe", "pipe", "inherit"],
+    env: { TMPDIR: directory, T3_CLAUDE_TEST_PARENT_ONLY: "fixture" },
+    stdio: ["pipe", "pipe", "ignore"],
   });
-  const output = createInterface({ input: child.stdout, crlfDelay: Infinity })[
+  const output = NodeReadline.createInterface({ input: child.stdout, crlfDelay: Infinity })[
     Symbol.asyncIterator
   ]();
-  const exit = new Promise<Error | number | null>((resolve) => {
-    child.once("error", resolve);
+  const exit = new Promise<number | null>((resolve) => {
+    child.once("error", () => resolve(null));
     child.once("close", resolve);
   });
-  // Keep broken pipes on the same failure path as an absent reply.
   child.stdin.on("error", () => {});
 
-  const readReply = async () => {
-    const line = await output.next();
-    if (line.done) throw new Error("Rust fixture closed before replying.");
-    return JSON.parse(line.value) as unknown;
+  const exchange = async (frame: object, expected: "ready" | "ok" | "closed") => {
+    child.stdin.write(JSON.stringify(frame) + "\n");
+    const line = await within(output.next(), expected === "ready" ? 20_000 : 6_000);
+    if (line.done) throw new Error("Claude stdio helper closed before replying.");
+    let reply: { readonly type?: unknown; readonly value?: unknown } | null;
+    try {
+      reply = JSON.parse(line.value);
+    } catch {
+      throw new Error("Invalid Claude stdio helper reply.");
+    }
+    if (reply?.type !== expected) {
+      throw new Error("Claude stdio helper refused " + expected + ".");
+    }
+    return reply.value;
   };
-  const ready = readReply();
-  let tail = ready.then(
-    () => {},
-    () => {},
-  );
-  let closing: Promise<void> | undefined;
 
-  const command = <Frame extends { readonly type: string }>(frame: Frame) => {
-    const reply = tail.then(async () => {
-      child.stdin.write(JSON.stringify(frame) + "\n");
-      return readReply();
-    });
-    tail = reply.then(
-      () => {},
-      () => {},
-    );
+  const ready = exchange(
+    {
+      type: "open",
+      version: 1,
+      profile: "session",
+      program: peer,
+      cwd: directory,
+      home: directory,
+    },
+    "ready",
+  ).then((value) => {
+    const receipt = value as { version?: unknown; pid?: unknown } | null;
+    if (receipt?.version !== 1 || typeof receipt.pid !== "number" || receipt.pid <= 0) {
+      throw new Error("Invalid Claude stdio readiness receipt.");
+    }
+  });
+  let tail: Promise<unknown> = ready;
+  const command = (frame: { readonly type: string }) => {
+    const reply = tail.then(() => exchange(frame, "ok"));
+    tail = reply;
     return reply;
   };
 
-  const close = () =>
-    (closing ??= tail.then(async () => {
+  const close = async () => {
+    try {
+      if (
+        await tail.then(
+          () => true,
+          () => false,
+        )
+      ) {
+        const status = (await exchange({ type: "close" }, "closed")) as {
+          code: number | null;
+          signal: number | null;
+        };
+        if (status.code !== 0 && status.signal !== 9) {
+          throw new Error("Unexpected Claude fixture child exit.");
+        }
+      }
+    } finally {
       child.stdin.end();
-      const status = await exit;
-      if (status !== 0) throw new Error(`Rust fixture exit: ${status}`);
-    }));
+      let status: number | null;
+      try {
+        status = await within(exit, 6_000);
+      } catch {
+        child.kill("SIGTERM");
+        status = await within(exit, 20_000);
+      }
+      if (status !== 0) throw new Error("Claude stdio helper exited unsuccessfully.");
+    }
+  };
+  return { ready, command, close };
+}
+
+export function makeClaudeStdioFixture(
+  executable: string,
+  peer: string,
+  directory: string,
+  expected: ClaudeAgentSdkQueryOptions,
+) {
+  if (
+    !NodePath.isAbsolute(executable) ||
+    NodePath.basename(executable) !== "t3-code-ls-claude-stdio"
+  ) {
+    throw new Error("Use the absolute t3-code-ls-claude-stdio path.");
+  }
+  if (
+    !NodePath.isAbsolute(peer) ||
+    !/^claude_stdio_host-[a-f0-9]+$/.test(NodePath.basename(peer))
+  ) {
+    throw new Error("Use the absolute deterministic Claude child path.");
+  }
+
+  let helper: ReturnType<typeof startHelper> | undefined;
+  let closing: Promise<void> | undefined;
 
   const backgroundHandled = Promise.withResolvers<void>();
   const approvals = new Map<number, AbortController>();
@@ -92,7 +164,11 @@ export function makeClaudeStdioFixture(executable: string, directory: string) {
         readonly complete: (id: string) => void;
       }
     | undefined;
-  let opened = false;
+  const close = () =>
+    (closing ??= (async () => {
+      for (const controller of approvals.values()) controller.abort();
+      await helper?.close();
+    })());
   const unsupported = (method: string) =>
     Effect.fail(failure(method, new Error("Outside the Claude stdio fixture profile.")));
 
@@ -101,21 +177,30 @@ export function makeClaudeStdioFixture(executable: string, directory: string) {
     open: ({ options }) =>
       Effect.tryPromise({
         try: async () => {
-          const permit = options.canUseTool;
+          const { canUseTool: permit, onUserDialog, onElicitation, ...settings } = options;
           if (
-            opened ||
-            options.sessionId !== "fixture" ||
-            options.permissionMode !== "default" ||
-            permit === undefined ||
-            (await ready) !== "ready"
+            helper !== undefined ||
+            closing !== undefined ||
+            typeof permit !== "function" ||
+            (onUserDialog !== undefined && typeof onUserDialog !== "function") ||
+            (onElicitation !== undefined && typeof onElicitation !== "function") ||
+            !NodeUtil.isDeepStrictEqual(settings, expected)
           ) {
             throw new Error("Expected a fresh approval-required Claude fixture session.");
           }
-          opened = true;
+          const started = startHelper(executable, peer, directory);
+          helper = started;
+          try {
+            await started.ready;
+          } catch (cause) {
+            await close().catch(() => {});
+            throw cause;
+          }
+          const command = started.command;
           const messages = async function* () {
             while (closing === undefined) {
               if (approvalFailure !== undefined) throw approvalFailure;
-              // The Rust test executable owns these bounded replies and their schema.
+              // The helper owns these bounded replies and their schema.
               const event = (await command({ type: "pull" })) as FixtureEvent | null;
               if (event === null) continue;
               switch (event[0]) {
@@ -137,7 +222,7 @@ export function makeClaudeStdioFixture(executable: string, directory: string) {
                       toolUseID: request.tool_use_id,
                       requestId: String(ticket),
                     })
-                      .then((decision) => command({ ...decide, decision }))
+                      .then((decision) => closing === undefined && command({ ...decide, decision }))
                       .catch((cause: unknown) => {
                         approvalFailure = new Error("Rust fixture approval failed.", { cause });
                       })
@@ -179,8 +264,12 @@ export function makeClaudeStdioFixture(executable: string, directory: string) {
                 const done = Promise.withResolvers<string>();
                 const id = command({ type: "interrupt" });
                 pendingInterrupt = { id, complete: done.resolve };
-                await id;
-                await done.promise;
+                try {
+                  await id;
+                  await within(done.promise, 6_000);
+                } finally {
+                  pendingInterrupt = undefined;
+                }
               },
               catch: (cause) => failure("interrupt", cause),
             }),

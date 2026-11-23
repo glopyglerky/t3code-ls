@@ -2161,7 +2161,9 @@
       ],
       "rust_paths": [
         "apps/server/src/orchestration-v2/Adapters/claude_stdio_control.rs",
-        "apps/server/src/orchestration-v2/Adapters/claude_stdio_host.rs"
+        "apps/server/src/orchestration-v2/Adapters/claude_stdio_host.rs",
+        "apps/server/src/orchestration-v2/Adapters/claude_stdio_helper.rs",
+        "crates/core/src/bin/t3-code-ls-claude-stdio.rs"
       ],
       "adapter_paths": [
         ".github/workflows/claude-stdio.yml",
@@ -2178,14 +2180,16 @@
       ],
       "acceptance_tests": [
         "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts",
+        "apps/server/scripts/check-claude-stdio-helper.mjs",
         "crates/core/tests/claude_stdio_control.rs",
         "crates/core/tests/claude_stdio_host.rs"
       ],
       "hosted_acceptance": {
-        "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts": ".github/workflows/claude-stdio.yml"
+        "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts": ".github/workflows/claude-stdio.yml",
+        "apps/server/scripts/check-claude-stdio-helper.mjs": ".github/workflows/claude-stdio.yml"
       },
       "retired_paths": [],
-      "notes": "T01 Unix stream-JSON session candidate for @anthropic-ai/claude-agent-sdk 0.3.321 initialize, user input, permission and interrupt frames. Run 45115372585 exercised the real ClaudeAdapterV2 through the Rust provider process owner with a deterministic child. Live sessions select the SDK runner. Installed CLI, hook, account, full control and application parity require qualification.",
+      "notes": "T01/T08 Unix stream-JSON candidate for @anthropic-ai/claude-agent-sdk 0.3.321 initialize, user input, permission and interrupt frames. The scoped t3-code-ls-claude-stdio executable owns the deterministic child in the ClaudeAdapterV2 test and the isolated vendor initialization proof. Run 45115372585 validated the earlier Cargo test bridge. Live sessions select the SDK runner. Installed CLI, hook, account, full control and application parity require qualification.",
       "rust_crates": ["crates/core"]
     },
     {

@@ -1,54 +1,76 @@
 # Run the Claude adapter through the Rust stdio host
 
 T01 and T08 share this controlled test. The production `ClaudeAdapterV2` receives
-a test runner through `ClaudeAgentSdkQueryRunner.open`. The runner starts the
-Rust `claude_stdio_host` Cargo test executable, which starts a deterministic
-child using `ClaudeStdioSession`. The adapter still owns approval presentation,
-steering state, result ownership, and the terminal event.
+a test runner through `ClaudeAgentSdkQueryRunner.open`. After validating the
+options, the runner starts the `t3-code-ls-claude-stdio` executable. The helper
+owns one `ClaudeStdioSession` and starts the deterministic test child. The
+adapter owns approval presentation, steering state, result ownership, and the
+terminal event.
 
-The test makes SDK `query()` throw if called. The bridge launch accepts an
-explicit Cargo test executable and gives it a temporary working directory and
-environment. The bridge starts only its own executable as the child. The child
-asserts the exact user and `now` steer frames, including Unicode, whitespace,
-null and omitted fields, and distinct UUIDs. It runs no tools and opens no
-network connections.
+The child asserts the exact user and `now` steer frames, including Unicode,
+whitespace, null and omitted fields, and distinct UUIDs. It runs no tools and
+opens no network connections. The adapter test rejects an unsupported
+permission mode before the child starts and makes SDK `query()` throw if called.
 
 The child withdraws an approval and reuses its wire request ID for a distinct
-tool use. The adapter emits cancellation for the first request. The Rust host
-refuses its late decision and writes the denial for the current ticket. The
-task-notification result leaves the foreground turn active. During interrupt,
-the child sends a foreign acknowledgment, then two copies of the foreground
-result, and then the matching acknowledgment. The adapter retains the foreground
-result and emits one terminal event for the interrupted turn.
+tool use. The adapter cancels the first request. The helper refuses the late
+answer and forwards the denial for the current ticket. A task-notification
+result leaves the foreground turn active. During interrupt, the child sends a
+foreign acknowledgment, two copies of the foreground result, and the matching
+acknowledgment. The adapter keeps the foreground result and emits one terminal
+event.
 
-## Run the fixture
+## Run the checks
 
-Run from the repository root on Unix with the pinned Rust compiler route, a
-frozen pnpm install, and `CARGO_TARGET_DIR` on the approved build filesystem.
+Use the [Claude stdio workflow](../../../.github/workflows/claude-stdio.yml)
+with the pinned Lustr and BlueFe compiler and frozen pnpm dependencies. The
+workflow builds the helper with
+`build --locked -p t3-code-ls-core --features claude-stdio-helper --bin t3-code-ls-claude-stdio`.
+It builds `claude_stdio_host` separately as the deterministic provider executable.
+
+Set `T3_CLAUDE_STDIO_HELPER` and `T3_CLAUDE_STDIO_FIXTURE` to the absolute
+executable paths reported by Cargo. Run the adapter test from the repository
+root.
 
 ```sh
-cargo test --locked -p t3-code-ls-core --test claude_stdio_control --test claude_stdio_host
-
-fixture="$(
-  cargo test --locked -p t3-code-ls-core --test claude_stdio_host --no-run --message-format=json |
-    node --input-type=module -e '
-      import { readFileSync } from "node:fs";
-      const artifact = readFileSync(0, "utf8").trim().split("\n").map(JSON.parse)
-        .find((entry) => entry.target?.name === "claude_stdio_host" && entry.executable);
-      if (!artifact) process.exit(1);
-      process.stdout.write(artifact.executable);
-    '
-)" &&
-test -x "$fixture" &&
-T3_CLAUDE_STDIO_FIXTURE="$fixture" pnpm exec vp test run --project t3 \
+pnpm exec vp test run --project t3 --maxWorkers 1 \
   apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts \
-  -t "runs ClaudeAdapterV2 against the Rust stdio host" --maxWorkers=1
+  -t "runs ClaudeAdapterV2 against the Rust stdio host"
 ```
 
-The adapter test runs only when `T3_CLAUDE_STDIO_FIXTURE` is set. Confirm that
-Vitest reports one passing test for the filtered run.
+On Linux, pass the same paths to the helper contract check.
+
+```sh
+node apps/server/scripts/check-claude-stdio-helper.mjs contract \
+  "$T3_CLAUDE_STDIO_HELPER" "$T3_CLAUDE_STDIO_FIXTURE"
+```
+
+The vendor workflow uses the same helper with the pinned Anthropic executable
+in a fresh profile and a separate network namespace. It verifies the
+initialization receipt, the executable and parent in `/proc`, and reaping
+after close. The `initialize-only` profile refuses turn commands.
+
+## Helper protocol
+
+The parent sends one JSON object per line over stdin. The first line supplies
+`type: "open"`, version `1`, a `session` or `initialize-only` profile, and
+absolute `program`, `cwd`, and `home` paths. The caller selects the executable
+and supplies isolated directories. The helper uses fixed stream-JSON arguments
+and clears the child's inherited environment. Provider stderr stays in the session.
+
+A matching initialization reply produces `ready` with the protocol version
+and child PID. A failure reports its stage and code. The `session` profile
+accepts user frames, permission decisions, interrupt requests, and pulls.
+`close` returns the child status after reaping. EOF and SIGTERM also close the
+direct child. The helper bounds startup frames at 8 KiB, subsequent frames
+at 256 KiB, pending requests and queued events at 16 each, the initialization
+wait at 15 seconds, and pipe writes at 2 seconds. The parent owns the isolated
+directories and must drain its replies or close the session.
 
 ## Source and limits
+
+- Helper patch base `83dcf23366f6675f93284bcb3cfefe251e3e1bcf`, tree
+  `3b16a2b46c911a2857b3f50b6627afc8084d9cfe`.
 
 - Fork base `ed028459c046a487f6e7e0287ec985ffd01e160d`, tree
   `bad51fb35d1bee7f142a6b7023e2286f0d979732`. Rust host introduced by
@@ -71,10 +93,10 @@ The production SDK runner still owns CLI acquisition and version provenance,
 merged configuration and native sandbox policy, hooks, permission rules and
 suggestions, MCP and elicitation, account and model changes, resume and fork,
 background tasks, and restart and shutdown behavior. The fixture verifies the
-adapter callback for one approval-required session. Production selection and
-per-platform qualification remain open.
+adapter callback for one approval-required session. Production selection,
+descendant-process supervision, and per-platform qualification remain open.
 
-## Developer check
+## Previous Cargo test bridge checks
 
 Linux x86_64 ran the focused Rust tests with bootstrap Rust 1.99.1. All four
 control tests and the standalone host fixture passed. The host test executable

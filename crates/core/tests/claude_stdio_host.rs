@@ -14,10 +14,10 @@ mod unix {
     use std::os::unix::process::ExitStatusExt;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
-    use t3_code_ls_core::claude_stdio_control::{Incoming, PermissionTicket};
+    use t3_code_ls_core::claude_stdio_control::Incoming;
     use t3_code_ls_core::claude_stdio_host::{ClaudeStdioSession, Error};
     use t3_code_ls_core::json::{self, Value};
-    use t3_code_ls_core::provider_process::{Config, Error as ProcessError, Limits, read_frame};
+    use t3_code_ls_core::provider_process::{Config, Error as ProcessError, Limits};
 
     const WAIT: Duration = Duration::from_secs(5);
     const FIRST: &str = r#"{"type":"user","message":{"role":"user","content":"first"},"parent_tool_use_id":null,"uuid":"11111111-1111-4111-8111-111111111111"}"#;
@@ -48,17 +48,30 @@ mod unix {
             return fixture(&args.next().expect("fixture mode"));
         }
 
+        if mode.as_deref() == Some("--print") {
+            assert_eq!(
+                args.collect::<Vec<_>>(),
+                [
+                    "--input-format",
+                    "stream-json",
+                    "--output-format",
+                    "stream-json",
+                    "--verbose",
+                    "--no-session-persistence",
+                    "--setting-sources",
+                    "",
+                ]
+            );
+            assert!(env::var_os("T3_CLAUDE_TEST_PARENT_ONLY").is_none());
+            assert!(env::var_os("ANTHROPIC_API_KEY").is_none());
+            fs::write("adapter-child-started", []).unwrap();
+            return fixture("adapter");
+        }
+        assert!(mode.is_none(), "unknown Claude test executable mode");
+
         let directory = env::temp_dir().join(format!("t3ls-claude-fixture-{}", std::process::id()));
         fs::create_dir(&directory).expect("create fresh fixture profile");
         let profile = Profile(directory);
-        if mode.as_deref() == Some("--adapter-bridge") {
-            return adapter_bridge(&profile.0);
-        }
-        if mode.as_deref() == Some("--vendor-handshake") {
-            let program = PathBuf::from(args.next().expect("pinned Claude executable"));
-            assert!(args.next().is_none());
-            return vendor_handshake(&profile.0, program);
-        }
         session(&profile.0);
         eprintln!(
             "Claude stdio fixture: user/steer identity, revocation, interrupt order and reap"
@@ -90,55 +103,6 @@ mod unix {
                 request_timeout: WAIT,
             },
         }
-    }
-
-    #[cfg(target_os = "linux")]
-    fn vendor_handshake(profile: &Path, program: PathBuf) {
-        assert!(program.is_absolute());
-        let program = fs::canonicalize(program).expect("resolve the pinned executable");
-        let fixture = config(profile, "");
-        let input = Config {
-            program: program.clone(),
-            args: [
-                "--print",
-                "--input-format",
-                "stream-json",
-                "--output-format",
-                "stream-json",
-                "--verbose",
-                "--no-session-persistence",
-                "--setting-sources",
-                "",
-            ]
-            .into_iter()
-            .map(Into::into)
-            .collect(),
-            environment: vec![(
-                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".into(),
-                "1".into(),
-            )],
-            limits: Limits {
-                max_frame_bytes: 256 * 1024,
-                request_timeout: Duration::from_secs(15),
-                ..fixture.limits
-            },
-            ..fixture
-        };
-        let session = ClaudeStdioSession::open(input).expect("vendor CLI initialization receipt");
-        assert!(
-            matches!(session.initialization_response(), Value::Object(fields) if !fields.is_empty()),
-            "Expected a nonempty initialization receipt"
-        );
-        let process = PathBuf::from(format!("/proc/{}", session.id()));
-        assert_eq!(fs::read_link(process.join("exe")).unwrap(), program);
-        session.close().expect("close and reap the vendor CLI");
-        assert!(!process.exists());
-        println!("Pinned vendor CLI acknowledged initialization and was reaped without a prompt.");
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    fn vendor_handshake(_profile: &Path, _program: PathBuf) {
-        panic!("The pinned vendor handshake fixture requires Linux");
     }
 
     fn fixture(mode: &str) {
@@ -302,82 +266,6 @@ mod unix {
         emit(output, &foreground);
         reply(output, &interrupt);
         reply(output, &interrupt);
-    }
-
-    fn adapter_bridge(profile: &Path) {
-        let mut session = ClaudeStdioSession::open(config(profile, "adapter")).unwrap();
-        assert_eq!(
-            session
-                .initialization_response()
-                .get("request_id")
-                .and_then(Value::as_str),
-            Some("t3-initialize-1")
-        );
-        let mut input = io::stdin().lock();
-        let mut output = io::stdout().lock();
-        let mut approvals = Vec::<(PermissionTicket, bool)>::new();
-        let mut decisions = 0;
-        emit(&mut output, r#""ready""#);
-
-        while let Some(line) = read_frame(&mut input, 1024).expect("bounded adapter command") {
-            let command = json::parse(&line).unwrap();
-            let response = match command.get("type").and_then(Value::as_str).unwrap() {
-                "user" => {
-                    session.offer(&line).unwrap();
-                    Value::Null
-                }
-                "interrupt" => Value::String(session.interrupt().unwrap()),
-                "permission" => {
-                    let index = command.get("ticket").and_then(Value::as_u64).unwrap() as usize;
-                    let (ticket, withdrawn) = &approvals[index];
-                    let decision = command.get("decision").unwrap();
-                    let sent = session
-                        .answer_permission(ticket, &json::stringify(decision))
-                        .unwrap();
-                    assert_eq!(sent, !withdrawn);
-                    decisions += 1;
-                    Value::Bool(sent)
-                }
-                "pull" => match session.poll(Duration::from_millis(50)).unwrap() {
-                    None => Value::Null,
-                    Some(Incoming::Message(value)) => event("message", value),
-                    Some(Incoming::BackgroundResult(value)) => event("background", value),
-                    Some(Incoming::PermissionRequested { ticket, request }) => {
-                        assert!(approvals.len() < 2);
-                        let id = approvals.len();
-                        approvals.push((ticket, false));
-                        event("permission", Value::Array(vec![index_value(id), request]))
-                    }
-                    Some(Incoming::PermissionWithdrawn(ticket)) => {
-                        let index = approvals
-                            .iter()
-                            .position(|(candidate, _)| candidate == &ticket)
-                            .unwrap();
-                        approvals[index].1 = true;
-                        event("withdrawn", index_value(index))
-                    }
-                    Some(Incoming::InterruptResponse {
-                        request_id,
-                        success: true,
-                        ..
-                    }) => event("interrupted", Value::String(request_id)),
-                    other => panic!("unexpected fixture event: {other:?}"),
-                },
-                other => panic!("unexpected adapter command: {other}"),
-            };
-            emit(&mut output, &json::stringify(&response));
-        }
-
-        assert_eq!(decisions, 2);
-        assert_reaped(session);
-    }
-
-    fn event(kind: &str, payload: Value) -> Value {
-        Value::Array(vec![Value::String(kind.to_owned()), payload])
-    }
-
-    fn index_value(index: usize) -> Value {
-        Value::Number(index.to_string())
     }
 
     fn read(input: &mut impl BufRead, line: &mut String) -> Value {
