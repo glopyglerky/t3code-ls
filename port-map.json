@@ -834,6 +834,39 @@
       "rust_crates": ["crates/core"]
     },
     {
+      "id": "git-repository-discovery",
+      "state": "candidate",
+      "domain_owner": "apps/server/src/vcs",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/server/src/vcs/GitVcsDriverCore.ts",
+          "blob": "32042a0ff5e5f838b17f1b53f8dbf3db8524e49d"
+        }
+      ],
+      "rust_paths": ["apps/server/rust/git-workspace/src/main.rs"],
+      "adapter_paths": [
+        ".github/workflows/workspace-edits.yml",
+        "apps/server/src/vcs/GitVcsDriverCore.ts"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["linux-x64"],
+          "state": "candidate",
+          "implementation": "rust",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": ["apps/server/src/vcs/GitVcsDriverCore.test.ts"],
+      "hosted_acceptance": {
+        "apps/server/src/vcs/GitVcsDriverCore.test.ts": ".github/workflows/workspace-edits.yml"
+      },
+      "retired_paths": [],
+      "notes": "T06. Opt-in local repository directory and HEAD discovery through gix. Includes, explicit discovery overrides, bare repositories and missing or failed helpers retain the Git route. Full Git workflow and performance qualification remain open.",
+      "rust_crates": ["apps/server/rust/git-workspace"]
+    },
+    {
       "id": "guest-share-decisions",
       "state": "integrated",
       "domain_owner": "apps/server/src/guest",
