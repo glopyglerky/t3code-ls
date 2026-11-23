@@ -609,7 +609,7 @@ revision with the same child replay watermark. [Baseline](https://github.com/glo
 The negotiated live refresh sends a payload-free notification when an ancestor
 changes the inherited view. The hosted check covers the active SQLite
 subscription, same-cursor page rejection in the shared client, and a native
-anchored read. Packaged native live refresh and J04 performance remain open.
+anchored read.
 [Live refresh check](https://github.com/glopyglerky/t3code-ls/actions/runs/45181752443)
 
 The history window and its older page include an ancestry revision read from
@@ -617,6 +617,13 @@ the same transaction as their rows. An aware client restores expanded rows
 only when the view revisions and child replay watermarks agree. The native
 check verifies one revision request per versioned read.
 [Coherent history check](https://github.com/glopyglerky/t3code-ls/actions/runs/45188834743)
+
+A bundled Linux x64 Chromium run kept the child at replay sequence 51 while
+its inherited view advanced from revision 52 to 58. Three older rows, keyboard
+focus and scroll position survived the refresh. Child replay then delivered
+sequences 59 and 60 in order, and the reopened omdb retained the new window.
+J04 performance remains open.
+[Packaged history check](https://github.com/glopyglerky/t3code-ls/actions/runs/45228499323)
 
 ## T05 offline publication under the serving fence
 
@@ -726,3 +733,14 @@ the descriptor 228 ms later than stock at the paired median (19.8%, range
 162–270 ms). Stock used SQLite WAL/NORMAL. Both native variants used omdb
 Immediate. CPU, RSS and cached first-paint attribution remain unqualified.
 [Balanced stock and native reopen comparison](https://github.com/glopyglerky/t3code-ls/actions/runs/45218299197)
+
+The later descriptor-boundary diagnostic repeated six balanced rounds using
+the same 6,400-message workload. Without span tracing, verified-page reuse
+saved 143 ms at the paired median against native control (130–185 ms) and
+reached readiness 194 ms later than stock (179–225 ms). The traced median
+`Omdb.make` span was 342 ms in native control and 205 ms with reuse. Traced
+minus untraced descriptor timings ranged from −75 to +41 ms across the native
+control pairs. These intervals include waits and scheduling. CPU and physical
+I/O attribution remain open, and this run preserves the distinct durability
+profiles and unchanged product engine pin.
+[Readiness span comparison](https://github.com/glopyglerky/t3code-ls/actions/runs/45224963241)

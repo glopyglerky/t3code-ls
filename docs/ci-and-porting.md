@@ -63,6 +63,16 @@ The integrated source can advance to an immutable default-branch commit before a
 
 The nightly checker compares Git ancestry as well as trees. An equal revision is current; an ancestor nightly is already integrated and creates no reverse-import or removal work. A newer or divergent nightly requires review. Complete tree differences remain in the report, and missing shallow ancestry fails explicitly. Nightly source locks retain their moved-tag and publication rollback checks. None of these reports changes the source pin or qualification.
 
+## Packaged peer-link recovery
+
+The Linux archive fixture starts two servers with disposable omdb stores on
+loopback. It reads the linked environment through OAuth/MCP, verifies both
+identities after process restart, and checks that revocation survives reopening
+both stores. An incompatible endpoint received one descriptor probe and zero
+credential requests. Live Connect edge and additional platform checks remain
+open.
+[Packaged peer-link run](https://github.com/glopyglerky/t3code-ls/actions/runs/45228554914)
+
 ## Generate plans locally
 
 Run from the repository root. Reports must stay outside the source checkout.
