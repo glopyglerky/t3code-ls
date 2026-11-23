@@ -29,7 +29,6 @@ import { fixedTime, fixedDateTime, sampleEvents, jsonPayloads, makeEvent } from 
 import { createMigratedSqlite, hash, nativeRequest, normalized, withNative } from "./redb-domain-fixture.mjs";
 
 const collect = (stream) => stream.pipe(Stream.runCollect, Effect.map(Array.from));
-const old = fixedTime;
 const cleanupTime = "2026-11-12T12:00:00.000Z";
 const command = (id, events, effects = []) => ({
   commandId: id, threadId: "thread:main", commandType: "fixture.command",
@@ -118,10 +117,16 @@ export async function verifyAgedRetention(executable) {
         Assert.ok(Option.isSome(yield* receipts.getByCommandId(initial.commandId)));
         beforeRows = normalized(yield* eventRows.read({ after_sequence: 0, limit: 4096 }));
         boundary = yield* sink.latestSequence();
-        // Make the synthetic mark due through the production row adapter; no wall-clock wait.
-        for (const name of ["thread-projections", "event-log-prune-mark"])
-          yield* rows.write({ kind: "metadata", name, sequence: boundary,
-            schema_version: 2, updated_at: old }, Rows.EmptyRows);
+        // The first pass records the retention mark. EventSink owns the separate
+        // projection watermark, which must already cover the full fixture.
+        const initialPass = yield* at(fixedTime, maintenance.pruneEventStore());
+        Assert.equal(initialPass.deletedEventCount, 0);
+        Assert.equal(yield* eventRows.prunedThrough, 0);
+        const metadata = yield* rows.read({ kind: "metadata" }, Rows.MetadataRows);
+        Assert.equal(metadata.find((row) => row.projection_name === "thread-projections")?.last_sequence, boundary);
+        Assert.deepEqual(metadata.find((row) => row.projection_name === "event-log-prune-mark"), {
+          projection_name: "event-log-prune-mark", last_sequence: boundary, updated_at: fixedTime,
+        });
         yield* database.request({ operation: "storage_backup", destination: backupPath }, Schema.Unknown);
         let interrupted = false;
         const partial = yield* Effect.exit(at(cleanupTime, maintenance.pruneEventStore(
