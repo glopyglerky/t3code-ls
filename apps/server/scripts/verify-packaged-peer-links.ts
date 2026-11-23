@@ -159,6 +159,13 @@ try {
   let b = await start(1, "initial");
   let owner = await authenticatePackagedServer(a, abort.signal);
   let peer = await authenticatePackagedServer(b, abort.signal);
+  checkpoint("enable linking through both authenticated settings routes");
+  for (const client of [owner, peer]) {
+    const settings = await client.rpc((rpc) => rpc[WS_METHODS.serverUpdateSettings]({
+      patch: { linkedEnvironmentsEnabled: true },
+    }));
+    Assert.equal(settings.linkedEnvironmentsEnabled, true);
+  }
   const identityA = await descriptor(a);
   const identityB = await descriptor(b);
   Assert.notEqual(identityA.environmentId, identityB.environmentId);
@@ -182,6 +189,13 @@ try {
   const refused = await owner.rpc((rpc) => rpc[WS_METHODS.peerLinksLink]({
     url: `http://127.0.0.1:${address.port}`, pairingCode: pairing.credential, access: "read-only",
   }).pipe(Effect.flip));
+  report.refusal = {
+    kind: refused._tag,
+    reason: refused._tag === "PeerLinkError" ? refused.reason : null,
+    probes,
+    credentialRequests,
+    unexpectedRequests,
+  };
   Assert.ok("reason" in refused);
   Assert.equal(refused.reason, "incompatible");
   Assert.ok(probes > 0);
@@ -234,7 +248,11 @@ try {
   report.observed = { linkedRead: true, bothIdentitiesStable: true, durableRevocation: true,
     ineligibleEndpointCredentialRequests: credentialRequests, database: "omdb" };
   report.status = "passed";
-} catch {
+} catch (error) {
+  if (error instanceof Error) {
+    const location = error.stack?.match(/verify-packaged-peer-links\.ts:(\d+):(\d+)/u);
+    if (location) report.failedAt = { line: Number(location[1]), column: Number(location[2]) };
+  }
   failed = true;
   report.status = "failed";
 } finally {
