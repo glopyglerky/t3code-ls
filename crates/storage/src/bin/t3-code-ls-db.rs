@@ -114,7 +114,7 @@ enum Request {
     },
     ApplicationProjectionReadsPrepare {},
     ApplicationProjectionsLookup {
-        transaction_id: String,
+        transaction_id: Option<String>,
         query: ProjectionLookup,
     },
     ApplicationProjectionsRecords {
@@ -988,9 +988,10 @@ async fn evaluate(
         Request::ApplicationProjectionsLookup {
             transaction_id,
             query,
-        } => Ok(transactions
-            .projections_lookup(&transaction_id, query)
-            .await?),
+        } => match transaction_id {
+            Some(id) => Ok(transactions.projections_lookup(&id, query).await?),
+            None => Ok(transactions.projections_lookup_once(query).await?),
+        },
         Request::ApplicationProjectionsRecords {
             transaction_id,
             query,

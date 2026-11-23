@@ -656,8 +656,11 @@ export const make = Effect.gen(function* () {
       input: Readonly<Record<string, unknown>>,
       response: Schema.Decoder<A>,
     ) {
-      if (singleProjectionReads && operation === "application_projections_records" &&
-        (yield* CurrentTransaction) === undefined) {
+      if (
+        singleProjectionReads &&
+        (operation === "application_projections_records" || operation === "application_projections_lookup") &&
+        (yield* CurrentTransaction) === undefined
+      ) {
         yield* outsideSqlTransaction;
         if (Object.hasOwn(input, "operation") || Object.hasOwn(input, "transaction_id"))
           return yield* new NativeDatabase.NativeDatabaseInputError({ stage: "request" });
