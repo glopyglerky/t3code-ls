@@ -8,6 +8,7 @@ import * as NodeCrypto from "node:crypto";
 import { EventEmitter, once } from "node:events";
 import * as NodeFS from "node:fs";
 import * as NodeNet from "node:net";
+import * as NodeHttp from "node:http";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
@@ -70,7 +71,16 @@ const initialTasks = "- [ ] First milestone\n- [ ] Second milestone\n- [ ] Keep 
 const durableTextProof = process.env.T3_CODE_LS_DURABLE_TEXT_PROOF === "true";
 const voiceDraftProof = process.env.T3_CODE_LS_VOICE_DRAFT_PROOF === "true";
 const pdfLinkProof = process.env.T3_CODE_LS_PDF_LINK_PROOF === "true";
+const pdfExternalLinkProof = process.env.T3_CODE_LS_PDF_EXTERNAL_LINK_PROOF === "true";
+Assert.ok(!pdfExternalLinkProof || (pdfLinkProof && bundledClient), "External PDF links require the packaged PDF proof");
 const htmlInteractionProof = process.env.T3_CODE_LS_HTML_INTERACTION_PROOF === "true";
+const pdfExternalOnlyProof = process.env.T3_CODE_LS_PDF_EXTERNAL_ONLY_PROOF === "true";
+Assert.ok(!pdfExternalOnlyProof || (pdfExternalLinkProof && bundledClient), "PDF-only qualification requires the packaged external-link case");
+Assert.ok(!pdfExternalOnlyProof || [
+  parallelTurnsProof, spliceNegotiationProof, splitPtyProof, bundledPtyProof, ptyRestartProof,
+  multiTabDraftProof, draftStorageProof, fileEditorProof, durableTextProof, voiceDraftProof,
+  htmlInteractionProof, pairingProof !== undefined, dioxusFindProof !== undefined,
+].every((enabled) => !enabled), "PDF-only qualification cannot replace another selected proof scope");
 Assert.ok(!htmlInteractionProof || bundledClient, "Interactive HTML must exercise the packaged browser route");
 const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
 const capturedApproval = {
@@ -1502,11 +1512,11 @@ function textRevisionIdentity(stateDirectory: string, initialize = false) {
 
 const linkedPdfName = "fixture-links.pdf";
 
-function linkedPdf(): string {
+function linkedPdf(externalUrl?: string): string {
   const page = (contents: number, annotations = "") =>
     `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents ${contents} 0 R ${annotations} >>`;
   const stream = (text: string) => {
-    const command = `BT /F1 24 Tf 30 700 Td (${text}) Tj ET`;
+    const command = `BT /F1 24 Tf 30 700 Td (${text}) Tj${externalUrl && text === "See page 2" ? " 0 -60 Td (Open controlled destination) Tj" : ""} ET`;
     return `<< /Length ${command.length} >>\nstream\n${command}\nendstream`;
   };
   const objects = [
@@ -1514,7 +1524,7 @@ function linkedPdf(): string {
     "<< /Type /Pages /Count 2 /Kids [3 0 R 5 0 R] >>",
     page(
       4,
-      "/Annots [<< /Type /Annot /Subtype /Link /Rect [30 690 220 730] /Border [0 0 0] /Dest [5 0 R /XYZ 0 792 0] >>]",
+      `/Annots [<< /Type /Annot /Subtype /Link /Rect [30 690 220 730] /Border [0 0 0] /Dest [5 0 R /XYZ 0 792 0] >>${externalUrl ? ` << /Type /Annot /Subtype /Link /Rect [30 630 360 670] /Border [0 0 0] /A << /S /URI /URI (${externalUrl}) >> >>` : ""}]`,
     ),
     stream("See page 2"),
     page(6),
@@ -1531,33 +1541,103 @@ function linkedPdf(): string {
   return `${source}xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.join("")}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
 }
 
-async function verifyLinkedPdf(page: Page) {
-  const panel = page.getByRole("button", { name: "Toggle right panel", exact: true });
-  if ((await panel.getAttribute("aria-pressed")) !== "true") await panel.click();
-  await page.locator('[aria-label="Open a surface"]').getByRole("button", { name: /^Files/u }).click();
-  const [response] = await Promise.all([
-    page.waitForResponse((response) => {
-      const url = new URL(response.url());
-      return (
-        url.origin === new URL(page.url()).origin &&
-        /^\/api\/assets\/[^/]+\/fixture-links\.pdf$/u.test(url.pathname)
-      );
-    }),
-    page.locator(`[role="treeitem"][data-item-path="${linkedPdfName}"]`).click(),
-  ]);
-  Assert.ok(response.ok(), `Signed fixture PDF returned HTTP ${response.status()}`);
-  const reader = page.getByRole("region", { name: linkedPdfName, exact: true });
-  await page.getByText("1 / 2 pages", { exact: true }).waitFor({ state: "visible" });
-  const destination = reader.getByRole("link", { name: "Page 2", exact: true });
-  await destination.waitFor({ state: "visible" });
-  await reader.getByText("See page 2", { exact: true }).click({ force: true });
-  const targetPage = page.getByText("2 / 2 pages", { exact: true });
-  await targetPage.waitFor({ state: "visible", timeout: 8_000 });
-  await reader.getByText("Fixture PDF destination", { exact: true }).waitFor({ state: "visible" });
-  await page.getByRole("button", { name: "Previous page", exact: true }).click();
-  await destination.press("Enter");
-  await targetPage.waitFor({ state: "visible", timeout: 8_000 });
-  return { signedAssetStatus: response.status(), pointerDestination: 2, keyboardDestination: 2 };
+async function startPdfLinkDestination() {
+  const path = `/pdf-destination-${NodeCrypto.randomUUID()}`;
+  let requests = 0;
+  let unexpected = 0;
+  const server = NodeHttp.createServer((request, response) => {
+    if (request.method === "GET" && request.url === path) {
+      requests++;
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store",
+        "content-security-policy": "default-src 'none'; base-uri 'none'; form-action 'none'" });
+      response.end("<!doctype html><title>Controlled PDF destination</title><h1>Controlled PDF destination</h1>");
+    } else {
+      if (request.url !== "/favicon.ico") unexpected++;
+      response.writeHead(404).end();
+    }
+  });
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  const address = server.address();
+  Assert.ok(address && typeof address !== "string");
+  return { url: `http://127.0.0.1:${address.port}${path}`, requests: () => requests, unexpected: () => unexpected,
+    stop: async () => { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); } };
+}
+
+async function verifyLinkedPdf(page: Page, workspace: string) {
+  const target = pdfExternalLinkProof ? await startPdfLinkDestination() : null;
+  const originalUrl = page.url();
+  const originalPages = page.context().pages().length;
+  let outsideRequests = 0;
+  const observe = (request: { url(): string }) => {
+    const url = new URL(request.url());
+    if (["http:", "https:"].includes(url.protocol) && !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) outsideRequests++;
+  };
+  if (target) page.context().on("request", observe);
+  const popups: Page[] = [];
+  try {
+    if (target) NodeFS.writeFileSync(NodePath.join(workspace, linkedPdfName), linkedPdf(target.url));
+    const panel = page.getByRole("button", { name: "Toggle right panel", exact: true });
+    if ((await panel.getAttribute("aria-pressed")) !== "true") await panel.click();
+    await page.locator('[aria-label="Open a surface"]').getByRole("button", { name: /^Files/u }).click();
+    const [response] = await Promise.all([
+      page.waitForResponse((response) => {
+        const url = new URL(response.url());
+        return (
+          url.origin === new URL(page.url()).origin &&
+          /^\/api\/assets\/[^/]+\/fixture-links\.pdf$/u.test(url.pathname)
+        );
+      }),
+      page.locator(`[role="treeitem"][data-item-path="${linkedPdfName}"]`).click(),
+    ]);
+    Assert.ok(response.ok(), `Signed fixture PDF returned HTTP ${response.status()}`);
+    const reader = page.getByRole("region", { name: linkedPdfName, exact: true });
+    await page.getByText("1 / 2 pages", { exact: true }).waitFor({ state: "visible" });
+    const destination = reader.getByRole("link", { name: "Page 2", exact: true });
+    await destination.waitFor({ state: "visible" });
+    await reader.getByText("See page 2", { exact: true }).click({ force: true });
+    const targetPage = page.getByText("2 / 2 pages", { exact: true });
+    await targetPage.waitFor({ state: "visible", timeout: 8_000 });
+    await reader.getByText("Fixture PDF destination", { exact: true }).waitFor({ state: "visible" });
+    await page.getByRole("button", { name: "Previous page", exact: true }).click();
+    await destination.press("Enter");
+    await targetPage.waitFor({ state: "visible", timeout: 8_000 });
+    let external = null as { pointerOpened: boolean; keyboardOpened: boolean; requests: number; noUnsolicitedRequests: boolean; openerIsolated: boolean } | null;
+    if (target) {
+      Assert.equal(target.requests(), 0, "PDF load and internal jumps must not fetch an external annotation");
+      Assert.equal(page.context().pages().length, originalPages);
+      await page.getByRole("button", { name: "Previous page", exact: true }).click();
+      const web = reader.getByRole("link", { name: target.url, exact: true });
+      await web.waitFor({ state: "visible" });
+      Assert.equal(await web.getAttribute("href"), target.url);
+      Assert.equal(await web.getAttribute("target"), "_blank");
+      Assert.ok((await web.getAttribute("rel"))?.includes("noopener"));
+      await page.waitForTimeout(200);
+      Assert.equal(target.requests(), 0, "Visible link annotations must remain passive before activation");
+      for (const [index, keyboard] of [false, true].entries()) {
+        const [popup] = await Promise.all([
+          page.context().waitForEvent("page", { timeout: 15_000 }),
+          keyboard ? web.press("Enter") : web.click(),
+        ]);
+        popups.push(popup);
+        await popup.waitForURL(target.url, { timeout: 15_000 });
+        await popup.getByRole("heading", { name: "Controlled PDF destination", exact: true }).waitFor({ state: "visible" });
+        Assert.equal(await popup.evaluate(() => window.opener === null), true);
+        Assert.equal(target.requests(), index + 1);
+        Assert.equal(page.url(), originalUrl);
+        await page.getByText("1 / 2 pages", { exact: true }).waitFor({ state: "visible" });
+        await popup.close();
+      }
+      Assert.equal(target.unexpected(), 0);
+      Assert.equal(outsideRequests, 0);
+      Assert.equal(page.context().pages().length, originalPages);
+      external = { pointerOpened: true, keyboardOpened: true, requests: target.requests(), noUnsolicitedRequests: true, openerIsolated: true };
+    }
+    return { signedAssetStatus: response.status(), pointerDestination: 2, keyboardDestination: 2, external };
+  } finally {
+    page.context().off("request", observe);
+    for (const popup of popups) if (!popup.isClosed()) await popup.close();
+    await target?.stop();
+  }
 }
 
 const interactiveHtmlTitle = "Controlled interactive document";
@@ -1738,8 +1818,10 @@ async function exercise(implementation: Implementation): Promise<void> {
     textRevisionProfile: null as ReturnType<typeof textRevisionIdentity> | null,
     pdfLinks: null as Awaited<ReturnType<typeof verifyLinkedPdf>> | null,
     htmlInteraction: null as Awaited<ReturnType<typeof verifyInteractiveHtml>> | null,
-    scope:
-      "Linux original web client; local project; composer submission; free ACP showcase approval and interruption; reload; same-state server restart",
+    pdfExternalOnly: pdfExternalOnlyProof,
+    scope: pdfExternalOnlyProof
+      ? "Linux packaged native application; authenticated local project and replay thread; signed PDF internal jumps and explicit loopback external links; no terminal qualification"
+      : "Linux original web client; local project; composer submission; free ACP showcase approval and interruption; reload; same-state server restart",
     startedAt: new Date().toISOString(),
     finishedAt: null as string | null,
     source,
@@ -2030,8 +2112,25 @@ async function exercise(implementation: Implementation): Promise<void> {
     completed("Received the completed replay turn on the original thread route");
     if (pdfLinkProof) {
       starting("follow a same-document link in the PDF reader opened from Files");
-      proof.pdfLinks = await verifyLinkedPdf(page);
+      proof.pdfLinks = await verifyLinkedPdf(page, workspace);
       completed("Followed a link in the signed PDF with pointer and keyboard input");
+      if (pdfExternalOnlyProof) {
+        Assert.equal(implementation, "native");
+        Assert.equal(proof.client, "built");
+        Assert.equal(proof.composer, "rust-wasm");
+        Assert.equal(proof.pdfLinks.signedAssetStatus, 200);
+        Assert.equal(proof.pdfLinks.pointerDestination, 2);
+        Assert.equal(proof.pdfLinks.keyboardDestination, 2);
+        Assert.deepEqual(proof.pdfLinks.external, {
+          pointerOpened: true, keyboardOpened: true, requests: 2,
+          noUnsolicitedRequests: true, openerIsolated: true,
+        });
+        Assert.equal(proof.completedSnapshots.length, 1);
+        Assert.equal(proof.persistence.length, 1);
+        completed("Qualified signed PDF internal jumps and two explicit isolated external launches");
+        proof.status = "passed";
+        return;
+      }
       await page.getByRole("button", { name: "Toggle right panel", exact: true }).click();
     }
     if (htmlInteractionProof) {
