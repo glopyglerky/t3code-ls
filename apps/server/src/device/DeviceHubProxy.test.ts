@@ -99,7 +99,11 @@ const fixture = (
       ),
       Layer.provideMerge(Layer.succeed(HttpClient.HttpClient, client)),
       Layer.provideMerge(
-        Layer.mock(SessionStore.SessionStore)({ awaitInvalidation: () => Effect.never }),
+        Layer.mock(SessionStore.SessionStore)({
+          cookieName: "fixture-session",
+          legacyCookieName: undefined,
+          awaitInvalidation: () => Effect.never,
+        }),
       ),
     ),
     { disableLogger: true },
