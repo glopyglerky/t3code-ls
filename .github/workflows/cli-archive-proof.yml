@@ -50,7 +50,7 @@ jobs:
           pnpm install --frozen-lockfile
           node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/cli-toolchain"
       - name: Check the packaged peer proof and linked-environment rules
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t10-packaged-peer-')
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t10-packaged-peer-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
         run: |
           node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/packaged-peer-links-tsconfig.json
           pnpm exec vp test run --maxWorkers 2 apps/server/src/peer/PeerLinks.test.ts
@@ -215,7 +215,7 @@ jobs:
               "$RUNNER_TEMP/cli-proof/guest-authorization/proof.json"
           fi
       - name: Verify linked trust across two packaged server reopens
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t10-packaged-peer-')
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t10-packaged-peer-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
         shell: bash
         run: |
           set -euo pipefail
