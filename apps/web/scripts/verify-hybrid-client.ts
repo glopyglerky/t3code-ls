@@ -1342,6 +1342,17 @@ async function terminalInput(page: Page) {
   return input;
 }
 
+async function readSelectedTerminalText(input: Locator) {
+  await input.press("Control+Shift+a");
+  // Reading Ghostty's selection must not send Ctrl+C to a pending shell line
+  // or foreground job when the selection has not rendered yet.
+  return input.evaluate((element) => {
+    const clipboard = new DataTransfer();
+    element.dispatchEvent(new ClipboardEvent("copy", { clipboardData: clipboard, cancelable: true }));
+    return clipboard.getData("text/plain");
+  });
+}
+
 async function waitForTerminalCopy(
   page: Page,
   input: Locator,
@@ -1351,9 +1362,7 @@ async function waitForTerminalCopy(
 ) {
   const deadline = Date.now() + 10_000;
   do {
-    await input.press("Control+Shift+a");
-    await input.press("Control+Shift+c");
-    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+    const clipboard = await readSelectedTerminalText(input);
     observe?.(clipboard);
     const match = clipboard.match(pattern);
     if (match !== null) return match;
@@ -1419,14 +1428,7 @@ async function waitForTerminalReceipt(page: Page, path: string) {
 async function waitForSelectedTerminalText(page: Page, input: Locator, pattern: RegExp) {
   const deadline = Date.now() + 10_000;
   do {
-    await input.press("Control+Shift+a");
-    // The DOM copy operation reads Ghostty's selection without injecting Ctrl+C
-    // while the canvas may still be empty and a foreground job owns the PTY.
-    const text = await input.evaluate((element) => {
-      const clipboard = new DataTransfer();
-      element.dispatchEvent(new ClipboardEvent("copy", { clipboardData: clipboard, cancelable: true }));
-      return clipboard.getData("text/plain");
-    });
+    const text = await readSelectedTerminalText(input);
     if (pattern.test(text)) return text;
     await page.waitForTimeout(100);
   } while (Date.now() < deadline);
