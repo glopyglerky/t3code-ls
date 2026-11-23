@@ -228,7 +228,7 @@ struct State {
 struct Shared {
     state: Mutex<State>,
     ready: Condvar,
-    stderr: Mutex<Vec<u8>>,
+    stderr: Arc<Mutex<Vec<u8>>>,
     limits: Limits,
     track_requests: bool,
 }
@@ -329,21 +329,21 @@ impl Shared {
     }
 }
 
-pub struct ProviderProcess {
-    shared: Arc<Shared>,
-    outgoing: Option<SyncSender<String>>,
+pub(crate) struct StdioChild {
     child: Child,
     sockets: Vec<UnixStream>,
-    workers: Vec<JoinHandle<()>>,
+    pub(crate) workers: Vec<JoinHandle<()>>,
     stopped: bool,
 }
 
-impl ProviderProcess {
-    pub fn spawn(config: Config) -> Result<Self, Error> {
+impl StdioChild {
+    pub(crate) fn spawn(
+        config: &Config,
+    ) -> Result<(Self, UnixStream, UnixStream, UnixStream), Error> {
         config.validate()?;
-        let (mut input, child_input) = UnixStream::pair().map_err(|_| Error::Spawn)?;
+        let (input, child_input) = UnixStream::pair().map_err(|_| Error::Spawn)?;
         let (output, child_output) = UnixStream::pair().map_err(|_| Error::Spawn)?;
-        let (mut errors, child_errors) = UnixStream::pair().map_err(|_| Error::Spawn)?;
+        let (errors, child_errors) = UnixStream::pair().map_err(|_| Error::Spawn)?;
         let sockets = vec![
             input.try_clone().map_err(|_| Error::Spawn)?,
             output.try_clone().map_err(|_| Error::Spawn)?,
@@ -380,6 +380,68 @@ impl ProviderProcess {
         let child = command.spawn().map_err(|_| Error::Spawn)?;
         // Command retains its own descriptor copies until it is dropped.
         drop(command);
+        let child = Self {
+            child,
+            sockets,
+            workers: Vec::new(),
+            stopped: false,
+        };
+        Ok((child, input, output, errors))
+    }
+
+    pub(crate) fn id(&self) -> u32 {
+        self.child.id()
+    }
+
+    fn try_wait(&mut self) -> Result<Option<ExitStatus>, Error> {
+        self.child.try_wait().map_err(|_| Error::Read)
+    }
+
+    pub(crate) fn shutdown(&mut self) -> Result<ExitStatus, Error> {
+        // Socket shutdown also releases workers when descendants retain their stdio.
+        for socket in &self.sockets {
+            let _ = socket.shutdown(Shutdown::Both);
+        }
+        let status = match self.child.try_wait() {
+            Ok(Some(status)) => Ok(status),
+            Ok(None) => {
+                let _ = self.child.kill();
+                self.child.wait().map_err(|_| Error::Read)
+            }
+            Err(_) => Err(Error::Read),
+        };
+        self.stopped = true;
+        let mut failed = false;
+        while let Some(worker) = self.workers.pop() {
+            if worker.join().is_err() {
+                failed = true;
+            }
+        }
+        if failed {
+            Err(Error::WorkerFailed)
+        } else {
+            status
+        }
+    }
+}
+
+impl Drop for StdioChild {
+    fn drop(&mut self) {
+        if !self.stopped {
+            let _ = self.shutdown();
+        }
+    }
+}
+
+pub struct ProviderProcess {
+    shared: Arc<Shared>,
+    outgoing: Option<SyncSender<String>>,
+    child: StdioChild,
+}
+
+impl ProviderProcess {
+    pub fn spawn(config: Config) -> Result<Self, Error> {
+        let (child, mut input, output, errors) = StdioChild::spawn(&config)?;
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 events: VecDeque::new(),
@@ -390,7 +452,7 @@ impl ProviderProcess {
                 terminal: None,
             }),
             ready: Condvar::new(),
-            stderr: Mutex::new(Vec::new()),
+            stderr: Arc::default(),
             limits: config.limits,
             track_requests: config.track_requests,
         });
@@ -399,12 +461,9 @@ impl ProviderProcess {
             shared: shared.clone(),
             outgoing: Some(sender),
             child,
-            sockets,
-            workers: Vec::new(),
-            stopped: false,
         };
         let writer_state = shared.clone();
-        process.workers.push(
+        process.child.workers.push(
             thread::Builder::new()
                 .name("t3ls-provider-input".to_owned())
                 .spawn(move || {
@@ -422,7 +481,7 @@ impl ProviderProcess {
                 .map_err(|_| Error::Spawn)?,
         );
         let reader_state = shared.clone();
-        process.workers.push(
+        process.child.workers.push(
             thread::Builder::new()
                 .name("t3ls-provider-output".to_owned())
                 .spawn(move || {
@@ -452,34 +511,10 @@ impl ProviderProcess {
                 .map_err(|_| Error::Spawn)?,
         );
         if !config.inherit_stderr {
-            process.workers.push(
-                thread::Builder::new()
-                    .name("t3ls-provider-stderr".to_owned())
-                    .spawn(move || {
-                        let mut buffer = [0u8; 4096];
-                        loop {
-                            match errors.read(&mut buffer) {
-                                Ok(0) => break,
-                                Ok(count) => {
-                                    let mut tail = shared
-                                        .stderr
-                                        .lock()
-                                        .unwrap_or_else(|error| error.into_inner());
-                                    tail.extend_from_slice(&buffer[..count]);
-                                    if tail.len() > STDERR_TAIL_BYTES {
-                                        let remove = tail.len() - STDERR_TAIL_BYTES;
-                                        tail.drain(..remove);
-                                    }
-                                }
-                                Err(error) if error.kind() == io::ErrorKind::Interrupted => {
-                                    continue;
-                                }
-                                Err(_) => break,
-                            }
-                        }
-                    })
-                    .map_err(|_| Error::Spawn)?,
-            );
+            process
+                .child
+                .workers
+                .push(drain_stderr(errors, shared.stderr.clone())?);
         }
         Ok(process)
     }
@@ -493,12 +528,7 @@ impl ProviderProcess {
     }
 
     pub fn stderr_tail(&self) -> String {
-        let tail = self
-            .shared
-            .stderr
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        String::from_utf8_lossy(&tail).into_owned()
+        stderr_tail(&self.shared.stderr)
     }
 
     pub fn send(&self, value: Value) -> Result<(), Error> {
@@ -691,7 +721,7 @@ impl ProviderProcess {
     }
 
     pub fn try_wait(&mut self) -> Result<Option<ExitStatus>, Error> {
-        self.child.try_wait().map_err(|_| Error::Read)
+        self.child.try_wait()
     }
 
     pub fn wait_for_exit(&mut self, timeout: Duration) -> Result<Option<ExitStatus>, Error> {
@@ -722,39 +752,48 @@ impl ProviderProcess {
     pub fn shutdown(&mut self) -> Result<ExitStatus, Error> {
         self.shared.terminate(Error::Shutdown);
         self.outgoing.take();
-        // Socket shutdown also releases workers when descendants retain their stdio.
-        for socket in &self.sockets {
-            let _ = socket.shutdown(Shutdown::Both);
-        }
-        let status = match self.child.try_wait() {
-            Ok(Some(status)) => Ok(status),
-            Ok(None) => {
-                let _ = self.child.kill();
-                self.child.wait().map_err(|_| Error::Read)
-            }
-            Err(_) => Err(Error::Read),
-        };
-        self.stopped = true;
-        let mut failed = false;
-        while let Some(worker) = self.workers.pop() {
-            if worker.join().is_err() {
-                failed = true;
-            }
-        }
-        if failed {
-            Err(Error::WorkerFailed)
-        } else {
-            status
-        }
+        self.child.shutdown()
     }
 }
 
 impl Drop for ProviderProcess {
     fn drop(&mut self) {
-        if !self.stopped {
+        if !self.child.stopped {
             let _ = self.shutdown();
         }
     }
+}
+
+pub(crate) fn drain_stderr(
+    mut errors: UnixStream,
+    tail: Arc<Mutex<Vec<u8>>>,
+) -> Result<JoinHandle<()>, Error> {
+    thread::Builder::new()
+        .name("t3ls-provider-stderr".to_owned())
+        .spawn(move || {
+            let mut buffer = [0u8; 4096];
+            loop {
+                match errors.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(count) => {
+                        let mut tail = tail.lock().unwrap_or_else(|error| error.into_inner());
+                        tail.extend_from_slice(&buffer[..count]);
+                        if tail.len() > STDERR_TAIL_BYTES {
+                            let remove = tail.len() - STDERR_TAIL_BYTES;
+                            tail.drain(..remove);
+                        }
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(_) => break,
+                }
+            }
+        })
+        .map_err(|_| Error::Spawn)
+}
+
+pub(crate) fn stderr_tail(tail: &Mutex<Vec<u8>>) -> String {
+    let tail = tail.lock().unwrap_or_else(|error| error.into_inner());
+    String::from_utf8_lossy(&tail).into_owned()
 }
 
 pub fn decode_frame(frame: &str, max_bytes: usize) -> Result<Message, Error> {
@@ -783,12 +822,22 @@ pub fn error_response(id: &RequestId, code: i64, message: &str) -> Value {
 }
 
 pub fn read_frame<R: BufRead>(reader: &mut R, maximum: usize) -> Result<Option<String>, Error> {
+    read_frame_with_eof(reader, maximum, true)
+}
+
+pub(crate) fn read_frame_with_eof<R: BufRead>(
+    reader: &mut R,
+    maximum: usize,
+    accept_unterminated: bool,
+) -> Result<Option<String>, Error> {
     let mut bytes = Vec::new();
     loop {
         let available = reader.fill_buf().map_err(|_| Error::Read)?;
         if available.is_empty() {
             return if bytes.is_empty() {
                 Ok(None)
+            } else if !accept_unterminated {
+                Err(Error::OutputClosed)
             } else {
                 String::from_utf8(bytes)
                     .map(Some)
