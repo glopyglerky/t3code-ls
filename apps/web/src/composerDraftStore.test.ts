@@ -755,6 +755,79 @@ describe("composerDraftStore context persistence", () => {
       vi.resetModules();
     }
   });
+
+  it.each([
+    { firstSave: "editor", startsWithDraft: true },
+    { firstSave: "model picker", startsWithDraft: true },
+    { firstSave: "editor", startsWithDraft: false },
+    { firstSave: "model picker", startsWithDraft: false },
+  ])(
+    "merges edits to the same draft when the $firstSave saves first (existing draft: $startsWithDraft)",
+    async ({ firstSave, startsWithDraft }) => {
+      const sharedStorage = createMemoryStorage();
+      vi.stubGlobal("localStorage", sharedStorage);
+      vi.stubGlobal("window", new EventTarget());
+      vi.useFakeTimers();
+      vi.resetModules();
+      try {
+        const editorTab = await import("./composerDraftStore");
+        const threadKey = scopedThreadKey(threadRef);
+        const previousPick = modelSelection(CODEX_DRIVER, "gpt-5.4");
+        const nextPick = modelSelection(CLAUDE_AGENT_DRIVER, "claude-sonnet-4-6", {
+          effort: "medium",
+        });
+        if (startsWithDraft) {
+          const editor = editorTab.useComposerDraftStore.getState();
+          editor.setPrompt(threadRef, "Original draft");
+          editor.setModelSelection(threadRef, previousPick);
+          await vi.advanceTimersByTimeAsync(300);
+        }
+        vi.resetModules();
+        const modelTab = await import("./composerDraftStore");
+
+        const terminal = {
+          ...makeTerminalContext({ id: "retry-console" }),
+          threadId: threadRef.threadId,
+        };
+        const prompt = `Inspect ${formatTerminalContextReference(terminal)} before retrying`;
+        const editPrompt = () => {
+          const editor = editorTab.useComposerDraftStore.getState();
+          editor.setPrompt(threadRef, prompt);
+          editor.addTerminalContexts(threadRef, [terminal]);
+        };
+        const chooseModel = () => {
+          modelTab.useComposerDraftStore.getState().setModelSelection(threadRef, nextPick, {
+            explicit: true,
+          });
+        };
+
+        if (firstSave === "editor") editPrompt();
+        else chooseModel();
+        await vi.advanceTimersByTimeAsync(300);
+        if (firstSave === "editor") chooseModel();
+        else editPrompt();
+        await vi.advanceTimersByTimeAsync(300);
+
+        const saved = JSON.parse(sharedStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY) as string);
+        expect(saved.version).toBe(9);
+        expect(saved.state.draftsByThreadKey[threadKey]).toEqual({
+          prompt,
+          attachments: [],
+          terminalContexts: [terminal],
+          modelSelectionByProvider: {
+            ...(startsWithDraft ? { [previousPick.instanceId]: previousPick } : {}),
+            [nextPick.instanceId]: nextPick,
+          },
+          activeProvider: nextPick.instanceId,
+          modelSelectionExplicit: true,
+        });
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+        vi.resetModules();
+      }
+    },
+  );
 });
 
 describe("composerDraftStore thread contexts", () => {
