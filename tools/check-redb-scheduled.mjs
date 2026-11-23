@@ -6,7 +6,13 @@ import * as Path from "node:path";
 import * as Sqlite from "node:sqlite";
 import * as Contracts from "@t3tools/contracts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+import {
+  RELAY_HOOK_DELIVERY_HEADER,
+  RELAY_HOOK_DELIVERY_TYP,
+  signRelayJwt,
+} from "@t3tools/shared/relayJwt";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -26,6 +32,11 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
+import * as Etag from "effect/http/Etag";
+import * as HttpPlatform from "effect/http/HttpPlatform";
+import * as HttpRouter from "effect/http/HttpRouter";
+import * as HttpApi from "effect/http-api/HttpApi";
+import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as ThreadLaunchService from "../apps/server/src/orchestration-v2/ThreadLaunchService.ts";
 import * as ManagedProjectFolders from "../apps/server/src/project/ManagedProjectFolders.ts";
@@ -46,6 +57,11 @@ import * as NativeScheduledRows from "../apps/server/src/scheduledTasks/NativeSc
 import * as SqliteScheduledRows from "../apps/server/src/scheduledTasks/SqliteScheduledRows.ts";
 import * as Rows from "../apps/server/src/scheduledTasks/ScheduledRows.ts";
 import * as Transactions from "../apps/server/src/persistence/PersistenceTransactions.ts";
+import * as ServerSecretStore from "../apps/server/src/auth/ServerSecretStore.ts";
+import * as ServerEnvironment from "../apps/server/src/environment/ServerEnvironment.ts";
+import { CLOUD_MINT_PUBLIC_KEY, RELAY_ISSUER_SECRET } from "../apps/server/src/cloud/config.ts";
+import * as RelayDeliveryProof from "../apps/server/src/scheduledTasks/RelayDeliveryProof.ts";
+import * as WebhookRoute from "../apps/server/src/scheduledTasks/webhookRoute.ts";
 import { createFixture } from "./database-fixture.mjs";
 import { exportSqliteState } from "./export-sqlite-state.mjs";
 import {
@@ -459,7 +475,91 @@ function waitFor(read, check, description) {
   });
 }
 
+class RelayFixtureApi extends HttpApi.make("environment").add(
+  Contracts.EnvironmentHttpApi.groups.webhooks,
+) {}
+
+const signedRelayHttp = Effect.fn("signedRelayHttp")(function* (service, keys) {
+  const clock = yield* Clock.Clock;
+  const environmentId = Contracts.EnvironmentId.make("relay-fixture-env");
+  const issuer = "https://relay.fixture.test";
+  const secrets = new Map([
+    [CLOUD_MINT_PUBLIC_KEY, keys.publicKey],
+    [RELAY_ISSUER_SECRET, issuer],
+  ]);
+  const routes = Layer.mergeAll(
+    HttpApiBuilder.layer(RelayFixtureApi).pipe(
+        Layer.provide(WebhookRoute.layer),
+        Layer.provide(RelayDeliveryProof.layer),
+        Layer.provide(Layer.succeed(ScheduledTaskService.ScheduledTaskService, service)),
+        Layer.provide(Layer.mock(ServerSecretStore.ServerSecretStore)({
+          get: (name) => Effect.succeed(Option.map(
+            Option.fromUndefinedOr(secrets.get(name)),
+            (value) => new TextEncoder().encode(value),
+          )),
+        })),
+        Layer.provide(Layer.mock(ServerEnvironment.ServerEnvironment)({
+          getEnvironmentId: Effect.succeed(environmentId),
+        })),
+        Layer.provide(HttpPlatform.layer.pipe(
+          Layer.provideMerge(NodeServices.layer),
+          Layer.provideMerge(Etag.layerWeak),
+        )),
+        Layer.provide([NodeServices.layer, NodeCrypto.layerSignature]),
+    ),
+    Layer.succeed(Clock.Clock, clock),
+  );
+  const { handler } = yield* Effect.acquireRelease(
+    Effect.sync(() => HttpRouter.toWebHandler(routes, { disableLogger: true })),
+    ({ dispose }) => Effect.promise(() => dispose()),
+  );
+  return Effect.fn("postSignedRelay")(function* (task, delivery, status, outcome) {
+    const now = Math.floor((yield* Clock.currentTimeMillis) / 1_000);
+    const deliveryId = delivery.relayDeliveryId;
+    const proof = yield* signRelayJwt({
+      privateKey: keys.privateKey,
+      typ: RELAY_HOOK_DELIVERY_TYP,
+      payload: {
+        iss: issuer,
+        aud: `t3-env:${environmentId}`,
+        sub: environmentId,
+        jti: `proof:${deliveryId}`,
+        iat: now,
+        exp: now + 600,
+        environmentId,
+        deliveryId,
+        receivedAt: at,
+        hookId: task.id,
+      },
+    }).pipe(Effect.provide(NodeCrypto.layerSignature));
+    const result = yield* Effect.promise(() => handler(new Request(
+      new URL(task.webhook.path, "http://environment.fixture.test"),
+      {
+        method: delivery.method,
+        body: delivery.body,
+        headers: {
+          ...delivery.headers,
+          [RELAY_HOOK_DELIVERY_HEADER]: proof,
+          "x-t3-relay-delivery-id": deliveryId,
+          "x-t3-relay-received-at": at,
+        },
+      },
+    )));
+    Assert.equal(result.status, status);
+    Assert.equal(result.headers.get("x-t3-hook-outcome"), outcome);
+    const id = `delivery:relay:${deliveryId}`;
+    Assert.deepEqual(
+      yield* Effect.promise(() => result.json()),
+      status === 202 ? { deliveryId: id } : { error: "delivery_unresolved", deliveryId: id },
+    );
+  });
+});
+
 async function proveDurableImmediateRelay() {
+  const keys = Crypto.generateKeyPairSync("ed25519", {
+    privateKeyEncoding: { format: "pem", type: "pkcs8" },
+    publicKeyEncoding: { format: "pem", type: "spki" },
+  });
   const withDurableNative = (use) =>
     withNative(executable, fixture, use, undefined, { durableRelayWebhooks: true });
   const { task, uncertain, ready, prompt } = await withDurableNative(() =>
@@ -468,6 +568,7 @@ async function proveDurableImmediateRelay() {
       exercise: ({ service, launches, input, advanceClock }) =>
         Effect.gen(function* () {
           const rows = yield* NativeScheduledRows.make;
+          const post = yield* signedRelayHttp(service, keys);
           const schedule = { type: "webhook", dedupe: { replayKey: "{{headers.delivery-id}}" } };
           const task = (yield* service.upsert(yield* input("durable-hook", { schedule }))).task;
           const uncertain = immediateRelayRequest(task, "possibly-sent", "first");
@@ -489,14 +590,13 @@ async function proveDurableImmediateRelay() {
                 acceptAnyOutcome: true,
               }),
           ];
-          Assert.equal((yield* service.triggerWebhook(uncertain)).outcome, "accepted");
+          yield* post(task, uncertain, 202, "accepted");
           yield* waitFor(
             readPending(uncertain.relayDeliveryId),
             ([row]) => row?.state === "relay_running" && launches.length === 1,
             "Immediate work never reached the normal worker without a scheduler tick",
           );
-          const accepted = yield* service.triggerWebhook(ready);
-          Assert.equal(accepted.outcome, "accepted");
+          yield* post(task, ready, 202, "accepted");
           const [entry] = yield* readPending(ready.relayDeliveryId);
           Assert.equal(entry.state, "relay_ready");
           const prompt = JSON.parse(entry.request_json);
@@ -528,7 +628,7 @@ async function proveDurableImmediateRelay() {
             ),
             [],
           );
-          Assert.equal((yield* service.triggerWebhook(ready)).outcome, "duplicate");
+          yield* post(task, ready, 202, "duplicate");
           advanceClock(60_000);
           yield* service.upsert(
             yield* input("durable-hook", { prompt: "Edited while queued", schedule }),
@@ -542,6 +642,7 @@ async function proveDurableImmediateRelay() {
       exercise: ({ service, launches, workers, advanceClock }) =>
         Effect.gen(function* () {
           const rows = yield* NativeScheduledRows.make;
+          const post = yield* signedRelayHttp(service, keys);
           const deliveryId = `delivery:relay:${ready.relayDeliveryId}`;
           const unresolvedId = `delivery:relay:${uncertain.relayDeliveryId}`;
           advanceClock(120_000);
@@ -587,19 +688,13 @@ async function proveDurableImmediateRelay() {
           });
           Assert.equal(delivery.outcome, "dispatch_failed");
           Assert.match(delivery.error, /could not be confirmed/);
-          Assert.deepEqual(yield* service.triggerWebhook(uncertain), {
-            _tag: "unresolved",
-            deliveryId: unresolvedId,
-          });
-          Assert.equal((yield* service.triggerWebhook(ready)).outcome, "duplicate");
+          yield* post(task, uncertain, 500, "unresolved");
+          yield* post(task, ready, 202, "duplicate");
           yield* rows.write(
             { kind: "prune_relays", before: "2026-11-13T00:00:00.000Z" },
             Rows.AnyRows,
           );
-          Assert.deepEqual(yield* service.triggerWebhook(uncertain), {
-            _tag: "unresolved",
-            deliveryId: unresolvedId,
-          });
+          yield* post(task, uncertain, 500, "unresolved");
           yield* workers.get("webhook-coalescing");
           Assert.equal(launches.length, 1);
         }),
@@ -690,7 +785,7 @@ try {
     }),
   );
   checks.push(
-    "Immediate relay admission retains its full prompt and reservation before acknowledgement, recovers ready work once, retains ambiguous running claims, and fences unopted readers",
+    "The signed relay HTTP route retains its full prompt before acknowledgement, recovers ready work once, returns 500 for ambiguous claims, and fences unopted readers",
   );
   await finishProof({
     executable,
