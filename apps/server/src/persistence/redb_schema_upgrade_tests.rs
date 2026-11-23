@@ -612,6 +612,14 @@ async fn isolated_trial_publish_interrupt_fixture() {
                 .await
                 .unwrap();
         }
+    } else if boundary.starts_with("forward-readiness-") {
+        crate::application_storage::probe_fixture_forward_activation(
+            home,
+            ISOLATED_UPDATE.into(),
+            |_| Ok(()),
+        )
+        .await
+        .unwrap();
     } else if boundary.starts_with("forward-catalog-") {
         crate::application_storage::record_fixture_forward_catalog(home, ISOLATED_UPDATE.into())
             .await
@@ -2204,11 +2212,29 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
             assert_eq!(capture(&live), sealed);
             assert!(!witness.exists());
 
+            assert!(
+                crate::application_storage::probe_fixture_forward_activation(
+                    home.to_owned(),
+                    ISOLATED_UPDATE.into(),
+                    |_| panic!("unmarked readiness"),
+                )
+                .await
+                .is_err()
+            );
             interrupt("forward-catalog-armed", None);
             assert_eq!(capture(&live), sealed);
             assert!(witness.exists());
             interrupt("forward-catalog-opened", None);
             let dirty_old = capture(&live);
+            assert!(
+                crate::application_storage::probe_fixture_forward_activation(
+                    home.to_owned(),
+                    ISOLATED_UPDATE.into(),
+                    |_| panic!("unrecovered readiness"),
+                )
+                .await
+                .is_err()
+            );
             assert_ne!(dirty_old.3, sealed.3);
             let witness_bytes = fs::read(&witness).unwrap();
             fs::write(&witness, b"foreign witness").unwrap();
@@ -2229,6 +2255,87 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
             let marked = capture(&live);
             assert!(mark().await.unwrap(), "verified the clean marked candidate");
             assert_eq!(capture(&live), marked);
+            let probe = || {
+                crate::application_storage::probe_fixture_forward_activation(
+                    home.to_owned(),
+                    ISOLATED_UPDATE.into(),
+                    |_| Ok(()),
+                )
+            };
+            for path in [
+                receipt.clone(),
+                selection.clone(),
+                witness.clone(),
+                home.join("runtime/versions/1.2.4/.install-complete"),
+                home.join("runtime/versions/1.2.4/t3"),
+                target_helper.clone(),
+            ] {
+                let bytes = fs::read(&path).unwrap();
+                fs::write(&path, b"foreign activation input").unwrap();
+                let called = std::cell::Cell::new(false);
+                assert!(
+                    crate::application_storage::probe_fixture_forward_activation(
+                        home.to_owned(),
+                        ISOLATED_UPDATE.into(),
+                        |_| {
+                            called.set(true);
+                            Ok(())
+                        },
+                    )
+                    .await
+                    .is_err()
+                );
+                assert!(!called.get(), "unverified input reached readiness");
+                fs::write(&path, bytes).unwrap();
+                assert_eq!(capture(&live), marked);
+            }
+            assert!(matches!(
+                crate::application_storage::probe_fixture_forward_activation(
+                    home.to_owned(),
+                    ISOLATED_UPDATE.into(),
+                    |_| Err(Error::IncompatibleStore),
+                )
+                .await,
+                Err(Error::IncompatibleStore)
+            ));
+            for boundary in [
+                "forward-readiness-before-probe",
+                "forward-readiness-after-probe",
+            ] {
+                interrupt(boundary, None);
+                assert_eq!(capture(&live), marked);
+                assert_restore_refused();
+            }
+            assert!(matches!(
+                crate::application_storage::probe_fixture_forward_activation(
+                    home.to_owned(),
+                    ISOLATED_UPDATE.into(),
+                    |_| {
+                        fs::write(&selection, b"changed during readiness").unwrap();
+                        Ok(())
+                    },
+                )
+                .await,
+                Err(Error::IncompatibleStore)
+            ));
+            fs::write(&selection, &selected.3).unwrap();
+            let activation = probe().await.unwrap();
+            assert_eq!(activation.activation.target_version, "1.2.4");
+            assert_eq!(activation.database, legacy_request.database);
+            assert_eq!(
+                activation.receipt_sha256,
+                forward_fixture_sha256(&durable.3)
+            );
+            assert_eq!(
+                activation.selection_sha256,
+                forward_fixture_sha256(&selected.3)
+            );
+            assert_eq!(probe().await.unwrap(), activation);
+            assert_eq!(capture(&live), marked);
+            assert_restore_refused();
+            println!(
+                "T05 sealed readiness witness survived interruption and refused changed inputs"
+            );
             println!(
                 "T05 native forward catalog recovered the interrupted sealed and marked states"
             );

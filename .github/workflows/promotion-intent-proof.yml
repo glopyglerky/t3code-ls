@@ -106,6 +106,9 @@ jobs:
               -- --ignored --exact --nocapture 2>&1 | tee "$proof/forward-catalog.log"
             grep -F 'T05 native forward catalog recovered the interrupted sealed and marked states' "$proof/forward-catalog.log"
             grep -F 'T05 forward catalog fenced both installed helpers across generic restore retries' "$proof/forward-catalog.log"
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-* ]]; then
+              grep -F 'T05 sealed readiness witness survived interruption and refused changed inputs' "$proof/forward-catalog.log"
+            fi
             cp "$RUNNER_TEMP/promotion-toolchain/installation-proof.json" "$proof/"
             exit 0
           fi
