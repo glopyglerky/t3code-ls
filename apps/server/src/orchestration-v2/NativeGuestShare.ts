@@ -488,6 +488,28 @@ export const make = Effect.fn("NativeGuestShare.make")(function* () {
   });
 
   return {
+    authorizeInvite: Effect.fn("NativeGuestShare.authorizeInvite")(function* (input: {
+      readonly shareId: string;
+      readonly inviteShareId: string;
+      readonly activeThread: boolean;
+      readonly expiresAt: string;
+      readonly now: DateTime.Utc;
+    }) {
+      const now = DateTime.toEpochMillis(input.now);
+      const expiresAt = Date.parse(input.expiresAt);
+      if (executable === undefined) {
+        return input.activeThread && input.shareId === input.inviteShareId && !(now >= expiresAt);
+      }
+      const response = yield* call({
+        ...input,
+        operation: "authorize-invite",
+        expiresAt: Number.isNaN(expiresAt) ? null : expiresAt,
+        now,
+      });
+      if ("error" in response || response.changed !== undefined || typeof response.ok !== "boolean")
+        return yield* new NativeGuestShareError({ stage: "response" });
+      return response.ok;
+    }),
     classifyGuestUploads: Effect.fn("NativeGuestShare.classifyGuestUploads")(function* (
       uploads: ReadonlyArray<GuestAttachments.InspectedGuestUpload>,
     ) {
