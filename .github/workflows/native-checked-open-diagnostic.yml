@@ -363,7 +363,7 @@ jobs:
               cd "$root"
               sha256sum pnpm-lock.yaml
               bundle_paths=("apps/server/$directory")
-              if [[ "$arm" == stock ]]; then bundle_paths+=(apps/web/dist); fi
+              if [[ "$variant" == stock ]]; then bundle_paths+=(apps/web/dist); fi
               find "${bundle_paths[@]}" -type f -print0 | sort -z | xargs -0 -r sha256sum
             ) > "$evidence/arm-$variant.sha256"
           done
