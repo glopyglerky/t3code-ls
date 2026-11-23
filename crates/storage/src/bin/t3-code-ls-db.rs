@@ -33,7 +33,8 @@ use t3_code_ls_storage::application_storage::{
     CandidatePreparationObservation, IsolatedTrialRequest, IsolatedTrialVerification,
     NativePromotionIntent, TrialRestorePublicationRequest, TrialRestoreRequest,
     backup_service_trial, inspect_isolated_service_trial_selection, prepare_isolated_service_trial,
-    prepare_service_trial_restore, publish_isolated_service_trial, publish_service_trial_restore,
+    prepare_service_trial_restore, publish_intended_isolated_service_trial,
+    publish_isolated_service_trial, publish_service_trial_restore,
     record_isolated_candidate_preparation, record_native_promotion_intent,
     rollback_isolated_service_trial, service_trial_capabilities, verify_isolated_service_trial,
 };
@@ -449,7 +450,9 @@ enum Request {
         #[serde(default)]
         max_running_title_generations: Option<f64>,
     },
-    OutboxNextClaimableAt { max_running_title_generations: Option<f64> },
+    OutboxNextClaimableAt {
+        max_running_title_generations: Option<f64>,
+    },
     OutboxSucceed {
         effect_id: String,
         worker_id: String,
@@ -1120,8 +1123,13 @@ async fn evaluate(
                 .await?;
             Ok(Value::Null)
         }
-        Request::ApplicationProjectionsApplyMany { transaction_id, events } => {
-            transactions.projections_apply_many(&transaction_id, events).await?;
+        Request::ApplicationProjectionsApplyMany {
+            transaction_id,
+            events,
+        } => {
+            transactions
+                .projections_apply_many(&transaction_id, events)
+                .await?;
             Ok(Value::Null)
         }
         Request::ApplicationProjectionsRead {
@@ -1256,7 +1264,10 @@ async fn evaluate(
                 )
                 .await?,
         ),
-        Request::ApplicationOutboxNextClaimableAt { transaction_id, max_running_title_generations } => serde_json::to_value(
+        Request::ApplicationOutboxNextClaimableAt {
+            transaction_id,
+            max_running_title_generations,
+        } => serde_json::to_value(
             transactions
                 .outbox_next_claimable_at_limited(&transaction_id, max_running_title_generations)
                 .await?,
@@ -1389,9 +1400,13 @@ async fn evaluate(
                 })
                 .await?,
         ),
-        Request::OutboxNextClaimableAt { max_running_title_generations } => {
-            serde_json::to_value(store.outbox_next_claimable_at_limited(max_running_title_generations).await?)
-        }
+        Request::OutboxNextClaimableAt {
+            max_running_title_generations,
+        } => serde_json::to_value(
+            store
+                .outbox_next_claimable_at_limited(max_running_title_generations)
+                .await?,
+        ),
         Request::OutboxSucceed {
             effect_id,
             worker_id,
@@ -1660,18 +1675,24 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Err(error) => error_response(&error),
             },
         ),
-        [mode, home, update_id] if mode == "trial-publish-sealed" => {
-            Some(match publish_isolated_service_trial(home.into(), update_id.clone()).await {
+        [mode, home, update_id] if mode == "trial-publish-sealed" => Some(
+            match publish_isolated_service_trial(home.into(), update_id.clone()).await {
                 Ok(publication) => json!({"ok": true, "result": publication}),
                 Err(error) => error_response(&error),
-            })
-        }
-        [mode, home, update_id] if mode == "trial-rollback-sealed" => {
-            Some(match rollback_isolated_service_trial(home.into(), update_id.clone()).await {
+            },
+        ),
+        [mode, home, update_id] if mode == "trial-publish-intended-sealed" => Some(
+            match publish_intended_isolated_service_trial(home.into(), update_id.clone()).await {
                 Ok(publication) => json!({"ok": true, "result": publication}),
                 Err(error) => error_response(&error),
-            })
-        }
+            },
+        ),
+        [mode, home, update_id] if mode == "trial-rollback-sealed" => Some(
+            match rollback_isolated_service_trial(home.into(), update_id.clone()).await {
+                Ok(publication) => json!({"ok": true, "result": publication}),
+                Err(error) => error_response(&error),
+            },
+        ),
         [mode, home, update_id] if mode == "trial-publish-restore-offline" => Some(
             match read_trial_request::<TrialRestorePublicationRequest>(
                 "invalid trial restore request",
@@ -1709,7 +1730,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         [mode, path] if mode == "exclusive-local" => Store::open_exclusive(path).await,
         _ => {
             return Err(Error::Invalid(
-                "usage: t3-code-ls-db initialize-local PATH | local PATH | read-only-local PATH | exclusive-local PATH | owner-lock PATH | trial-backup HOME UPDATE_ID CATALOG_SHA256 | trial-prepare-isolated HOME UPDATE_ID < REQUEST_JSON | trial-record-promotion HOME UPDATE_ID < INTENT_JSON | trial-record-prepared HOME UPDATE_ID < OBSERVATION_JSON | trial-verify-isolated HOME UPDATE_ID < RECEIPT_JSON | trial-inspect-selection HOME UPDATE_ID FROM_VERSION TARGET_VERSION | trial-publish-sealed HOME UPDATE_ID | trial-rollback-sealed HOME UPDATE_ID | trial-prepare-restore HOME UPDATE_ID < REQUEST_JSON | trial-publish-restore-offline HOME UPDATE_ID < WITNESSED_REQUEST_JSON".into(),
+                "usage: t3-code-ls-db initialize-local PATH | local PATH | read-only-local PATH | exclusive-local PATH | owner-lock PATH | trial-backup HOME UPDATE_ID CATALOG_SHA256 | trial-prepare-isolated HOME UPDATE_ID < REQUEST_JSON | trial-record-promotion HOME UPDATE_ID < INTENT_JSON | trial-record-prepared HOME UPDATE_ID < OBSERVATION_JSON | trial-verify-isolated HOME UPDATE_ID < RECEIPT_JSON | trial-inspect-selection HOME UPDATE_ID FROM_VERSION TARGET_VERSION | trial-publish-sealed HOME UPDATE_ID | trial-publish-intended-sealed HOME UPDATE_ID | trial-rollback-sealed HOME UPDATE_ID | trial-prepare-restore HOME UPDATE_ID < REQUEST_JSON | trial-publish-restore-offline HOME UPDATE_ID < WITNESSED_REQUEST_JSON".into(),
             )
             .into());
         }

@@ -551,3 +551,61 @@ qualification. No build or live profile activation ran on the Mac.
 MIT stock lineage remains
 `28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`. Mandatory method SHA-256 is
 `5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
+
+### Explicit sealed publication of an intended candidate
+
+`trial-publish-intended-sealed HOME UPDATE_ID` is a separate offline operation.
+It requires the earned candidate observation and embedded promotion intent. It
+uses the same Rust `TrialLease` and physical inode move as sealed publication,
+while the legacy `trial-publish-sealed` command continues to refuse any intent.
+No launcher calls the new command. It does not unseal the catalog, select a
+version, admit an update, start a server or authorize a release.
+
+Before a move, the existing trial receipt gains `sealed_publication` version 1.
+Its typed phase is `publishing`, `published`, `rolling_back` or `rolled_back`, and
+it pins the SHA-256 of the exact pending `service-state.json` bytes. This stays
+inside the established receipt authority. Source, checkpoint and staged database
+identities remain bound by that receipt. Both installed entry/helper pairs are
+rechecked, and both helper capability probes must advertise
+`sealedIntentPublication: 1` before the extended receipt can become durable.
+An older helper rejects the added field; merely supporting promotion intents is
+insufficient for this transition.
+
+Each phase update is staged, synced and atomically replaces the same receipt
+under the selection, home and database leases. Interrupted publication resumes
+only with the same bytes, identities, packages, intent and pending selection.
+Once rollback begins, publication is refused. Before canonical rename, rollback
+retains the sealed candidate and removes only the verified extra link to the
+source inode. After rename, the existing sealed rollback restores that source
+inode and preserves the failed candidate. Retries reconcile physical names with
+the typed phase; contradictory or changed inputs fail closed. Terminal rollback
+cannot be republished under the same receipt.
+
+The synthetic native process fixture interrupts phase staging, durable intent to
+move, source preservation, canonical rename, completed publication, rollback
+intent, extra-link removal and completed rollback. It checks canonical and
+retained inode identity, exact database/checkpoint/version-state bytes, sealed
+catalog refusal, package and phase mismatch refusal, legacy refusal and repeated
+CLI publication. On the focused hosted lane it uses the freshly built Rust
+helper for both installed package capability checks and the command invocation.
+Entries and candidate observation remain controlled fixture data; this is not
+packaged application activation evidence.
+
+The added exact hosted command, after the existing helper build, is:
+
+```sh
+T3_TEST_PROMOTION_HELPER="$CARGO_TARGET_DIR/debug/t3-code-ls-db" \
+  "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+  test --locked -j 2 -p t3-code-ls-storage --lib \
+  application_bootstrap::upgrade::tests::service_intended_sealed_publication_recovers_without_activation \
+  -- --exact --nocapture
+```
+
+`promotion-intent-proof.yml` selects this check for
+`candidate/t3code-ls-t05-sealed-intent-*`, retains its log and verifies its completion
+marker. Formatting, parse and workflow-shell checks were performed locally.
+Compilation and fixture execution await the exact hosted candidate. No new native
+activation, platform, durability or production-serving acceptance is claimed.
+The source oracle remains stock `28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`,
+with retained MIT provenance and mandatory method SHA-256
+`5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
