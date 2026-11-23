@@ -158,6 +158,9 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
     readonly beforeRegistrationRemove?: (
       environmentId: EnvironmentId,
     ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>;
+    readonly beforeOwnedDataClear?: (
+      environmentId: EnvironmentId,
+    ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>;
     readonly beforeCredentialPut?: (
       connectionId: string,
     ) => Effect.Effect<void, ConnectionTransientError>;
@@ -309,7 +312,9 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
   });
   const ownedDataCleanup = Persistence.EnvironmentOwnedDataCleanup.of({
     clear: (environmentId) =>
-      Ref.update(ownedDataClears, (environmentIds) => [...environmentIds, environmentId]),
+      (options?.beforeOwnedDataClear?.(environmentId) ?? Effect.void).pipe(
+        Effect.andThen(Ref.update(ownedDataClears, (environmentIds) => [...environmentIds, environmentId])),
+      ),
   });
   const networkStatus = yield* SubscriptionRef.make<"unknown" | "offline" | "online">("online");
   const connectivity = Connectivity.Connectivity.of({
@@ -1992,6 +1997,57 @@ describe("EnvironmentRegistry", () => {
         Effect.provideService(PullRequestRoutingPermissions, permissions),
         Effect.scoped,
       );
+    }),
+  );
+
+  it.effect("disconnects removed SSH environments when owned data cleanup fails", () =>
+    Effect.gen(function* () {
+      const failure = new Persistence.ConnectionPersistenceError({
+        operation: "clear-environment",
+        message: "Queued message storage is unavailable.",
+      });
+      const harness = yield* makeHarness([SSH_CONNECTION], [SSH_PROFILE], [], {
+        beforeOwnedDataClear: () => Effect.fail(failure),
+      });
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.start;
+        const result = yield* Effect.flip(registry.remove(SSH_CONNECTION.environmentId));
+        expect(result).toEqual(failure);
+        expect((yield* SubscriptionRef.get(registry.entries)).has(SSH_CONNECTION.environmentId)).toBe(false);
+        expect(yield* Ref.get(harness.cacheClears)).toEqual([SSH_CONNECTION.environmentId]);
+        expect(yield* Ref.get(harness.disconnectedSshTargets)).toEqual([SSH_TARGET]);
+      }).pipe(Effect.provide(harness.layer), Effect.scoped);
+    }),
+  );
+
+  it.effect("retries failed owned data cleanup on an identical platform removal", () =>
+    Effect.gen(function* () {
+      let fail = true;
+      let attempts = 0;
+      const harness = yield* makeHarness([], [], [], {
+        beforeOwnedDataClear: () => Effect.suspend(() => {
+          attempts += 1;
+          return fail
+            ? Effect.fail(new Persistence.ConnectionPersistenceError({
+                operation: "clear-environment", message: "Storage is unavailable.",
+              }))
+            : Effect.void;
+        }),
+      });
+      yield* Effect.gen(function* () {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
+        yield* registry.reconcilePlatform([new PrimaryConnectionRegistration({ target: TARGET })]);
+        yield* registry.reconcilePlatform([]);
+        expect(attempts).toBe(1);
+        expect((yield* SubscriptionRef.get(registry.entries)).has(TARGET.environmentId)).toBe(false);
+        fail = false;
+        yield* registry.reconcilePlatform([]);
+        expect(attempts).toBe(2);
+        expect(yield* Ref.get(harness.ownedDataClears)).toEqual([TARGET.environmentId]);
+        yield* registry.reconcilePlatform([]);
+        expect(attempts).toBe(2);
+      }).pipe(Effect.provide(harness.layer), Effect.scoped);
     }),
   );
 
