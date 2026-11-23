@@ -6,7 +6,7 @@ use crate::{
 };
 use gpui::{
     AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, Role,
-    Styled, Window, div, prelude::FluentBuilder as _, px,
+    StatefulInteractiveElement, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_base::Button;
 use std::collections::BTreeMap;
