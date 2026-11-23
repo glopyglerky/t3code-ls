@@ -1821,6 +1821,45 @@
       "rust_crates": ["packages/client-runtime/rust", "packages/client-runtime/rust/web"]
     },
     {
+      "id": "desktop-gpui-showcase",
+      "state": "candidate",
+      "domain_owner": "apps/desktop",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/desktop/src/main.ts",
+          "blob": "f241e14587f34d742a7721b46d9be990a0dd2409"
+        },
+        {
+          "path": "apps/web/src/components/ComposerPromptEditorTiptap.tsx",
+          "blob": "5a036e34611ed5a72c7eb463a4a4e819ae1c2863"
+        }
+      ],
+      "rust_paths": [
+        "apps/desktop/rust/src/main.rs",
+        "apps/desktop/rust/src/replay.rs"
+      ],
+      "adapter_paths": [
+        "apps/desktop/rust/Cargo.toml",
+        "apps/desktop/rust/Cargo.lock",
+        "apps/desktop/rust/README.md",
+        "apps/server/scripts/dev-replay/showcase_transcript.ndjson"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["linux-x64"],
+          "state": "candidate",
+          "implementation": "standalone-gpui-showcase-fixture",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": ["packages/client-runtime/rust/tests/text_revision.rs"],
+      "retired_paths": [],
+      "notes": "T01 and T14. The root Rust workspace checks the shared text owner. The isolated GPUI manifest has its own fixture tests and requires hosted X11, input and assistive-technology checks. The fixture route has no server, provider effects or persistent drafts.",
+      "rust_crates": ["packages/client-runtime/rust"]
+    },
+    {
       "id": "conversation-text-revisions",
       "state": "candidate",
       "domain_owner": "packages/client-runtime",
