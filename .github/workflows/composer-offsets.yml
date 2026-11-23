@@ -283,6 +283,38 @@ jobs:
             jq -e '.status == "passed" and .composer == "rust-wasm" and .parallelTurns.stillPendingAfterOtherApproval and .parallelTurns.completedReopened and .parallelTurns.interruptedReopened' \
               "$proof/parallel/native/proof.json"
           fi
+      - name: Prepare the source-pinned server preview browser
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-preview-')
+        run: |
+          timeout -k 5s 600s node apps/server/scripts/prepare-preview-fixture-browser.ts \
+            "$RUNNER_TEMP/preview-browser-home" > "$RUNNER_TEMP/preview-browser-install.json"
+      - name: Exercise owned preview navigation and viewer lifecycle in the packaged application
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-preview-')
+        run: |
+          proof="$RUNNER_TEMP/built-composer-proof/preview-lifetime"
+          mkdir "$proof"
+          cp "$RUNNER_TEMP/preview-browser-install.json" "$proof/browser-install.json"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- env \
+              T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 T3_CODE_LS_PREVIEW_LIFETIME_PROOF=true \
+              T3_CODE_LS_PREVIEW_BROWSER_HOME="$4" T3CODE_SERVER_BROWSER_SANDBOX=0 \
+              VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
+              "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
+          ' _ "$(id -un)" "$(command -v node)" "$proof" "$RUNNER_TEMP/preview-browser-home"
+          jq -e '.status == "passed" and .previewLifetime.runtime == "server" and .previewLifetime.navigationOwned and .previewLifetime.pointerRoundTrip and .previewLifetime.hiddenViewerDetached and .previewLifetime.sameTabReconnected and .previewLifetime.closedViewerDetached and .previewLifetime.reopenedFresh and .previewLifetime.frames > 0' \
+            "$proof/native/proof.json"
+      - name: Check preview stream and surface lifecycle owners
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-preview-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 src/preview/ServerBrowserStream.test.ts src/preview/SessionControl.test.ts
+          pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 src/browser/ServerBrowserSurface.browser.test.tsx
+      - name: Remove the owned preview installation
+        if: always() && startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-preview-')
+        run: |
+          rm -rf "$RUNNER_TEMP/preview-browser-home"
       - name: Exercise PDF link handling in the browser
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-')
         working-directory: apps/web
