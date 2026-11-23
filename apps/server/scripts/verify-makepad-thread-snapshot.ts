@@ -159,11 +159,11 @@ try {
   } else Assert.ok(data.projection.messages.some((message) => message.text === "GPUI server reply café 🦀"));
   Assert.ok(FS.existsSync(Path.join(userdata, "statev2.sqlite")));
   Assert.ok(!FS.existsSync(Path.join(userdata, "statev2.omdb")));
-  for (const [request, success] of [
-    [{ port, token, environmentId: "wrong-environment", threadId }, false],
-    [{ port, token: "invalid.fixture.token", environmentId: descriptor.environmentId, threadId }, false],
-    [{ port, token, environmentId: descriptor.environmentId, threadId: "missing-fixture-thread" }, false],
-    [{ port, token, environmentId: descriptor.environmentId, threadId }, true],
+  for (const [scenario, request, success] of [
+    ["wrong environment", { port, token, environmentId: "wrong-environment", threadId }, false],
+    ["invalid token", { port, token: "invalid.fixture.token", environmentId: descriptor.environmentId, threadId }, false],
+    ["missing thread", { port, token, environmentId: descriptor.environmentId, threadId: "missing-fixture-thread" }, false],
+    ["authenticated thread", { port, token, environmentId: descriptor.environmentId, threadId }, true],
   ] as const) {
     await new Promise<void>((resolve, reject) => {
       const view = ChildProcess.spawn(executable, [historyMode ? "--thread-history-proof" : "--thread-snapshot-proof"], {
@@ -179,12 +179,22 @@ try {
       view.stdout.on("data", capture);
       view.stderr.on("data", capture);
       view.once("error", () => { clearTimeout(timer); reject(new Error("Makepad snapshot window could not start")); });
-      view.once("close", (code) => {
+      view.once("close", (code, signal) => {
         clearTimeout(timer);
         const kind = historyMode ? "history" : "snapshot";
         const marker = success ? `T14 Makepad server ${kind} proof passed` : `T14 Makepad server ${kind} refusal passed`;
         if (code === 0 && !oversized && output.includes(marker) && !output.includes(token)) resolve();
-        else reject(new Error("Makepad snapshot window check failed"));
+        else {
+          const reason = [
+            "Makepad history proof timed out", "History widget does not match checked records",
+            "Expected a bounded first page", "Oldest record was not paged", "Missing native history control",
+            "Incomplete history", "Missing ordered history record", "Missing safe history refusal",
+            "T14 Makepad server history refusal passed", "T14 Makepad server history proof passed",
+          ].find((diagnostic) => output.includes(diagnostic));
+          reject(new Error(
+            `Makepad ${kind} check failed for ${scenario} (exit ${code ?? signal}, ${oversized ? "output exceeded bound" : reason ?? "no expected proof marker"})`,
+          ));
+        }
       });
       view.stdin.on("error", () => { /* A failed child closes its input. The close handler reports a safe error. */ });
       view.stdin.end(JSON.stringify(request));
