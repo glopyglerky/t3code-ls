@@ -655,6 +655,12 @@ after publication, preserved the failed candidate, and brought the previous
 runtime back to readiness. [Rollback before publication](https://github.com/glopyglerky/t3code-ls/actions/runs/45183245968)
 · [Rollback after publication](https://github.com/glopyglerky/t3code-ls/actions/runs/45188137463)
 
+Isolated preparation checks the candidate's embedded version before invoking
+the storage helper. The packaged check used a separately built candidate for
+the forward target. A mislabeled copy with otherwise valid digests and receipts
+was refused without changes to the trial files, checkpoint or selected service.
+[Packaged version check](https://github.com/glopyglerky/t3code-ls/actions/runs/45191901057)
+
 Promotion to the target runtime, catalog unsealing and ordinary native update
 admission still require production recovery proof.
 

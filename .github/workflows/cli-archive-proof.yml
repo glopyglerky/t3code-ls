@@ -86,19 +86,51 @@ jobs:
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
             -p t3-code-ls-storage --lib isolated_trial | tee "$RUNNER_TEMP/cli-proof/native-trial.log"
           export T3_TEST_PREPARE_ENTRY="$entry"
+          export T3_TEST_PREPARE_VERSION="$version"
           export T3_TEST_SEALED_TRIAL_HELPER="$(dirname "$entry")/native-bin/t3-code-ls-db"
-          node --test --test-reporter tap --test-name-pattern 'compiled Rust helper restores' \
+          node --test --test-reporter tap --test-name-pattern 'compiled Rust helper (restores|rejects)' \
             tools/service-launcher-trial.test.mjs | tee "$RUNNER_TEMP/cli-proof/preparation.log"
           grep -E '^ok [1-9][0-9]* - compiled Rust helper restores ' "$RUNNER_TEMP/cli-proof/preparation.log"
+          grep -E '^ok [1-9][0-9]* - compiled Rust helper rejects a mislabeled installed package before recording preparation$' "$RUNNER_TEMP/cli-proof/preparation.log"
+          if [[ "$LAUNCHER_PROMOTION_PROOF" == true || "$LAUNCHER_CANCEL_PROOF" == true ]]; then
+            candidate_version=$(node -p '(BigInt(process.argv[1].split(".", 1)[0]) + 1n) + ".0.0"' "$version")
+            manifest=apps/server/package.json
+            saved_manifest="$RUNNER_TEMP/previous-server-package.json"
+            cp -p "$manifest" "$saved_manifest"
+            restore_manifest() { cp -p "$saved_manifest" "$manifest"; }
+            trap restore_manifest EXIT
+            node -e '
+              const fs = require("node:fs");
+              const [file, version] = process.argv.slice(1);
+              const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+              fs.writeFileSync(file, JSON.stringify({ ...manifest, version }, null, 2) + "\n");
+            ' "$manifest" "$candidate_version"
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t02-bundled-native-integrated-* ]]; then
+              export T3_CODE_LS_BUNDLE_GIT_WORKSPACE=1
+            fi
+            pnpm exec node apps/server/scripts/cli.ts build-exe --verbose
+            pnpm exec node scripts/build-cli-archive.ts --platform linux --arch x64 \
+              --version "$candidate_version" --output-dir "$RUNNER_TEMP/cli-archive"
+            restore_manifest
+            trap - EXIT
+            git diff --exit-code HEAD -- "$manifest"
+            candidate_archive="t3-$candidate_version-linux-x64.tar.gz"
+            (cd "$RUNNER_TEMP/cli-archive" && sha256sum "$candidate_archive") > "$RUNNER_TEMP/cli-proof/candidate-archive.sha256"
+            tar -xzf "$RUNNER_TEMP/cli-archive/$candidate_archive" -C "$extracted"
+            candidate_entry="$extracted/t3-$candidate_version-linux-x64/t3"
+            candidate_helper="$(dirname "$candidate_entry")/native-bin/t3-code-ls-db"
+            test -x "$candidate_entry" && test -x "$candidate_helper"
+          fi
           if [[ "$LAUNCHER_PROMOTION_PROOF" == true ]]; then
             sudo -n unshare --net -- bash -euc '
               ip link set dev lo up
               exec runuser -u "$1" -- env T3_TEST_LAUNCHER_PROMOTION_INTENT=1 \
                 T3_TEST_LAUNCHER_SEALED_PUBLICATION=1 T3_TEST_LAUNCHER_SEALED_SERVING=1 \
                 T3_TEST_PREPARE_ENTRY="$3" T3_TEST_SEALED_TRIAL_HELPER="$4" T3_TEST_PREVIOUS_RUNTIME_VERSION="$5" \
+                T3_TEST_PREPARE_VERSION="$6" T3_TEST_PREVIOUS_RUNTIME_ENTRY="$7" \
                 "$2" --test --test-reporter tap \
                 --test-name-pattern "compiled Rust helper records" tools/service-launcher-trial.test.mjs
-            ' _ "$(id -un)" "$(command -v node)" "$entry" "$T3_TEST_SEALED_TRIAL_HELPER" "$version" \
+            ' _ "$(id -un)" "$(command -v node)" "$candidate_entry" "$candidate_helper" "$version" "$candidate_version" "$entry" \
               | tee "$RUNNER_TEMP/cli-proof/promotion-intent.log"
             grep -E '^ok [1-9][0-9]* - compiled Rust helper records ' "$RUNNER_TEMP/cli-proof/promotion-intent.log"
             grep -F 'Packaged serve refused the sealed catalog without publishing runtime state or modifying the database.' \
@@ -112,9 +144,10 @@ jobs:
               exec runuser -u "$1" -- env T3_TEST_LAUNCHER_PROMOTION_INTENT=1 \
                 T3_TEST_LAUNCHER_CANCEL_BEFORE_PUBLICATION=1 T3_TEST_PREPARE_ENTRY="$3" \
                 T3_TEST_SEALED_TRIAL_HELPER="$4" T3_TEST_PREVIOUS_RUNTIME_VERSION="$5" \
+                T3_TEST_PREPARE_VERSION="$6" T3_TEST_PREVIOUS_RUNTIME_ENTRY="$7" \
                 "$2" --test --test-reporter tap \
                 --test-name-pattern "compiled Rust helper records" tools/service-launcher-trial.test.mjs
-            ' _ "$(id -un)" "$(command -v node)" "$entry" "$T3_TEST_SEALED_TRIAL_HELPER" "$version" \
+            ' _ "$(id -un)" "$(command -v node)" "$candidate_entry" "$candidate_helper" "$version" "$candidate_version" "$entry" \
               | tee "$RUNNER_TEMP/cli-proof/promotion-cancel.log"
             grep -F 'Cancelled the unstarted promotion and reopened the exact previous packaged server.' \
               "$RUNNER_TEMP/cli-proof/promotion-cancel.log"
@@ -137,7 +170,7 @@ jobs:
             exec runuser -u "$1" -- "$2" apps/server/scripts/verify-packaged-git-workspace.ts "$3" "$4"
           ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/cli-proof/git-workspace" "$entry"
       - name: Verify guest authorization and redemption across a native reopen
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t10-packaged-guest-')
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t10-packaged-guest-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
         shell: bash
         run: |
           set -euo pipefail

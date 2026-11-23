@@ -902,7 +902,8 @@
         "apps/server/src/orchestration-v2/NativeGuestShare.ts",
         "apps/server/src/orchestration-v2/GuestShareDecider.ts",
         "apps/server/src/guest/GuestShareService.ts",
-        "packages/shared/src/nativeExecutable.ts"
+        "packages/shared/src/nativeExecutable.ts",
+        ".github/workflows/cli-archive-proof.yml"
       ],
       "platform_routes": [
         {
@@ -924,10 +925,14 @@
       "acceptance_tests": [
         "tools/check-guest-share-adapter.mjs",
         "tools/check-guest-share-runtime.mjs",
-        "tools/check-guest-share.mjs"
+        "tools/check-guest-share.mjs",
+        "apps/server/scripts/verify-packaged-guest-authorization.ts"
       ],
+      "hosted_acceptance": {
+        "apps/server/scripts/verify-packaged-guest-authorization.ts": ".github/workflows/cli-archive-proof.yml"
+      },
       "retired_paths": [],
-      "notes": "Guest-share transitions, invite and signed-session eligibility, and upload classification run through the existing Rust helper. The application verifies signatures, holds keys, applies live host policy, and owns filesystem observations, JavaScript Unicode case folding, IDs, SQLite transactions, attachment copying and cleanup. Other hosts retain the original classifier.",
+      "notes": "Guest-share transitions, invite and signed-session eligibility, and upload classification run through the existing Rust helper. The application verifies signatures, holds keys, applies live host policy, and owns filesystem observations, JavaScript Unicode case folding, IDs, upstream SQLite transactions, attachment copying and cleanup. Run 45191900038 at 6283476858c082d9e787ba5a645284bf299a2981 exercised the packaged Linux x64 server and native database with a synthetic managed relay. It verified one successful concurrent redemption, a valid session after restart, refusal to reuse the invite, and no writes on rejected authorization. Browser cookie handling and the live Connect edge remain open. Other hosts retain the original classifier.",
       "rust_crates": ["crates/core"]
     },
     {
