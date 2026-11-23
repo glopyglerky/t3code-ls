@@ -1754,6 +1754,28 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn store_modes_refuse_a_symlink_and_preserve_its_target() {
+        let fixture = TestFixture::start().await;
+        fixture.initialize().await.shutdown().await.unwrap();
+        let original = std::fs::read(fixture.path()).unwrap();
+        let link = fixture.path().with_file_name("linked.redb");
+        std::os::unix::fs::symlink(fixture.path(), &link).unwrap();
+
+        assert!(matches!(Store::open_read_only(&link).await, Err(Error::IncompatibleStore)));
+        assert!(matches!(Store::open_local(&link).await, Err(Error::IncompatibleStore)));
+        assert!(matches!(Store::open_exclusive(&link).await, Err(Error::IncompatibleStore)));
+        assert!(matches!(Store::initialize_local(&link).await, Err(Error::IncompatibleStore)));
+        assert_eq!(std::fs::read(fixture.path()).unwrap(), original);
+
+        let dangling = fixture.path().with_file_name("dangling.redb");
+        let absent = fixture.path().with_file_name("absent.redb");
+        std::os::unix::fs::symlink(&absent, &dangling).unwrap();
+        assert!(matches!(Store::initialize_local(&dangling).await, Err(Error::IncompatibleStore)));
+        assert!(!absent.exists());
+    }
+
     #[tokio::test]
     async fn clean_file_payload_corruption_is_rejected_on_open_and_initialize() {
         const ORIGINAL: &[u8] = b"UNIQUE_PROJECTION_PAYLOAD_ORIGINAL";
