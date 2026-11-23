@@ -36,7 +36,7 @@ function readStartupObservations(logPath: string) {
     return {
       outputBytes: size,
       phases: startupPhases.filter((phase) => lines.includes(`startup phase: ${phase}`)),
-      errorCodes: [...new Set(lines.match(/\b(?:ENOENT|EACCES|EPERM|EADDRINUSE|ENOSPC|ERR_MODULE_NOT_FOUND|SQLITE_BUSY|SQLITE_CANTOPEN)\b/gu))],
+      errorCodes: [...new Set(lines.match(/\b(?:ENOENT|EACCES|EPERM|EADDRINUSE|ENOSPC|EPIPE|ECONNRESET|ERR_MODULE_NOT_FOUND|SQLITE_BUSY|SQLITE_CANTOPEN)\b/gu))],
     };
   } finally {
     FS.closeSync(fd);
@@ -57,7 +57,8 @@ export async function withAndroidPairingFixture(input: {
   Assert.equal(process.platform, "linux");
   Assert.equal(process.arch, "x64");
   Assert.deepEqual(Object.keys(OS.networkInterfaces()), ["lo"]);
-  const bundle = Path.join(input.temporary, "outbox-runtime-server/bin.mjs");
+  // The JavaScript bundle resolves its declared external packages from apps/server.
+  const bundle = Path.resolve(import.meta.dirname, "../apps/server/dist/bin.mjs");
   Assert.equal(FS.realpathSync(bundle), bundle, "Stage an owned packaged server, not a source/home symlink");
   const scratch = FS.mkdtempSync(Path.join(input.temporary, "outbox-pairing-"));
   FS.chmodSync(scratch, 0o700);
@@ -127,6 +128,7 @@ export async function withAndroidPairingFixture(input: {
     for (const directory of [home, state, env.PATH!, env.TMPDIR!, Path.join(state, "userdata")]) {
       FS.mkdirSync(directory, { recursive: true, mode: 0o700 });
     }
+    FS.symlinkSync("/usr/bin/git", Path.join(env.PATH!, "git"));
     FS.writeFileSync(Path.join(state, "userdata/settings.json"), JSON.stringify({ providerInstances:
       Object.fromEntries(["codex", "claudeAgent", "pi", "cursor", "grok", "fx", "opencode", "antigravity", "kiro", "muse"]
         .map((driver) => [driver, { driver, enabled: false }])) }), { mode: 0o600 });
@@ -275,7 +277,7 @@ export async function withAndroidPairingFixture(input: {
         { operation: "application_receipts_get", transaction_id: transactionId, command_id: "t12-dispatch-command:initial-message" },
         { operation: "application_rollback", transaction_id: transactionId },
       ];
-      const output = ChildProcess.execFileSync(Path.join(input.temporary, "outbox-runtime-server/native-bin/t3-code-ls-db"),
+      const output = ChildProcess.execFileSync(Path.join(Path.dirname(bundle), "native-bin/t3-code-ls-db"),
         ["read-only-local", database], { env: {}, encoding: "utf8", timeout: 15_000, maxBuffer: 1_048_576,
           input: requests.map((request) => JSON.stringify(request)).join("\n") + "\n" });
       const responses = output.trim().split("\n").map((line) => JSON.parse(line));

@@ -601,11 +601,17 @@ jobs:
           test -s "$toolchain_root/installation-proof.json"
           pnpm --dir apps/web run build
           node tools/build-native.mjs "$RUNNER_TEMP/outbox-server-components"
-          T3_CODE_LS_NATIVE_DIR="$RUNNER_TEMP/outbox-server-components" pnpm --dir apps/server run build:bundle
-          server="$RUNNER_TEMP/outbox-runtime-server"
+          # Keep filesystem-loaded externals reachable through the server package's node_modules.
+          server="$GITHUB_WORKSPACE/apps/server/dist"
           test ! -e "$server"
-          mv apps/server/dist "$server"
+          touch "$RUNNER_TEMP/outbox-runtime-server-owned"
+          T3_CODE_LS_NATIVE_DIR="$RUNNER_TEMP/outbox-server-components" pnpm --dir apps/server run build:bundle
           test -f "$server/bin.mjs" && test -f "$server/client/index.html" && test -x "$server/native-bin/t3-code-ls-db"
+          node --input-type=module - "$server/bin.mjs" <<'JS'
+          import { createRequire } from "node:module";
+          const resolve = createRequire(process.argv[2]).resolve;
+          for (const dependency of ["playwright-core", "undici"]) resolve(dependency);
+          JS
           proof="$RUNNER_TEMP/outbox-runtime-proof"
           cp "$toolchain_root/installation-proof.json" "$proof/server-toolchain.json"
           git rev-parse HEAD HEAD^{tree} > "$proof/server-source.txt"
@@ -658,7 +664,10 @@ jobs:
           rm -f -- "$RUNNER_TEMP/outbox-runtime-positive.apk" "$RUNNER_TEMP/outbox-runtime-missing-library.apk" \
             "$RUNNER_TEMP/outbox-runtime-normal.apk"
           rm -rf -- "$RUNNER_TEMP/outbox-runtime-sdk" "$RUNNER_TEMP/outbox-runtime-sdk-user"
-          rm -rf -- "$RUNNER_TEMP/outbox-runtime-server"
+          if [[ -f "$RUNNER_TEMP/outbox-runtime-server-owned" ]]; then
+            rm -rf -- "$GITHUB_WORKSPACE/apps/server/dist"
+            rm -f -- "$RUNNER_TEMP/outbox-runtime-server-owned"
+          fi
 
   maintenance-snapshot:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-maintenance-snapshot-')
