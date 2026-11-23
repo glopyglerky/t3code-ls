@@ -10,6 +10,7 @@ use crate::application::{
     schema_key, table,
 };
 use crate::application_json::{compact_json, field, object_fields, render_fields, set_field};
+use crate::application_projections::{MESSAGES, THREADS, read_index};
 use crate::application_rows::{
     delete_row, managed_marker, nullable, nullable_cell, read_row, text, text_cell, validate_table,
     write_row,
@@ -44,6 +45,8 @@ const DOMAINS: [&str; 2] = [RUNTIME, CONTEXT];
 const MARKER: &str = "runtime-state-v1";
 const PREPARE_ROWS: usize = 32;
 const PAGE_ROWS: usize = 128;
+// Matches the retained history limit in AgentSessionScanner.
+const MAX_IMPORTED_MESSAGES: usize = 200;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -99,6 +102,13 @@ pub struct ContextRecord {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct ImportedMessageWitness {
+    role: String,
+    text_sha256: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RuntimeStateOperation {
     RuntimeUpsert {
@@ -108,6 +118,12 @@ pub enum RuntimeStateOperation {
     RuntimeImport {
         thread_id: String,
         source: String,
+    },
+    RuntimeRecoverImport {
+        runtime: RuntimeRecord,
+        source: String,
+        project_id: String,
+        messages: Vec<ImportedMessageWitness>,
     },
     RuntimeGet {
         thread_id: String,
@@ -696,6 +712,80 @@ fn imported_payload(previous: Option<&str>, source: &str) -> Result<String> {
     Ok(render_fields(&fields))
 }
 
+fn set_imported_source(row: &mut Map<String, Value>, source: &str) -> Result<bool> {
+    let previous = row.get("runtime_payload_json").and_then(|cell| {
+        if cell.get("type").and_then(Value::as_str) == Some("text")
+            && cell.get("encoding").is_none()
+        {
+            cell.get("value").and_then(Value::as_str)
+        } else {
+            None
+        }
+    });
+    let payload = imported_payload(previous, source)?;
+    if previous == Some(payload.as_str()) {
+        return Ok(false);
+    }
+    row.insert("runtime_payload_json".into(), text_cell(&payload));
+    Ok(true)
+}
+
+async fn import_history_matches(
+    session: &mut Session,
+    thread_id: &str,
+    project_id: &str,
+    messages: &[ImportedMessageWitness],
+) -> Result<bool> {
+    if messages.len() > MAX_IMPORTED_MESSAGES {
+        return Err(invalid("transcript exceeds the retained message limit"));
+    }
+    let thread_cell = text_cell(thread_id);
+    let Some(thread) = read_row(
+        &mut session.transaction,
+        &session.catalog,
+        THREADS,
+        std::slice::from_ref(&thread_cell),
+    )
+    .await?
+    else {
+        return Ok(false);
+    };
+    let payload: Value = decode(text(&thread.row, "payload_json")?.as_bytes())?;
+    if text(&thread.row, "project_id")? != project_id || payload["historyOrigin"] != "v1_import" {
+        return Ok(false);
+    }
+    if read_index::count_equal(session, MESSAGES, "thread_id", &thread_cell).await?
+        != messages.len() as u64
+    {
+        return Ok(false);
+    }
+    for (index, expected) in messages.iter().enumerate() {
+        // The importer creates the message ID from its zero-based position.
+        let id = format!("{thread_id}:{index:06}");
+        let Some(message) = read_row(
+            &mut session.transaction,
+            &session.catalog,
+            MESSAGES,
+            &[text_cell(&id)],
+        )
+        .await?
+        else {
+            return Ok(false);
+        };
+        if message.row.get("thread_id") != Some(&thread_cell) {
+            return Ok(false);
+        }
+        let payload: Value = decode(text(&message.row, "payload_json")?.as_bytes())?;
+        if payload["role"].as_str() != Some(expected.role.as_str())
+            || !payload["text"].is_string()
+            || request_digest(&payload["text"]) != expected.text_sha256
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 fn runtime_stored(runtime: &RuntimeRecord, payload: Option<&str>) -> Map<String, Value> {
     Map::from_iter([
         ("thread_id".into(), text_cell(&runtime.thread_id)),
@@ -905,23 +995,47 @@ impl ApplicationTransactions {
                     )
                     .await?
                     {
-                        let old_payload =
-                            previous.row.get("runtime_payload_json").and_then(|cell| {
-                                if cell.get("type").and_then(Value::as_str) == Some("text")
-                                    && cell.get("encoding").is_none()
-                                {
-                                    cell.get("value").and_then(Value::as_str)
-                                } else {
-                                    None
-                                }
-                            });
-                        let payload = imported_payload(old_payload, &source)?;
-                        previous
-                            .row
-                            .insert("runtime_payload_json".into(), text_cell(&payload));
+                        set_imported_source(&mut previous.row, &source)?;
                         set_row(&mut session, RUNTIME, &identity, previous.row).await?;
                     }
                     Ok(json!({"written":true}))
+                }
+                RuntimeStateOperation::RuntimeRecoverImport {
+                    runtime,
+                    source,
+                    project_id,
+                    messages,
+                } => {
+                    runtime.validate()?;
+                    if !import_history_matches(
+                        &mut session,
+                        &runtime.thread_id,
+                        &project_id,
+                        &messages,
+                    )
+                    .await?
+                    {
+                        return Ok(json!({"recovered":false}));
+                    }
+                    let identity = [text_cell(&runtime.thread_id)];
+                    let mut row = match read_row(
+                        &mut session.transaction,
+                        &session.catalog,
+                        RUNTIME,
+                        &identity,
+                    )
+                    .await?
+                    {
+                        Some(existing) => existing.row,
+                        None => {
+                            let payload = upsert_payload(runtime.runtime_payload.as_deref(), None)?;
+                            runtime_stored(&runtime, payload.as_deref())
+                        }
+                    };
+                    if set_imported_source(&mut row, &source)? {
+                        set_row(&mut session, RUNTIME, &identity, row).await?;
+                    }
+                    Ok(json!({"recovered":true}))
                 }
                 RuntimeStateOperation::RuntimeDelete { thread_id } => {
                     remove_row(&mut session, RUNTIME, &[text_cell(&thread_id)]).await?;

@@ -13,6 +13,7 @@ import * as SqlSchema from "effect/sql/SqlSchema";
 import {
   AgentSessionImportSource,
   IsoDateTime,
+  type ProjectId,
   ProviderInstanceId,
   RuntimeMode,
   ThreadId,
@@ -52,6 +53,16 @@ export const RecordImportedTranscriptInput = Schema.Struct({
 });
 export type RecordImportedTranscriptInput = typeof RecordImportedTranscriptInput.Type;
 
+export interface RecoverImportedTranscriptInput {
+  readonly runtime: ProviderSessionRuntime;
+  readonly source: AgentSessionImportSource;
+  readonly projectId: ProjectId;
+  readonly messages: ReadonlyArray<{
+    readonly role: "user" | "assistant";
+    readonly text: string;
+  }>;
+}
+
 export interface ProviderSessionRuntimeUpsertOptions {
   readonly onConflict?: "update" | "ignore";
 }
@@ -67,6 +78,11 @@ export class ProviderSessionRuntimeRepository extends Context.Service<
     readonly recordImportedTranscript: (
       input: RecordImportedTranscriptInput,
     ) => Effect.Effect<void, ProviderSessionRuntimeRepositoryError>;
+
+    /** Available when the repository can verify projections in the runtime write transaction. */
+    readonly recoverImportedTranscript?: (
+      input: RecoverImportedTranscriptInput,
+    ) => Effect.Effect<boolean, ProviderSessionRuntimeRepositoryError>;
 
     readonly getByThreadId: (
       input: GetProviderSessionRuntimeInput,
@@ -349,6 +365,9 @@ export interface ProviderSessionRuntimeRows<E> {
   readonly recordImportedTranscriptRow: (
     input: RecordImportedTranscriptInput,
   ) => Effect.Effect<void, E>;
+  readonly recoverImportedTranscriptRow?: (
+    input: RecoverImportedTranscriptInput,
+  ) => Effect.Effect<boolean, E>;
   readonly getRuntimeRowByThreadId: (
     input: GetProviderSessionRuntimeInput,
   ) => Effect.Effect<Option.Option<typeof ProviderSessionRuntimeRawDbRowSchema.Type>, E>;
@@ -365,6 +384,7 @@ export function repositoryFromRows<E>({
   upsertRuntimeRow,
   insertRuntimeRow,
   recordImportedTranscriptRow,
+  recoverImportedTranscriptRow,
   getRuntimeRowByThreadId,
   listRuntimeRows,
   deleteRuntimeByThreadId,
@@ -468,6 +488,20 @@ export function repositoryFromRows<E>({
   return {
     upsert,
     recordImportedTranscript,
+    ...(recoverImportedTranscriptRow === undefined
+      ? {}
+      : {
+          recoverImportedTranscript: (input: RecoverImportedTranscriptInput) =>
+            recoverImportedTranscriptRow(input).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProviderSessionRuntimeRepository.recoverImportedTranscript:query",
+                  "ProviderSessionRuntimeRepository.recoverImportedTranscript:encodeRequest",
+                  { threadId: input.runtime.threadId },
+                ),
+              ),
+            ),
+        }),
     getByThreadId,
     list,
     deleteByThreadId,
