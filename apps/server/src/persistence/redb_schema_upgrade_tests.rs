@@ -3109,7 +3109,8 @@ async fn forward_packaged_catalog_refusals(
                     .forward_service_activation_v1
                     .as_mut()
                     .unwrap()
-                    .update_id = "foreign-update".into();
+                    .forward_selection_sha256 =
+                    forward_fixture_sha256(b"another synthetic selection");
                 let bytes = encode_catalog(&catalog)?;
                 record_generation_identity(&mut tx, &catalog, &bytes).await?;
                 tx.put(schema_key(), bytes).await?;

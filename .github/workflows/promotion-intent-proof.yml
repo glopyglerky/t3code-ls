@@ -154,6 +154,13 @@ jobs:
                 grep -F "T05 packaged readiness $rejected: exit 78" "$proof/forward-catalog.log"
               done
             fi
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-catalog-* ]]; then
+              grep -F 'T05 packaged readiness foreign-lease: exit 78' "$proof/forward-catalog.log"
+              grep -F 'T05 packaged inherited catalog corpus coherent: expected readiness true' "$proof/forward-catalog.log"
+              for rejected in catalog generation marker snapshot; do
+                grep -F "T05 packaged inherited catalog corpus $rejected: expected readiness false" "$proof/forward-catalog.log"
+              done
+            fi
             cp "$RUNNER_TEMP/promotion-toolchain/installation-proof.json" "$proof/"
             exit 0
           fi
