@@ -1315,7 +1315,7 @@ async function nativeFailureChecks() {
     Effect.gen(function* () {
       yield* createThread();
       const guest = yield* GuestShareService.GuestShareService;
-      const { url } = yield* guest.create({ threadId });
+      const { url, share } = yield* guest.create({ threadId });
       const credential = new URL(url).hash.slice(1);
       const before = yield* snapshot();
       const clock = yield* Clock.Clock;
@@ -1359,6 +1359,23 @@ async function nativeFailureChecks() {
       NodeAssert.equal(after.events.length, before.events.length + 1);
       NodeAssert.equal(after.events.at(-1).event.type, "thread.guest-share-updated");
       NodeAssert.deepEqual(after.outbox, before.outbox);
+      const [sessionCookie] = cookie.split(";");
+      const shareId = share.id;
+      const session = () => Effect.promise(() => handler(new Request(
+        `https://env.t3.test/api/guest/session?share=${encodeURIComponent(shareId)}`,
+        { headers: { cookie: sessionCookie } },
+      )));
+      yield* control.setMode({ operation: "authorize-session", kind: "exit" });
+      const unavailable = yield* session();
+      NodeAssert.equal(unavailable.status, 403);
+      NodeAssert.equal((yield* Effect.promise(() => unavailable.json())).reason, "unavailable");
+      NodeAssert.equal(unavailable.headers.has("set-cookie"), false);
+      NodeAssert.deepEqual(yield* snapshot(), after);
+      NodeAssert.deepEqual((yield* control.calls).map((call) => call.operation), ["authorize-session"]);
+      yield* control.setMode();
+      NodeAssert.equal((yield* session()).status, 204);
+      NodeAssert.deepEqual((yield* control.calls).map((call) => call.operation), ["authorize-session"]);
+      NodeAssert.deepEqual(yield* snapshot(), after);
     }),
     control.path,
     "invite-authorization",
