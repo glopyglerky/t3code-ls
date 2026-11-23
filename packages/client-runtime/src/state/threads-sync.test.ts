@@ -2480,6 +2480,42 @@ describe("EnvironmentThreads", () => {
     }),
   );
 
+  it.effect("resumes from the installed projection after a replacement snapshot fails", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({ cached: BASE_PROJECTION });
+      yield* SubscriptionRef.changes(harness.subscriptionCount).pipe(
+        Stream.filter((count) => count >= 1),
+        Stream.runHead,
+      );
+
+      const sequence = CACHED_SNAPSHOT_SEQUENCE + 1;
+      const defective = snapshot(BASE_PROJECTION, sequence);
+      Object.defineProperty(defective, "projection", {
+        get() {
+          throw new Error("Replacement snapshot could not be installed");
+        },
+      });
+      yield* Queue.offer(harness.inputs, defective);
+      yield* awaitThreadState(harness.observed, (value) => Option.isSome(value.error));
+      yield* TestClock.adjust("60 seconds");
+      yield* SubscriptionRef.changes(harness.subscriptionCount).pipe(
+        Stream.filter((count) => count >= 2),
+        Stream.runHead,
+      );
+      expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBe(CACHED_SNAPSHOT_SEQUENCE);
+
+      yield* Queue.offer(harness.inputs, titleUpdated("Replay after a failed snapshot", sequence));
+      const recovered = yield* awaitThreadState(
+        harness.observed,
+        (value) =>
+          value.status === "live" &&
+          Option.isSome(value.data) &&
+          value.data.value.thread.title === "Replay after a failed snapshot",
+      );
+      expect(recovered.sequence).toBe(sequence);
+    }),
+  );
+
   it.effect("keeps replayed updates synchronizing until the completion marker arrives", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({ cached: BASE_PROJECTION, completionMarker: true });
