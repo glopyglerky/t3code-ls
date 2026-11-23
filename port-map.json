@@ -1853,6 +1853,9 @@
         }
       ],
       "acceptance_tests": ["apps/web/scripts/verify-hybrid-client.ts"],
+      "hosted_acceptance": {
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
+      },
       "retired_paths": [],
       "notes": "T01, T11 and J36. VITE_T3_CODE_LS_PAIRING_RENDERER=dioxus selects the local pairing form only. The browser adapter uses Dioxus 0.8.0-alpha.3 release cb27832398e8a3fa30a0fc8d6917c6d8a86fa71a, an ancestor of research pin 0a7242a2a72b08975584bf8ecb05076a5ee0b9c7. Cargo.lock records release artifact checksums. The bundled Chromium proof has yet to run.",
       "rust_crates": ["apps/web/rust/pairing"]

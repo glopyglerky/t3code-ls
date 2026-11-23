@@ -194,6 +194,12 @@ def select_checks(changed: list[str], mapping: dict, old_mapping: dict, names: d
     application = False
     ports = mapping["ports"] + old_mapping.get("ports", [])
     acceptance_tests = {test for port in ports for test in port.get("acceptance_tests", [])}
+    hosted_tests = set()
+    for port in ports:
+        for test, workflow in port.get("hosted_acceptance", {}).items():
+            if test not in port.get("acceptance_tests", []) or workflow not in port.get("adapter_paths", []):
+                raise ValueError(f"Hosted acceptance needs a declared test and workflow owner: {test}")
+            hosted_tests.add(test)
     acceptance_evidence = {path for port in ports for route in port.get("platform_routes", [])
                            for path in route.get("acceptance_evidence", {}).values()}
     component_manifest = {} if component_manifest is None else component_manifest
@@ -205,7 +211,7 @@ def select_checks(changed: list[str], mapping: dict, old_mapping: dict, names: d
             if not rust_members(path, names):
                 raise ValueError(f"Acceptance test is outside the Cargo workspace: {path}")
             continue
-        if path in HYBRID_ACCEPTANCE_TESTS:
+        if path in HYBRID_ACCEPTANCE_TESTS or path in hosted_tests:
             continue
         if path not in component_manifest:
             raise ValueError(f"Acceptance test needs an execution mapping in tools/acceptance-checks.json: {path}")
@@ -329,7 +335,8 @@ def select_checks(changed: list[str], mapping: dict, old_mapping: dict, names: d
         | {test for port in ports if port["id"] in runtime_affected
            for test in port.get("acceptance_tests", [])})
     component_tests = sorted(path for path in selected_tests
-                             if not path.endswith(".rs") and path not in scheduled_tests)
+                             if not path.endswith(".rs") and path not in scheduled_tests
+                             and path not in hosted_tests)
     for path in component_tests:
         if path not in component_manifest:
             raise ValueError(f"Acceptance test needs a scheduled execution mapping: {path}")

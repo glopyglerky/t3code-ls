@@ -37,6 +37,18 @@ Test.test("every declared acceptance test has exactly one execution route", () =
   const declared = new Set(mapping.ports.flatMap((port) => port.acceptance_tests));
   const adapters = new Set(planAdapterChecks(adapterPortIds).map((check) => check.script));
   const components = new Set(Object.keys(acceptanceChecks));
+  const hosted = new Map();
+  for (const port of mapping.ports) {
+    for (const [script, workflow] of Object.entries(port.hosted_acceptance ?? {})) {
+      Assert.ok(port.acceptance_tests.includes(script), `Hosted test has no declared owner: ${script}`);
+      Assert.match(workflow, /^\.github\/workflows\/[a-z0-9-]+\.yml$/u);
+      Assert.ok(port.adapter_paths.includes(workflow), `Hosted workflow has no declared owner: ${workflow}`);
+      Assert.ok(!hosted.has(script) || hosted.get(script) === workflow, `Conflicting hosted workflows: ${script}`);
+      Assert.ok(FS.readFileSync(Path.join(root, workflow), "utf8").includes(script),
+        `Hosted workflow does not reference its declared test: ${script}`);
+      hosted.set(script, workflow);
+    }
+  }
   for (const script of declared) {
     Assert.ok(FS.existsSync(Path.join(root, script)), `Missing acceptance source: ${script}`);
     if (script.endsWith(".rs")) {
@@ -46,9 +58,9 @@ Test.test("every declared acceptance test has exactly one execution route", () =
         : undefined;
       Assert.ok(packageConfig && packageConfig.autotests !== false,
         `Rust acceptance must be a discovered integration test in a Cargo workspace member: ${script}`);
-      Assert.equal(adapters.has(script) || components.has(script), false);
+      Assert.equal(adapters.has(script) || components.has(script) || hosted.has(script), false);
     } else {
-      Assert.equal(Number(adapters.has(script)) + Number(components.has(script)), 1,
+      Assert.equal(Number(adapters.has(script)) + Number(components.has(script)) + Number(hosted.has(script)), 1,
         `Acceptance script must have one explicit execution route: ${script}`);
     }
   }

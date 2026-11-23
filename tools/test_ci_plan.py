@@ -152,6 +152,17 @@ class SelectionTests(unittest.TestCase):
         self.assertEqual(result["gates"], {"native": True, "adapters": False, "application": True})
         self.assertTrue(result["stage_native"])
 
+    def test_hosted_browser_proof_stays_in_its_own_workflow(self):
+        mapping = copy.deepcopy(MAPPING)
+        script = "apps/web/scripts/verify-hybrid-client.ts"
+        workflow = ".github/workflows/composer-offsets.yml"
+        owned = port("browser-form", "crates/core/src/browser_form.rs", workflow, test=script)
+        owned["hosted_acceptance"] = {script: workflow}
+        mapping["ports"].append(owned)
+        result = self.select([script], mapping=mapping, full_reason="requested full fork gates")
+        self.assertNotIn(script, result["component_tests"])
+        self.assertIn("tools/check-project-commands.mjs", result["component_tests"])
+
     def test_transport_candidate_does_not_build_unrelated_storage_or_application(self):
         result = self.select(["crates/transport/src/bridge.rs"])
         self.assertEqual(set(result["rust_packages"]), {
