@@ -1850,6 +1850,37 @@
       "retired_paths": [],
       "notes": "T03 shared text-apply candidate. It defines append, replacement and UTF-16 splice behavior and a bounded retry boundary for one item. Capability negotiation, durable chunk and event representation, cache recovery, and client rendering still need integration.",
       "rust_crates": ["packages/client-runtime/rust"]
+    },
+    {
+      "id": "claude-stdio-control",
+      "state": "candidate",
+      "domain_owner": "apps/server/src/orchestration-v2/Adapters",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts",
+          "blob": "64537c7e5fa8f35134d7a8c4fc6cd2dc8839eda3"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/testkit/fixtures/claude_background_wake_before_queued_prompt/claude_transcript.ndjson",
+          "blob": "e2b88ec9340ff4f3d464298af12f0ebdcfbd132d"
+        }
+      ],
+      "rust_paths": ["apps/server/src/orchestration-v2/Adapters/claude_stdio_control.rs"],
+      "adapter_paths": [],
+      "platform_routes": [
+        {
+          "targets": ["linux-x64"],
+          "state": "candidate",
+          "implementation": "standalone-component",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": ["apps/server/src/orchestration-v2/Adapters/claude_stdio_control.rs"],
+      "retired_paths": [],
+      "notes": "T01 independent stream-JSON control candidate based on the pin of @anthropic-ai/claude-agent-sdk. Covers frame limits, interrupt receipt dispatch, and stale permission replies. The checked-in capture supplies message semantics. No process transport or production query runner is selected here.",
+      "rust_crates": ["crates/core"]
     }
   ],
   "backend_selection": "Select before execution. Compatible Linux GNU x86_64 defaults to Rust; other hosts use the retained upstream implementation. Explicit per-component native overrides fail visibly. T3_CODE_LS_IMPLEMENTATION=upstream provides a controlled original baseline. No retry through another implementation."
