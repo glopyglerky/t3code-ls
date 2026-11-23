@@ -779,6 +779,7 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
     let old_result = fs::read(&trial).unwrap();
     let old_receipt = fs::read(&receipt_path).unwrap();
     let selection_path = runtime.join("service-state.json");
+    let original_selection = fs::read(&selection_path).unwrap();
     let inspect_selection = || {
         let output = Command::new(executable)
             .arg("trial-inspect-selection")
@@ -790,8 +791,9 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
         assert!(output.stderr.is_empty());
         serde_json::from_slice::<Value>(&output.stdout).unwrap()
     };
+    fs::remove_file(&selection_path).unwrap();
     assert_eq!(inspect_selection()["error"]["kind"], "incompatible_store");
-    let selection = json!({
+    let pending_selection = json!({
         "protocol": 4,
         "activeVersion": "1.0.0",
         "update": {
@@ -802,7 +804,11 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
             "status": "pending",
         },
     });
-    fs::write(&selection_path, serde_json::to_vec(&selection).unwrap()).unwrap();
+    fs::write(
+        &selection_path,
+        serde_json::to_vec(&pending_selection).unwrap(),
+    )
+    .unwrap();
     let observed = inspect_selection();
     assert_eq!(observed["ok"], true, "{observed}");
     assert_eq!(observed["result"]["update_id"], UPDATE);
@@ -817,7 +823,7 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
         ("protocol", json!(2)),
         ("update", json!({"status": "committed"})),
     ] {
-        let mut changed = selection.clone();
+        let mut changed = pending_selection.clone();
         changed[field] = value;
         fs::write(&selection_path, serde_json::to_vec(&changed).unwrap()).unwrap();
         assert_eq!(inspect_selection()["error"]["kind"], "incompatible_store");
@@ -829,7 +835,7 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
         ("status", json!("committed")),
         ("dbPath", json!(trial)),
     ] {
-        let mut changed = selection.clone();
+        let mut changed = pending_selection.clone();
         changed["update"][field] = value;
         fs::write(&selection_path, serde_json::to_vec(&changed).unwrap()).unwrap();
         assert_eq!(inspect_selection()["error"]["kind"], "incompatible_store");
@@ -852,6 +858,7 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
     assert_eq!(fs::read(&checkpoint).unwrap(), original_checkpoint);
     assert_eq!(fs::read(&receipt_path).unwrap(), old_receipt);
     assert_eq!(fs::read(&selection_path).unwrap(), saved_selection);
+    fs::write(&selection_path, &original_selection).unwrap();
 
     fs::write(&receipt_path, vec![b' '; 8 * 1024 + 1]).unwrap();
     assert_eq!(prepare(&request)["error"]["kind"], "incompatible_store");
