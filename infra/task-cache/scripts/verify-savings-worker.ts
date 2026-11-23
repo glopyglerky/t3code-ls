@@ -65,8 +65,8 @@ for (const bundle of [bundles.native, bundles.runtime]) {
 }
 Assert.equal((await inspectNativeSavings(directory)).fingerprint, artifacts.fingerprint);
 
-function writeRuntime(bundle: BundleOutput, name: string): string {
-  const runtimeDirectory = NodePath.join(proofDirectory, name);
+function writeRuntime(root: string, bundle: BundleOutput, name: string): string {
+  const runtimeDirectory = NodePath.join(root, name);
   NodeFS.mkdirSync(runtimeDirectory);
   NodeFS.writeFileSync(NodePath.join(runtimeDirectory, "package.json"), '{"type":"module"}');
   for (const file of bundle.files) {
@@ -77,8 +77,8 @@ function writeRuntime(bundle: BundleOutput, name: string): string {
   }
   return runtimeDirectory;
 }
-const retainedRuntimeDirectory = writeRuntime(bundles.retainedRuntime, "retained-runtime");
-const runtimeDirectory = writeRuntime(bundles.runtime, "runtime");
+const retainedRuntimeDirectory = writeRuntime(proofDirectory, bundles.retainedRuntime, "retained-runtime");
+const runtimeDirectory = writeRuntime(proofDirectory, bundles.runtime, "runtime");
 const loadedWasm = new Set<string>();
 const hooks = NodeModule.registerHooks({
   load(url, context, nextLoad) {
