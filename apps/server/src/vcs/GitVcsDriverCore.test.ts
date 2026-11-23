@@ -709,6 +709,73 @@ it.effect("reads the project's own repository when the server inherited GIT_DIR"
   ).pipe(Effect.provide(layerTest)),
 );
 
+const gixFixture = process.env.T3_CODE_LS_GIX_FIXTURE;
+it.effect.skipIf(gixFixture === undefined)(
+  "reads repository paths and branch identity through the selected gix helper",
+  () => Effect.scoped(Effect.gen(function* () {
+    assert.isDefined(gixFixture);
+    const retained = yield* GitVcsDriver.GitVcsDriver;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const delegate = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const env = yield* HostProcess.Environment;
+    const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
+    const spawner = ChildProcessSpawner.make((command) => {
+      if (ChildProcess.isStandardCommand(command)) {
+        calls.push({ command: String(command.command), args: command.args.map(String) });
+      }
+      return delegate.spawn(command);
+    });
+    const native = yield* makeGitVcsDriverCore().pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.provideService(HostProcess.Environment, {
+        ...env,
+        T3_CODE_LS_IMPLEMENTATION: "native",
+        T3_CODE_LS_GIT_WORKSPACE_EXECUTABLE: gixFixture,
+      }),
+    );
+    const scratch = yield* makeTmpDir("git-native-workspace-");
+    const cwd = path.join(scratch, "checkout \n");
+    const nested = path.join(cwd, "nested");
+    yield* fs.makeDirectory(nested, { recursive: true });
+    const { initialBranch } = yield* initRepoWithCommit(cwd);
+    const linked = path.join(scratch, "linked ");
+    yield* git(cwd, ["worktree", "add", "-b", "linked-branch", linked]);
+    const alias = path.join(scratch, "alias");
+    NodeFS.symlinkSync(nested, alias);
+    const unborn = path.join(scratch, "unborn");
+    yield* fs.makeDirectory(unborn);
+    yield* git(unborn, ["init", "--initial-branch=unborn-branch"]);
+
+    for (const [location, branch] of [
+      [cwd, initialBranch], [nested, initialBranch], [alias, initialBranch],
+      [linked, "linked-branch"], [unborn, "unborn-branch"],
+    ] as const) {
+      const input = { cwd: location, refresh: true };
+      const expected = yield* retained.listRefs(input);
+      const start = calls.length;
+      const actual = yield* native.listRefs(input);
+      assert.deepEqual(actual.refs, expected.refs);
+      const discovery = calls.slice(start);
+      assert.equal(discovery.filter((call) => call.command === gixFixture).length, 1);
+      assert.isFalse(discovery.some((call) =>
+        call.args.includes("--git-common-dir") || call.args.includes("--show-toplevel"),
+      ));
+      const status = yield* native.statusDetailsLocal(location, { includeDivergence: false });
+      assert.equal(status.branch, branch);
+    }
+    yield* native.switchRef({ cwd: linked, refName: yield* git(linked, ["rev-parse", "HEAD"]) });
+    const detached = yield* native.listRefs({ cwd: linked, refresh: true });
+    assert.isFalse(detached.refs.some((ref) => ref.current));
+    const badConfigProbe = path.join(cwd, "bad-config-probe");
+    yield* fs.makeDirectory(badConfigProbe);
+    yield* fs.writeFileString(path.join(cwd, ".git", "config"), "[bad\n");
+    const before = calls.length;
+    assert.isTrue(Exit.isFailure(yield* Effect.exit(native.listRefs({ cwd: badConfigProbe }))));
+    assert.isTrue(calls.slice(before).some((call) => call.args.includes("--git-common-dir")));
+  })).pipe(Effect.provide(layerTest)),
+);
+
 it.effect("reads a branch whose name starts with a parenthesis as attached", () =>
   Effect.scoped(
     Effect.gen(function* () {

@@ -5,6 +5,7 @@ on:
     branches:
       - "candidate/t3code-ls-t06-file-revisions-*"
       - "candidate/t3code-ls-t06-repository-paths-*"
+      - "candidate/t3code-ls-t06-gix-*"
 
 permissions:
   contents: read
@@ -41,3 +42,18 @@ jobs:
         run: |
           pnpm --dir apps/server exec vp test run --maxWorkers 2 \
             src/vcs/GitVcsDriver.test.ts src/vcs/GitVcsDriverCore.test.ts
+      - name: Install the pinned compiler for native repository discovery
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t06-gix-')
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/git-workspace-toolchain"
+      - name: Compare the gix adapter with Git through the repository service
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t06-gix-')
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/git-workspace-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/git-workspace-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
+            --locked --release --manifest-path apps/server/rust/git-workspace/Cargo.toml
+          export T3_CODE_LS_GIX_FIXTURE="$CARGO_TARGET_DIR/release/t3-code-ls-git-workspace"
+          sha256sum "$T3_CODE_LS_GIX_FIXTURE" apps/server/rust/git-workspace/Cargo.lock
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 \
+            src/vcs/GitVcsDriverCore.test.ts -t 'through the selected gix helper'
