@@ -431,7 +431,6 @@ impl TrialLease {
         self.verify_installed_target(activation)
     }
 
-    #[cfg(test)]
     fn verify_published_layout(&self, update_id: &str) -> Result<()> {
         let state = TrialRestoreDirectories::pinned(&self.directories.state);
         let failed = state.join(format!(".statev2-failed-sealed-{update_id}.omdb"));
@@ -852,7 +851,6 @@ pub(super) async fn record_forward_selection(home: PathBuf, update_id: String) -
     })
 }
 
-#[cfg(test)]
 fn forward_selection_bytes(
     home: &Path,
     activation: &PreparedServiceActivation,
@@ -1152,6 +1150,119 @@ fn run_forward_process(command: &mut std::process::Command) -> Result<()> {
             }
         }
         std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// Retain the existing physical forward owners for read-only proof checks.
+/// This protocol cannot admit serving, recover a database or transfer a lease.
+/// EOF or output failure drops every lease; a successor must acquire and check
+/// them again. The caller must reconcile prior unknown child completion first.
+pub(super) async fn run_forward_owner(home: PathBuf, update_id: String) -> Result<()> {
+    use crate::application::ForwardServiceActivation;
+    use crate::backend::ExclusiveTrialFile;
+
+    // Validate before deriving any request-controlled pathname or taking a lock.
+    if !home.is_absolute() || !super::valid_update_id(&update_id) {
+        return Err(Error::IncompatibleStore);
+    }
+    let directories = TrialRestoreDirectories::open(&home)?;
+    let receipt = TrialRestoreDirectories::pinned(&directories.state)
+        .join(format!(".statev2-trial-{update_id}.receipt-v1.json"));
+    let receipt_bytes = read_trial_file(&receipt)?.ok_or(Error::IncompatibleStore)?;
+    let saved: IsolatedTrialVerification =
+        serde_json::from_slice(&receipt_bytes).map_err(|_| Error::IncompatibleStore)?;
+    validate_observation(&saved)?;
+    validate_isolated_trial_request(&home, &update_id, &saved.request)?;
+    validate_isolated_trial_preparation(&saved.request, &saved.preparation)?;
+    if saved.sealed_publication.as_ref().map(|record| record.phase)
+        != Some(SealedPromotionPhase::ForwardCommitted)
+        || serde_json::to_vec(&saved).map_err(|_| Error::IncompatibleStore)? != receipt_bytes
+    {
+        return Err(Error::IncompatibleStore);
+    }
+    let activation = saved
+        .request
+        .activation
+        .as_ref()
+        .ok_or(Error::IncompatibleStore)?;
+    // An on-disk helper pathname, digest or request alone is insufficient.
+    crate::forward_child_readiness::verify_running_image(&activation.target_helper_sha256)?;
+    let lease =
+        TrialLease::open_for(home, &saved.request, Some(SealedMove::PublishIntended)).await?;
+    directories.verify(&lease.home)?;
+    let state = TrialRestoreDirectories::pinned(&lease.directories.state);
+    let candidate = ExclusiveTrialFile::acquire(state.join("statev2.omdb"), MAX_TRIAL_FILE_BYTES)?;
+    let selection =
+        TrialRestoreDirectories::pinned(&lease.directories.runtime).join("service-state.json");
+    let selected = forward_selection_bytes(&lease.home, activation, &receipt_bytes)?;
+    let marker = ForwardServiceActivation {
+        update_id: update_id.clone(),
+        forward_selection_sha256: trial_document_sha256(&selected),
+    };
+    let marker_path = state.join(format!(".statev2-forward-{update_id}.json"));
+    let marker_bytes = serde_json::to_vec(&marker).map_err(|_| Error::IncompatibleStore)?;
+    let verify = || {
+        lease.verify_inputs()?;
+        lease.verify_published_layout(&update_id)?;
+        if trial_file_identity(&candidate.verified_file()?)?
+            != (saved.preparation.database.clone(), 1)
+            || read_trial_file(&receipt)?.as_deref() != Some(receipt_bytes.as_slice())
+            || read_trial_file(&selection)?.as_deref() != Some(selected.as_slice())
+            || read_trial_file(&marker_path)?.as_deref() != Some(marker_bytes.as_slice())
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    };
+    // No candidate engine or output exists until owners and saved bindings agree.
+    lease.verify_promotion_runtimes(&saved).await?;
+    verify()?;
+    let mut input = io::stdin().lock();
+    let mut output = io::stdout().lock();
+    loop {
+        let mut frame = Vec::new();
+        let count = input
+            .by_ref()
+            .take(4097)
+            .read_until(b'\n', &mut frame)
+            .map_err(io_error)?;
+        if count == 0 {
+            return Ok(());
+        }
+        #[derive(Deserialize)]
+        #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
+        enum Request {
+            ForwardOwnerCheck,
+        }
+        if count > 4096
+            || frame.last() != Some(&b'\n')
+            || serde_json::from_slice::<Request>(&frame).is_err()
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        lease.verify_promotion_runtimes(&saved).await?;
+        verify()?;
+        let store = Store {
+            db: candidate.snapshot().await?,
+        };
+        let checked = ApplicationTransactions::new(store.clone())
+            .verify_forward_catalog(activation, &marker, &saved.preparation.snapshot)
+            .await;
+        // Always close before propagating a failed check. No recovery or writer
+        // fallback is permitted, including after lost output or interrupted open.
+        let closed = store.db.shutdown_for_handoff().await;
+        if !checked? {
+            return Err(Error::IncompatibleStore);
+        }
+        closed?;
+        lease.verify_promotion_runtimes(&saved).await?;
+        verify()?;
+        writeln!(
+            output,
+            "{{\"ok\":true,\"result\":{{\"checked\":true,\"serving\":false}}}}"
+        )
+        .map_err(io_error)?;
+        output.flush().map_err(io_error)?;
     }
 }
 

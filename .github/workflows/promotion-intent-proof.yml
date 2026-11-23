@@ -162,6 +162,9 @@ jobs:
                   -p t3-code-ls-storage --lib "$packaged_test" \
                   -- --ignored --exact --nocapture 2>&1 | tee "$proof/forward-packaged.log"
                 grep -F "test $packaged_test ... ok" "$proof/forward-packaged.log"
+                if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-catalog-integrated-writer-process-installed-startup-forward-owner-* ]]; then
+                  test "$(grep -Fc 'T05 forward owner: immutable image, live-owner refusal, continuing selection checks, EOF release and reacquisition; never serving' "$proof/forward-packaged.log")" = 2
+                fi
               fi
             fi
             sha256sum --check "$proof/prior-helper.sha256"

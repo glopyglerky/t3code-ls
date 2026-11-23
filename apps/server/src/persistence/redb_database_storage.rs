@@ -28,6 +28,12 @@ pub(crate) const MAX_TRIAL_EXECUTABLE_BYTES: u64 = 256 * 1024 * 1024;
 #[path = "redb_isolated_trial.rs"]
 mod isolated;
 
+/// Read-only forward owner protocol. It retains existing leases, never serves.
+#[cfg(target_os = "linux")]
+pub async fn run_forward_owner(home: PathBuf, update_id: String) -> Result<()> {
+    isolated::run_forward_owner(home, update_id).await
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct StorageStatistics {
     pub database_bytes: u64,
