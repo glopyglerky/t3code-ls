@@ -4,7 +4,10 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeChildProcess from "node:child_process";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
@@ -54,6 +57,7 @@ NodeAssert.equal(Selected.selection.kind, "omdb");
 
 const fixture = await createFixture();
 const checks = [];
+const independentReads = process.env.T3_CODE_LS_INDEPENDENT_READS === "1";
 const completedAt = "2026-11-10T12:00:01.000Z";
 const completionEvents = [
   ["run.updated", { ...jsonPayloads.run, status: "completed", completedAt }],
@@ -156,6 +160,35 @@ try {
           NodeAssert.ok(shell.threads.some((thread) => thread.id === "thread:main"));
         }),
       );
+      if (independentReads) {
+        const staged = yield* Deferred.make();
+        const release = yield* Deferred.make();
+        const messageText = Effect.fn("verifyIndependentRead.messageText")(function* () {
+          const snapshot = yield* projections.getThreadSnapshot("thread:main");
+          return snapshot.projection.messages.find((message) => message.id === "message:main")?.text;
+        });
+        const writer = yield* Effect.forkScoped(Effect.exit(tx.withTransaction(
+          Effect.gen(function* () {
+            yield* sink.write({ events: [makeEvent("message.updated", {
+              ...jsonPayloads.message,
+              text: "Private staged reply",
+              streaming: false,
+              updatedAt: completedAt,
+            }, { id: "independent-read:staged", occurredAt: completedAt })] });
+            NodeAssert.equal(yield* tx.withReadTransaction(messageText()), "Private staged reply");
+            yield* Deferred.succeed(staged, undefined);
+            yield* Deferred.await(release);
+            return yield* Effect.fail("fixture-rollback");
+          }),
+        )));
+        yield* Effect.gen(function* () {
+          yield* Deferred.await(staged);
+          NodeAssert.equal(yield* messageText(), "This turn is a replay.");
+        }).pipe(Effect.timeout("5 seconds"), Effect.ensuring(Deferred.succeed(release, undefined)));
+        NodeAssert.ok(Exit.isFailure(yield* Fiber.join(writer)));
+        NodeAssert.equal(yield* messageText(), "This turn is a replay.");
+        checks.push("An independent read sees committed rows while the writer sees its own staged rows");
+      }
       const snapshot = yield* projections.getThreadSnapshot("thread:main");
       replayExpectation = {
         projectId: "project:main",

@@ -521,6 +521,34 @@ impl Backend {
         Self::open_snapshot(path.as_ref().to_owned(), false, u64::MAX).await
     }
 
+    pub(crate) async fn open_current_reader(path: impl AsRef<Path>) -> Result<Self> {
+        let path = path.as_ref().to_owned();
+        if !path.is_absolute() {
+            return Err(Error::Invalid("database path must be absolute".into()));
+        }
+        let handles = tokio::task::spawn_blocking(move || {
+            let identity = path_identity(&path)?;
+            // Use a live MultiWriter engine handle for fresh committed snapshots.
+            // The application handle keeps transaction writes and writer acquisition disabled.
+            let database = checked_open(&path, &identity)?;
+            validate_tables(&database.begin_read().map_err(storage_error)?)?;
+            let handles = DatabaseHandles {
+                path,
+                exclusive: false,
+                read_only: true,
+                identity: Some(identity),
+                reader: None,
+                writer: Mutex::new(Some(Arc::new(database))),
+                opening: Mutex::new(()),
+            };
+            handles.verify_identity()?;
+            Ok::<_, Error>(Arc::new(handles))
+        })
+        .await
+        .map_err(worker_error)??;
+        Ok(Self { handles })
+    }
+
     pub(crate) async fn open_offline_snapshot(path: &Path) -> Result<Self> {
         Self::open_snapshot(path.to_owned(), true, u64::MAX).await
     }

@@ -49,7 +49,11 @@ const Imported = Schema.Struct({
 const ACTIVE_MARKER = "t3code-omdb-owner-v1\n";
 
 export const make = Effect.fn("Omdb.make")(
-  function* (options: { readonly executable: string; readonly databasePath: string }) {
+  function* (options: {
+    readonly executable: string;
+    readonly databasePath: string;
+    readonly independentReads?: boolean;
+  }) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const directory = path.dirname(options.databasePath);
@@ -256,8 +260,12 @@ export const make = Effect.fn("Omdb.make")(
         }
       }
       yield* database.request({ operation: "application_bootstrap" }, Bootstrap);
+      const readDatabase = options.independentReads
+        ? yield* NativeDatabase.make({ ...options, mode: "current-read-local", requestTimeout: "15 minutes" })
+        : undefined;
       const client = yield* RedbClient.make.pipe(
         Effect.provideService(NativeDatabase.NativeDatabase, database),
+        Effect.provideService(RedbClient.ReadDatabase, readDatabase),
       );
       // Finish every resumable index preparation before making the cutover durable.
       // A failed preparation leaves the preserved SQLite source and the retryable
@@ -283,6 +291,9 @@ export const make = Effect.fn("Omdb.make")(
       ]) {
         while (!(yield* prepare).prepared) yield* Effect.yieldNow;
       }
+      if (readDatabase !== undefined) {
+        yield* readDatabase.request({ operation: "application_schema" }, RedbClient.ApplicationSchema);
+      }
       if (activate !== undefined) yield* activate;
       return { database, client };
     });
@@ -305,10 +316,11 @@ const layerFromPath = (
   executable: string,
   durableRelayWebhooks: boolean,
   singleProjectionReads: boolean,
+  independentReads: boolean,
 ) =>
   Layer.unwrap(
     Effect.gen(function* () {
-      const { database, client } = yield* make({ databasePath, executable }).pipe(
+      const { database, client } = yield* make({ databasePath, executable, independentReads }).pipe(
         Effect.provideService(RedbClient.DurableRelayWebhooks, durableRelayWebhooks),
         Effect.provideService(RedbClient.SingleProjectionReads, singleProjectionReads),
       );
@@ -332,6 +344,7 @@ export const layerConfig = Layer.unwrap(
       executable,
       environment.T3_CODE_LS_DURABLE_RELAY_WEBHOOKS === "1",
       environment.T3_CODE_LS_SINGLE_PROJECTION_READS === "1",
+      environment.T3_CODE_LS_INDEPENDENT_READS === "1",
     );
   }),
 );
