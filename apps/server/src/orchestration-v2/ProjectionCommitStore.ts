@@ -37,10 +37,11 @@ export interface ProjectionCommitStoreShape {
   readonly getThread: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2AppThread | undefined, ProjectionCommitStoreError>;
-  readonly getRuntimeRequest: (
-    threadId: ThreadId,
-    requestId: RuntimeRequestId,
-  ) => Effect.Effect<OrchestrationV2RuntimeRequest | undefined, ProjectionCommitStoreError>;
+  readonly userInputCancellationCurrent: (input: {
+    readonly threadId: ThreadId;
+    readonly requestId: RuntimeRequestId;
+    readonly providerTurnId: OrchestrationV2RuntimeRequest["providerTurnId"];
+  }) => Effect.Effect<boolean, ProjectionCommitStoreError>;
   readonly getRun: (
     threadId: ThreadId,
     runId: RunId,
@@ -86,6 +87,18 @@ export class ProjectionCommitStore extends Context.Service<
   ProjectionCommitStore,
   ProjectionCommitStoreShape
 >()("t3/orchestration-v2/ProjectionCommitStore") {}
+
+export function userInputRequestMatchesCancellation(
+  current: OrchestrationV2RuntimeRequest | undefined,
+  providerTurnId: OrchestrationV2RuntimeRequest["providerTurnId"],
+): boolean {
+  return (
+    current?.status === "pending" &&
+    current.kind === "user_input" &&
+    current.providerTurnId === providerTurnId &&
+    current.responseCapability.type !== "message"
+  );
+}
 
 /**
  * Host identity normalization remains in the existing source-control domain.

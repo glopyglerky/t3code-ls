@@ -630,6 +630,110 @@ async fn get(app: &mut ApplicationTransactions, table: &str, id: &str) -> Map<St
 }
 
 #[tokio::test]
+async fn user_input_cancellation_uses_the_current_transaction_row() {
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    let mut app = initialize(&store).await;
+    prepare(&store).await;
+    app.begin("write").await.unwrap();
+    for id in ["thread", "other"] {
+        apply(&mut app, "write", event("thread.created", id, thread(id)))
+            .await
+            .unwrap();
+    }
+    assert!(
+        app.projections_user_input_cancellation(
+            "write",
+            "thread".into(),
+            "missing".into(),
+            Some("turn")
+        )
+        .await
+        .unwrap()
+        .is_none()
+    );
+    let mut request = json!({"id":"request","nodeId":"node","providerTurnId":"\u{feff}turn\u{a0}",
+        "kind":"user_input","status":"pending","createdAt":NOW,"resolvedAt":null,
+        "responseCapability":{"type":"live","providerSessionId":"session"}});
+    apply(
+        &mut app,
+        "write",
+        event("runtime-request.updated", "thread", request.clone()),
+    )
+    .await
+    .unwrap();
+    for (turn, expected) in [
+        (Some("turn"), true),
+        (Some("retargeted"), false),
+        (None, false),
+    ] {
+        let result = app
+            .projections_user_input_cancellation("write", "thread".into(), "request".into(), turn)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.eligible, Some(expected));
+        assert_eq!(result.payload_json, request.to_string());
+    }
+    assert!(
+        app.projections_user_input_cancellation(
+            "write",
+            "other".into(),
+            "request".into(),
+            Some("turn")
+        )
+        .await
+        .unwrap()
+        .is_none()
+    );
+
+    app.savepoint("write", "answer").await.unwrap();
+    request["status"] = json!("resolved");
+    apply(
+        &mut app,
+        "write",
+        event("runtime-request.updated", "thread", request.clone()),
+    )
+    .await
+    .unwrap();
+    async fn eligible(app: &mut ApplicationTransactions) -> Option<bool> {
+        app.projections_user_input_cancellation(
+            "write",
+            "thread".into(),
+            "request".into(),
+            Some("turn"),
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .eligible
+    }
+    assert_eq!(eligible(&mut app).await, Some(false));
+    app.rollback_to("write", "answer").await.unwrap();
+    app.release("write", "answer").await.unwrap();
+    assert_eq!(eligible(&mut app).await, Some(true));
+    request["status"] = json!("pending");
+    request["responseCapability"] = json!({"type":"message"});
+    apply(
+        &mut app,
+        "write",
+        event("runtime-request.updated", "thread", request),
+    )
+    .await
+    .unwrap();
+    assert_eq!(eligible(&mut app).await, Some(false));
+    app.rollback("write").await.unwrap();
+}
+
+async fn get(app: &mut ApplicationTransactions, table: &str, id: &str) -> Map<String, Value> {
+    app.get("write", table, &[text_cell(id)])
+        .await
+        .unwrap()
+        .unwrap()
+}
+
+
+#[tokio::test]
 async fn all_projection_entity_families_and_shadow_columns_are_persisted() {
     let fixture = TestFixture::start().await;
     let store = fixture.initialize().await;

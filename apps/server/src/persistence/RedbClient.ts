@@ -49,6 +49,7 @@ const applicationOperations = {
   application_projections_normalization: "read",
   application_projections_read: "read",
   application_projections_guard: "read",
+  application_projections_user_input_cancellation: "read",
   application_projections_mark_applied: "write",
   application_outbox_enqueue: "write",
   application_outbox_get: "read",
