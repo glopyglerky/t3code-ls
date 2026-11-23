@@ -200,7 +200,7 @@ export async function verifyGuestRedeem({
     Assert.equal((yield* decodeRefusal(body)).reason, reason);
   });
 
-  const first = await run(({ client, guest, projections, redeem, settings, sink }) =>
+  const first = await run(({ client, guest, projections, redeem, settings, sink, session }) =>
     Effect.gen(function* () {
       yield* settings.updateSettings({ guestSharingEnabled: true });
       const at = yield* DateTime.now;
@@ -307,11 +307,20 @@ export async function verifyGuestRedeem({
       const stored = (yield* projections.getThread(threadId)).guestShare;
       Assert.equal(stored?.id, share.id);
       Assert.equal(stored?.guestName, winner.name);
+      Assert.equal((yield* session(share.id, sessionCookie)).status, 204);
+      yield* Effect.acquireUseRelease(
+        Effect.promise(() => Fs.rename(helperPath, unavailablePath)),
+        () => session(share.id, sessionCookie).pipe(
+          Effect.flatMap((response) => assertRefusal(response, 403, "unavailable")),
+        ),
+        () => Effect.promise(() => Fs.rename(unavailablePath, helperPath)),
+      );
+      Assert.deepEqual(yield* snapshot(client), after);
       return { after, client, credential, sessionCookie, shareId: share.id };
     }),
   );
 
-  await run(({ client, redeem, session }) => Effect.gen(function* () {
+  const revoked = await run(({ client, redeem, session, guest }) => Effect.gen(function* () {
     Assert.notEqual(client, first.client);
     Assert.deepEqual(yield* snapshot(client), first.after);
     Assert.equal((yield* session(first.shareId, first.sessionCookie)).status, 204);
@@ -326,6 +335,18 @@ export async function verifyGuestRedeem({
     Assert.equal(replayReceipts.length, 1);
     Assert.equal(cellValue(replayReceipts[0]?.command_type), redeemCommand);
     Assert.equal(cellValue(replayReceipts[0]?.status), "rejected");
+    const replacement = yield* guest.create({ threadId });
+    Assert.notEqual(replacement.share.id, first.shareId);
+    const afterRevocation = yield* snapshot(client);
+    yield* assertRefusal(yield* session(first.shareId, first.sessionCookie), 403, "inactive");
+    Assert.deepEqual(yield* snapshot(client), afterRevocation);
+    return afterRevocation;
+  }));
+
+  await run(({ client, session }) => Effect.gen(function* () {
+    Assert.deepEqual(yield* snapshot(client), revoked);
+    yield* assertRefusal(yield* session(first.shareId, first.sessionCookie), 403, "inactive");
+    Assert.deepEqual(yield* snapshot(client), revoked);
   }));
 
   const files = await Fs.readdir(Path.join(root, "userdata"));
@@ -334,6 +355,8 @@ export async function verifyGuestRedeem({
   return [
     "GuestHttp with selected omdb owners refuses an unavailable Rust invite helper without writes or a cookie",
     "two concurrent GuestHttp redeems commit one event, projection update and accepted receipt, with one secure cookie and no outbox change",
+    "selected Rust session authorization accepts the winning cookie and refuses an unavailable helper without durable changes",
     "reopened omdb preserves the winning cookie and refuses the consumed invite with only a rejected receipt",
+    "replacing the share revokes the old cookie before and after another native reopen without writes on denied reads",
   ];
 }

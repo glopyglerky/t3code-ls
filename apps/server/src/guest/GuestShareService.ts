@@ -334,10 +334,18 @@ const make = Effect.gen(function* () {
               now,
             })
             .pipe(Effect.mapError(() => new GuestShareAccessError({ reason: "unavailable" })))
-        : activeThread &&
-          share.id === claims.value.shareId &&
-          !(DateTime.toEpochMillis(now) >= Date.parse(share.expiresAt)) &&
-          share.guestName !== null;
+        : yield* guestShareDecisions
+            .authorizeSession({
+              shareId: share.id,
+              sessionShareId: claims.value.shareId,
+              threadId: thread.id,
+              sessionThreadId: claims.value.threadId,
+              activeThread,
+              claimedGuest: share.guestName !== null,
+              expiresAt: share.expiresAt,
+              now,
+            })
+            .pipe(Effect.mapError(() => new GuestShareAccessError({ reason: "unavailable" })));
     if (!eligible || (yield* connectHostname) !== share.host) {
       return yield* inactive;
     }

@@ -94,6 +94,29 @@ pub fn invite_is_live(
         && !expires_at.is_some_and(|expires| now.0 >= expires.0)
 }
 
+pub struct SessionEligibility<'a> {
+    pub share_id: &'a str,
+    pub session_share_id: &'a str,
+    pub thread_id: &'a str,
+    pub session_thread_id: &'a str,
+    pub active_thread: bool,
+    pub claimed_guest: bool,
+    pub expires_at: Option<Timestamp>,
+    pub now: Timestamp,
+}
+
+pub fn session_is_live(input: SessionEligibility<'_>) -> bool {
+    input.claimed_guest
+        && input.thread_id == input.session_thread_id
+        && invite_is_live(
+            input.share_id,
+            input.session_share_id,
+            input.active_thread,
+            input.expires_at,
+            input.now,
+        )
+}
+
 /// Payload retains attachment fields which the decision layer does not inspect.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Attachment<Payload> {
@@ -509,6 +532,72 @@ mod tests {
 
     fn time(value: i64) -> Timestamp {
         Timestamp::from_epoch_millis(value).unwrap()
+    }
+
+    #[test]
+    fn session_eligibility_requires_the_claimed_live_share_and_thread() {
+        let eligible = |share, thread, active, claimed, expiry, now| {
+            session_is_live(SessionEligibility {
+                share_id: "share-1",
+                session_share_id: share,
+                thread_id: "thread-1",
+                session_thread_id: thread,
+                active_thread: active,
+                claimed_guest: claimed,
+                expires_at: expiry,
+                now,
+            })
+        };
+        assert!(eligible(
+            "share-1",
+            "thread-1",
+            true,
+            true,
+            Some(time(100)),
+            time(99)
+        ));
+        assert!(!eligible(
+            "share-2",
+            "thread-1",
+            true,
+            true,
+            Some(time(100)),
+            time(99)
+        ));
+        assert!(!eligible(
+            "share-1",
+            "thread-2",
+            true,
+            true,
+            Some(time(100)),
+            time(99)
+        ));
+        assert!(!eligible(
+            "share-1",
+            "thread-1",
+            false,
+            true,
+            Some(time(100)),
+            time(99)
+        ));
+        assert!(!eligible(
+            "share-1",
+            "thread-1",
+            true,
+            false,
+            Some(time(100)),
+            time(99)
+        ));
+        assert!(!eligible(
+            "share-1",
+            "thread-1",
+            true,
+            true,
+            Some(time(100)),
+            time(100)
+        ));
+        // Invalid parsed dates keep the original JavaScript comparison semantics.
+        assert!(eligible("share-1", "thread-1", true, true, None, time(100)));
     }
 
     fn initial() -> Thread<String, String> {
