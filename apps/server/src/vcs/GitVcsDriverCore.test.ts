@@ -767,9 +767,44 @@ it.effect.skipIf(gixFixture === undefined)(
     yield* native.switchRef({ cwd: linked, refName: yield* git(linked, ["rev-parse", "HEAD"]) });
     const detached = yield* native.listRefs({ cwd: linked, refresh: true });
     assert.isFalse(detached.refs.some((ref) => ref.current));
+
+    const remote = "origin/team";
+    const remoteRef = `refs/remotes/${remote}/release`;
+    yield* git(cwd, ["update-ref", remoteRef, "HEAD"]);
+    yield* git(cwd, ["symbolic-ref", `refs/remotes/${remote}/HEAD`, remoteRef]);
+    yield* git(cwd, ["tag", "missing"]);
+    yield* git(cwd, ["update-ref", `refs/remotes/${remote}/nested/child`, "HEAD"]);
+    const checkRemote = (location: string, refName: string, exists: boolean) =>
+      Effect.gen(function* () {
+        const input = { cwd: location, remoteName: remote, refName };
+        assert.equal(yield* retained.remoteBranchExists(input), exists);
+        const start = calls.length;
+        assert.equal(yield* native.remoteBranchExists(input), exists);
+        const commands = calls.slice(start);
+        assert.equal(commands.filter((call) => call.command === gixFixture).length, 1);
+        assert.isFalse(commands.some((call) => call.args.includes("show-ref")));
+      });
+    yield* checkRemote(cwd, "release", true);
+    yield* checkRemote(linked, "HEAD", true);
+    yield* checkRemote(linked, "missing", false);
+    yield* checkRemote(nested, "nested", false);
+    yield* git(cwd, ["pack-refs", "--all", "--prune"]);
+    yield* checkRemote(linked, "release", true);
+    yield* git(cwd, ["update-ref", "-d", remoteRef]);
+    yield* checkRemote(linked, "release", false);
+    const malformedRef = path.join(cwd, ".git", "refs", "remotes", remote, "malformed");
+    yield* fs.makeDirectory(path.dirname(malformedRef), { recursive: true });
+    yield* fs.writeFileString(malformedRef, "invalid object id\n");
+    const malformedStart = calls.length;
+    assert.isFalse(yield* native.remoteBranchExists({ cwd, remoteName: remote, refName: "malformed" }));
+    assert.isTrue(calls.slice(malformedStart).some((call) => call.args.includes("show-ref")));
+    yield* fs.remove(malformedRef);
+
     const configured = yield* makeNative({ GIT_CONFIG_COUNT: "0" });
+    const configuredExpected = yield* retained.listRefs({ cwd: linked, refresh: true });
     const configuredStart = calls.length;
-    assert.deepEqual((yield* configured.listRefs({ cwd: linked })).refs, detached.refs);
+    assert.deepEqual((yield* configured.listRefs({ cwd: linked })).refs, configuredExpected.refs);
+    assert.isFalse(yield* configured.remoteBranchExists({ cwd, remoteName: remote, refName: "release" }));
     assert.isFalse(calls.slice(configuredStart).some((call) => call.command === gixFixture));
     const badConfigProbe = path.join(cwd, "bad-config-probe");
     yield* fs.makeDirectory(badConfigProbe);
@@ -781,6 +816,9 @@ it.effect.skipIf(gixFixture === undefined)(
     assert.isTrue(Exit.isFailure(yield* Effect.exit(native.listRefs({ cwd: badConfigProbe }))));
     assert.equal(calls.slice(before).filter((call) => call.command === gixFixture).length, 1);
     assert.isTrue(calls.slice(before).some((call) => call.args.includes("--git-common-dir")));
+    const refBefore = calls.length;
+    assert.isFalse(yield* native.remoteBranchExists({ cwd, remoteName: remote, refName: "release" }));
+    assert.isTrue(calls.slice(refBefore).some((call) => call.args.includes("show-ref")));
   })).pipe(Effect.provide(layerTest)),
 );
 

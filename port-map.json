@@ -863,7 +863,7 @@
         "apps/server/src/vcs/GitVcsDriverCore.test.ts": ".github/workflows/workspace-edits.yml"
       },
       "retired_paths": [],
-      "notes": "T06. Opt-in local repository directory and HEAD discovery through gix. Includes, explicit discovery overrides, bare repositories and missing or failed helpers retain the Git route. Full Git workflow and performance qualification remain open.",
+      "notes": "T06. Opt-in repository directory, HEAD and exact remote branch reads through gix. Includes, explicit discovery overrides, bare repositories and missing or failed helpers retain the Git route. Full Git workflow and performance qualification remain open.",
       "rust_crates": ["apps/server/rust/git-workspace"]
     },
     {

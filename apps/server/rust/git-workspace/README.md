@@ -1,6 +1,6 @@
 # Native repository discovery trial
 
-This Linux candidate replaces the path and HEAD reads within the Git workspace service when `T3_CODE_LS_GIT_WORKSPACE_EXECUTABLE` names the absolute path to the trial executable. The service retains its existing cache and still runs Git for status, branch enumeration, and mutations. Explicit upstream mode uses the retained service.
+This Linux candidate handles path discovery, HEAD and exact remote branch reads within the Git workspace service when `T3_CODE_LS_GIT_WORKSPACE_EXECUTABLE` names the absolute path to the trial executable. The service retains its discovery cache and reads remote refs fresh so fetches and deletions are visible. Git still handles status, branch enumeration, and mutations. Explicit upstream mode uses the retained service.
 
 The trial opens the repository with strict local configuration and rejects untrusted directories. The helper returns the physical worktree root, common directory, and current branch. Bare repositories, Git configuration overrides, includes, unreadable configuration, and failed helpers use the existing Git discovery. Global configuration and repository trust parity still need qualification before this route becomes a default.
 
