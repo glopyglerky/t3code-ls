@@ -540,7 +540,7 @@ impl Backend {
     /// sharing this OFD, including snapshots, until this handle shuts down.
     /// `verify` must bind the exact file to current parent authority, receipt,
     /// selection and catalog. Possession of a locked descriptor is insufficient.
-    async fn inherited_trial_checked_writer(
+    pub(crate) async fn inherited_trial_checked_writer(
         file: File,
         max_bytes: u64,
         verify: impl FnOnce(&File) -> Result<()> + Send + 'static,
@@ -1385,13 +1385,27 @@ impl Backend {
         result
     }
 
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) async fn shutdown_for_handoff(self) -> Result<()> {
+        self.shutdown_owned(true).await
+    }
+
     pub(crate) async fn shutdown(self) -> Result<()> {
+        self.shutdown_owned(false).await
+    }
+
+    async fn shutdown_owned(self, require_unique: bool) -> Result<()> {
         tokio::task::spawn_blocking(move || match Arc::try_unwrap(self.handles) {
             Ok(handles) => {
                 if let Some(writer) = handles.writer.into_inner().map_err(storage_error)? {
                     match Arc::try_unwrap(writer) {
                         Ok(writer) => writer.close().map_err(storage_error)?,
-                        Err(writer) => drop(writer),
+                        Err(writer) => {
+                            drop(writer);
+                            if require_unique {
+                                return Err(Error::WriterBusy);
+                            }
+                        }
                     }
                 }
                 if let Some(reader) = handles.reader {
@@ -1401,7 +1415,11 @@ impl Backend {
             }
             Err(handles) => {
                 drop(handles);
-                Ok(())
+                if require_unique {
+                    Err(Error::WriterBusy)
+                } else {
+                    Ok(())
+                }
             }
         })
         .await
@@ -2476,6 +2494,30 @@ mod tests {
             peer.try_lock(),
             Err(std::fs::TryLockError::WouldBlock)
         ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn handoff_shutdown_refuses_retained_engine_handles() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("handoff.omdb");
+        let backend = Backend::open(&path, true).await.unwrap();
+        let retained = backend.clone();
+        assert!(matches!(
+            backend.shutdown_for_handoff().await,
+            Err(Error::WriterBusy)
+        ));
+        retained.shutdown_for_handoff().await.unwrap();
+        let lease = ExclusiveTrialFile::acquire(path.clone(), 128 * 1024 * 1024).unwrap();
+        let reader = lease.snapshot().await.unwrap();
+        let retained = reader.clone();
+        assert!(matches!(
+            reader.shutdown_for_handoff().await,
+            Err(Error::WriterBusy)
+        ));
+        assert_trial_peers_excluded(&path);
+        retained.shutdown_for_handoff().await.unwrap();
+        assert_trial_peers_excluded(&path);
     }
 
     #[cfg(target_os = "linux")]

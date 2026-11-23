@@ -882,6 +882,16 @@ fn forward_selection_bytes(
 
 #[cfg(test)]
 pub(super) async fn record_forward_catalog(home: PathBuf, update_id: String) -> Result<bool> {
+    record_forward_catalog_owned(home, update_id, None).await
+}
+
+// The existing owner retains every physical lease. Only engine ownership moves.
+#[cfg(test)]
+pub(super) async fn record_forward_catalog_owned(
+    home: PathBuf,
+    update_id: String,
+    process: Option<std::process::Command>,
+) -> Result<bool> {
     use super::tests::interrupt_trial_publication;
     use crate::{application::ForwardServiceActivation, backend::ExclusiveTrialFile};
 
@@ -966,7 +976,7 @@ pub(super) async fn record_forward_catalog(home: PathBuf, update_id: String) -> 
     let reused = ApplicationTransactions::new(snapshot.clone())
         .verify_forward_catalog(activation, &marker, &saved.preparation.snapshot)
         .await?;
-    snapshot.shutdown().await?;
+    snapshot.db.shutdown_for_handoff().await?;
     verify()?;
     if trial_file_digest(&candidate.verified_file()?)? != digest || (reused && !armed) {
         return Err(Error::IncompatibleStore);
@@ -981,33 +991,64 @@ pub(super) async fn record_forward_catalog(home: PathBuf, update_id: String) -> 
     lease.sync_publication()?;
     verify_witness()?;
     interrupt_trial_publication("forward-catalog-armed");
-    let store = Store {
-        db: candidate
-            .open_checked_writer(move |file| {
-                if trial_file_digest(file)? != digest {
-                    return Err(Error::IncompatibleStore);
-                }
-                Ok(())
-            })
-            .await?,
-    };
-    interrupt_trial_publication("forward-catalog-opened");
-    let transactions = ApplicationTransactions::new(store.clone());
-    if transactions
-        .verify_forward_catalog(activation, &marker, &saved.preparation.snapshot)
-        .await?
-        != reused
-    {
-        return Err(Error::IncompatibleStore);
+    if let Some(mut command) = process {
+        // No engine survives preflight. Bind the inherited description to the
+        // exact parent observation, never to a digest supplied by the child.
+        let witness = super::FixtureForwardActivationWitness {
+            activation: activation.clone(),
+            database: saved.preparation.database.clone(),
+            receipt_sha256: trial_document_sha256(&receipt_bytes),
+            selection_sha256: marker.forward_selection_sha256.clone(),
+        };
+        lease.verify_promotion_runtimes(&saved).await?;
+        verify_witness()?;
+        if trial_file_digest(&candidate.verified_file()?)? != digest {
+            return Err(Error::IncompatibleStore);
+        }
+        command
+            .env("T3_TEST_FORWARD_CHILD_HOME", &lease.home)
+            .env(
+                "T3_TEST_FORWARD_CHILD_WITNESS",
+                serde_json::to_string(&witness).map_err(|_| Error::IncompatibleStore)?,
+            )
+            .env("T3_TEST_FORWARD_CHILD_DB", &digest)
+            .stdin(std::process::Stdio::from(candidate.inherited_file()?));
+        run_forward_process(&mut command)?;
+        // Exit is observed and reaped before any parent engine is opened.
+        lease
+            .verify_promotion_runtimes(&saved)
+            .await
+            .map_err(|_| Error::UnknownCommit)?;
+        verify_witness().map_err(|_| Error::UnknownCommit)?;
+    } else {
+        let store = Store {
+            db: candidate
+                .open_checked_writer(move |file| {
+                    if trial_file_digest(file)? != digest {
+                        return Err(Error::IncompatibleStore);
+                    }
+                    Ok(())
+                })
+                .await?,
+        };
+        interrupt_trial_publication("forward-catalog-opened");
+        let transactions = ApplicationTransactions::new(store.clone());
+        if transactions
+            .verify_forward_catalog(activation, &marker, &saved.preparation.snapshot)
+            .await?
+            != reused
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        if !reused {
+            transactions
+                .mark_forward_catalog(activation, marker.clone(), verify_witness)
+                .await?;
+            interrupt_trial_publication("forward-catalog-committed");
+        }
+        drop(transactions);
+        store.shutdown().await.map_err(|_| Error::UnknownCommit)?;
     }
-    if !reused {
-        transactions
-            .mark_forward_catalog(activation, marker.clone(), verify_witness)
-            .await?;
-        interrupt_trial_publication("forward-catalog-committed");
-    }
-    drop(transactions);
-    store.shutdown().await.map_err(|_| Error::UnknownCommit)?;
     let snapshot = Store {
         db: candidate
             .snapshot()
@@ -1027,6 +1068,38 @@ pub(super) async fn record_forward_catalog(home: PathBuf, update_id: String) -> 
         return Err(Error::UnknownCommit);
     }
     Ok(reused)
+}
+
+// Single child only: descendants and ordinary serving are not admitted here.
+// Timeout means unknown delivery. Keep all caller leases until actual reap.
+#[cfg(test)]
+fn run_forward_process(command: &mut std::process::Command) -> Result<()> {
+    let mut child = command.spawn().map_err(io_error)?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut uncertain = false;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                return if !uncertain && status.success() {
+                    Ok(())
+                } else {
+                    Err(Error::UnknownCommit)
+                };
+            }
+            Ok(None) => {}
+            Err(_) => uncertain = true,
+        }
+        if uncertain || std::time::Instant::now() >= deadline {
+            uncertain = true;
+            let _ = child.kill();
+            // A failed kill/wait never releases the owner or opens a handle.
+            // Retain leases and retry observation instead of returning early.
+            if child.wait().is_ok() {
+                return Err(Error::UnknownCommit);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
 }
 
 /// Observe a synthetic first-readiness callback while all existing owners are held.

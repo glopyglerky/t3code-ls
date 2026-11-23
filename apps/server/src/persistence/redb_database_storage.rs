@@ -370,6 +370,25 @@ pub(crate) async fn record_fixture_forward_catalog(
         .map_err(|_| Error::UnknownCommit)?
 }
 
+// Disposable process route; cancellation cannot drop the owning lease task.
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) async fn record_fixture_forward_catalog_process(
+    home: PathBuf,
+    update_id: String,
+    command: std::process::Command,
+) -> Result<bool> {
+    if !home.is_absolute() || !valid_update_id(&update_id) {
+        return Err(Error::IncompatibleStore);
+    }
+    tokio::spawn(isolated::record_forward_catalog_owned(
+        home,
+        update_id,
+        Some(command),
+    ))
+    .await
+    .map_err(|_| Error::UnknownCommit)?
+}
+
 // This is a process-fixture observation, never a serving or launcher permit.
 #[cfg(all(test, target_os = "linux"))]
 #[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

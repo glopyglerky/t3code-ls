@@ -1444,6 +1444,8 @@ enum ForwardCommitCase {
     InterruptBeforeWrite,
     InterruptAfterDurable,
     CatalogFences,
+    ProcessHandoff,
+    ProcessHandoffUnknown,
 }
 
 #[cfg(target_os = "linux")]
@@ -1473,6 +1475,21 @@ async fn service_forward_catalog_fences_generic_restore() {
     assert!(std::env::var_os("T3_TEST_PRIOR_PROMOTION_HELPER").is_some());
     promotion_intent_fixture(PromotionFixture::ForwardCommit(
         ForwardCommitCase::CatalogFences,
+    ))
+    .await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "requires the pinned helper; disposable Linux process handoff"]
+async fn service_forward_process_handoff() {
+    assert!(std::env::var_os("T3_TEST_PROMOTION_HELPER").is_some());
+    promotion_intent_fixture(PromotionFixture::ForwardCommit(
+        ForwardCommitCase::ProcessHandoff,
+    ))
+    .await;
+    promotion_intent_fixture(PromotionFixture::ForwardCommit(
+        ForwardCommitCase::ProcessHandoffUnknown,
     ))
     .await;
 }
@@ -1970,7 +1987,12 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
     };
     let source_helper = helper_path("1.2.3");
     let target_helper = helper_path("1.2.4");
-    let catalog_case = matches!(case, ForwardCommitCase::CatalogFences);
+    let catalog_case = matches!(
+        case,
+        ForwardCommitCase::CatalogFences
+            | ForwardCommitCase::ProcessHandoff
+            | ForwardCommitCase::ProcessHandoffUnknown
+    );
     let generic_update = if catalog_case {
         "ba212c2b-63d4-4b28-97e4-1c1d6dc6d281"
     } else {
@@ -2008,7 +2030,10 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
     let stage = state.join(format!(".statev2-restore-{generic_update}.omdb"));
     let legacy_preparation = if matches!(
         case,
-        ForwardCommitCase::InterruptAfterDurable | ForwardCommitCase::CatalogFences
+        ForwardCommitCase::InterruptAfterDurable
+            | ForwardCommitCase::CatalogFences
+            | ForwardCommitCase::ProcessHandoff
+            | ForwardCommitCase::ProcessHandoffUnknown
     ) {
         let frame = run(
             &source_helper,
@@ -2044,9 +2069,10 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
             return;
         }
         ForwardCommitCase::InterruptBeforeWrite => "forward-commit-prewrite",
-        ForwardCommitCase::InterruptAfterDurable | ForwardCommitCase::CatalogFences => {
-            "forward-commit-durable"
-        }
+        ForwardCommitCase::InterruptAfterDurable
+        | ForwardCommitCase::CatalogFences
+        | ForwardCommitCase::ProcessHandoff
+        | ForwardCommitCase::ProcessHandoffUnknown => "forward-commit-durable",
     };
     let interrupt = |boundary: &str, action: Option<&str>| {
         let mut child = Command::new(std::env::current_exe().unwrap());
@@ -2228,6 +2254,22 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
             interrupt("forward-catalog-armed", None);
             assert_eq!(capture(&live), sealed);
             assert!(witness.exists());
+            if matches!(
+                case,
+                ForwardCommitCase::ProcessHandoff | ForwardCommitCase::ProcessHandoffUnknown
+            ) {
+                forward_writer_process_cases(
+                    home,
+                    matches!(case, ForwardCommitCase::ProcessHandoffUnknown),
+                )
+                .await;
+                assert_restore_refused();
+                assert_eq!(capture(&receipt), durable);
+                assert_eq!(capture(&original), source);
+                assert_eq!(capture(&checkpoint), checkpoint_before);
+                assert_eq!(capture(&selection), selected);
+                return;
+            }
             interrupt("forward-catalog-opened", None);
             let dirty_old = capture(&live);
             assert!(
@@ -2658,7 +2700,7 @@ fn forward_inherited_child_fixture() {
     let Ok(home) = std::env::var("T3_TEST_FORWARD_CHILD_HOME") else {
         return;
     };
-    let verify = || -> crate::Result<()> {
+    let verify = |check_digest: bool| -> crate::Result<()> {
         use crate::application_storage::{
             FixtureForwardActivationWitness, IsolatedTrialVerification,
         };
@@ -2757,8 +2799,9 @@ fn forward_inherited_child_fixture() {
             || held.nlink() != 1
             || format!("{:016x}", held.dev()) != witness.database.device
             || format!("{:016x}", held.ino()) != witness.database.inode
-            || forward_fixture_sha256(&read(std::path::PathBuf::from("/proc/self/fd/0"))?)
-                != expected("T3_TEST_FORWARD_CHILD_DB")?
+            || (check_digest
+                && forward_fixture_sha256(&read(std::path::PathBuf::from("/proc/self/fd/0"))?)
+                    != expected("T3_TEST_FORWARD_CHILD_DB")?)
         {
             return Err(Error::IncompatibleStore);
         }
@@ -2772,7 +2815,120 @@ fn forward_inherited_child_fixture() {
         }
         Ok(())
     };
-    let code = if verify().is_err() {
+    let writer = || -> crate::Result<()> {
+        verify(true)?;
+        if std::env::var("T3_TEST_FORWARD_WRITER").is_err() {
+            return Ok(());
+        }
+        let case = std::env::var("T3_TEST_FORWARD_WRITER").unwrap();
+        if case == "noop" {
+            return Ok(());
+        }
+        if case == "refuse" {
+            return Err(Error::IncompatibleStore);
+        }
+        if case == "timeout" {
+            let mut pid =
+                std::fs::File::create(std::path::Path::new(&home).join("writer-timeout.pid"))
+                    .map_err(|_| Error::IncompatibleStore)?;
+            use std::io::Write;
+            write!(pid, "{}", std::process::id()).map_err(|_| Error::IncompatibleStore)?;
+            pid.sync_all().map_err(|_| Error::IncompatibleStore)?;
+            loop {
+                std::thread::park();
+            }
+        }
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            use crate::application_storage::{
+                FixtureForwardActivationWitness, IsolatedTrialVerification,
+            };
+            use std::os::fd::AsFd;
+            let witness: FixtureForwardActivationWitness =
+                serde_json::from_str(&std::env::var("T3_TEST_FORWARD_CHILD_WITNESS").unwrap())
+                    .unwrap();
+            let state = std::path::Path::new(&home).join("userdata");
+            let saved: IsolatedTrialVerification = serde_json::from_slice(
+                &std::fs::read(state.join(format!(
+                    ".statev2-trial-{}.receipt-v1.json",
+                    witness.activation.update_id
+                )))
+                .unwrap(),
+            )
+            .unwrap();
+            if saved.sealed_publication.as_ref().map(|r| r.phase)
+                != Some(crate::application_storage::SealedPromotionPhase::ForwardCommitted)
+            {
+                return Err(Error::IncompatibleStore);
+            }
+            let marker = crate::application::ForwardServiceActivation {
+                update_id: witness.activation.update_id.clone(),
+                forward_selection_sha256: witness.selection_sha256.clone(),
+            };
+            let inherited = || {
+                std::io::stdin()
+                    .as_fd()
+                    .try_clone_to_owned()
+                    .map(std::fs::File::from)
+                    .map_err(|_| Error::IncompatibleStore)
+            };
+            let preview = Store {
+                db: crate::backend::Backend::inherited_trial_reader(
+                    inherited()?,
+                    128 * 1024 * 1024,
+                )
+                .await?,
+            };
+            let checked = ApplicationTransactions::new(preview.clone())
+                .verify_forward_catalog(&witness.activation, &marker, &saved.preparation.snapshot)
+                .await;
+            preview.db.shutdown_for_handoff().await?;
+            if checked? {
+                return Err(Error::IncompatibleStore);
+            }
+            verify(true)?;
+            if !matches!(
+                crate::backend::ExclusiveTrialFile::acquire(
+                    state.join("statev2.omdb"),
+                    128 * 1024 * 1024
+                ),
+                Err(Error::WriterBusy)
+            ) {
+                return Err(Error::IncompatibleStore);
+            }
+            let digest = std::env::var("T3_TEST_FORWARD_CHILD_DB").unwrap();
+            let store = Store {
+                db: crate::backend::Backend::inherited_trial_checked_writer(
+                    inherited()?,
+                    128 * 1024 * 1024,
+                    move |_| {
+                        if forward_fixture_sha256(
+                            &std::fs::read("/proc/self/fd/0")
+                                .map_err(|_| Error::IncompatibleStore)?,
+                        ) != digest
+                        {
+                            return Err(Error::IncompatibleStore);
+                        }
+                        Ok(())
+                    },
+                )
+                .await?,
+            };
+            let transactions = ApplicationTransactions::new(store.clone());
+            transactions
+                .mark_forward_catalog(&witness.activation, marker, || verify(false))
+                .await?;
+            if case == "committed-failure" {
+                // Model lost completion after a durable commit. Deliberately
+                // bypass engine shutdown; the parent must reap, report unknown,
+                // then use its existing recovery owner without replay.
+                std::process::exit(73);
+            }
+            drop(transactions);
+            store.db.shutdown_for_handoff().await?;
+            Ok(())
+        })
+    };
+    let code = if writer().is_err() {
         78
     } else if std::env::var("T3_TEST_FORWARD_CHILD_FAIL").is_ok() {
         73
@@ -3160,4 +3316,85 @@ async fn forward_packaged_catalog_refusals(
         drop(owner);
     }
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+async fn forward_writer_process_cases(home: &std::path::Path, unknown: bool) {
+    use crate::application_storage::{
+        record_fixture_forward_catalog, record_fixture_forward_catalog_process,
+    };
+    use std::process::{Command, Stdio};
+    let executable = std::env::current_exe().unwrap();
+    let digest = forward_fixture_sha256(&std::fs::read(&executable).unwrap());
+    let live = home.join("userdata/statev2.omdb");
+    let before = capture_forward_file(&live).unwrap();
+    // Each refusal/timeout is observed and reaped by the lifecycle owner.
+    for case in [
+        "stale-exe",
+        "noop",
+        "refuse",
+        "timeout",
+        if unknown {
+            "committed-failure"
+        } else {
+            "valid"
+        },
+    ] {
+        let mut command = Command::new(&executable);
+        command
+            .arg("application_bootstrap::upgrade::tests::forward_inherited_child_fixture")
+            .arg("--exact")
+            .env_clear()
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .env("T3_TEST_FORWARD_CHILD_VERSION", env!("CARGO_PKG_VERSION"))
+            .env(
+                "T3_TEST_FORWARD_CHILD_EXE",
+                if case == "stale-exe" {
+                    "foreign"
+                } else {
+                    &digest
+                },
+            )
+            .env("T3_TEST_FORWARD_WRITER", case);
+        let result = record_fixture_forward_catalog_process(
+            home.to_owned(),
+            ISOLATED_UPDATE.into(),
+            command,
+        )
+        .await;
+        if case == "valid" {
+            assert!(!result.unwrap());
+        } else {
+            assert!(matches!(result, Err(Error::UnknownCommit)));
+        }
+        println!("T05 process handoff {case}: reaped and parent result checked");
+        if case == "timeout" {
+            let pid = std::fs::read_to_string(home.join("writer-timeout.pid")).unwrap();
+            let pid: u32 = pid.parse().unwrap();
+            assert!(
+                !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+                "timed out writer not reaped"
+            );
+            std::fs::remove_file(home.join("writer-timeout.pid")).unwrap();
+        }
+        if !matches!(case, "committed-failure" | "valid") {
+            assert_eq!(capture_forward_file(&live).unwrap(), before);
+        }
+    }
+    // Reconcile success or a committed-but-failed report through the existing
+    // owner. This observes the exact durable marker without replaying the child.
+    assert!(
+        record_fixture_forward_catalog(home.to_owned(), ISOLATED_UPDATE.into())
+            .await
+            .unwrap()
+    );
+    let marked = capture_forward_file(&live).unwrap();
+    assert_ne!(marked.3, before.3);
+    assert!(
+        record_fixture_forward_catalog(home.to_owned(), ISOLATED_UPDATE.into())
+            .await
+            .unwrap()
+    );
+    assert_eq!(capture_forward_file(&live).unwrap(), marked);
 }

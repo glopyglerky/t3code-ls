@@ -137,6 +137,18 @@ jobs:
                 -- --nocapture 2>&1 | tee "$proof/inherited-writer.log"
               grep -F 'test result: ok. 2 passed; 0 failed' "$proof/inherited-writer.log"
             fi
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-catalog-integrated-writer-process-* ]]; then
+              shutdown_test=backend::tests::handoff_shutdown_refuses_retained_engine_handles
+              process_test=application_bootstrap::upgrade::tests::service_forward_process_handoff
+              timeout -k 5s 180s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+                test --locked -j 2 -p t3-code-ls-storage --lib "$shutdown_test" \
+                -- --exact --nocapture 2>&1 | tee "$proof/handoff-shutdown.log"
+              grep -F "test $shutdown_test ... ok" "$proof/handoff-shutdown.log"
+              timeout -k 5s 750s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+                test --locked -j 2 -p t3-code-ls-storage --lib "$process_test" \
+                -- --ignored --exact --nocapture 2>&1 | tee "$proof/forward-process.log"
+              grep -F "test $process_test ... ok" "$proof/forward-process.log"
+            fi
             sha256sum --check "$proof/prior-helper.sha256"
             timeout -k 5s 600s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
               test --locked -j 2 -p t3-code-ls-storage --lib \
