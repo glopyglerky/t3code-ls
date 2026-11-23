@@ -271,7 +271,9 @@ jobs:
           trial_root="$RUNNER_TEMP/reopen-trials"
           mkdir "$trial_root"
           trap 'rm -r "${trial_root:?}"' EXIT
-          for ((pair=1; pair<=6; pair++)); do
+          trial_count=6
+          if [[ "$REOPEN_SPANS" == true ]]; then trial_count=3; fi
+          for ((pair=1; pair<=trial_count; pair++)); do
             profiles=(stock candidate)
             if (( pair % 2 == 0 )); then profiles=(candidate stock); fi
             if [[ -n "$extra_profile" ]]; then
