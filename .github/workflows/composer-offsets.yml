@@ -149,7 +149,7 @@ jobs:
         working-directory: apps/mobile
         run: pnpm exec vp test run --project unit --maxWorkers 2 src/persistence/mobile-database.test.ts
       - name: Exercise terminal attachment and parser continuity
-        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-split-')
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-')
         working-directory: apps/server
         run: pnpm exec vp test run --maxWorkers 2 src/terminal/Manager.test.ts
       - name: Exercise peer reconnect and task-cache recovery
@@ -165,12 +165,25 @@ jobs:
         run: |
           pnpm --dir apps/server exec vp test run --maxWorkers 2 \
             src/orchestration-v2/RestartContinuation.test.ts src/orchestration-v2/ProviderRuntimeRecoveryService.test.ts
+      - name: Build the selected Rust PTY host
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-')
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/pty-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/pty-target"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            build --release --locked --manifest-path apps/server/rust/pty-host/Cargo.toml
+          sha256sum "$CARGO_TARGET_DIR/release/t3-code-ls-pty-host"
+          printf 'T3_CODE_LS_PTY_PROOF_EXECUTABLE=%s\n' \
+            "$CARGO_TARGET_DIR/release/t3-code-ls-pty-host" >> "$GITHUB_ENV"
+      - name: Type-check the selected terminal adapter through the server
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-')
+        run: node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/omdb-production-tsconfig.json
       - name: Build and open the application with the Rust composer binding
         if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
         env:
           T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
           T3_CODE_LS_SPLICE_NEGOTIATION_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-splice-') }}
-          T3_CODE_LS_SPLIT_PTY_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-split-') }}
+          T3_CODE_LS_SPLIT_PTY_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-') }}
           T3_CODE_LS_MULTI_TAB_DRAFT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-') }}
           T3_CODE_LS_DRAFT_STORAGE_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-storage-') }}
           T3_CODE_LS_FILE_EDITOR_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
