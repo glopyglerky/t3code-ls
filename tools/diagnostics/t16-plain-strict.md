@@ -36,3 +36,16 @@ paint attribution and complete-tree resource coverage remain unqualified.
 
 The workflow starts with the pinned Lustr and BlueFe tests for
 `t16-strict-control`, including sequence, identity and migration refusal cases.
+
+## Visit completion
+
+The probe keeps the original readiness timestamps and verifies the selected
+thread visit separately. Before shutdown it requires an accepted visit and a
+persisted cache whose exact selected history and cursor match the authoritative
+seed snapshot. After reopening it observes an accepted visit and a selected
+cursor advance beyond the actual WebSocket resume position.
+
+The `completed_work` receipt records the additional verification interval in
+each phase. Resource sampling includes that interval. Use the exact equality
+check and stopped event categories to decide which trials can be compared.
+A missing or elided visit leaves the round unqualified.

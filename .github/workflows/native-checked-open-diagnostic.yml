@@ -74,6 +74,8 @@ jobs:
             cp tools/diagnostics/t16-strict-control.rs "$evidence/probe-strict-control.rs"
           fi
           if [[ "$PLAIN_STRICT_PROOF" == true ]]; then
+            git -C "$scratch/probe" apply "$GITHUB_WORKSPACE/tools/diagnostics/t16-completed-work.patch"
+            node tools/diagnostics/t16-completed-work.test.mjs "$scratch/probe"
             cp tools/diagnostics/t16-cursor-diagnostic.rs "$scratch/probe/tools/src/bin/t16-cursor-diagnostic.rs"
             cp tools/diagnostics/t16-cursor-diagnostic.rs "$evidence/probe-cursor-diagnostic.rs"
           fi
@@ -716,7 +718,7 @@ jobs:
                 user="$1"; shift
                 exec runuser -u "$user" -- "$@"
               ' _ "$scratch/stock" "$scratch/full-stock" "$scratch/native" "$(id -un)" \
-                env -u REDB_CHECKED_OPEN_DIAGNOSTICS -u T3_CODE_LS_DIAGNOSTIC_DB \
+                env -u REDB_CHECKED_OPEN_DIAGNOSTICS -u T3_CODE_LS_DIAGNOSTIC_DB T16_COMPLETED_WORK=1 \
                 "$probe" probe-reopen "$(command -v node)" "$root/apps/server/dist/bin.mjs" \
                 "$trial" "$driver" "$chrome" "$mode" > "$sample"
               jq -er --argjson round "$round" --argjson position "$((position + 1))" --arg variant "$variant" '
