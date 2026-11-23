@@ -786,6 +786,64 @@ function assertNativePtyOwner(shell: string, executable: string, serverPid: numb
   Assert.fail("The interactive shell must descend from the selected Rust PTY host");
 }
 
+async function waitForTerminalReceipt(page: Page, path: string) {
+  const deadline = Date.now() + 10_000;
+  do {
+    if (NodeFS.existsSync(path)) {
+      const value = NodeFS.readFileSync(path, "utf8");
+      if (value.endsWith("\n")) return value.trim();
+    }
+    await page.waitForTimeout(100);
+  } while (Date.now() < deadline);
+  throw new Error(`The terminal script did not write its ${NodePath.extname(path)} receipt`);
+}
+
+async function verifyAlternateTerminalReconnect(page: Page, workspace: string, shell: string) {
+  const script = NodePath.join(workspace, "fixture-terminal-screen.sh");
+  const release = `${script}.leave`;
+  const exited = `${script}.exited`;
+  NodeFS.writeFileSync(
+    script,
+    [
+      `trap 'printf "%s\\n" "$?" > "$0.exited"' EXIT`,
+      `printf 'fixture-main-screen:%s\\n\\033[?1049h\\033[Hfixture-alternate-screen:%s 世界\\n' "$1" "$1"`,
+      'printf "%s\\n" "$1" > "$0.entered"',
+      "attempt=0",
+      'while [ ! -f "$0.leave" ] && [ "$attempt" -lt 600 ]; do',
+      "  command -p sleep 0.1",
+      "  attempt=$((attempt+1))",
+      "done",
+      '[ -f "$0.leave" ] || exit 1',
+      `printf '\\033[?1049lfixture-primary-restored:%s\\n' "$1"`,
+      "",
+    ].join("\n"),
+    { mode: 0o600, flag: "wx" },
+  );
+  const shellQuote = `'${script.replaceAll("'", "'\\''")}'`;
+  const input = await terminalInput(page);
+  await page.evaluate((line) => navigator.clipboard.writeText(line), `/bin/sh ${shellQuote} "$$"`);
+  await input.press("Control+Shift+v");
+  await waitForTerminalCopy(page, input, /fixture-terminal-screen\.sh/u, "before submission");
+  await input.press("Enter");
+  Assert.equal(await waitForTerminalReceipt(page, `${script}.entered`), shell);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const reattached = await terminalInput(page);
+  const alternate = new RegExp(`fixture-alternate-screen:${shell} 世界`, "u");
+  await waitForTerminalCopy(page, reattached, alternate, "after alternate-screen reattach", (text) => {
+    if (alternate.test(text)) Assert.ok(!text.includes(`fixture-main-screen:${shell}`));
+  });
+  NodeFS.writeFileSync(release, "leave\n", { flag: "wx" });
+  Assert.equal(await waitForTerminalReceipt(page, exited), "0");
+  const restored = new RegExp(`fixture-primary-restored:${shell}`, "u");
+  await waitForTerminalCopy(page, reattached, restored, "after leaving alternate screen", (text) => {
+    if (restored.test(text)) {
+      Assert.ok(text.includes(`fixture-main-screen:${shell}`));
+      Assert.ok(!alternate.test(text));
+    }
+  });
+  return { sameShell: true, alternateScreenRetained: true, primaryScreenRestored: true };
+}
+
 async function verifySplitTerminalReconnect(page: Page, workspace: string, shell: string) {
   const script = NodePath.join(workspace, "fixture-terminal-fragments.sh");
   const gate = `${script}.resume`;
@@ -822,18 +880,7 @@ async function verifySplitTerminalReconnect(page: Page, workspace: string, shell
   await input.press("Enter");
   // Keep the live foreground process free of key events until it writes the end
   // marker. A copy gesture without a selection can be delivered as terminal input.
-  const waitForFile = async (path: string) => {
-    const deadline = Date.now() + 10_000;
-    do {
-      if (NodeFS.existsSync(path)) {
-        const value = NodeFS.readFileSync(path, "utf8");
-        if (value.endsWith("\n")) return value.trim();
-      }
-      await page.waitForTimeout(100);
-    } while (Date.now() < deadline);
-    throw new Error(`The terminal script did not write its ${NodePath.extname(path)} receipt`);
-  };
-  const [before, scriptPid] = (await waitForFile(startedFile)).split(" ");
+  const [before, scriptPid] = (await waitForTerminalReceipt(page, startedFile)).split(" ");
   Assert.equal(before, shell);
   Assert.match(scriptPid ?? "", /^\d+$/u);
   let sawSnapshot = false;
@@ -877,8 +924,8 @@ async function verifySplitTerminalReconnect(page: Page, workspace: string, shell
     while (!sawSnapshot && Date.now() < attachDeadline) await page.waitForTimeout(100);
     Assert.ok(sawSnapshot, "The reattach snapshot must contain the staged terminal marker");
     NodeFS.writeFileSync(gate, "resume\n", { flag: "wx" });
-    Assert.equal(await waitForFile(releasedFile), shell);
-    Assert.equal(await waitForFile(exitFile), "0");
+    Assert.equal(await waitForTerminalReceipt(page, releasedFile), shell);
+    Assert.equal(await waitForTerminalReceipt(page, exitFile), "0");
     const [, after] = await waitForTerminalCopy(
       page,
       reattached,
@@ -1335,6 +1382,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     } | null,
     terminalReattach: null as { sameShell: boolean; unicodeOutput: boolean } | null,
     terminalSplit: null as Awaited<ReturnType<typeof verifySplitTerminalReconnect>> | null,
+    terminalAlternate: null as Awaited<ReturnType<typeof verifyAlternateTerminalReconnect>> | null,
     terminalFailure: null as string | null,
     terminalInitialOutput: false,
     nativePtyOwner: false,
@@ -1673,6 +1721,9 @@ async function exercise(implementation: Implementation): Promise<void> {
           starting("reattach across a split terminal control sequence");
           proof.terminalSplit = await verifySplitTerminalReconnect(page, workspace, shell);
           completed("Reattached across a split control sequence and copied split UTF-8 output");
+          starting("reattach while an alternate terminal screen is active");
+          proof.terminalAlternate = await verifyAlternateTerminalReconnect(page, workspace, shell);
+          completed("Reattached to the alternate screen and restored the primary terminal");
         }
       } catch (error) {
         proof.terminalFailure = redact(error instanceof Error ? error.message : String(error));
