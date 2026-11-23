@@ -38,6 +38,7 @@ const nativeRuntime = makeRuntimeLayers({
 export const {
   layerEventInfrastructure,
   layerEventSink,
+  layerGuestShare,
   layerProjectService,
   layerProjectSetupScriptRunner,
   layer,
