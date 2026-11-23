@@ -123,6 +123,13 @@ jobs:
               | tee "$RUNNER_TEMP/promotion-proof/helper-reap.log"
             grep -F 'test result: ok. 4 passed; 0 failed' "$RUNNER_TEMP/promotion-proof/helper-reap.log"
           fi
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-helper-reap-running-image-* ]]; then
+            test_name=forward_child_readiness::running_image_tests::running_image_is_owned_sealed_and_reaped
+            timeout -k 5s 180s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              test --locked -j 2 -p t3-code-ls-storage --lib "$test_name" -- --exact --nocapture \
+              | tee "$RUNNER_TEMP/promotion-proof/running-image.log"
+            grep -F "test $test_name ... ok" "$RUNNER_TEMP/promotion-proof/running-image.log"
+          fi
           if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-* ]]; then
             proof="$RUNNER_TEMP/promotion-proof"
             lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"

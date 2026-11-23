@@ -399,3 +399,203 @@ mod image_tests {
         );
     }
 }
+
+// This proves only a synthetic direct child's running image while it awaits
+// finish. It does not qualify a packaged SEA, serving, or caller cancellation.
+#[cfg(test)]
+mod running_image_tests {
+    use super::*;
+    use std::io::{Seek, SeekFrom, Write};
+    use std::process::Stdio;
+    use std::time::Duration;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::process::{Child, Command};
+
+    const READY: &[u8] = b"t3-synthetic-image-ready-v1\n";
+    const FINISH: &[u8] = b"finish\n";
+
+    #[test]
+    #[ignore = "synthetic subprocess selected only by running image tests"]
+    fn running_image_fixture() {
+        if std::env::var("T3_RUNNING_IMAGE_FIXTURE").as_deref() != Ok("1") {
+            return;
+        }
+        // Independent of the parent's Tokio deadline, including blocked stdin.
+        std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_secs(5));
+            std::process::exit(124);
+        });
+        // libtest writes its own stdout. Use stderr for the exact bounded frame.
+        std::io::stderr().write_all(READY).unwrap();
+        std::io::stderr().flush().unwrap();
+        let mut finish = Vec::new();
+        let read = std::io::stdin()
+            .take(FINISH.len() as u64 + 1)
+            .read_to_end(&mut finish);
+        std::process::exit(if read.is_ok() && finish == FINISH {
+            0
+        } else {
+            65
+        });
+    }
+
+    fn spawn_fixture(executable: &Path) -> Child {
+        let module = module_path!().split_once("::").unwrap().1;
+        Command::new(executable)
+            .args([
+                "--exact",
+                &format!("{module}::running_image_fixture"),
+                "--ignored",
+                "--nocapture",
+            ])
+            .env_clear()
+            .env("T3_RUNNING_IMAGE_FIXTURE", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap()
+    }
+
+    // PID comes from the retained Child, never a request or readiness frame.
+    // The trusted fixture cannot exec again and remains blocked until finish.
+    fn verify_owned_image(child: &mut Child, pid: u32, image: &File, digest: &str) -> Result<()> {
+        if child.id() != Some(pid)
+            || child
+                .try_wait()
+                .map_err(|_| Error::IncompatibleStore)?
+                .is_some()
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        let running =
+            File::open(format!("/proc/{pid}/exe")).map_err(|_| Error::IncompatibleStore)?;
+        let held = image.metadata().map_err(|_| Error::IncompatibleStore)?;
+        let actual = running.metadata().map_err(|_| Error::IncompatibleStore)?;
+        if (actual.dev(), actual.ino()) != (held.dev(), held.ino())
+            || fcntl_get_seals(&running).map_err(|_| Error::IncompatibleStore)?
+                != fcntl_get_seals(image).map_err(|_| Error::IncompatibleStore)?
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        verify_image(image, digest)?;
+        verify_image(&running, digest)?;
+        if child
+            .try_wait()
+            .map_err(|_| Error::IncompatibleStore)?
+            .is_some()
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    }
+
+    // Child and image outlive the bounded exchange. Every returned error is
+    // killed/reaped before either is released. Dropping this caller is unqualified.
+    async fn exchange(
+        child: &mut Child,
+        image: &File,
+        other_image: &File,
+        digest: &str,
+        matches_image: bool,
+        finish: Option<&[u8]>,
+    ) -> Result<std::process::ExitStatus> {
+        let pid = child.id().ok_or(Error::IncompatibleStore)?;
+        let result = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut ready = vec![0; READY.len()];
+            let mut stderr = child.stderr.take().ok_or(Error::IncompatibleStore)?;
+            stderr
+                .read_exact(&mut ready)
+                .await
+                .map_err(|_| Error::IncompatibleStore)?;
+            if ready != READY {
+                return Err(Error::IncompatibleStore);
+            }
+            if verify_owned_image(child, std::process::id(), image, digest).is_ok()
+                || verify_owned_image(child, pid, other_image, digest).is_ok()
+                || verify_owned_image(child, pid, image, &"0".repeat(64)).is_ok()
+                || verify_owned_image(child, pid, image, digest).is_ok() != matches_image
+            {
+                return Err(Error::IncompatibleStore);
+            }
+            // Check the retained fd cursor was not consumed by digest checks.
+            if image
+                .try_clone()
+                .map_err(|_| Error::IncompatibleStore)?
+                .stream_position()
+                .map_err(|_| Error::IncompatibleStore)?
+                != 7
+            {
+                return Err(Error::IncompatibleStore);
+            }
+            let mut stdin = child.stdin.take().ok_or(Error::IncompatibleStore)?;
+            if let Some(finish) = finish {
+                stdin
+                    .write_all(finish)
+                    .await
+                    .map_err(|_| Error::IncompatibleStore)?;
+            }
+            drop(stdin); // Finish is accepted only with EOF.
+            let mut extra = [0; 1];
+            if stderr
+                .read(&mut extra)
+                .await
+                .map_err(|_| Error::IncompatibleStore)?
+                != 0
+            {
+                return Err(Error::IncompatibleStore);
+            }
+            child.wait().await.map_err(|_| Error::IncompatibleStore)
+        })
+        .await
+        .unwrap_or(Err(Error::IncompatibleStore));
+        if result.is_err() {
+            let killed = child.start_kill();
+            child.wait().await.map_err(|_| Error::IncompatibleStore)?;
+            killed.map_err(|_| Error::IncompatibleStore)?;
+        }
+        result
+    }
+
+    #[tokio::test]
+    async fn running_image_is_owned_sealed_and_reaped() {
+        // No installed executable, application home, credentials or provider.
+        let executable = std::env::current_exe().unwrap();
+        let digest = executable_digest(&executable).unwrap();
+        let mut image = stage_image(&executable, &digest)
+            .expect("qualification requires Linux 6.3+ executable memfd permission");
+        let other_image = stage_image(&executable, &digest).unwrap();
+        image.seek(SeekFrom::Start(7)).unwrap();
+        let pinned = std::path::PathBuf::from(format!(
+            "/proc/{}/fd/{}",
+            std::process::id(),
+            image.as_raw_fd()
+        ));
+        // Same bytes in another sealed inode must fail. The disk process also
+        // emits READY, but its actual running image must fail identity checks.
+        for (path, matches_image, finish, code) in [
+            (pinned.as_path(), true, Some(FINISH), 0),
+            (executable.as_path(), false, Some(FINISH), 0),
+            (pinned.as_path(), true, None, 65),
+            (pinned.as_path(), true, Some(b"wrong\n".as_slice()), 65),
+        ] {
+            let mut child = spawn_fixture(path);
+            let pid = child.id().unwrap();
+            let result = exchange(
+                &mut child,
+                &image,
+                &other_image,
+                &digest,
+                matches_image,
+                finish,
+            )
+            .await;
+            // Check cleanup even when the exchange reports an error.
+            assert_eq!(child.id(), None, "exchange returned before reaping");
+            assert!(child.try_wait().unwrap().is_some(), "missing cached status");
+            assert_eq!(result.unwrap().code(), Some(code));
+            assert!(verify_owned_image(&mut child, pid, &image, &digest).is_err());
+        }
+    }
+}
