@@ -130,9 +130,16 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     if before["messages"] != result["snapshot"]["messages"]
         || before["threadSequence"] != result["snapshot"]["threadSequence"]
     {
-        return Err(
-            "the reopened selected history disagrees with its durable pre-stop state".into(),
-        );
+        let after = &result["snapshot"];
+        let first_differing_message = before["messages"]
+            .as_array()
+            .zip(after["messages"].as_array())
+            .and_then(|(before, after)| before.iter().zip(after).position(|(a, b)| a != b));
+        return Err(format!(
+            "reopened {mode} history differs: cursor {} -> {}, messages {} -> {}, first differing index {first_differing_message:?}",
+            before["threadSequence"], after["threadSequence"], before["messageCount"], after["messageCount"],
+            mode = implementation.unwrap_or("stock"),
+        ).into());
     }
     let mut snapshot = result["snapshot"].clone();
     snapshot
