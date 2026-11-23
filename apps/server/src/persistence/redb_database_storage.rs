@@ -66,7 +66,7 @@ pub struct TrialFileIdentity {
     pub created: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct TrialSnapshot {
     pub catalog_sha256: String,
@@ -74,7 +74,7 @@ pub struct TrialSnapshot {
     pub checksum: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IsolatedTrialRequest {
     pub update_id: String,
@@ -139,7 +139,7 @@ fn validate_isolated_trial_request(
 }
 
 /// Exercise the candidate's native bootstrap on a private copy of an offline
-/// checkpoint. A successful result identifies a disposable trial database.
+/// checkpoint. A retry reuses the verified preparation stored under this ID.
 pub async fn prepare_isolated_service_trial(
     home: PathBuf,
     update_id: String,
@@ -172,7 +172,22 @@ pub async fn verify_isolated_service_trial(
         preparation,
     } = verification;
     validate_isolated_trial_request(&home, &update_id, &request)?;
-    if preparation.update_id != update_id
+    validate_isolated_trial_preparation(&request, &preparation)?;
+    #[cfg(target_os = "linux")]
+    {
+        isolated::verify(home, request, preparation).await
+    }
+    #[cfg(not(target_os = "linux"))]
+    Err(Error::Invalid(
+        "isolated trial verification is unsupported on this platform".into(),
+    ))
+}
+
+fn validate_isolated_trial_preparation(
+    request: &IsolatedTrialRequest,
+    preparation: &IsolatedTrialPreparation,
+) -> Result<()> {
+    if preparation.update_id != request.update_id
         || preparation.database == request.database
         || preparation.database.created.is_none()
         || preparation.target_schema_sha256 != request.target_schema_sha256
@@ -182,14 +197,7 @@ pub async fn verify_isolated_service_trial(
     {
         return Err(Error::Invalid("invalid isolated trial preparation".into()));
     }
-    #[cfg(target_os = "linux")]
-    {
-        isolated::verify(home, request, preparation).await
-    }
-    #[cfg(not(target_os = "linux"))]
-    Err(Error::Invalid(
-        "isolated trial verification is unsupported on this platform".into(),
-    ))
+    Ok(())
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
