@@ -109,18 +109,30 @@ try {
   const linked = Path.join(scratch, "linked");
   const nested = Path.join(workspace, "nested");
   const bare = Path.join(scratch, "bare.git");
+  const configuredWorktree = Path.join(scratch, "configured-worktree");
+  const symlinkedWorktree = Path.join(scratch, "symlinked-worktree");
   FS.mkdirSync(nested, { recursive: true });
   const git = (cwd: string, ...args: string[]) => ChildProcess.execFileSync("/usr/bin/git", args, {
     cwd, env: baseEnv, encoding: "utf8", timeout: 10_000,
   }).trim();
+  const fixtureIdentity = ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"];
   git(workspace, "init", "--quiet", "--initial-branch=main");
   FS.writeFileSync(Path.join(workspace, "README"), "Synthetic packaged Git workspace\n");
   git(workspace, "add", "README");
-  git(workspace, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "Fixture");
+  git(workspace, ...fixtureIdentity, "commit", "--quiet", "-m", "Fixture");
   git(workspace, "branch", "作業/修正");
   git(workspace, "worktree", "add", "--quiet", "-b", "linked-branch", linked);
   FS.mkdirSync(bare);
   git(bare, "init", "--quiet", "--bare", "--initial-branch=main");
+  for (const checkout of [configuredWorktree, symlinkedWorktree]) {
+    FS.mkdirSync(checkout);
+    git(checkout, "init", "--quiet", "--initial-branch=configured");
+    git(checkout, ...fixtureIdentity, "commit", "--quiet", "--allow-empty", "-m", "Fixture");
+  }
+  git(configuredWorktree, "config", "core.worktree", "..");
+  FS.mkdirSync(Path.join(symlinkedWorktree, "child"));
+  FS.symlinkSync("../child", Path.join(symlinkedWorktree, ".git", "portal"));
+  git(symlinkedWorktree, "config", "core.worktree", "portal/..");
   const phases: unknown[] = [];
   const observations: unknown[] = [];
   report.phases = phases;
@@ -162,7 +174,9 @@ try {
     const client = await authenticatePackagedServer(active, abort.signal);
     const locations = mode === "native"
       ? [{ label: "root", cwd: workspace }, { label: "nested", cwd: nested },
-        { label: "linked", cwd: linked }, { label: "bare", cwd: bare }]
+        { label: "linked", cwd: linked }, { label: "bare", cwd: bare },
+        { label: "configured-worktree", cwd: configuredWorktree },
+        { label: "symlinked-worktree", cwd: symlinkedWorktree }]
       : [{ label: "root", cwd: workspace }];
     for (const { label, cwd } of locations) {
       checkpoint(`${mode}:${label}:rpc`);
@@ -174,13 +188,16 @@ try {
       { env: baseEnv, encoding: "utf8", timeout: 10_000 });
       Assert.equal(detection.error, undefined, `${mode}:${label}: Git detection oracle failed to run`);
       Assert.equal(detection.signal, null, `${mode}:${label}: Git detection oracle was interrupted`);
-      const isRepo = detection.status === 0 && detection.stdout.split("\n")[0] === "true";
+      const [insideWorktree, worktreeRoot] = detection.stdout.split("\n");
+      const isRepo = detection.status === 0 && insideWorktree === "true";
+      const isAtRepositoryRoot = isRepo ? worktreeRoot === FS.realpathSync(cwd) : undefined;
       const refs = isRepo
         ? git(cwd, "for-each-ref", "--format=%(refname:strip=2)", "refs/heads").split("\n").filter(Boolean).sort()
         : [];
       const current = isRepo ? git(cwd, "symbolic-ref", "--short", "HEAD") : undefined;
       observations.push({ mode, location: label, oracle: { isRepo, detectionExit: detection.status,
-        detectionStdout: detection.stdout, detectionStderr: detection.stderr, refs, current },
+        detectionStdout: detection.stdout, detectionStderr: detection.stderr, refs, current,
+        isAtRepositoryRoot },
       actual: { isRepo: result.isRepo, refs: result.refs.map((ref) => ref.name).sort(),
         totalCount: result.totalCount, current: result.refs.find((ref) => ref.current)?.name,
         isAtRepositoryRoot: result.isAtRepositoryRoot } });
@@ -191,7 +208,8 @@ try {
       Assert.equal(result.totalCount, refs.length, `${mode}:${label}: branch count`);
       if (isRepo) {
         Assert.equal(result.refs.find((ref) => ref.current)?.name, current, `${mode}:${label}: HEAD`);
-        Assert.equal(result.isAtRepositoryRoot, cwd !== nested, `${mode}:${label}: root identity`);
+        Assert.equal(isAtRepositoryRoot, cwd !== nested, `${mode}:${label}: fixture root identity changed`);
+        Assert.equal(result.isAtRepositoryRoot, isAtRepositoryRoot, `${mode}:${label}: root identity`);
       }
     }
     checkpoint(`${mode}:execution-witness`);
@@ -209,8 +227,12 @@ try {
       for (const { label, cwd } of locations.filter(({ cwd }) => cwd !== bare)) {
         Assert.ok(nativeCalls.some((call) => call.cwd === cwd && call.line.includes(JSON.stringify(cwd))),
           `${mode}:${label}: the packaged helper must execute in the requested work tree`);
-        Assert.ok(!coreDiscovery.some((call) => call.cwd === cwd),
-          `${mode}:${label}: applicable discovery must not fall back to Core Git discovery`);
+        const discovery = coreDiscovery.filter((call) => call.cwd === cwd);
+        const usesRetainedDiscovery = cwd === symlinkedWorktree;
+        for (const argument of ["--git-common-dir", "--show-toplevel"]) {
+          Assert.equal(discovery.some(({ line }) => line.includes(JSON.stringify(argument))),
+            usesRetainedDiscovery, `${mode}:${label}: retained ${argument}`);
+        }
       }
       Assert.ok(!nativeCalls.some((call) => call.cwd === bare || call.line.includes(JSON.stringify(bare))),
         "The bare repository must be rejected by normal admission before helper execution");

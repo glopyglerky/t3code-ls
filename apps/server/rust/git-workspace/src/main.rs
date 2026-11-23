@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
 
 #[derive(Serialize)]
@@ -38,6 +38,17 @@ fn open_repository(cwd: &Path) -> Option<(PathBuf, gix::Repository)> {
 fn discover(cwd: &Path) -> Option<RepositoryPaths> {
     let (cwd, repo) = open_repository(cwd)?;
     let worktree = repo.workdir()?.canonicalize().ok()?;
+    if let Some(configured) = repo.config_snapshot().string("core.worktree") {
+        let configured = gix::path::from_bstring(configured).ok()?;
+        // gix can collapse `..` before following a symlink in core.worktree.
+        if configured
+            .components()
+            .any(|part| part == Component::ParentDir)
+            && repo.git_dir().join(configured).canonicalize().ok()? != worktree
+        {
+            return None;
+        }
+    }
     let common_dir = repo.common_dir().canonicalize().ok()?;
     let head = repo.head_name().ok()?;
     let current_branch = match head {

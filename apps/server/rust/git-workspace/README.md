@@ -47,6 +47,16 @@ copied-artifact trials reject a changed helper and a wrong-target manifest befor
 helper execution. The original extracted entry, helper and manifest must remain
 unchanged.
 
+For an explicit `core.worktree` containing `..`, the helper compares the raw
+path resolved through the filesystem against the root returned by gix. It
+returns `null` when the paths differ or the raw path cannot be resolved. The
+archive proof uses `portal/..` with a symlink inside `.git`. It checks root
+identity and branch results through `vcs.listRefs` and requires the trace to show
+both retained Core Git discovery commands. A second worktree with `core.worktree`
+set to `..` must use native discovery.
+[Git worktree setup](https://github.com/git/git/blob/v2.51.2/setup.c#L986-L999)
+[Gitoxide worktree normalization](https://github.com/GitoxideLabs/gitoxide/blob/dd39fb66e3b1551c9fe849043e39b357a9799ca1/gix/src/open/repository.rs#L308-L340)
+
 Successful `execve` and `chdir` records bind the RPC observations to the packaged
 helper and working directories. The fixture traces only synthetic profiles and
 passes its bootstrap credential on a pipe. Its owned process group is stopped
