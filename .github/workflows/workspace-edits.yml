@@ -1,0 +1,35 @@
+name: Workspace file editing
+
+on:
+  push:
+    branches: ["candidate/t3code-ls-t06-file-revisions-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  workspace-edits:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install locked test dependencies
+        run: |
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+      - name: Exercise the workspace owner and editor save coordination
+        run: |
+          pnpm exec vp test run --maxWorkers 2 \
+            apps/server/src/workspace/WorkspaceFileSystem.test.ts \
+            apps/web/src/components/files/fileSaveCoordinator.test.ts \
+            apps/web/src/components/files/fileSaveSessions.test.ts \
+            apps/web/src/components/files/projectFilesQueryState.test.ts

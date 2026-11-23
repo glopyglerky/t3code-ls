@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off - FileSystem cannot create a FIFO, and reads spy on native realpath.
 import * as NodeChildProcess from "node:child_process";
+import { createHash } from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 
 import * as NodePath from "@effect/platform-node/NodePath";
@@ -505,6 +506,26 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
   });
 
   describe("writeFile", () => {
+    it.effect("preserves an external edit made after the editor loaded the file", () =>
+      Effect.gen(function* () {
+        const files = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir;
+        const relativePath = "stale-draft.md";
+        const original = "first revision\n";
+        const replacement = "external change\n";
+        yield* writeTextFile(cwd, relativePath, original);
+        const expectedRevision = createHash("sha256").update(original).digest("hex");
+        yield* fs.writeFileString(path.join(cwd, relativePath), replacement);
+
+        const input = { cwd, relativePath, contents: "editor draft\n", expectedRevision };
+        const result = yield* files.writeFile(input).pipe(Effect.result);
+        const onDisk = yield* fs.readFileString(path.join(cwd, relativePath));
+        expect({ status: result._tag, onDisk }).toEqual({ status: "Failure", onDisk: replacement });
+      }),
+    );
+
     it.effect("rejects writes outside a known workspace", () =>
       Effect.gen(function* () {
         const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
