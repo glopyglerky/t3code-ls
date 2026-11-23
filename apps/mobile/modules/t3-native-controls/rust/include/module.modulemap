@@ -1,0 +1,4 @@
+module T3Outbox {
+    header "t3_outbox.h"
+    export *
+}

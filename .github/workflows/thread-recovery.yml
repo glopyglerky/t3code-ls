@@ -5,6 +5,7 @@ on:
     branches:
       - "candidate/t3code-ls-t03-text-revision-*"
       - "candidate/t3code-ls-t12-outbox-identity-*"
+      - "candidate/t3code-ls-t12-outbox-native-*"
 
 permissions:
   contents: read
@@ -39,3 +40,35 @@ jobs:
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-')
         working-directory: apps/mobile
         run: pnpm exec vp test run --project unit --maxWorkers 2 src/state/thread-outbox.test.ts
+      - name: Install the pinned compiler for the outbox checks
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
+        run: |
+          node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/outbox-toolchain"
+      - name: Build and exercise the mobile outbox policy and adapter
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/outbox-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-mobile-outbox -p t3-code-ls-client-text
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" rustc --locked --release \
+            -p t3-code-ls-mobile-outbox --crate-type cdylib
+          library="$CARGO_TARGET_DIR/release/libt3_outbox.so"
+          sha256sum "$library"
+          python3 - "$library" > "$RUNNER_TEMP/t12-outbox-cells.json" <<'PY'
+          import ctypes, json, sys
+          resolve = ctypes.CDLL(sys.argv[1]).t3_outbox_delivery_v1
+          resolve.argtypes = [ctypes.c_int32]
+          resolve.restype = ctypes.c_int32
+          assert resolve(-1) == resolve(64) == -1
+          outcomes = [resolve(facts) for facts in range(64)]
+          assert set(outcomes) == {0, 1, 2}
+          print(json.dumps(outcomes))
+          PY
+          T3_OUTBOX_PROOF_MATRIX="$(cat "$RUNNER_TEMP/t12-outbox-cells.json")"
+          export T3_OUTBOX_PROOF_MATRIX
+          pnpm --dir apps/mobile exec vp test run --project unit --maxWorkers 2 \
+            "$GITHUB_WORKSPACE/apps/mobile/src/native/outboxDelivery.test.ts" src/state/thread-outbox.test.ts \
+            src/state/threadOutboxDelivery.permissions.test.ts

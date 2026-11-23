@@ -1,0 +1,13 @@
+[package]
+name = "t3-code-ls-mobile-outbox"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "t3_outbox"
+
+[dependencies]
+t3-code-ls-client-text = { path = "../../../../../packages/client-runtime/rust" }
