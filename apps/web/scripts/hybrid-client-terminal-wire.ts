@@ -1,5 +1,13 @@
 import type { TerminalAttachStreamEvent, TerminalSessionSnapshot } from "@t3tools/contracts";
 
+type IdentityCounts = {
+  missing: number;
+  null: number;
+  wrongType: number;
+  matching: number;
+  different: number;
+};
+
 type WireCounters = {
   sockets: number;
   opened: number;
@@ -11,6 +19,14 @@ type WireCounters = {
   parts: number;
   oversized: number;
   invalidJson: number;
+  nonStringSent: number;
+  terminalTagTextFrames: number;
+  terminalArrayFrames: number;
+  attachTagHits: number;
+  observeTagHits: number;
+  terminalWrongEnvelope: number;
+  terminalMissingRequestId: number;
+  identity: { threadId: IdentityCounts; terminalId: IdentityCounts };
   attachRequests: number;
   observeRequests: number;
   chunks: number;
@@ -57,6 +73,17 @@ export function installTerminalWireObserver({
     parts: 0,
     oversized: 0,
     invalidJson: 0,
+    nonStringSent: 0,
+    terminalTagTextFrames: 0,
+    terminalArrayFrames: 0,
+    attachTagHits: 0,
+    observeTagHits: 0,
+    terminalWrongEnvelope: 0,
+    terminalMissingRequestId: 0,
+    identity: {
+      threadId: { missing: 0, null: 0, wrongType: 0, matching: 0, different: 0 },
+      terminalId: { missing: 0, null: 0, wrongType: 0, matching: 0, different: 0 },
+    },
     attachRequests: 0,
     observeRequests: 0,
     chunks: 0,
@@ -72,6 +99,13 @@ export function installTerminalWireObserver({
   // Keep one attach stream per document. Request IDs are local to their socket.
   const matchTerminal = (identity: { threadId?: string; terminalId?: string } | undefined) =>
     identity?.threadId === threadId && identity.terminalId === terminalId;
+  const countIdentity = (counts: IdentityCounts, value: unknown, expected: string) => {
+    if (value === undefined) counts.missing++;
+    else if (value === null) counts.null++;
+    else if (typeof value !== "string") counts.wrongType++;
+    else if (value === expected) counts.matching++;
+    else counts.different++;
+  };
   const socketOrigin = origin.replace(/^http/u, "ws");
   const decoder = new TextDecoder();
   const nativeSend = WebSocket.prototype.send;
@@ -92,8 +126,12 @@ export function installTerminalWireObserver({
       socket.send = function (this: WebSocket, data: Parameters<WebSocket["send"]>[0]) {
         nativeSend.call(this, data);
         counters.sent++;
-        if (typeof data !== "string" || (!data.includes(attachTag) && !data.includes(observeTag)))
+        if (typeof data !== "string") {
+          counters.nonStringSent++;
           return;
+        }
+        if (!data.includes(attachTag) && !data.includes(observeTag)) return;
+        counters.terminalTagTextFrames++;
         let request: {
           _tag?: string;
           id?: string | number;
@@ -105,6 +143,15 @@ export function installTerminalWireObserver({
         } catch {
           counters.invalidJson++;
           return;
+        }
+        if (Array.isArray(request)) counters.terminalArrayFrames++;
+        if (request?.tag === attachTag || request?.tag === observeTag) {
+          if (request.tag === attachTag) counters.attachTagHits++;
+          else counters.observeTagHits++;
+          if (request._tag !== "Request") counters.terminalWrongEnvelope++;
+          if (request.id === undefined) counters.terminalMissingRequestId++;
+          countIdentity(counters.identity.threadId, request.payload?.threadId, threadId);
+          countIdentity(counters.identity.terminalId, request.payload?.terminalId, terminalId);
         }
         if (
           request?._tag !== "Request" ||
