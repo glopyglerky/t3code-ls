@@ -11,10 +11,11 @@ import { setTimeout as delay } from "node:timers/promises";
 const [phase, proofArgument, variant, reconnectArgument] = process.argv.slice(2);
 Assert.ok(phase === "admit" || phase === "run");
 const normalApp = variant === "--normal-app";
-Assert.ok(variant === undefined || (phase === "run" && normalApp), "Invalid proof variant");
+const preferences = variant === "--preferences";
+Assert.ok(variant === undefined || (phase === "run" && (normalApp || preferences)), "Invalid proof variant");
 const pairReconnect = reconnectArgument === "--pair-reconnect";
 Assert.ok(reconnectArgument === undefined || (normalApp && pairReconnect));
-Assert.equal(process.argv.length, pairReconnect ? 6 : normalApp ? 5 : 4);
+Assert.equal(process.argv.length, pairReconnect ? 6 : normalApp || preferences ? 5 : 4);
 Assert.equal(process.env.GITHUB_ACTIONS, "true", "Only the admitted hosted lane may operate this fixture");
 Assert.equal(process.platform, "linux");
 Assert.equal(process.arch, "x64");
@@ -30,7 +31,7 @@ const adb = Path.join(sdk, "platform-tools/adb");
 const emulator = Path.join(sdk, "emulator/emulator");
 const avdmanager = Path.join(sdk, "cmdline-tools/latest/bin/avdmanager");
 const image = Path.join(sdk, "system-images/android-36/google_apis/x86_64");
-const packageName = "com.t3tools.t3code.dev";
+const packageName = preferences ? "com.t3tools.t3code.dev.preferencesproof" : "com.t3tools.t3code.dev";
 const avdName = "t3-outbox-runtime";
 const serial = "emulator-5558";
 const root = Path.resolve(import.meta.dirname, "..");
@@ -66,7 +67,8 @@ let ownsScratch = false;
 let ownsAdb = false;
 let failure: unknown;
 
-type FixturePhase = "dispatch-reopen" | "pair-reconnect" | "seed" | "seed-creation" | "reopen-remove" | "reopen-empty";
+const preferencesPhases = ["preferences-seed", "preferences-held", "preferences-recover", "preferences-clean"] as const;
+type FixturePhase = "dispatch-reopen" | "pair-reconnect" | "seed" | "seed-creation" | "reopen-remove" | "reopen-empty" | typeof preferencesPhases[number];
 const pendingTaskTitle = "T12 offline pending task";
 
 const launchedPids = new Set<string>();
@@ -92,7 +94,8 @@ async function launchFixture(label: string, fixturePhase: FixturePhase) {
   launchedPids.add(pid);
   report[`${label}Process`] = { pid, stopped: false };
   checkpoint(`${label}:await-receipt`);
-  const deadline = Date.now() + ((fixturePhase === "pair-reconnect" || fixturePhase === "dispatch-reopen") ? 240_000 : 60_000);
+  const serverPhase = fixturePhase === "pair-reconnect" || fixturePhase === "dispatch-reopen";
+  const deadline = Date.now() + (preferences ? 30_000 : serverPhase ? 240_000 : 60_000);
   while (true) {
     abort.signal.throwIfAborted();
     const read = device([
@@ -105,11 +108,11 @@ async function launchFixture(label: string, fixturePhase: FixturePhase) {
       const receipt = JSON.parse(frame) as Record<string, unknown>;
       report[label] = receipt;
       save();
-      if ((fixturePhase !== "pair-reconnect" && fixturePhase !== "dispatch-reopen")) FS.writeFileSync(
+      if (!serverPhase) FS.writeFileSync(
         Path.join(proof, `${label}-logcat.txt`),
         device(["logcat", "-d", "-t", "300"]).stdout,
       );
-      Assert.equal(receipt.schema, (fixturePhase === "pair-reconnect" || fixturePhase === "dispatch-reopen") ? 3 : 2);
+      Assert.equal(receipt.schema, preferences ? 1 : serverPhase ? 3 : 2);
       Assert.equal(receipt.phase, fixturePhase);
       return { pid, receipt };
     }
@@ -270,6 +273,29 @@ async function verifyNormalApp(positiveApk: string) {
   await stopFixture("normal-app-reopen-empty", empty.pid);
 }
 
+async function verifyPreferencesApp() {
+  checkpoint("preferences:package");
+  const apk = Path.join(temporary, "outbox-runtime-preferences.apk");
+  const members = run("unzip", ["-Z1", apk]).stdout.split("\n");
+  Assert.ok(members.includes("assets/index.android.bundle"));
+  Assert.ok(!members.some((member) => /^lib\/[^/]+\/libt3_outbox\.so$/u.test(member)));
+  const hash = Crypto.createHash("sha256");
+  for await (const data of FS.createReadStream(apk)) hash.update(data);
+  const digest = hash.digest("hex");
+  Assert.equal(FS.readFileSync(Path.join(proof, "preferences-package.sha256"), "utf8").trim(),
+    `${digest}  outbox-runtime-preferences.apk`);
+  report.preferencesPackage = { packageName, sha256: digest, embeddedBundle: true };
+  run(adb, ["-s", serial, "install", "-g", "--no-streaming", apk], { timeout: 120_000 });
+  for (const phase of preferencesPhases) {
+    const { pid, receipt } = await launchFixture(phase, phase);
+    Assert.equal(receipt.fixture, "T12/J17-preferences");
+    assertCompleted(receipt);
+    await stopFixture(phase, pid);
+  }
+  checkpoint("preferences:uninstall-fixture");
+  device(["uninstall", packageName]);
+}
+
 async function unusedPort(port: number) {
   const server = Net.createServer();
   await new Promise<void>((resolve, reject) => server.once("error", reject).listen(port, "127.0.0.1", resolve));
@@ -357,7 +383,8 @@ try {
         record: (receipt) => { report.pairingServerPreflight = receipt; save(); },
       });
     }
-    for (const variant of ["missing-library", "positive"] as const) {
+    if (preferences) await verifyPreferencesApp();
+    for (const variant of preferences ? [] : ["missing-library", "positive"] as const) {
       checkpoint(`${variant}:package`);
       const apk = Path.join(temporary, `outbox-runtime-${variant}.apk`);
       const members = run("unzip", ["-Z1", apk]).stdout.split("\n");

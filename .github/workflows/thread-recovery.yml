@@ -390,6 +390,7 @@ jobs:
     env:
       APP_VARIANT: development
       T3_ANDROID_OUTBOX_RUNTIME_PROOF: "1"
+      PREFERENCES_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-preferences-') }}
       NORMAL_APP_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-normal-') }}
       PAIR_RECONNECT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-normal-pair-') }}
       RETAINED_APK_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-normal-pair-dispatch-retained-') }}
@@ -459,7 +460,7 @@ jobs:
           ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$RUNNER_TEMP/outbox-runtime-sdk" "$JAVA_HOME" "$(id -gn)"
       - name: Build matching JNI and embedded-JS Android packages
         id: build-runtime-packages
-        if: env.RETAINED_APK_PROOF != 'true'
+        if: env.RETAINED_APK_PROOF != 'true' && env.PREFERENCES_PROOF != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -534,6 +535,33 @@ jobs:
           fi
           (cd "$RUNNER_TEMP" && sha256sum "${packages[@]}") \
             > "$RUNNER_TEMP/outbox-runtime-proof/packages.sha256"
+      - name: Build the isolated Android preference recovery package
+        if: env.PREFERENCES_PROOF == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          export GRADLE_USER_HOME="$RUNNER_TEMP/outbox-preferences-gradle"
+          export T3_ANDROID_PREFERENCES_RUNTIME_PROOF=1
+          unset T3_ANDROID_OUTBOX_RUNTIME_PROOF
+          test ! -e apps/mobile/android
+          test ! -e "$RUNNER_TEMP/outbox-runtime-preferences.apk"
+          trap 'rm -rf -- apps/mobile/android "$GRADLE_USER_HOME"' EXIT
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          node --test apps/mobile/plugins/withAndroidPreferencesProof.test.cjs
+          pnpm --dir apps/mobile exec vp test run --project unit --maxWorkers 2 \
+            src/persistence/mobile-database.test.ts src/lib/storage.test.ts src/state/preferences.test.ts
+          pnpm --dir apps/mobile exec expo prebuild --platform android --no-install
+          apps/mobile/android/gradlew -p apps/mobile/android --no-daemon --max-workers=2 :app:assembleRelease
+          apk=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          sdk="$RUNNER_TEMP/outbox-runtime-sdk"
+          test "$("$sdk/cmdline-tools/latest/bin/apkanalyzer" manifest application-id "$apk")" = com.t3tools.t3code.dev.preferencesproof
+          cp "$apk" "$RUNNER_TEMP/outbox-runtime-preferences.apk"
+          proof="$RUNNER_TEMP/outbox-runtime-proof"
+          git show -s --format='%H %T' > "$proof/preferences-source.txt"
+          (cd "$RUNNER_TEMP" && sha256sum outbox-runtime-preferences.apk) > "$proof/preferences-package.sha256"
       - name: Stage the retained Android packages from the same application source
         id: retained-runtime-packages
         if: env.RETAINED_APK_PROOF == 'true'
@@ -629,9 +657,10 @@ jobs:
             proof_args=(run "$3/outbox-runtime-proof")
             if [[ "$7" == true ]]; then proof_args+=(--normal-app); fi
             if [[ "$8" == true ]]; then proof_args+=(--pair-reconnect); fi
+            if [[ "$9" == true ]]; then proof_args+=(--preferences); fi
             exec runuser -u "$1" -g "$6" -G kvm -- env GITHUB_ACTIONS=true RUNNER_TEMP="$3" ANDROID_HOME="$4" ANDROID_SDK_ROOT="$4" JAVA_HOME="$5" \
               "$2" scripts/verify-android-outbox-runtime.ts "${proof_args[@]}"
-          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$RUNNER_TEMP/outbox-runtime-sdk" "$JAVA_HOME" "$(id -gn)" "$NORMAL_APP_PROOF" "$PAIR_RECONNECT_PROOF"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$RUNNER_TEMP/outbox-runtime-sdk" "$JAVA_HOME" "$(id -gn)" "$NORMAL_APP_PROOF" "$PAIR_RECONNECT_PROOF" "$PREFERENCES_PROOF"
       - name: Retain Android execution or the first admission blocker
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -641,7 +670,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Retain the exact executed positive package
-        if: success()
+        if: success() && env.PREFERENCES_PROOF != 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: outbox-android-runtime-apk
@@ -660,12 +689,20 @@ jobs:
             ${{ runner.temp }}/outbox-runtime-normal.apk
           if-no-files-found: error
           retention-days: 3
+      - name: Retain the executed preference recovery package
+        if: success() && env.PREFERENCES_PROOF == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: android-preference-recovery-apk
+          path: ${{ runner.temp }}/outbox-runtime-preferences.apk
+          if-no-files-found: error
+          retention-days: 3
       - name: Remove owned packages and SDK staging
         if: always()
         shell: bash
         run: |
           rm -f -- "$RUNNER_TEMP/outbox-runtime-positive.apk" "$RUNNER_TEMP/outbox-runtime-missing-library.apk" \
-            "$RUNNER_TEMP/outbox-runtime-normal.apk"
+            "$RUNNER_TEMP/outbox-runtime-normal.apk" "$RUNNER_TEMP/outbox-runtime-preferences.apk"
           rm -rf -- "$RUNNER_TEMP/outbox-runtime-sdk" "$RUNNER_TEMP/outbox-runtime-sdk-user"
           if [[ -f "$RUNNER_TEMP/outbox-runtime-server-owned" ]]; then
             rm -rf -- "$GITHUB_WORKSPACE/apps/server/dist"
