@@ -35,6 +35,7 @@ import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
 import { SOCKET_FRAME_PARTS_QUERY_PARAM } from "@t3tools/shared/socketFrameParts";
 import { durableTextPrefix } from "../../server/scripts/dev-replay-agent.ts";
 import { denyThreadLinkWasm, verifyThreadNavigation } from "./hybrid-client-thread-navigation.ts";
+import { prepareSavedHistory, importSavedHistory, verifySavedHistory } from "./hybrid-client-history.ts";
 import { verifyApprovalAction } from "./hybrid-client-approval-action.ts";
 import { verifyGuestNameForm } from "./hybrid-client-guest-name.ts";
 import { verifyBundledVoiceDraft } from "./hybrid-client-voice.ts";
@@ -2581,6 +2582,7 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
     writeJson(NodePath.join(settingsDirectory, "settings.json"), {
       responseStreamingMode: "paragraph",
       providerInstances: {
+        ...(compositionProof ? { codex: prepareSavedHistory(stateDirectory) } : {}),
         devReplay: {
           displayName: "Replay (dev)",
           driver: "acpRegistry",
@@ -2635,6 +2637,7 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
     schemaVersion: 1,
     status: "running",
     composition: null as Record<string, unknown> | null,
+    savedHistory: null as Record<string, unknown> | null,
     implementation,
     client: bundledClient ? "built" : "development",
     composer: "unverified",
@@ -3130,6 +3133,9 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       proof.approvalReceipt = inspectNativeApprovalReceipt(nativeExecutable("db"), stateDirectory,
         decision.commandId, decision.threadId, approval.snapshotSequence);
       const approvalUrl = page.url();
+      // Synthetic provider import through authenticated production RPC. No live DB edits.
+      const savedHistorySeed = await importSavedHistory(page, stateDirectory,
+        NodePath.join(runRoot, fixtureName, "saved-history-fixture"));
       // Reopen the same omdb profile through the ordinary packaged entry.
       await application.stop();
       application = await startApplication(implementation, stateDirectory, serverPort, webPort,
@@ -3160,6 +3166,9 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       proof.historyFind = { query, count: "1/1", draftPreserved: true,
         renderer: compositionProof === "dioxus" ? "dioxus-wasm" : "retained",
         refusedWasmRequests: refusedComposerWasmRequests };
+      proof.savedHistory = { seed: savedHistorySeed,
+        reopened: await verifySavedHistory(page, savedHistorySeed) };
+      completed("Reopened paged saved history and jumped to exact old/new messages through Find");
       await page.goto(stoppedUrl, { waitUntil: "domcontentloaded" });
       await page.waitForFunction(() => document.querySelector<HTMLElement>('[data-testid="composer-editor"]')
         ?.innerText === "This unsent draft must survive Stop and reopen.");
@@ -3184,11 +3193,13 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       proof.composition = { renderer: compositionProof, completeDioxusClient: false,
         pairing: composedPairing, rustDrafts: true, rustComposer: true, navigationId,
         commands: composerSubmit.requests, stop: stopRequests[0],
+        savedHistory: proof.savedHistory,
         approvalCommandId: decision.commandId, sameStoreRestart: true, stoppedDraftReopened: true,
         wasmSha256, refusedWasmRequests: refusedComposerWasmRequests,
         artifacts: Object.fromEntries([
           "apps/server/dist/bin.mjs", "apps/server/dist/native-bin/manifest.json",
           "apps/server/scripts/dev-replay-agent.ts", capturedStop.path, capturedApproval.path,
+          "apps/web/scripts/hybrid-client-history.ts", "apps/web/scripts/hybrid-client-history-seed.js",
           "apps/web/dist/index.html", "apps/web/dist/client-text-wasm/composer_offsets_bg.wasm",
           "apps/web/dist/pairing-wasm/local_pairing_bg.wasm",
         ].map((path) => [path, NodeCrypto.createHash("sha256")

@@ -119,7 +119,7 @@ jobs:
           node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/launch-receipt-tsconfig.json
       - name: Type check the full server with the pinned Rust checker
         id: server-types
-        if: env.INTEGRATED_NATIVE == 'true' || env.DIOXUS_TIMELINE_PROOF == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t16-root-release-server-types-')
+        if: env.INTEGRATED_NATIVE == 'true' || env.DIOXUS_TIMELINE_PROOF == 'true' || env.DIOXUS_COMPOSITION_PROOF == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t16-root-release-server-types-')
         run: node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit --pretty false -p apps/server/tsconfig.json
       - name: Compare a typecheck failure with the pinned Go checker and Effect diagnostics
         if: failure() && steps.server-types.outcome == 'failure'
@@ -396,7 +396,9 @@ jobs:
           fi
           if [[ "$DIOXUS_COMPOSITION_PROOF" == true ]]; then
             sha256sum apps/web/dist/pairing-wasm/local_pairing.js \
-              apps/web/dist/pairing-wasm/local_pairing_bg.wasm >> "$proof/application.sha256"
+              apps/web/dist/pairing-wasm/local_pairing_bg.wasm apps/server/dist/native-bin/manifest.json \
+              >> "$proof/application.sha256"
+            find apps/web/dist -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$proof/web-assets.sha256"
             for renderer in dioxus dioxus-fallback; do
               mkdir "$proof/composed-$renderer"
               T3_CODE_LS_BROWSER_COMPOSITION_PROOF="$renderer" \
@@ -414,10 +416,17 @@ jobs:
                 .threadNavigation.draftPreserved and .historyFind.draftPreserved and
                 (.composition.commands | length) == 3 and .approvalReceipt.engine == "omdb" and
                 .approvalReceipt.commandId == .composition.approvalCommandId and
+                .savedHistory.seed.messages == 200 and .savedHistory.seed.threads == 1 and
+                .savedHistory.reopened.draftPreserved and .savedHistory.reopened.searchFocusPreserved and
+                (.savedHistory.reopened.olderRows | length) > 0 and
+                [.savedHistory.reopened.jumps[].index] == [1, 199, 1] and
+                .savedHistory.reopened.jumps[0].messageId == .savedHistory.reopened.jumps[2].messageId and
+                .savedHistory.reopened.jumps[0].messageId != .savedHistory.reopened.jumps[1].messageId and
                 (if $renderer == "dioxus-fallback" then .composition.refusedWasmRequests > 0
                  else .composerStop.timeline.streamingRow.streaming and
                    (.composerStop.timeline.reopenedRow.streaming | not) end)
               ' "$proof/composed-$renderer/native/proof.json"
+              sha256sum --check --quiet "$proof/application.sha256" "$proof/web-assets.sha256"
             done
           elif [[ "$DIOXUS_NAVIGATION_PROOF" == true ]]; then
             sha256sum apps/web/dist/pairing-wasm/local_pairing.js \
