@@ -165,13 +165,13 @@ jobs:
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
           pnpm --dir apps/web run build
-          node apps/server/scripts/cli.ts build --verbose
-          node apps/server/scripts/cli.ts build-exe --verbose --target win-x64
+          pnpm exec node apps/server/scripts/cli.ts build --verbose
+          pnpm exec node apps/server/scripts/cli.ts build-exe --verbose --target win-x64
           version="$(node -p 'require("./apps/server/package.json").version')"
           payload="$RUNNER_TEMP/cli-windows-archive"
           install -Dm644 "$monitor/t3-resource-monitor.exe" "$RUNNER_TEMP/cli-windows-resources/t3-resource-monitor.exe"
           unset AZURE_TRUSTED_SIGNING_ENDPOINT AZURE_TRUSTED_SIGNING_ACCOUNT_NAME AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME
-          node scripts/build-cli-archive.ts --platform win --arch x64 --version "$version" \
+          pnpm exec node scripts/build-cli-archive.ts --platform win --arch x64 --version "$version" \
             --resource-monitor-dir "$RUNNER_TEMP/cli-windows-resources" --output-dir "$payload"
           archive="$payload/t3-$version-win32-x64.zip"
           sha256sum "$archive" | cut -d ' ' -f 1 > "$payload/archive.sha256"
