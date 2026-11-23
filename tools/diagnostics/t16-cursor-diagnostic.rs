@@ -1,4 +1,4 @@
-//! MIT. Untimed, exact-case J02 event attribution. Never an equivalence gate.
+//! MIT. Untimed J02 event attribution for the observed fixture window.
 use serde_json::{Value, json};
 use std::{
     env, fs,
@@ -10,8 +10,10 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const SELECTED: &str = "import:codex:0251af00-0000-4000-8000-000000000000";
 const BOUND: u64 = 16 * 1024 * 1024;
 
-fn sample_coordinates(sample: &Value, native: bool) -> Result<Value> {
-    let seed = if native { 12865 } else { 12866 };
+const FIRST_SEQUENCE: u64 = 12865;
+const LAST_SEQUENCE: u64 = 12867;
+
+fn sample_coordinates(sample: &Value, native: bool) -> Result<(Value, u64)> {
     if sample["journey"] != "J02"
         || sample["profile"] != if native { "native" } else { "stock" }
         || sample["native_lookups"] != false
@@ -21,17 +23,38 @@ fn sample_coordinates(sample: &Value, native: bool) -> Result<Value> {
         || sample["snapshot"]["selectedThreadId"] != SELECTED
         || sample["snapshot"]["threadCount"] != 32
         || sample["snapshot"]["messageCount"] != 200
-        || sample["saved_thread_sequence"] != seed
-        || sample["browser"]["threadResumeAfterSequence"] != 12865
-        || sample["snapshot"]["shellSequence"] != 12867
-        || sample["snapshot"]["threadSequence"] != 12867
     {
-        return Err("not the exact plain-1 coordinate case".into());
+        return Err("not the plain-1 fixture".into());
     }
-    Ok(
-        json!({"seed_http_thread_sequence":seed,"reopen_ws_after_sequence":12865,
-        "final_http_shell_sequence":12867,"final_http_thread_sequence":12867}),
-    )
+
+    let mut through = FIRST_SEQUENCE;
+    let mut coordinates = serde_json::Map::new();
+    for (name, value) in [
+        (
+            "seed_http_thread_sequence",
+            &sample["saved_thread_sequence"],
+        ),
+        (
+            "reopen_ws_after_sequence",
+            &sample["browser"]["threadResumeAfterSequence"],
+        ),
+        (
+            "final_http_shell_sequence",
+            &sample["snapshot"]["shellSequence"],
+        ),
+        (
+            "final_http_thread_sequence",
+            &sample["snapshot"]["threadSequence"],
+        ),
+    ] {
+        let sequence = value
+            .as_u64()
+            .filter(|sequence| (FIRST_SEQUENCE..=LAST_SEQUENCE).contains(sequence))
+            .ok_or_else(|| format!("{name} outside the observed fixture window"))?;
+        through = through.max(sequence);
+        coordinates.insert(name.to_owned(), json!(sequence));
+    }
+    Ok((Value::Object(coordinates), through))
 }
 
 fn read_json(path: &Path) -> Result<Value> {
@@ -80,7 +103,7 @@ fn capture(mut command: Command, input: &[u8]) -> Result<Vec<u8>> {
     result
 }
 
-fn native_rows(helper: &Path, database: &Path) -> Result<Value> {
+fn native_rows(helper: &Path, database: &Path, through: u64) -> Result<Value> {
     let mut command = Command::new("timeout");
     command
         .args(["--kill-after=1s", "5s"])
@@ -91,7 +114,8 @@ fn native_rows(helper: &Path, database: &Path) -> Result<Value> {
     let input = [
         json!({"operation":"application_begin","transaction_id":"cursor-diagnostic","mode":"read"}),
         json!({"operation":"application_events_read","transaction_id":"cursor-diagnostic",
-            "after_sequence":12864,"through_sequence":12867,"limit":3}),
+            "after_sequence":FIRST_SEQUENCE - 1,"through_sequence":through,
+            "limit":through - FIRST_SEQUENCE + 1}),
         json!({"operation":"application_rollback","transaction_id":"cursor-diagnostic"}),
     ]
     .iter()
@@ -113,7 +137,7 @@ fn native_response(bytes: &[u8]) -> Result<Value> {
     Ok(frames[1]["result"].clone())
 }
 
-fn sqlite_rows(database: &Path) -> Result<Value> {
+fn sqlite_rows(database: &Path, through: u64) -> Result<Value> {
     // Immutable avoids even SHM creation. Refuse WAL content rather than ignore it.
     match fs::symlink_metadata(database.with_file_name("statev2.sqlite-wal")) {
         Ok(m) if m.file_type().is_file() && m.len() == 0 => {}
@@ -127,19 +151,19 @@ fn sqlite_rows(database: &Path) -> Result<Value> {
     let mut command = Command::new("timeout");
     command.args(["--kill-after=1s", "5s", "sqlite3", "-batch", "-bail", "-readonly", "-json"])
         .arg(format!("file:{path}?immutable=1"))
-        .arg("SELECT sequence, aggregate_kind, stream_id, event_type, application_event_version FROM orchestration_events WHERE sequence BETWEEN 12865 AND 12867 ORDER BY sequence;");
+        .arg(format!("SELECT sequence, aggregate_kind, stream_id, event_type, application_event_version FROM orchestration_events WHERE sequence BETWEEN {FIRST_SEQUENCE} AND {through} ORDER BY sequence;"));
     Ok(serde_json::from_slice(&capture(command, b"")?)?)
 }
 
-fn categories(rows: &Value) -> Result<Value> {
+fn categories(rows: &Value, through: u64) -> Result<Value> {
     let rows = rows
         .as_array()
-        .filter(|rows| rows.len() == 3)
+        .filter(|rows| rows.len() as u64 == through - FIRST_SEQUENCE + 1)
         .ok_or("missing coordinate events")?;
     let mut output = Vec::new();
     for (index, row) in rows.iter().enumerate() {
         let kind = row["event_type"].as_str().ok_or("missing event type")?;
-        if row["sequence"] != 12865 + index as u64
+        if row["sequence"] != FIRST_SEQUENCE + index as u64
             || row["application_event_version"] != 2
             || !KNOWN_TYPES.contains(&kind)
         {
@@ -180,7 +204,7 @@ fn main() -> Result<()> {
         _ => return Err("unknown arm".into()),
     };
     let sample = read_json(Path::new(sample))?;
-    let coordinates = sample_coordinates(&sample, native)?;
+    let (coordinates, through) = sample_coordinates(&sample, native)?;
     let trial = fs::canonicalize(trial)?;
     if fs::canonicalize(trial.join("reopen-fixture"))?.to_str()
         != sample["fixture_workspace"].as_str()
@@ -206,14 +230,15 @@ fn main() -> Result<()> {
                 .ok_or("bundle directory missing")?
                 .join("native-bin/t3-code-ls-db"),
             &database,
+            through,
         )?
     } else {
-        sqlite_rows(&database)?
+        sqlite_rows(&database, through)?
     };
-    let events = categories(&rows)?;
+    let events = categories(&rows, through)?;
     println!(
         "{}",
-        json!({"kind":"plain-1-stopped-event-cursor-diagnostic","schema_version":1,
+        json!({"kind":"plain-1-stopped-event-cursor-diagnostic","schema_version":2,
         "coordinates":coordinates,"events":events,"observation":"after probe exit and clean shutdown",
         "equivalence_qualified":false,"performance_qualified":false,"causal_attribution_qualified":false,
         "limits":["Stored event types and stream owners only; no actor, payload, command, timestamp or identity retained",
@@ -369,13 +394,13 @@ mod tests {
     }
 
     #[test]
-    fn accepts_distinct_exact_milestones_without_equating_them() {
+    fn preserves_coordinates_from_both_hosted_runs() {
         assert_eq!(
-            sample_coordinates(&sample(false), false).unwrap()["seed_http_thread_sequence"],
+            sample_coordinates(&sample(false), false).unwrap().0["seed_http_thread_sequence"],
             12866
         );
         assert_eq!(
-            sample_coordinates(&sample(true), true).unwrap()["seed_http_thread_sequence"],
+            sample_coordinates(&sample(true), true).unwrap().0["seed_http_thread_sequence"],
             12865
         );
         for field in [
@@ -393,10 +418,19 @@ mod tests {
             assert!(sample_coordinates(&bad, false).is_err(), "{field}");
         }
         assert!(sample_coordinates(&sample(true), false).is_err());
+        let mut observed = sample(false);
+        observed["browser"]["threadResumeAfterSequence"] = json!(12866);
+        observed["snapshot"]["shellSequence"] = json!(12866);
+        observed["snapshot"]["threadSequence"] = json!(12866);
+        let (coordinates, through) = sample_coordinates(&observed, false).unwrap();
+        assert_eq!(coordinates["reopen_ws_after_sequence"], 12866);
+        assert_eq!(through, 12866);
+        observed["snapshot"]["shellSequence"] = json!(12868);
+        assert!(sample_coordinates(&observed, false).is_err());
     }
     #[test]
     fn emits_only_bounded_categories_and_rejects_missing_or_foreign_events() {
-        let result = categories(&rows()).unwrap();
+        let result = categories(&rows(), 12867).unwrap();
         assert_eq!(result[0]["owner"], "selected-thread");
         assert!(!result.to_string().contains("PRIVATE_SENTINEL"));
         assert!(!result.to_string().contains(SELECTED));
@@ -409,13 +443,21 @@ mod tests {
         ] {
             let mut bad = rows();
             bad[1][field] = json!("PRIVATE_SENTINEL");
-            assert!(categories(&bad).is_err(), "{field}");
+            assert!(categories(&bad, 12867).is_err(), "{field}");
         }
         let mut missing = rows();
         missing.as_array_mut().unwrap().pop();
-        assert!(categories(&missing).is_err());
+        assert!(categories(&missing, 12867).is_err());
+        assert_eq!(
+            categories(&missing, 12866)
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
         let mut duplicate = rows();
         duplicate[1] = duplicate[0].clone();
-        assert!(categories(&duplicate).is_err());
+        assert!(categories(&duplicate, 12867).is_err());
     }
 }

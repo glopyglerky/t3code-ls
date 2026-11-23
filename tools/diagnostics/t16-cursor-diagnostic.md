@@ -56,10 +56,12 @@ fiber, background service, actor or causal code path.
 
 ## Bounded private observations
 
-Only exact coordinate case 12865..12867 is admitted, including the differing
-seed coordinate for stock/full versus native. Each command requires the exact
-selected fixture ID, 32 threads, 200 selected messages, valid snapshot and a
-sample whose fixture workspace resolves inside that supplied owned trial.
+The diagnostic admits coordinates within the observed 12865..12867 fixture
+window. Run 45246737366 used a stock seed of 12866, a resume of 12865 and final
+watermarks of 12867. Run 45251441916 recorded 12866 at all four stock boundaries.
+The read includes sequence 12865 through the largest coordinate in that sample.
+Each command requires the exact selected fixture ID, 32 threads, 200 selected
+messages, a valid snapshot and a fixture workspace inside the supplied trial.
 Canonical database identity rejects symlink escapes. Stopped ownership is a
 caller obligation established by successful probe exit in the itinerary; the
 CLI does not establish process quiescence for an arbitrary supplied directory.
@@ -73,7 +75,7 @@ is a hosted prerequisite failure; it is not installed by this patch.
 
 Native uses the existing packaged helper without product edits or a new backend.
 Its API returns full event rows internally. Those bytes stay in bounded process
-memory and are never logged or saved. Only three sequential event types from the
+memory and are never logged or saved. Only the bounded sequence window's event types from the
 base schema literal allowlist and stream categories survive the projection.
 Payloads, raw IDs, commands, timestamps and actor guesses are omitted. Missing,
 duplicate, unknown-schema or foreign-owner rows reject the diagnostic. Child
