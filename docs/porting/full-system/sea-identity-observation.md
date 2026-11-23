@@ -34,7 +34,7 @@ Before launch, repeat the existing saved-receipt, selection, marker, runtime and
 read-only catalog checks under the existing selection, home and database locks.
 Close the catalog snapshot before spawning. Verify the retained immutable entry
 against the receipt's `target_entry_sha256`, then launch that descriptor only,
-with fixed `__sea-identity` arguments, empty environment and no inherited
+with fixed `__sea-identity-observe` arguments, empty environment and no inherited
 database descriptor. No installed-path execution or retry fallback is allowed.
 
 The physical owner must inspect `/proc/<owned-child-pid>/exe` while that exact
@@ -51,9 +51,8 @@ this check: fixed timeout, bounded stdout/stderr, strict single-frame decoding,
 empty stderr, checked exit status and explicit kill plus awaited reap on every
 failure/cancellation path. Keep all physical locks and the retained image until
 reap is observed. Lost output, identity races, timeout and uncertain completion
-cannot produce success or admit another child before reconciliation. A future
-bounded handshake must keep the probe inspectable until the parent has checked
-the real running image; this one-shot prerequisite has no such handshake yet.
+cannot produce success or admit another child before reconciliation. The early handshake below keeps the source probe pending for inspection until
+finish and EOF. It does not implement the parent's process ownership contract.
 
 After reap, recheck the existing receipt, selection, marker, immutable entry and
 catalog, closing the snapshot again. Only then report `observed: true`,
@@ -65,15 +64,45 @@ leases or report readiness. A failed observation leaves the serving fence intact
 
 On this source base, `redb_isolated_trial.rs::run_forward_process` is test-only,
 discards output and has no process-identity observation callback.
-`verify_intent_helper` bounds pipes and time, but its timeout drops a
-`kill_on_drop` child without explicitly awaiting reap. The TypeScript launcher
+`capture_intent_helper` bounds pipes and time and now explicitly kills and awaits
+reap on capture errors. Cancellation of its entire caller still leaves only
+`kill_on_drop` cleanup, without an awaited reap under the owner's leases. The TypeScript launcher
 does not own the Rust forward owner's locks. Reusing those paths unchanged
 would not prove immutable running identity and reap under the retained owners.
 Adding a separate supervisor would bypass the requested existing owners.
 
-This patch therefore supplies the early probe prerequisite only. Actual launch
-requires an extension of the existing supervisor and a bounded probe handshake,
-then hosted Linux tests against a real single-asset SEA. Relative asset loading,
+This patch supplies the early handshake prerequisite only. Actual launch
+requires cancellation-safe ownership in the existing supervisor and independent
+package metadata binding, then hosted Linux tests against a real single-asset SEA. Relative asset loading,
 ordinary startup, installed acceptance and other platforms remain unqualified.
 The existing forward-owner protocol, permanent catalog fences, port status,
 stock source pins and MIT license remain unchanged.
+
+## Bounded early handshake prerequisite
+
+`__sea-identity-observe` is a separate fieldless bootstrap command. The existing
+`__sea-identity` command and its source fixture remain available. Both read and
+hash the same bounded raw asset and actual bundled package metadata before any
+application imports. The handshake emits one `t3-sea-identity-observe-v1` JSON
+frame with the same identity fields and `serving: false`. It then waits for
+exactly seven bytes, `finish\n`, followed by EOF. Fragmented input is accepted;
+wrong, extra or repeated input, incomplete EOF, input close/error and output
+failure refuse with exit 78. Successful completion adds no output. A fixed
+five-second timer independently refuses missing finish or blocked output.
+The timer bounds asynchronous waiting, not synchronous hashing or OS suspension.
+
+The parent must treat every frame field as untrusted. After verifying its own
+live child, executable inode, seals and receipt digest under its retained leases,
+it may send finish and close stdin. It must await reap and repeat all selection,
+receipt, marker, image and catalog checks before reporting an observation. A
+finish token grants no authority and provides no evidence those checks occurred.
+
+`node --test tools/sea-identity.test.mjs tools/sea-identity-handshake.test.mjs`
+executes controlled source-import fixtures. The new fixture checks pending
+completion before finish and before EOF, fragmented finish, strict input refusal,
+output and input failures, bootstrap refusal and the independent timer. It keeps
+the original fixture unchanged. It simulates SEA and streams in-process, so it
+does not establish an actual SEA's liveness, empty environment, descriptor
+isolation, immutable running image, package/build provenance, cancellation or reap.
+No forward-owner observe operation or executable launch is added. The permanent
+serving fence, saved selection, markers, receipts and catalog remain unchanged.
