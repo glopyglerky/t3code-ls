@@ -39,9 +39,10 @@ No installed state, live providers, personal profiles or source databases are us
 
 The additional Rust `account` command validates the existing probe's retained
 per-identity CPU deltas, tick conversion, group disjointness and RSS page units.
-It writes separate accounting receipts for the original three-arm observations
-and extra verifier observations. It retains sampler scan wall time, gaps and
-unavailable reads. These receipts establish internal arithmetic, not an
+The strict verifier writes an accounting receipt for each of its four samples.
+The command can also validate previously retained three-arm receipts. It
+retains sampler scan wall time, gaps and unavailable reads. The receipts
+establish internal arithmetic, not an
 independent measurement of the kernel or reconstruction of peak RSS.
 See [Linux proc](https://www.kernel.org/doc/html/latest/filesystems/proc.html).
 

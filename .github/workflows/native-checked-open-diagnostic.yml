@@ -549,9 +549,6 @@ jobs:
             find apps/server/dist apps/web/dist -type f -print0 | sort -z | xargs -0 -r sha256sum
           ) > "$evidence/arm-strict-verifier.sha256"
           (cd "$scratch/stock" && sha256sum --check "$evidence/arm-stock.sha256") > "$evidence/stock-after-strict-build.txt"
-          for sample in "$evidence"/paired-[1-6]-*.json; do
-            "$verifier" account < "$sample" > "${sample%.json}-resource-account.json"
-          done
           chrome="$(command -v google-chrome)"
           driver="$(command -v chromedriver || printf '%s/chromedriver' "$CHROMEWEBDRIVER")"
           test -x "$driver"
