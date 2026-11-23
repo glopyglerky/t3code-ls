@@ -920,7 +920,7 @@
         "tools/check-guest-share.mjs"
       ],
       "retired_paths": [],
-      "notes": "Guest-share transitions and upload classification run through the existing Rust helper. Authorization, filesystem observations, JavaScript Unicode case folding, IDs, SQLite transactions, attachment copying and cleanup remain in the application. Other hosts retain the original classifier.",
+      "notes": "Guest-share transitions, invite and signed-session eligibility, and upload classification run through the existing Rust helper. The application verifies signatures, holds keys, applies live host policy, and owns filesystem observations, JavaScript Unicode case folding, IDs, SQLite transactions, attachment copying and cleanup. Other hosts retain the original classifier.",
       "rust_crates": ["crates/core"]
     },
     {
@@ -2176,7 +2176,7 @@
         "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
       },
       "retired_paths": [],
-      "notes": "T07 Linux PTY host using portable-pty 0.9.0 and nix 0.28.0. The Linux x64 server can opt in to the verified packaged helper with T3_CODE_LS_BUNDLED_PTY_HOST=1 or use an explicit helper with T3_CODE_LS_PTY_HOST_EXECUTABLE. The default selection uses NodePtyAdapter. The bundled browser fixture verifies the packaged helper hash, shell ancestry, Unicode input and same-shell reattachment. The native owner uses bounded nonblocking byte input, exact output acknowledgement and kill/reap for the initial process group. Restart, signal behavior, interactive foreground jobs, session-escaping descendants and performance remain unqualified.",
+      "notes": "T07 Linux PTY host using portable-pty 0.9.0 and nix 0.28.0. The Linux x64 server can opt in to the verified packaged helper with T3_CODE_LS_BUNDLED_PTY_HOST=1 or use an explicit helper with T3_CODE_LS_PTY_HOST_EXECUTABLE. The default selection uses NodePtyAdapter. The bundled browser fixture verifies the packaged helper hash, shell ancestry, split UTF-8 and control sequences, plus an active alternate screen and restoration of the primary screen across same-shell reattachment. The native owner uses bounded nonblocking byte input, exact output acknowledgement and kill/reap for the initial process group. Server restart, general foreground job control, signals, session-escaping descendants and performance remain unqualified.",
       "rust_crates": ["apps/server/rust/pty-host"]
     },
     {
