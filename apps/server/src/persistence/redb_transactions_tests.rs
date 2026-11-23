@@ -91,6 +91,10 @@ async fn application_generation_checks_engine_layout_and_exact_catalog() {
         identity.engine_version, identity.engine_revision, identity.engine_revision
     );
     assert!(include_str!("../../../../Cargo.lock").contains(&expected_pin));
+    transactions
+        .begin_mode("reader-before", ApplicationTransactionMode::Read, None)
+        .await
+        .unwrap();
 
     for mismatched in [
         ApplicationGenerationIdentity {
@@ -133,6 +137,37 @@ async fn application_generation_checks_engine_layout_and_exact_catalog() {
     assert!(transactions.generation_identity().await.unwrap().is_none());
     assert!(!transactions.initialize(schema()).await.unwrap());
     assert!(transactions.generation_identity().await.unwrap().is_none());
+
+    let mut changed = catalog;
+    changed
+        .schema
+        .tables
+        .retain(|table| table.name == "receipts");
+    let changed_bytes = encode_catalog(&changed).unwrap();
+    let mut writer = store.db.begin().await.unwrap();
+    record_generation_identity(&mut writer, &changed, &changed_bytes)
+        .await
+        .unwrap();
+    writer.put(schema_key(), changed_bytes).await.unwrap();
+    writer.commit().await.unwrap();
+
+    transactions
+        .begin_mode("reader-after", ApplicationTransactionMode::Read, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        transactions.sessions["reader-after"].catalog.as_ref(),
+        &changed
+    );
+    assert!(
+        transactions
+            .get("reader-before", "records", &[json!("one")])
+            .await
+            .unwrap()
+            .is_none()
+    );
+    transactions.rollback("reader-before").await.unwrap();
+    transactions.rollback("reader-after").await.unwrap();
 }
 
 #[tokio::test]
