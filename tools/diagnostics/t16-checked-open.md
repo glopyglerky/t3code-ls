@@ -152,3 +152,9 @@ The completed-work probe separately validates all 200 retained messages and the
 authoritative bounded window used by the web client's cache. The cache must
 match that window's ordered message IDs, roles, text and selected-thread
 cursor. The bounded read runs in preparation, before the timed reopen.
+
+Warm reopen may elide a visit when the selected thread is already read.
+The probe accepts that case only when the final authoritative thread cursor
+equals the observed resume cursor. When the client sends a visit, the probe
+requires its accepted reply and an advanced cursor. Cross-arm cursor equality
+and the independent stopped-store diagnostic still apply.
