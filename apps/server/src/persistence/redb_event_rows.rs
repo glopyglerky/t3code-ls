@@ -857,16 +857,20 @@ impl Store {
         let catalog = decode_catalog(&bytes)?;
         read_generation_identity(&mut tx, &catalog, &bytes).await?;
         validate_event_table(&catalog)?;
-        let stored = tx.get(&key(&catalog, "preparation")).await?;
+        // Both values belong to this reserved transaction's immutable snapshot.
+        // Keep decoding and repair in this owner while sharing one blocking read.
+        let [stored, stored_marker]: [Option<Vec<u8>>; 2] = tx
+            .get_many(&[key(&catalog, "preparation"), marker(&catalog)])
+            .await?
+            .try_into()
+            .map_err(|_| Error::IncompatibleStore)?;
         let mut state = match stored {
             Some(bytes) => {
                 let state: Preparation = decode(&bytes)?;
                 if state.version != 1 {
                     return Err(Error::IncompatibleStore);
                 }
-                if tx
-                    .get(&marker(&catalog))
-                    .await?
+                if stored_marker
                     .as_deref()
                     .map(decode::<String>)
                     .transpose()?
@@ -878,7 +882,7 @@ impl Store {
                 state
             }
             None => {
-                if tx.get(&marker(&catalog)).await?.is_some() {
+                if stored_marker.is_some() {
                     return Err(Error::IncompatibleStore);
                 }
                 tx.put(marker(&catalog), encode(&"event-index-v1")?).await?;
