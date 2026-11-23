@@ -41,7 +41,12 @@ import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as ProjectService from "./project/ProjectService.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
-import { ServerActivation } from "./serverActivation.ts";
+import {
+  ServerActivation,
+  StagedCandidateReadinessError,
+  StagedCandidateStartup,
+  afterStagedCandidateReadiness,
+} from "./serverActivation.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
@@ -52,13 +57,19 @@ it.effect.each([
   "disabled-default",
   "launch-failure",
   "project-failure",
-] as const)("keeps bootstrap launch failures separate from project failures: %s", (scenario) =>
+  "staged-admit",
+  "staged-cancel",
+  "staged-inspection-failure",
+  "staged-report-failure",
+  "staged-admission-failure",
+] as const)("preserves startup failures and staged admission: %s", (scenario) =>
   Effect.gen(function* () {
     const projectId = ProjectId.make("bootstrap-project");
     const instanceId = ProviderInstanceId.make(
       scenario === "disabled-default" ? "custom" : "codex",
     );
     const events: ServerLifecycleStreamEvent[] = [];
+    const startupEffects: string[] = [];
     const recovery = {
       terminalizedRuns: 0,
       stoppedSessions: 0,
@@ -68,6 +79,9 @@ it.effect.each([
     };
     const imports = { importedThreadCount: 0, importedMessageCount: 0 };
     const dependencies = Layer.mergeAll(
+      Layer.effectDiscard(Effect.sync(() => {
+        startupEffects.push("construct-layers");
+      })),
       NodeCrypto.layer,
       Path.layer,
       Layer.mock(ServerConfig.ServerConfig)({
@@ -103,20 +117,47 @@ it.effect.each([
         startupPresentation: "browser",
         autoBootstrapProjectFromCwd: true,
       }),
-      Layer.mock(Keybindings.Keybindings)({ start: Effect.void }),
+      Layer.mock(Keybindings.Keybindings)({
+        start: Effect.sync(() => {
+          startupEffects.push("keybindings");
+        }),
+      }),
       Layer.mock(LegacyV1ThreadImporter.LegacyV1ThreadImporter)({
         pendingThreadCount: Effect.succeed(0),
-        reconcileShells: Effect.succeed(imports),
+        reconcileShells: Effect.sync(() => {
+          startupEffects.push("legacy-import");
+          return imports;
+        }),
         importPendingTranscripts: Effect.succeed(imports),
       }),
       Layer.mock(ProviderRuntimeRecovery.ProviderRuntimeRecoveryService)({
-        recover: Effect.succeed(recovery),
-        prepareForShutdown: Effect.void,
-        reconcile: () => Effect.succeed(recovery),
+        recover: Effect.sync(() => {
+          startupEffects.push("recovery");
+          return recovery;
+        }),
+        prepareForShutdown: Effect.sync(() => {
+          startupEffects.push("shutdown-prepare");
+        }),
+        reconcile: () => Effect.sync(() => {
+          startupEffects.push("shutdown-reconcile");
+          return recovery;
+        }),
       }),
-      Layer.mock(Orchestrator.OrchestratorV2)({ recoverDelegatedTasks: Effect.void }),
-      Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({ shutdown: Effect.void }),
-      Layer.mock(AgentAwarenessRelay.AgentAwarenessRelay)({ start: () => Effect.void }),
+      Layer.mock(Orchestrator.OrchestratorV2)({
+        recoverDelegatedTasks: Effect.sync(() => {
+          startupEffects.push("delegated-recovery");
+        }),
+      }),
+      Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
+        shutdown: Effect.sync(() => {
+          startupEffects.push("sessions-shutdown");
+        }),
+      }),
+      Layer.mock(AgentAwarenessRelay.AgentAwarenessRelay)({
+        start: () => Effect.sync(() => {
+          startupEffects.push("awareness-relay");
+        }),
+      }),
       Layer.mock(EffectWorker.OrchestrationEffectWorkerV2)({ runOnce: () => Effect.never }),
       Layer.mock(ServerLifecycleEvents.ServerLifecycleEvents)({
         publish: (event) =>
@@ -127,7 +168,9 @@ it.effect.each([
           }),
       }),
       Layer.mock(ServerSettings.ServerSettingsService)({
-        start: Effect.void,
+        start: Effect.sync(() => {
+          startupEffects.push("settings");
+        }),
         getSettings: Effect.succeed({
           ...DEFAULT_SERVER_SETTINGS,
           defaultModelSelection:
@@ -199,7 +242,10 @@ it.effect.each([
       Layer.mock(ServiceLauncherClient.ServiceLauncherClient)({
         managed: false,
         protocol: undefined,
-        prepareTrial: () => Effect.undefined,
+        prepareTrial: () => Effect.sync(() => {
+          startupEffects.push("launcher-prepared");
+          return undefined;
+        }),
       }),
       Layer.mock(GitVcsDriver.GitVcsDriver)({}),
       Layer.mock(AnalyticsService.AnalyticsService)({}),
@@ -212,7 +258,7 @@ it.effect.each([
         address: NetAddress.inetAddressFromIpStringUnsafe("127.0.0.1", 3773),
       }),
     );
-    yield* Effect.gen(function* () {
+    const start = Effect.gen(function* () {
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       yield* startup.markHttpListening;
       const ready = yield* Effect.exit(startup.awaitCommandReady);
@@ -230,7 +276,64 @@ it.effect.each([
     }).pipe(
       Effect.provide(ServerRuntimeStartup.layerWithOptions().pipe(Layer.provide(dependencies))),
       Effect.provideService(ServerActivation, Effect.never),
+      Effect.scoped,
+      afterStagedCandidateReadiness,
     );
+    if (!scenario.startsWith("staged-")) return yield* start;
+    const prepared = yield* Deferred.make<void>();
+    const admission = yield* Deferred.make<void>();
+    const checkpoints: string[] = [];
+    const rejected = new StagedCandidateReadinessError({ cause: "synthetic stage refusal" });
+    const candidate = start.pipe(Effect.provideService(StagedCandidateStartup, {
+      inspect: scenario === "staged-inspection-failure"
+        ? Effect.fail(rejected)
+        : Effect.sync(() => {
+            checkpoints.push("inspected");
+          }),
+      reportPrepared: scenario === "staged-report-failure"
+        ? Effect.fail(rejected)
+        : Effect.sync(() => {
+            checkpoints.push("prepared");
+          }).pipe(
+            Effect.andThen(Deferred.succeed(prepared, undefined)),
+            Effect.asVoid,
+          ),
+      awaitAdmission: scenario === "staged-admission-failure"
+        ? Deferred.await(admission).pipe(Effect.andThen(Effect.fail(rejected)))
+        : Deferred.await(admission),
+    }));
+    const fiber = yield* candidate.pipe(Effect.forkScoped);
+    if (scenario === "staged-inspection-failure" || scenario === "staged-report-failure") {
+      assert.isTrue(Exit.isFailure(yield* Fiber.await(fiber)));
+      assert.deepEqual(checkpoints, scenario === "staged-report-failure" ? ["inspected"] : []);
+      assert.deepEqual(startupEffects, []);
+      assert.deepEqual(events, []);
+      return;
+    }
+    yield* Deferred.await(prepared);
+    assert.deepEqual(checkpoints, ["inspected", "prepared"]);
+    assert.deepEqual(startupEffects, []);
+    assert.deepEqual(events, []);
+    if (scenario === "staged-cancel") {
+      yield* Fiber.interrupt(fiber);
+      assert.deepEqual(startupEffects, []);
+      assert.deepEqual(events, []);
+      return;
+    }
+    yield* Deferred.succeed(admission, undefined);
+    if (scenario === "staged-admission-failure") {
+      assert.isTrue(Exit.isFailure(yield* Fiber.await(fiber)));
+      assert.deepEqual(startupEffects, []);
+      assert.deepEqual(events, []);
+      return;
+    }
+    yield* Fiber.join(fiber);
+    assert.deepEqual(startupEffects.slice(0, 7), [
+      "construct-layers", "keybindings", "settings", "legacy-import", "recovery",
+      "delegated-recovery", "awareness-relay",
+    ]);
+    assert.ok(startupEffects.indexOf("launcher-prepared") > startupEffects.indexOf("recovery"));
+    assert.ok(startupEffects.includes("shutdown-reconcile"));
   }),
 );
 

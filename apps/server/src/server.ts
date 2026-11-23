@@ -1338,4 +1338,7 @@ export const runServer = Effect.scoped(
       Effect.raceFirst(ownership.awaitLost),
     );
   }),
-).pipe(Effect.provide(ProcessRunner.layer));
+).pipe(
+  Effect.provide(ProcessRunner.layer),
+  ServerActivation.afterStagedCandidateReadiness,
+);
