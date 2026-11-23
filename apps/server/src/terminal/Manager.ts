@@ -392,7 +392,7 @@ function terminalWireLabel(session: TerminalSessionState): string {
   return truncateTerminalWireLabel(getTerminalLabel(session.terminalId));
 }
 
-function snapshot(session: TerminalSessionState, resumeOutput = false): TerminalSessionSnapshot {
+function snapshot(session: TerminalSessionState): TerminalSessionSnapshot {
   return {
     threadId: session.threadId,
     terminalId: session.terminalId,
@@ -400,10 +400,7 @@ function snapshot(session: TerminalSessionState, resumeOutput = false): Terminal
     worktreePath: session.worktreePath,
     status: session.status,
     pid: session.pid,
-    history:
-      resumeOutput && session.process !== null
-        ? session.history.attachmentValue(session.pendingHistoryControlSequence)
-        : session.history.value(),
+    history: session.history.value(),
     exitCode: session.exitCode,
     exitSignal: session.exitSignal,
     label: terminalWireLabel(session),
@@ -1102,19 +1099,6 @@ export class BoundedTerminalHistory {
       .map((chunk) => chunk!.data)
       .join("");
     return this.cachedValue;
-  }
-
-  attachmentValue(continuation: string): string {
-    const history = this.value();
-    // The next live chunk may begin inside this sequence. Keep it out of persisted
-    // history, which can be replayed against an entirely different PTY.
-    if (continuation.length === 0 || continuation.length > this.maxBytes) return history;
-    const bytes = Buffer.byteLength(continuation);
-    if (bytes > this.maxBytes) return history;
-    const budget = this.maxBytes - bytes;
-    return (
-      (this.byteLength <= budget ? history : retainedTerminalHistory(history, budget)) + continuation
-    );
   }
 }
 
@@ -3154,7 +3138,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       yield* resizeSession(session, session.process, targetCols, targetRows);
     }
 
-    return snapshot(session, true);
+    return snapshot(session);
   });
 
   const readAllTerminalMetadata = () =>
@@ -3334,9 +3318,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   ) =>
     streamSession(
       input,
-      requireSession(input.threadId, input.terminalId).pipe(
-        Effect.map((session) => snapshot(session, true)),
-      ),
+      requireSession(input.threadId, input.terminalId).pipe(Effect.map(snapshot)),
       listener,
       registerCleanup,
     );
@@ -3349,7 +3331,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
     streamSession(
       input,
       getSession(input.threadId, input.terminalId).pipe(
-        Effect.map((session) => (Option.isSome(session) ? snapshot(session.value, true) : null)),
+        Effect.map((session) => (Option.isSome(session) ? snapshot(session.value) : null)),
       ),
       listener,
       registerCleanup,
