@@ -31,7 +31,11 @@ import {
 
 type Implementation = "upstream" | "native";
 type PairingRenderer = "retained" | "dioxus" | "dioxus-fallback";
-type OwnedApplication = { pid: number; pairingUrl: string; stop: () => Promise<void> };
+type OwnedApplication = {
+  pid: number;
+  pairingUrl: string;
+  stop: (target?: "group" | "server") => Promise<void>;
+};
 type InterruptedShowcase = ReplayTurnIdentity & {
   threadId: string;
   threadUrl: string;
@@ -54,6 +58,7 @@ const pairingProof = process.env.T3_CODE_LS_PAIRING_PROOF;
 const dioxusFindProof = process.env.T3_CODE_LS_DIOXUS_FIND_PROOF;
 const expectsDioxusFind = process.env.VITE_T3_CODE_LS_THREAD_FIND_RENDERER === "dioxus";
 const bundledPtyProof = process.env.T3_CODE_LS_BUNDLED_PTY_PROOF === "true";
+const ptyRestartProof = process.env.T3_CODE_LS_PTY_RESTART_PROOF === "true";
 const nativePtyHost = bundledPtyProof
   ? NodePath.join(repoRoot, "apps/server/dist/native-bin/t3-code-ls-pty-host")
   : process.env.T3_CODE_LS_PTY_PROOF_EXECUTABLE;
@@ -300,18 +305,22 @@ async function startApplication(
     });
   }
 
-  const stop = async () => {
+  const stop = async (target: "group" | "server" = "group") => {
     if (stopping) return;
     stopping = true;
-    const signal = (value: NodeJS.Signals) => {
+    const signal = (value: NodeJS.Signals, recipient: number) => {
       try {
-        process.kill(-pid, value);
+        process.kill(recipient, value);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
       }
     };
-    signal("SIGTERM");
-    const killTimer = setTimeout(() => signal("SIGKILL"), 10_000);
+    signal("SIGTERM", target === "server" ? pid : -pid);
+    let killed = false;
+    const killTimer = setTimeout(() => {
+      killed = true;
+      signal("SIGKILL", -pid);
+    }, 10_000);
     let deadlineTimer: ReturnType<typeof setTimeout>;
     const deadline = new Promise<never>((_, reject) => {
       deadlineTimer = setTimeout(
@@ -321,6 +330,9 @@ async function startApplication(
     });
     try {
       await Promise.race([exited, deadline]);
+      if (target === "server") {
+        Assert.equal(killed, false, "The server must close without the process-group backstop");
+      }
     } finally {
       clearTimeout(killTimer);
       clearTimeout(deadlineTimer!);
@@ -454,9 +466,6 @@ async function verifyPairing(implementation: Implementation, renderer: PairingRe
     Assert.equal(await form.count(), 0, "The pairing form must leave the authenticated page");
     const authenticated = await context.request.get(sessionUrl.href);
     Assert.equal((await authenticated.json()).authenticated, true);
-    const welcomeControls = renderer === "dioxus"
-      ? await verifyWelcomeControlUpdates(page)
-      : undefined;
     if (renderer === "dioxus-fallback") {
       await page.getByRole("alert").filter({ hasText: "Could not open setup controls" })
         .waitFor({ state: "visible" });
@@ -467,6 +476,9 @@ async function verifyPairing(implementation: Implementation, renderer: PairingRe
     const controls = welcome.locator('[data-welcome-renderer="dioxus-wasm"]');
     if (renderer === "dioxus") await controls.waitFor({ state: "visible" });
     else Assert.equal(await controls.count(), 0);
+    const welcomeControls = renderer === "dioxus"
+      ? await verifyWelcomeControlUpdates(page)
+      : undefined;
     await welcome.getByText(/^Looking for projects in your .* history…$/u)
       .waitFor({ state: "hidden" });
     const importProjects = welcome.getByRole("checkbox", { name: /^Import (?:\d+ )?projects? and their threads\b/u });
@@ -966,7 +978,7 @@ async function terminalMarker(page: Page, prefix: "fixture-pty" | "fixture-reatt
   return pid;
 }
 
-function assertNativePtyOwner(shell: string, executable: string, serverPid: number): void {
+function assertNativePtyOwner(shell: string, executable: string, serverPid: number): number {
   const expected = NodeFS.realpathSync(executable);
   let pid = Number(shell);
   for (let depth = 0; depth < 8 && pid > 1; depth += 1) {
@@ -975,7 +987,7 @@ function assertNativePtyOwner(shell: string, executable: string, serverPid: numb
     const parent = Number(status.match(/^PPid:\s+(\d+)$/mu)?.[1]);
     if (NodeFS.readlinkSync(`${processDirectory}/exe`) === expected) {
       Assert.equal(parent, serverPid, "The bundled server must own the selected PTY helper");
-      return;
+      return pid;
     }
     if (parent === serverPid) break;
     pid = parent;
@@ -1010,6 +1022,56 @@ async function waitForSelectedTerminalText(page: Page, input: Locator, pattern: 
     await page.waitForTimeout(100);
   } while (Date.now() < deadline);
   throw new Error(`Expected selected terminal text matching ${pattern}`);
+}
+
+function liveLinuxProcess(pid: number) {
+  Assert.ok(Number.isSafeInteger(pid) && pid > 1, "Expected a bounded fixture process identity");
+  let status: string;
+  try {
+    status = NodeFS.readFileSync(`/proc/${pid}/stat`, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  const fields = status.slice(status.lastIndexOf(")") + 2).trim().split(/\s+/u);
+  const [state, parent] = fields;
+  const started = fields[19];
+  Assert.ok(started && parent, "Expected Linux start-time and parent witnesses");
+  return state === "Z" || state === "X" ? null : { pid, parent: Number(parent), started };
+}
+
+async function verifyOwnedPtyShutdown(page: Page, workspace: string, shell: string, helper: number,
+  stopServer: () => Promise<void>) {
+  const script = NodePath.join(workspace, "fixture-pty-restart.sh");
+  const marker = `${script}.pid`;
+  const quote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
+  NodeFS.writeFileSync(script, `printf '%s\\n' "$$" > ${quote(marker)}\nexec sleep 600\n`);
+  const input = await terminalInput(page);
+  await page.evaluate((line) => navigator.clipboard.writeText(line), `sh ${quote(script)}`);
+  await input.press("Control+Shift+v");
+  await waitForSelectedTerminalText(page, input, /fixture-pty-restart\.sh/u);
+  await input.press("Enter");
+  const foreground = liveLinuxProcess(Number(await waitForTerminalReceipt(page, marker)));
+  const session = liveLinuxProcess(Number(shell));
+  const owner = liveLinuxProcess(helper);
+  Assert.ok(session && owner && foreground, "The server must own a live terminal and foreground job");
+  Assert.equal(foreground.parent, session.pid, "The scripted job must belong to this terminal");
+  const processes = [session, owner, foreground];
+  const remains = ({ pid, started }: (typeof processes)[number]) => liveLinuxProcess(pid)?.started === started;
+  try {
+    await stopServer();
+    const deadline = Date.now() + 5000;
+    while (processes.some(remains) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    Assert.deepEqual(processes.filter(remains), [], "The stopped server must leave no live PTY processes");
+    return session;
+  } finally {
+    for (const owned of processes.filter(remains)) {
+      try { process.kill(owned.pid, "SIGKILL"); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+    }
+  }
 }
 
 async function verifyAlternateTerminalReconnect(page: Page, workspace: string, shell: string) {
@@ -1726,6 +1788,12 @@ async function exercise(implementation: Implementation): Promise<void> {
     terminalReattach: null as { sameShell: boolean; unicodeOutput: boolean } | null,
     terminalSplit: null as Awaited<ReturnType<typeof verifySplitTerminalReconnect>> | null,
     terminalAlternate: null as Awaited<ReturnType<typeof verifyAlternateTerminalReconnect>> | null,
+    terminalRestart: null as {
+      oldOwnerExited: boolean;
+      foregroundExited: boolean;
+      newShell: boolean;
+      previousThreadReopened: boolean;
+    } | null,
     terminalFailure: null as string | null,
     terminalInitialOutput: false,
     nativePtyOwner: false,
@@ -2096,6 +2164,7 @@ async function exercise(implementation: Implementation): Promise<void> {
           origin: new URL(page.url()).origin,
         });
         const shell = await terminalMarker(page, "fixture-pty");
+        let terminalOwner: number | undefined;
         if (nativePtyHost !== undefined) {
           if (bundledPtyProof) {
             const manifest = JSON.parse(NodeFS.readFileSync(NodePath.join(NodePath.dirname(nativePtyHost), "manifest.json"), "utf8"));
@@ -2103,12 +2172,38 @@ async function exercise(implementation: Implementation): Promise<void> {
             Assert.equal(manifest.files["t3-code-ls-pty-host"],
               NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(nativePtyHost)).digest("hex"));
           }
-          assertNativePtyOwner(shell, nativePtyHost, application.pid);
+          terminalOwner = assertNativePtyOwner(shell, nativePtyHost, application.pid);
           proof.nativePtyOwner = true;
           proof.bundledNativePtyOwner = bundledPtyProof;
         }
         proof.terminalInitialOutput = true;
         saveProof();
+        if (ptyRestartProof) {
+          Assert.ok(bundledPtyProof && nativePtyHost && terminalOwner !== undefined);
+          starting("stop the native server with a foreground terminal job");
+          const previous = await verifyOwnedPtyShutdown(page, workspace, shell, terminalOwner,
+            () => application.stop("server"));
+          application = await startApplication(implementation, stateDirectory, serverPort,
+            webPort, NodePath.join(directory, "terminal-restart.log"));
+          proof.processGroups.push(application.pid);
+          await page.reload({ waitUntil: "domcontentloaded" });
+          await assertCompleted(page, threadId, turnIdentity);
+          const replacement = await terminalMarker(page, "fixture-reattach");
+          const restarted = liveLinuxProcess(Number(replacement));
+          Assert.ok(restarted);
+          Assert.ok(restarted.pid !== previous.pid || restarted.started !== previous.started,
+            "A fresh terminal must have a distinct process identity after server restart");
+          assertNativePtyOwner(replacement, nativePtyHost, application.pid);
+          proof.terminalRestart = {
+            oldOwnerExited: true,
+            foregroundExited: true,
+            newShell: true,
+            previousThreadReopened: true,
+          };
+          completed("Reopened the durable thread and started a new owned terminal after graceful server shutdown");
+          proof.status = "passed";
+          return;
+        }
         await page.reload({ waitUntil: "domcontentloaded" });
         await assertCompleted(page, threadId, turnIdentity);
         const reattached = await terminalMarker(page, "fixture-reattach");
