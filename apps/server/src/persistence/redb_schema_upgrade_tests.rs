@@ -13,6 +13,7 @@ async fn fixture_80() -> (TestFixture, Store, ApplicationCatalog) {
     let source = ApplicationCatalog {
         event_layout: None,
         prepared_service_activation_v1: None,
+        forward_service_activation_v1: None,
         schema: previous.schema,
         generation: "native".into(),
     };
@@ -242,6 +243,7 @@ async fn interrupted_staging_retries_from_current_source_and_removes_stale_candi
     let target = ApplicationCatalog {
         event_layout: None,
         prepared_service_activation_v1: None,
+        forward_service_activation_v1: None,
         generation: request_digest(&json!([
             "native-schema-upgrade",
             source.generation,
@@ -1269,7 +1271,56 @@ async fn direct_88_import_and_80_88_89_chain_retain_the_original_receipt_and_exa
                 .unwrap(),
             receipt
         );
+
+        let mut marked = serde_json::to_value(&active).unwrap();
+        marked["forward_service_activation_v1"] = json!({
+            "update_id": "aa212c2b-63d4-4b28-97e4-1c1d6dc6d281",
+            "forward_selection_sha256": "a".repeat(64),
+        });
+        let marked = encode(&marked).unwrap();
+        let mut tx = reopened.db.begin().await.unwrap();
+        tx.put(schema_key(), marked.clone()).await.unwrap();
+        tx.commit().await.unwrap();
+        assert!(matches!(
+            reopened.application_import().await,
+            Err(Error::IncompatibleStore)
+        ));
+        let mut tx = reopened.db.begin().await.unwrap();
+        record_generation_identity(&mut tx, &active, &marked)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(
+            reopened.application_import().await.unwrap().unwrap(),
+            receipt
+        );
+
+        for (field, value) in [
+            ("forward_selection_sha256", json!("b".repeat(64))),
+            ("update_id", json!("ba212c2b-63d4-4b28-97e4-1c1d6dc6d281")),
+        ] {
+            let mut tampered: Value = serde_json::from_slice(&marked).unwrap();
+            tampered["forward_service_activation_v1"][field] = value;
+            let mut tx = reopened.db.begin().await.unwrap();
+            tx.put(schema_key(), encode(&tampered).unwrap())
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+            assert!(matches!(
+                reopened.application_import().await,
+                Err(Error::IncompatibleStore)
+            ));
+        }
+        let mut tx = reopened.db.begin().await.unwrap();
+        tx.put(schema_key(), marked).await.unwrap();
+        tx.commit().await.unwrap();
         reopened.shutdown().await.unwrap();
+        let readonly = Store::open_read_only(fixture.path()).await.unwrap();
+        assert_eq!(
+            readonly.application_import().await.unwrap().unwrap(),
+            receipt
+        );
+        readonly.shutdown().await.unwrap();
     }
 }
 
@@ -2314,6 +2365,9 @@ async fn forward_catalog_fixture(
         checksum: fingerprint.checksum,
     };
     let marked_file = capture_forward_file(&live).unwrap();
+    assert_eq!(format!("{:016x}", marked_file.0), request.database.device);
+    assert_eq!(format!("{:016x}", marked_file.1), request.database.inode);
+    assert_eq!(marked_file.2, 1);
     let marked_sha256 = forward_fixture_sha256(&marked_file.3);
     let mut marked_target = request.clone();
     marked_target.target = marked_snapshot.clone();
@@ -2322,64 +2376,45 @@ async fn forward_catalog_fixture(
         "preparation": preparation,
         "witness": { "kind": "offline-pre-activation", "target_file_sha256": marked_sha256 },
     });
-    let assert_refused = |commands: &[(&str, &str, &str, Option<&Value>)]| {
+    let assert_refused = |mode, update, error, input: Option<&Value>| {
         let before = capture();
         for helper in helpers {
-            for &(mode, update, error, input) in commands {
-                let frame = run_forward_helper(helper, home, update, mode, input);
-                assert_eq!(frame["ok"], false, "{helper:?} {mode}: {frame}");
-                assert_eq!(frame["error"]["kind"], error, "{helper:?} {mode}: {frame}");
-                assert_eq!(capture(), before, "{helper:?} {mode} changed fixture files");
-            }
+            let frame = run_forward_helper(helper, home, update, mode, input);
+            assert_eq!(frame["ok"], false, "{helper:?} {mode}: {frame}");
+            assert_eq!(frame["error"]["kind"], error, "{helper:?} {mode}: {frame}");
+            assert_eq!(capture(), before, "{helper:?} {mode} changed fixture files");
         }
     };
-    let prepare = json!(marked_target);
-    assert_refused(&[
-        (
-            "trial-rollback-sealed",
-            ISOLATED_UPDATE,
-            "incompatible_store",
-            None,
-        ),
-        (
+    let prepare = |input| {
+        assert_refused(
             "trial-prepare-restore",
             update,
             "incompatible_store",
-            Some(&prepare),
-        ),
-        (
-            "trial-publish-restore-offline",
-            update,
-            "incompatible_store",
-            Some(&marked_target_publication),
-        ),
-    ]);
-    fs::rename(&stage, &parked).unwrap();
-    assert_refused(&[(
-        "trial-prepare-restore",
-        update,
+            Some(input),
+        )
+    };
+    let publish =
+        |input, error| assert_refused("trial-publish-restore-offline", update, error, Some(input));
+    let prepare_request = json!(marked_target);
+    assert_refused(
+        "trial-rollback-sealed",
+        ISOLATED_UPDATE,
         "incompatible_store",
-        Some(&prepare),
-    )]);
+        None,
+    );
+    prepare(&prepare_request);
+    publish(&marked_target_publication, "incompatible_store");
+    fs::rename(&stage, &parked).unwrap();
+    prepare(&prepare_request);
     fs::rename(&parked, &stage).unwrap();
 
     // The first interrupted layout still has a stage and two links to the target.
     fs::hard_link(&live, &preserved).unwrap();
-    assert_refused(&[(
-        "trial-publish-restore-offline",
-        update,
-        "incompatible_store",
-        Some(&marked_target_publication),
-    )]);
+    publish(&marked_target_publication, "incompatible_store");
     fs::remove_file(&live).unwrap();
     fs::rename(&stage, &live).unwrap();
     // After rename the marked failed target is read under its preserved name.
-    assert_refused(&[(
-        "trial-publish-restore-offline",
-        update,
-        "unknown_commit",
-        Some(&marked_target_publication),
-    )]);
+    publish(&marked_target_publication, "unknown_commit");
     fs::rename(&live, &stage).unwrap();
     fs::rename(&preserved, &live).unwrap();
 
@@ -2387,6 +2422,11 @@ async fn forward_catalog_fixture(
     // prepared file and the independent checkpoint have the same marked snapshot.
     let plain_preparation: TrialRestorePreparation =
         serde_json::from_value(preparation.clone()).unwrap();
+    let plain_stage = capture_forward_file(&stage).unwrap();
+    assert_eq!(
+        forward_fixture_sha256(&plain_stage.3),
+        plain_preparation.staged_file_sha256
+    );
     let plain_checkpoint = capture_forward_file(&checkpoint).unwrap();
     fs::write(&checkpoint, &marked_file.3).unwrap();
     let marked_prepared_publication = json!({
@@ -2408,20 +2448,13 @@ async fn forward_catalog_fixture(
         }
     });
     fs::rename(&stage, &preserved).unwrap();
-    assert_refused(&[(
-        "trial-publish-restore-offline",
-        update,
-        "unknown_commit",
-        Some(&marked_prepared_publication),
-    )]);
+    publish(&marked_prepared_publication, "unknown_commit");
     fs::rename(&live, &stage).unwrap();
     fs::rename(&preserved, &live).unwrap();
-    assert_refused(&[(
-        "trial-publish-restore-offline",
-        update,
-        "incompatible_store",
-        Some(&marked_prepared_publication),
-    )]);
+    publish(&marked_prepared_publication, "incompatible_store");
+    fs::rename(&stage, &parked).unwrap();
+    prepare(&marked_prepared_publication["restore"]);
+    fs::rename(&parked, &stage).unwrap();
 
     // Restore the synthetic layout and confirm the later application row by key.
     fs::rename(&live, &parked).unwrap();

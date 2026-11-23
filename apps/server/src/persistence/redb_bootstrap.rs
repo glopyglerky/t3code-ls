@@ -172,6 +172,7 @@ impl Store {
             generation: "native".into(),
             event_layout,
             prepared_service_activation_v1: None,
+            forward_service_activation_v1: None,
         };
         let bytes = encode_catalog(&catalog)?;
         record_generation_identity(&mut tx, &catalog, &bytes).await?;

@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
@@ -70,11 +70,22 @@ pub(crate) struct ApplicationCatalog {
     pub(crate) event_layout: Option<ApplicationEventLayout>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) prepared_service_activation_v1: Option<PreparedServiceActivation>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "ForwardServiceActivation::deserialize_present"
+    )]
+    pub(crate) forward_service_activation_v1: Option<ForwardServiceActivation>,
 }
 
 impl ApplicationCatalog {
+    fn has_service_fence(&self) -> bool {
+        self.prepared_service_activation_v1.is_some()
+            || self.forward_service_activation_v1.is_some()
+    }
+
     pub(crate) fn ensure_serving(&self) -> Result<()> {
-        if self.prepared_service_activation_v1.is_some() {
+        if self.has_service_fence() {
             return Err(Error::IncompatibleStore);
         }
         Ok(())
@@ -91,6 +102,22 @@ pub struct PreparedServiceActivation {
     pub target_entry_sha256: String,
     pub target_helper_sha256: String,
     pub target_schema_sha256: String,
+}
+
+/// Binds the forward catalog to the exact selection bytes, including its receipt digest.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ForwardServiceActivation {
+    pub(crate) update_id: String,
+    pub(crate) forward_selection_sha256: String,
+}
+
+impl ForwardServiceActivation {
+    fn deserialize_present<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Option<Self>, D::Error> {
+        Self::deserialize(deserializer).map(Some)
+    }
 }
 
 pub(crate) fn exact_service_version(value: &str) -> bool {
@@ -198,7 +225,7 @@ async fn verify_generation_identity(
     expected: &ApplicationGenerationIdentity,
 ) -> Result<Option<ApplicationGenerationIdentity>> {
     let Some(bytes) = transaction.get(&generation_identity_key(catalog)).await? else {
-        if catalog.event_layout.is_some() || catalog.prepared_service_activation_v1.is_some() {
+        if catalog.event_layout.is_some() || catalog.has_service_fence() {
             return Err(Error::IncompatibleStore);
         }
         // Older generations have a validated catalog without an engine record.
@@ -339,6 +366,13 @@ fn validate_catalog(catalog: &ApplicationCatalog) -> Result<()> {
     }
     if let Some(binding) = &catalog.prepared_service_activation_v1 {
         binding.validate()?;
+    }
+    if let Some(binding) = &catalog.forward_service_activation_v1
+        && (catalog.prepared_service_activation_v1.is_some()
+            || !crate::application_storage::valid_update_id(&binding.update_id)
+            || !digest(&binding.forward_selection_sha256))
+    {
+        return Err(Error::IncompatibleStore);
     }
     Ok(())
 }
@@ -519,9 +553,7 @@ impl ApplicationTransactions {
             .ok_or(Error::IncompatibleStore)?;
         let mut catalog = decode_catalog(&bytes)?;
         read_generation_identity(&mut transaction, &catalog, &bytes).await?;
-        if catalog.prepared_service_activation_v1.is_some() {
-            return Err(Error::IncompatibleStore);
-        }
+        catalog.ensure_serving()?;
         catalog.prepared_service_activation_v1 = Some(binding);
         let bytes = encode_catalog(&catalog)?;
         record_generation_identity(&mut transaction, &catalog, &bytes).await?;
@@ -549,6 +581,7 @@ impl ApplicationTransactions {
             generation: "native".into(),
             event_layout: None,
             prepared_service_activation_v1: None,
+            forward_service_activation_v1: None,
         };
         let bytes = encode_catalog(&catalog)?;
         record_generation_identity(&mut transaction, &catalog, &bytes).await?;

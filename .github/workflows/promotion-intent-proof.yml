@@ -11,7 +11,7 @@ permissions:
 jobs:
   promotion-intent:
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
-    timeout-minutes: 20
+    timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-promotion-intent-forward-catalog-') && 35 || 20 }}
     env:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
@@ -21,6 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          fetch-depth: 3
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
@@ -37,6 +38,47 @@ jobs:
           cp Cargo.lock database.lock.json toolchain.lock.json "$RUNNER_TEMP/promotion-proof/"
       - name: Verify the pinned compiler
         run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/promotion-toolchain"
+      - name: Build the exact predecessor and verify its catalog refusal
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-promotion-intent-forward-catalog-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          proof="$RUNNER_TEMP/promotion-proof"
+          old_checkout="$RUNNER_TEMP/promotion-prior-source"
+          old_commit=3d0ac7e1ad6e4a86e17cba84e3b6d154d39cb3c1
+          old_tree=e06b4f6a965a33f6d9277fdcee02cb74f3c82109
+          red_commit=fc4b3f9aca8dd88ed9afcb3d62bec9c69ed780f8
+          test "$(git rev-parse "$red_commit^" "$old_commit^{tree}")" = "$(printf '%s\n%s' "$old_commit" "$old_tree")"
+          git worktree add --detach "$old_checkout" "$old_commit"
+          trap 'git worktree remove --force "$old_checkout"' EXIT
+          cmp toolchain.lock.json "$old_checkout/toolchain.lock.json"
+          cmp Cargo.lock "$old_checkout/Cargo.lock"
+          git -C "$old_checkout" rev-parse HEAD HEAD^{tree} > "$proof/prior-source.txt"
+          lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/promotion-prior-target"
+          (
+            cd "$old_checkout"
+            timeout -k 5s 600s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              build --locked -j 2 -p t3-code-ls-storage --bin t3-code-ls-db
+          )
+          helper="$CARGO_TARGET_DIR/debug/t3-code-ls-db"
+          sha256sum "$helper" > "$proof/prior-helper.sha256"
+          "$helper" trial-capabilities > "$proof/prior-capabilities.json"
+          git -C "$old_checkout" switch --detach "$red_commit"
+          set +e
+          (
+            cd "$old_checkout"
+            timeout -k 5s 240s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              test --locked -j 2 -p t3-code-ls-storage --lib \
+              application::tests::forward_catalog_marker_is_strict_and_keeps_the_serving_fence \
+              -- --exact --nocapture
+          ) 2>&1 | tee "$proof/forward-catalog-red.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          test "$status" -eq 101
+          grep -F 'the compatible reader must retain the marker: IncompatibleStore' "$proof/forward-catalog-red.log"
+          sha256sum --check "$proof/prior-helper.sha256"
+          printf 'T3_TEST_PRIOR_PROMOTION_HELPER=%s\n' "$helper" >> "$GITHUB_ENV"
       - name: Build the helper and exercise intent interruption and refusal
         shell: bash
         run: |
@@ -92,6 +134,26 @@ jobs:
             -- --exact 2>&1 | tee "$RUNNER_TEMP/promotion-proof/isolated-cli-restart.log"
           grep -F 'isolated_trial_cli_restarts_from_checkpoint_after_interruption ... ok' \
             "$RUNNER_TEMP/promotion-proof/isolated-cli-restart.log"
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-* ]]; then
+            proof="$RUNNER_TEMP/promotion-proof"
+            lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+            for test_name in \
+              application::tests::forward_catalog_marker_is_strict_and_keeps_the_serving_fence \
+              application_bootstrap::upgrade::tests::direct_88_import_and_80_88_89_chain_retain_the_original_receipt_and_exact_lineage; do
+              log="$proof/${test_name##*::}.log"
+              timeout -k 5s 180s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+                test --locked -j 2 -p t3-code-ls-storage --lib "$test_name" \
+                -- --exact --nocapture 2>&1 | tee "$log"
+              grep -F "test $test_name ... ok" "$log"
+            done
+            sha256sum --check "$proof/prior-helper.sha256"
+            timeout -k 5s 480s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              test --locked -j 2 -p t3-code-ls-storage --lib \
+              application_bootstrap::upgrade::tests::service_forward_catalog_fences_generic_restore \
+              -- --ignored --exact --nocapture 2>&1 | tee "$proof/forward-catalog.log"
+            grep -F 'T05 forward catalog fenced both installed helpers across generic restore retries' \
+              "$proof/forward-catalog.log"
+          fi
           cp "$RUNNER_TEMP/promotion-toolchain/installation-proof.json" "$RUNNER_TEMP/promotion-proof/"
       - name: Retain bounded recovery evidence
         if: always()
@@ -111,6 +173,6 @@ jobs:
           if [[ -d "$toolchain" ]]; then
             find "$toolchain" -type d -exec chmod u+w {} +
           fi
-          rm -rf "$RUNNER_TEMP/promotion-cargo-home" "$RUNNER_TEMP/promotion-target" \
+          rm -rf "$RUNNER_TEMP/promotion-cargo-home" "$RUNNER_TEMP/promotion-target" "$RUNNER_TEMP/promotion-prior-target" \
             "$RUNNER_TEMP/promotion-profiles" "$toolchain"
           df -k "$RUNNER_TEMP"

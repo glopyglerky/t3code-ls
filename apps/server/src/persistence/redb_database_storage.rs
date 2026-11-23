@@ -880,9 +880,9 @@ async fn verify_restore_snapshot(path: &Path, expected: &TrialSnapshot) -> Resul
 }
 
 #[cfg(unix)]
-async fn verify_generic_restore_target(path: &Path, expected: &TrialSnapshot) -> Result<Store> {
+async fn verify_generic_restore_snapshot(path: &Path, expected: &TrialSnapshot) -> Result<Store> {
     let store = verify_restore_snapshot(path, expected).await?;
-    // Sealed candidates can only be rolled back by the owner of the trial receipt.
+    // A generic restore cannot consume an isolated trial or forward catalog.
     ApplicationTransactions::new(store.clone()).schema().await?;
     Ok(store)
 }
@@ -898,9 +898,9 @@ async fn prepare_trial_restore(
     let owner = OwnerLock::acquire_existing_native(&state.join("server-owner.sqlite"))?;
     let backups = checked_directory(home.join("runtime").join("native-db-backup"))?;
     let checkpoint_path = backups.join(format!("{}.omdb", request.update_id));
-    let checkpoint = verify_restore_snapshot(&checkpoint_path, &request.checkpoint).await?;
+    let checkpoint = verify_generic_restore_snapshot(&checkpoint_path, &request.checkpoint).await?;
     let live_path = state.join("statev2.omdb");
-    let live = verify_generic_restore_target(&live_path, &request.target).await?;
+    let live = verify_generic_restore_snapshot(&live_path, &request.target).await?;
     if trial_file_identity(&live.db.open_verified_offline_file(&live_path)?)?
         != (request.database, 1)
     {
@@ -1136,8 +1136,9 @@ async fn publish_trial_restore(
         } else {
             (&live, &stage)
         };
-        let failed = verify_generic_restore_target(failed_path, &restore.target).await?;
-        let prepared = verify_restore_snapshot(prepared_path, &restore.checkpoint).await?;
+        let failed = verify_generic_restore_snapshot(failed_path, &restore.target).await?;
+        // A rename retry reads the canonical file as the prepared image.
+        let prepared = verify_generic_restore_snapshot(prepared_path, &restore.checkpoint).await?;
         let failed_links = if !reused && has_preserved { 2 } else { 1 };
         let failed_file = verify_trial_file(&failed, failed_path, &restore.database, failed_links)?;
         let prepared_file =
