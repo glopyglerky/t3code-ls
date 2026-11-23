@@ -1,3 +1,4 @@
+import { installThreadMessageText } from "@t3tools/client-runtime/rpc";
 import type { RichDocMap, RichRun } from "./composer-rich-text-doc";
 
 interface NativeMap {
@@ -10,6 +11,12 @@ interface NativeMap {
 interface OffsetModule {
   default(): Promise<unknown>;
   ComposerOffsetMap: { from_words(words: Uint32Array, length: number): NativeMap | undefined };
+  ThreadMessageText?: {
+    from_message(sequence: number, text: string, maxBytes: number): {
+      append(baseSequence: number, sequence: number, suffix: string): string | undefined;
+      free(): void;
+    } | undefined;
+  };
 }
 
 const runKinds = { text: 0, token: 2, break: 3, prefix: 4 } satisfies Record<RichRun["kind"], number>;
@@ -26,6 +33,12 @@ export async function initializeComposerOffsets(): Promise<void> {
   const module: OffsetModule = await import(/* @vite-ignore */ url.href);
   await module.default();
   offsetModule = module;
+  const textBinding = module.ThreadMessageText;
+  if (textBinding !== undefined) {
+    installThreadMessageText((sequence, text, maxBytes) =>
+      textBinding.from_message(sequence, text, maxBytes),
+    );
+  }
 }
 
 export function nativeComposerOffsetMap(map: RichDocMap): NativeMap | undefined {

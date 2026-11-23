@@ -1934,6 +1934,12 @@ const OrchestrationV2EventBase = Schema.Struct({
   occurredAt: Schema.DateTimeUtc,
 });
 
+const OrchestrationV2MessageUpdated = Schema.Struct({
+  ...OrchestrationV2EventBase.fields,
+  type: Schema.Literal("message.updated"),
+  payload: OrchestrationV2ConversationMessage,
+});
+
 export const OrchestrationV2DomainEvent = Schema.Union([
   Schema.Struct({
     ...OrchestrationV2EventBase.fields,
@@ -2033,11 +2039,7 @@ export const OrchestrationV2DomainEvent = Schema.Union([
     type: Schema.Literal("runtime-request.updated"),
     payload: OrchestrationV2RuntimeRequest,
   }),
-  Schema.Struct({
-    ...OrchestrationV2EventBase.fields,
-    type: Schema.Literal("message.updated"),
-    payload: OrchestrationV2ConversationMessage,
-  }),
+  OrchestrationV2MessageUpdated,
   Schema.Struct({
     ...OrchestrationV2EventBase.fields,
     type: Schema.Literal("turn-item.updated"),
@@ -3977,6 +3979,7 @@ export const OrchestrationV2SubscribeThreadInput = Schema.Struct({
   /** The client restores `*Omitted` bodies from records it already holds. */
   acceptDedupedBodies: Schema.optionalKey(Schema.Boolean),
   acceptCompactIds: Schema.optionalKey(Schema.Boolean),
+  messageTextAppends: Schema.optionalKey(Schema.Literal(1)),
 });
 export type OrchestrationV2SubscribeThreadInput = typeof OrchestrationV2SubscribeThreadInput.Type;
 
@@ -4078,6 +4081,8 @@ const OrchestrationV2UnknownThreadStreamEvent = Schema.Struct({
   ),
 );
 
+export const THREAD_MESSAGE_BASE_MAX_BYTES = 65_536;
+
 export const OrchestrationV2ThreadStreamItem = withRecordIdTable(
   Schema.Union([
     Schema.Struct({
@@ -4097,6 +4102,12 @@ export const OrchestrationV2ThreadStreamItem = withRecordIdTable(
       kind: Schema.Literal("event"),
       sequence: NonNegativeInt,
       event: OrchestrationV2DomainEvent,
+    }),
+    Schema.Struct({
+      kind: Schema.Literal("message-text-append"),
+      baseSequence: NonNegativeInt,
+      sequence: NonNegativeInt,
+      event: OrchestrationV2MessageUpdated,
     }),
     OrchestrationV2UnknownThreadStreamEvent,
   ]),

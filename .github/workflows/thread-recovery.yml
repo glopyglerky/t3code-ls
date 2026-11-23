@@ -27,4 +27,8 @@ jobs:
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
       - name: Exercise thread replay and recovery
-        run: pnpm exec vp test run --maxWorkers 2 packages/client-runtime/src/state/threads-sync.test.ts
+        run: |
+          pnpm exec vp test run --maxWorkers 2 \
+            packages/client-runtime/src/state/threads-sync.test.ts \
+            packages/contracts/src/orchestrationV2.test.ts \
+            apps/server/src/orchestration-v2/WireProjection.test.ts

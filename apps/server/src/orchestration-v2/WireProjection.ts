@@ -11,6 +11,7 @@ import type {
   OrchestrationV2ThreadStreamItem,
   OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
+import { THREAD_MESSAGE_BASE_MAX_BYTES } from "@t3tools/contracts";
 import {
   dedupeSubagentBodies,
   dedupeTurnItemBodies,
@@ -30,6 +31,44 @@ const MAX_DYNAMIC_VALUE_BYTES = 16_384;
 const MAX_ON_DEMAND_BYTES = 256 * 1024;
 const TRUNCATION_MARKER = "\n… output truncated for transport";
 const TRUNCATION_MARKER_BYTES = Buffer.byteLength(TRUNCATION_MARKER, "utf8");
+
+/** A subscription owns one bounded base. Replay and live events share it. */
+export function makeMessageTextAppendEncoder() {
+  let base: { readonly id: MessageId; readonly sequence: number; readonly text: string } | undefined;
+  return (item: OrchestrationV2ThreadStreamItem): OrchestrationV2ThreadStreamItem => {
+    if (item.kind === "snapshot") base = undefined;
+    if (item.kind !== "event" || item.event.type !== "message.updated") return item;
+
+    const { event, sequence } = item;
+    const message = event.payload;
+    const previous = base;
+    base =
+      message.role === "assistant" &&
+      message.streaming &&
+      message.text.length <= THREAD_MESSAGE_BASE_MAX_BYTES &&
+      message.text.isWellFormed() &&
+      Buffer.byteLength(message.text, "utf8") <= THREAD_MESSAGE_BASE_MAX_BYTES
+        ? { id: message.id, sequence, text: message.text }
+        : undefined;
+    if (
+      base === undefined ||
+      previous === undefined ||
+      previous.id !== base.id ||
+      previous.sequence >= sequence ||
+      previous.text.length < 64 ||
+      previous.text.length >= base.text.length ||
+      !base.text.startsWith(previous.text)
+    ) {
+      return item;
+    }
+    return {
+      kind: "message-text-append",
+      baseSequence: previous.sequence,
+      sequence,
+      event: { ...event, payload: { ...message, text: base.text.slice(previous.text.length) } },
+    };
+  };
+}
 
 function truncateDetail(
   value: string | undefined,

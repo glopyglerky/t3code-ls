@@ -4,7 +4,7 @@ import {
   type EnvironmentId as EnvironmentIdType,
   type OrchestrationV2ThreadDetailSnapshot,
   type OrchestrationV2ThreadProjection,
-  type OrchestrationV2ThreadStreamItem,
+  type OrchestrationV2ThreadStreamItem as WireThreadItem,
   type OrchestrationV2TurnItem,
   type ThreadId as ThreadIdType,
 } from "@t3tools/contracts";
@@ -35,9 +35,10 @@ import * as ManagedRelay from "../relay/managedRelay.ts";
 import {
   isAuthorizationFailure,
   request,
-  subscribeDynamic,
+  subscribeThread,
   subscriptionRetryDelay,
 } from "../rpc/client.ts";
+import { canDecodeThreadMessageText } from "../rpc/threadMessageText.ts";
 import { parseThreadKey, threadKey } from "./entities.ts";
 import { applyOrchestrationV2ProjectionEvent } from "./orchestrationV2Projection.ts";
 import { THREAD_SNAPSHOT_IDLE_TTL_MS } from "./threadRetention.ts";
@@ -61,6 +62,7 @@ import {
 } from "./threadState.ts";
 
 const THREAD_SUBSCRIPTION_RETRY_DELAY = "250 millis";
+type OrchestrationV2ThreadStreamItem = Exclude<WireThreadItem, { kind: "message-text-append" }>;
 
 function statusWithoutLiveData(
   data: Option.Option<OrchestrationV2ThreadProjection>,
@@ -1011,8 +1013,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     never,
     EnvironmentSupervisor.EnvironmentSupervisor
   > =>
-    subscribeDynamic(
-      ORCHESTRATION_V2_WS_METHODS.subscribeThread,
+    subscribeThread(
       Effect.fn("EnvironmentThreadState.makeSubscribeInput")(function* (session) {
         let current = yield* SubscriptionRef.get(state);
         // A delete event already cleared this thread. Park without opening the socket.
@@ -1116,6 +1117,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
               }
             : {}),
           acceptDedupedBodies: true as const,
+          ...(canDecodeThreadMessageText() &&
+          Option.exists(config, (value) => value.threadMessageTextAppends === 1)
+            ? { messageTextAppends: 1 as const }
+            : {}),
         };
       }),
       {

@@ -163,6 +163,7 @@ import {
 } from "./orchestration-v2/threadHistoryPaging.ts";
 import {
   makeLiveBodyDeduper,
+  makeMessageTextAppendEncoder,
   projectDomainEventForWire,
   projectThreadProjectionForWire,
   threadStreamEventItem,
@@ -899,12 +900,19 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
     readonly acceptCompactTurnItems?: boolean;
     readonly acceptDedupedBodies?: boolean;
     readonly acceptCompactIds?: boolean;
+    readonly messageTextAppends?: 1;
   }) {
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
     const dedupeBodies = input.acceptDedupedBodies === true;
     // Replay, snapshot, and live tail share one deduper: it must see every delivered record.
     const withLiveDedupe = <E, R>(stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>) =>
       dedupeBodies ? Stream.suspend(() => Stream.map(stream, makeLiveBodyDeduper())) : stream;
+    const withMessageTextAppends = <E, R>(
+      stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>,
+    ) =>
+      input.messageTextAppends === 1
+        ? Stream.suspend(() => Stream.map(stream, makeMessageTextAppendEncoder()))
+        : stream;
     const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
 
     yield* Effect.annotateCurrentSpan({
@@ -1013,6 +1021,7 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
         Stream.concat(completionMarker),
         Stream.concat(eventStreamFrom(snapshotSequence)),
         withLiveDedupe,
+        withMessageTextAppends,
       );
     });
 
@@ -1115,6 +1124,7 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
         Stream.concat(completionMarker),
         Stream.concat(eventStreamFrom(highWater)),
         withLiveDedupe,
+        withMessageTextAppends,
       );
     }
 
@@ -1875,6 +1885,7 @@ export const layerWsRpc = (
           shellOlderSettled: true,
           threadResumeCompletionMarker: true,
           threadSnapshotPagination: true,
+          threadMessageTextAppends: 1 as const,
           threadFind: true,
           threadFindProgressive: true,
           secretProviderSettings: true,
