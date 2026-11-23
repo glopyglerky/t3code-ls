@@ -26,6 +26,9 @@ class T3NativeControlsModule : Module() {
     Name("T3NativeControls")
     Function("resolveOutboxDeliveryV1") { facts: Int -> T3OutboxDelivery.resolve(facts) }
     if (BuildConfig.T3_OUTBOX_RUNTIME_PROOF) {
+      Function("getOutboxRuntimeProofPhase") {
+        appContext.currentActivity?.intent?.getStringExtra("t3OutboxRuntimeProofPhase")
+      }
       Function("recordOutboxRuntimeProof") { result: String ->
         require(result.toByteArray(Charsets.UTF_8).size <= 16_384)
         val directory = requireNotNull(appContext.reactContext).filesDir
