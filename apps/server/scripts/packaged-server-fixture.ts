@@ -142,10 +142,15 @@ export async function authenticatePackagedServer(
   server: ReturnType<typeof startPackagedServer>,
   signal: AbortSignal,
 ) {
-  const send = async (path: string, body?: URLSearchParams | string, headers?: Record<string, string>) => {
+  const send = async (
+    path: string,
+    body?: URLSearchParams | string,
+    headers?: Record<string, string>,
+    method: "GET" | "POST" = "POST",
+  ) => {
     const result = await fetch(server.origin + path, {
-      method: "POST",
-      headers,
+      method,
+      ...(headers === undefined ? {} : { headers }),
       ...(body === undefined ? {} : { body }),
       redirect: "error",
       signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
@@ -167,6 +172,13 @@ export async function authenticatePackagedServer(
     [ORCHESTRATION_PROTOCOL_HEADER]: String(ORCHESTRATION_PROTOCOL_VERSION),
   };
   return {
+    request: (path: string, body?: object): Promise<unknown> =>
+      send(
+        path,
+        body === undefined ? undefined : JSON.stringify(body),
+        headers,
+        body === undefined ? "GET" : "POST",
+      ),
     createProject: (project: { projectId: ProjectId; title: string; workspaceRoot: string }) =>
       send("/api/projects/mutate", JSON.stringify({
         type: "project.create",
