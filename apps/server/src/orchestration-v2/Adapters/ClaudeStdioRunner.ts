@@ -34,18 +34,16 @@ type FixtureEvent =
 const failure = (method: string, cause: unknown) =>
   new ClaudeAgentSdkQueryRunnerError({ method, cause });
 
-async function within<A>(pending: Promise<A>, milliseconds: number): Promise<A> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      pending,
-      new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("Claude stdio helper timed out.")), milliseconds);
+function within<A>(pending: Promise<A>, milliseconds: number): Promise<A> {
+  // The child process is driven by wall time, independently of the caller's clock.
+  return Effect.runPromise(
+    Effect.tryPromise({ try: () => pending, catch: (cause) => cause }).pipe(
+      Effect.timeoutOrElse({
+        duration: milliseconds,
+        orElse: () => Effect.fail(new Error("Claude stdio helper timed out.")),
       }),
-    ]);
-  } finally {
-    clearTimeout(timer);
-  }
+    ),
+  );
 }
 
 function startHelper(executable: string, peer: string, directory: string) {
