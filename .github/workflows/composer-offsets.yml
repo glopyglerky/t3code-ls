@@ -33,8 +33,9 @@ jobs:
       NATIVE_PTY_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-') }}
       PAIRING_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t01-dioxus-pairing-') }}
       GUEST_NAME_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t11-dioxus-guest-') }}
-      DIOXUS_STOP_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-stop-') }}
-      DIOXUS_SUBMIT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-send-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-stop-') }}
+      DIOXUS_TIMELINE_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-timeline-') }}
+      DIOXUS_STOP_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-stop-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-timeline-') }}
+      DIOXUS_SUBMIT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-send-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-stop-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-timeline-') }}
       DIOXUS_APPROVAL_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-approval-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -272,6 +273,14 @@ jobs:
             cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
             export VITE_T3_CODE_LS_APPROVAL_RENDERER=dioxus
           fi
+          if [[ "$DIOXUS_TIMELINE_PROOF" == true ]]; then
+            export VITE_T3_CODE_LS_ASSISTANT_TEXT_RENDERER=dioxus
+            # packages/client-runtime/src/state/threadDetail.test.ts
+            pnpm --dir packages/client-runtime exec vp test run src/state/threadDetail.test.ts
+            # apps/web/src/components/chat/DioxusAssistantText.browser.test.tsx
+            pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
+                src/components/chat/DioxusAssistantText.browser.test.tsx
+          fi
           pnpm --dir apps/web run build
           implementation=upstream
           if [[ "$BUNDLED_NATIVE" == true ]]; then
@@ -314,6 +323,9 @@ jobs:
             fi
             for renderer in dioxus dioxus-fallback; do
               mkdir "$proof/submit-$renderer"
+              timeline=false
+              if [[ "$DIOXUS_TIMELINE_PROOF" == true ]]; then timeline=true; fi
+              T3_CODE_LS_ASSISTANT_TEXT_PROOF="$timeline" \
               T3_CODE_LS_COMPOSER_STOP_PROOF="$DIOXUS_STOP_PROOF" \
               T3_CODE_LS_COMPOSER_SUBMIT_PROOF="$renderer" \
                 node apps/web/scripts/verify-hybrid-client.ts "$proof/submit-$renderer" "$implementation"

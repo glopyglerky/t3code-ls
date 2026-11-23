@@ -23,7 +23,14 @@ export interface ThreadFindMount extends DioxusMount {
   ): void;
 }
 
+export interface AssistantTextMount extends DioxusMount {
+  update(text: string, sequence: string, updatedAt: string, streaming: boolean): void;
+}
+
 interface OnboardingBindings {
+  mount_assistant_text(
+    root: HTMLDivElement, text: string, sequence: string, updatedAt: string, streaming: boolean,
+  ): AssistantTextMount;
   default(): Promise<unknown>;
   mount_approval_action(
     root: HTMLSpanElement,

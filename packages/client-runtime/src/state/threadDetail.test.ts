@@ -209,6 +209,36 @@ describe("quietThreadAtom", () => {
   });
 });
 
+it("keeps assistant text, timestamp and applied sequence together across stream, reset and resume", () => {
+  const state = Atom.make(AsyncResult.success({
+    ...EMPTY_ENVIRONMENT_THREAD_STATE, sequence: 7, data: Option.some(withItem(assistant)),
+  }));
+  const details = createEnvironmentThreadDetailAtoms(() => state);
+  const ref = { environmentId: EnvironmentId.make("env"), threadId: v2ThreadId };
+  const snapshot = details.assistantMessageSnapshotAtom(ref, assistant.id);
+  const registry = AtomRegistry.make();
+  const release = registry.mount(snapshot);
+  try {
+    expect(registry.get(snapshot)).toEqual({ text: "Hel", updatedAt: v2Now, sequence: 7, streaming: true });
+    registry.set(state, AsyncResult.success({ ...EMPTY_ENVIRONMENT_THREAD_STATE,
+      sequence: 8, data: Option.some(withItem({ ...assistant, text: "Hello", updatedAt: later })),
+    }));
+    expect(registry.get(snapshot)).toEqual({ text: "Hello", updatedAt: later, sequence: 8, streaming: true });
+    registry.set(state, AsyncResult.success(EMPTY_ENVIRONMENT_THREAD_STATE));
+    expect(registry.get(snapshot)).toBeNull();
+    // Reopened state supplies its own text and revision, including replacements rather than append-only updates.
+    registry.set(state, AsyncResult.success({ ...EMPTY_ENVIRONMENT_THREAD_STATE,
+      sequence: 9, data: Option.some(withItem({ ...assistant, text: "Hi", updatedAt: later })),
+    }));
+    expect(registry.get(snapshot)).toEqual({ text: "Hi", updatedAt: later, sequence: 9, streaming: true });
+    registry.set(state, AsyncResult.success({ ...EMPTY_ENVIRONMENT_THREAD_STATE,
+      sequence: 10, data: Option.some(withItem({ ...assistant, text: "Hi there", updatedAt: later,
+        streaming: false, status: "completed" })),
+    }));
+    expect(registry.get(snapshot)).toMatchObject({ text: "Hi there", sequence: 10, streaming: false });
+  } finally { release(); registry.dispose(); }
+});
+
 describe("timelineVisibleTurnItemsAtom", () => {
   const ref = { environmentId: EnvironmentId.make("environment-1"), threadId: v2ThreadId };
 

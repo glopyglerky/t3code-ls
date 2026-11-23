@@ -2045,6 +2045,57 @@
       "rust_crates": ["apps/web/rust/pairing"]
     },
     {
+      "id": "browser-assistant-text-dioxus",
+      "state": "candidate",
+      "domain_owner": "apps/web/src/components/chat",
+      "reviewed_upstream_commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "upstream_sources": [
+        {
+          "path": "apps/web/src/components/chat/TimelineAssistantRows.tsx",
+          "blob": "72fcf79013e87d58682de982521c9e2e43e5fb43"
+        }
+      ],
+      "rust_paths": [
+        "apps/web/rust/pairing/src/assistant_text.rs"
+      ],
+      "adapter_paths": [
+        "apps/web/rust/pairing/src/lib.rs",
+        "apps/web/src/components/chat/TimelineAssistantRows.tsx",
+        "apps/web/src/components/chat/DioxusAssistantText.tsx",
+        "apps/web/src/onboarding/dioxusBindings.ts",
+        "apps/web/src/vite-env.d.ts",
+        "apps/web/src/state/entities.ts",
+        "packages/client-runtime/src/state/threadDetail.ts",
+        ".github/workflows/composer-offsets.yml"
+      ],
+      "platform_routes": [
+        {
+          "targets": [
+            "browser"
+          ],
+          "state": "candidate",
+          "implementation": "dioxus-wasm",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "apps/web/scripts/verify-hybrid-client.ts",
+        "apps/web/src/components/chat/DioxusAssistantText.browser.test.tsx",
+        "packages/client-runtime/src/state/threadDetail.test.ts"
+      ],
+      "hosted_acceptance": {
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/chat/DioxusAssistantText.browser.test.tsx": ".github/workflows/composer-offsets.yml",
+        "packages/client-runtime/src/state/threadDetail.test.ts": ".github/workflows/composer-offsets.yml"
+      },
+      "retired_paths": [],
+      "notes": "T02/T11 C02 and J36 continuation. VITE_T3_CODE_LS_ASSISTANT_TEXT_RENDERER=dioxus selects a conservative Rust-owned plain paragraph child on the normal selected-thread timeline. The selected-thread state owner supplies exact text, updatedAt and applied thread sequence together; this is not an item revision. Rust declines richer formats to the retained Markdown renderer. Citation wrappers, row metadata, other kinds, commands and persistence retain their owners. No application execution or acceptance is claimed by this patch. Real Wasm stream/replacement/remount, focus continuity, running-thread reopen and interrupted persistence checks are selected by the opt-in timeline workflow prefix. Broader Markdown, attachments, accessibility, hosted/guest/platform and performance qualification remain open.",
+      "rust_crates": [
+        "apps/web/rust/pairing"
+      ]
+    },
+    {
       "id": "browser-approval-action-dioxus",
       "state": "candidate",
       "domain_owner": "apps/web/src/components/chat",
