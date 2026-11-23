@@ -384,11 +384,15 @@ jobs:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-')
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-normal-pair-') && 70 || 55 }}
+    permissions:
+      contents: read
+      actions: read
     env:
       APP_VARIANT: development
       T3_ANDROID_OUTBOX_RUNTIME_PROOF: "1"
       NORMAL_APP_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-normal-') }}
       PAIR_RECONNECT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-normal-pair-') }}
+      RETAINED_APK_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-normal-pair-dispatch-retained-') }}
       NODE_OPTIONS: --max-old-space-size=3072
       EXPO_NO_DOTENV: "1"
       EXPO_NO_GIT_STATUS: "1"
@@ -455,6 +459,7 @@ jobs:
           ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$RUNNER_TEMP/outbox-runtime-sdk" "$JAVA_HOME" "$(id -gn)"
       - name: Build matching JNI and embedded-JS Android packages
         id: build-runtime-packages
+        if: env.RETAINED_APK_PROOF != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -529,6 +534,49 @@ jobs:
           fi
           (cd "$RUNNER_TEMP" && sha256sum "${packages[@]}") \
             > "$RUNNER_TEMP/outbox-runtime-proof/packages.sha256"
+      - name: Stage the retained Android packages from the same application source
+        id: retained-runtime-packages
+        if: env.RETAINED_APK_PROOF == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          producer=066c2c68118a45d0dfd7737981752d0a75dfbca3
+          producer_tree=6b4f7fea3dcb3a870b4710c0a98473f2205226e4
+          producer_run=45237394555
+          git fetch --no-tags --depth=1 origin "$producer"
+          test "$(git rev-parse 'FETCH_HEAD^{tree}')" = "$producer_tree"
+          git diff --exit-code "$producer" HEAD -- . ':(exclude).github/workflows/thread-recovery.yml'
+          scratch=$(mktemp -d "$RUNNER_TEMP/retained-outbox.XXXXXXXX")
+          trap 'rm -rf -- "$scratch"' EXIT
+          proof="$RUNNER_TEMP/outbox-runtime-proof"
+          download() {
+            local id="$1" digest="$2" destination="$3"
+            local endpoint="repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
+            gh api "$endpoint" | jq -e --arg sha "$producer" --arg digest "sha256:$digest" \
+              --argjson run "$producer_run" --argjson id "$id" '
+              .id == $id and .expired == false and .digest == $digest and
+              .workflow_run.id == $run and .workflow_run.head_sha == $sha' >/dev/null
+            gh api "$endpoint/zip" > "$destination"
+            printf '%s  %s\n' "$digest" "$destination" | sha256sum --check
+          }
+          download 14854360571 8f864b267caa02142868f51a3b2c40b247fffb9b5852784a2a9997993e0615b7 "$scratch/apks.zip"
+          download 14854375458 ca48dd7ee9d8c1a395fac1f37d9279c0b252d5cf08015219ba8cda3d89b557da "$scratch/receipt.zip"
+          unzip -p "$scratch/receipt.zip" source.txt > "$proof/apk-source.txt"
+          grep -Fx "$producer $producer_tree" "$proof/apk-source.txt"
+          unzip -p "$scratch/receipt.zip" packages.sha256 > "$proof/packages.sha256"
+          packages=(outbox-runtime-missing-library.apk outbox-runtime-normal.apk outbox-runtime-positive.apk)
+          cmp <(unzip -Z1 "$scratch/apks.zip" | LC_ALL=C sort) <(printf '%s\n' "${packages[@]}")
+          cmp <(awk '{print $2}' "$proof/packages.sha256" | LC_ALL=C sort) <(printf '%s\n' "${packages[@]}")
+          for package in "${packages[@]}"; do
+            test ! -e "$RUNNER_TEMP/$package"
+            unzip -p "$scratch/apks.zip" "$package" > "$RUNNER_TEMP/$package"
+          done
+          (cd "$RUNNER_TEMP" && sha256sum --strict --check "$proof/packages.sha256")
+          git show -s --format='%H %T' > "$proof/source.txt"
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
       - name: Stage the isolated native server for Android pairing
         if: env.PAIR_RECONNECT_PROOF == 'true'
         shell: bash
@@ -592,7 +640,7 @@ jobs:
             ${{ runner.temp }}/outbox-runtime-normal.apk
           retention-days: 3
       - name: Retain built fixtures for runtime failure diagnosis
-        if: failure() && steps.build-runtime-packages.outcome == 'success'
+        if: failure() && (steps.build-runtime-packages.outcome == 'success' || steps.retained-runtime-packages.outcome == 'success')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: outbox-android-runtime-failed-install-apks
