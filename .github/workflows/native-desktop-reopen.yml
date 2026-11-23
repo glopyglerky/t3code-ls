@@ -49,14 +49,18 @@ jobs:
           export T3_CODE_LS_NATIVE_DIR="$PWD/bin"
           pnpm exec node scripts/build-desktop-artifact.ts --platform linux --arch x64 \
             --target AppImage --keep-stage --output-dir "$TMPDIR/artifacts" --verbose
-          mapfile -t bundles < <(find "$TMPDIR" -type d -name linux-unpacked)
-          test "${#bundles[@]}" -eq 1
-          payload="${bundles[0]}"
+          archives=("$TMPDIR"/artifacts/*.AppImage)
+          test "${#archives[@]}" -eq 1
+          test -x "${archives[0]}"
+          extract="$TMPDIR/extracted"
+          mkdir "$extract"
+          (cd "$extract" && "${archives[0]}" --appimage-extract > "$TMPDIR/extracted-files.txt")
+          payload="$extract/squashfs-root"
           test -x "$payload/t3code"
           git show -s --format='%H %T' > "$evidence/source.txt"
           getconf GNU_LIBC_VERSION > "$evidence/platform.txt"
           sha256sum "$payload/t3code" "$payload/resources/app.asar" bin/manifest.json \
-            "$TMPDIR"/artifacts/*.AppImage > "$evidence/artifacts.sha256"
+            "${archives[0]}" > "$evidence/artifacts.sha256"
           sudo -n unshare --net -- bash -euc '
             ip link set dev lo up
             exec runuser -u "$1" -- env -u T3_CODE_LS_IMPLEMENTATION -u T3_CODE_LS_NATIVE_DIR \
