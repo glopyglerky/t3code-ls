@@ -502,6 +502,7 @@ async function verifyWelcomeControlUpdates(page: Page) {
     const root = document.createElement("div");
     document.body.appendChild(root);
     let activations = 0;
+    const activationCount = () => activations;
     const mount = bindings.mount_welcome_controls(root, false, false, 2, 2, () => { activations++; });
     let released = false;
     const waitFor = async (check: () => boolean) => {
@@ -516,7 +517,7 @@ async function verifyWelcomeControlUpdates(page: Page) {
       await waitFor(() => button()?.textContent === "Import 2 projects and start");
       if (!button().disabled) throw new Error("Start must require a ready agent");
       button().click();
-      if (activations !== 0) throw new Error("A disabled Start invoked setup");
+      if (activationCount() !== 0) throw new Error("A disabled Start invoked setup");
       root.querySelector<HTMLButtonElement>("#welcome-without-agent")!.focus();
       mount.update(true, false, 2, 0);
       await waitFor(() => button().textContent === "Import threads and start" && document.activeElement === button());
@@ -530,14 +531,14 @@ async function verifyWelcomeControlUpdates(page: Page) {
       await waitFor(() => button().textContent === "Import 1 project and start" && !button().disabled);
       button().click();
       button().click();
-      if (activations !== 1) throw new Error("Setup activation must be single while pending");
+      if (activationCount() !== 1) throw new Error("Setup activation must be single while pending");
       mount.free();
       released = true;
       if (root.childElementCount !== 0) throw new Error("A released welcome mount retained its controls");
       root.appendChild(original);
       original.disabled = false;
       original.click();
-      if (activations !== 1) throw new Error("A released welcome mount retained an activation");
+      if (activationCount() !== 1) throw new Error("A released welcome mount retained an activation");
       return { countUpdates: true, agentReadiness: true, pending: true, focusRetained: true, released: true };
     } finally {
       if (!released) mount.free();
