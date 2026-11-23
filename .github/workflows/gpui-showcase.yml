@@ -1,0 +1,76 @@
+name: GPUI desktop showcase
+
+on:
+  push:
+    branches: ["candidate/t3code-ls-t14-gpui-showcase-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  linux-x64:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 40
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install the pinned compiler
+        timeout-minutes: 4
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/gpui-compiler"
+      - name: Install the X11 test host
+        timeout-minutes: 5
+        run: |
+          apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+            libx11-xcb-dev libxrandr-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-render0-dev \
+            libasound2-dev libudev-dev xvfb xauth xdotool mesa-vulkan-drivers fonts-dejavu-core \
+            dbus-x11 at-spi2-core python3-pyatspi python3-xlib
+      - name: Build the locked desktop candidate and run its replay tests
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/gpui-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/gpui-target"
+          manifest=apps/desktop/rust/Cargo.toml
+          lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked --manifest-path "$manifest"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --locked --manifest-path "$manifest"
+          sha256sum "$manifest" apps/desktop/rust/Cargo.lock \
+            "$CARGO_TARGET_DIR/debug/t3-code-ls-desktop-gpui"
+      - name: Open the fixture window and check keyboard submission
+        timeout-minutes: 3
+        run: |
+          xvfb-run -a -s '-screen 0 1280x1024x24' dbus-run-session -- \
+            /usr/bin/python3 tools/check-gpui-showcase.py \
+            "$RUNNER_TEMP/gpui-target/debug/t3-code-ls-desktop-gpui"
+      - name: Build the selected application server for the native snapshot read
+        run: |
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          export CARGO_HOME="$RUNNER_TEMP/gpui-server-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/gpui-server-target"
+          T3_CODE_LS_IMPLEMENTATION=native node tools/build-native.mjs
+          node tools/check-hybrid.mjs --verify-binaries
+          pnpm --dir apps/web run build
+          T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$GITHUB_WORKSPACE/bin" \
+            pnpm --dir apps/server run build:bundle
+          sha256sum apps/server/dist/bin.mjs apps/server/dist/native-bin/manifest.json
+      - name: Read a real native thread through the GPUI window
+        timeout-minutes: 4
+        run: |
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- xvfb-run -a -s "-screen 0 1280x1024x24" dbus-run-session -- \
+              "$2" apps/server/scripts/verify-gpui-thread-snapshot.ts "$3"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/gpui-target/debug/t3-code-ls-desktop-gpui"
