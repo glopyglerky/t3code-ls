@@ -35,7 +35,7 @@ const root = FS.realpathSync(Path.resolve(import.meta.dirname, "../../.."));
 const outputPath = process.argv[2];
 const boundary = process.argv[3] ?? "before-claim";
 Assert.ok(outputPath && Path.isAbsolute(outputPath) && process.argv.length <= 4);
-Assert.ok(boundary === "before-claim" || boundary === "after-claim");
+Assert.ok(boundary === "before-claim" || boundary === "after-claim" || boundary === "after-dispatch");
 const proof = Path.join(FS.realpathSync(Path.dirname(outputPath)), Path.basename(outputPath));
 Assert.ok(Path.relative(root, proof).startsWith(`..${Path.sep}`));
 Assert.equal(process.platform, "linux");
@@ -102,6 +102,9 @@ try {
   FS.symlinkSync("/usr/bin/git", Path.join(bin, "git"));
   ChildProcess.execFileSync(Path.join(bin, "git"), ["init", "--quiet"], { cwd: workspaceRoot, env });
   const provider = ProviderInstanceId.make("devReplay");
+  const providerWitness = Path.join(scratch, "provider-prompts.txt");
+  FS.writeFileSync(providerWitness, "", { mode: 0o600 });
+  const promptsObserved = () => FS.readFileSync(providerWitness, "utf8").split("prompt\n").length - 1;
   write(Path.join(userdata, "settings.json"), {
     providerInstances: {
       ...Object.fromEntries(
@@ -113,7 +116,11 @@ try {
         config: {
           source: "local",
           commandPath: process.execPath,
-          commandArgs: [Path.join(root, "apps/server/scripts/dev-replay-agent.ts")],
+          commandArgs: [
+            Path.join(root, "apps/server/scripts/scheduled-relay-provider-probe.mjs"),
+            Path.join(root, "apps/server/scripts/dev-replay-agent.ts"),
+            providerWitness,
+          ],
         },
       },
     },
@@ -220,38 +227,41 @@ try {
     return response.status;
   };
 
-  checkpoint("acknowledge durable admission and kill before dispatch");
+  checkpoint("acknowledge durable admission and interrupt the selected boundary");
   report.initialStatus = await post(initial.origin, "accepted");
   for (let i = 0; !FS.existsSync(witnessPath) && i < 200; i++) await delay(50, undefined, { signal: abort.signal });
   const witness = JSON.parse(FS.readFileSync(witnessPath, "utf8"));
   Assert.equal(witness.deliveryId, deliveryId);
   Assert.equal(witness.admissionCommitted, true);
-  Assert.equal(witness.workerClaimCommitted, boundary === "after-claim");
-  Assert.equal(witness.workerClaimAcknowledged, false);
+  Assert.equal(witness.workerClaimCommitted, boundary !== "before-claim");
+  Assert.equal(witness.dispatchCommitted, boundary === "after-dispatch");
   Assert.match(witness.promptSha256, /^[0-9a-f]{64}$/u);
   const exit = await initial.stop("SIGKILL");
   owned = undefined;
   Assert.deepEqual(exit, { code: null, signal: "SIGKILL" });
   report.processExit = exit;
+  const promptsBeforeReopen = promptsObserved();
+  Assert.ok(promptsBeforeReopen <= (boundary === "after-dispatch" ? 1 : 0));
 
-  const expectedTaskStatus = boundary === "before-claim" ? "succeeded" : "failed";
+  const expectedRunCount = boundary === "after-claim" ? 0 : 1;
+  const expectedTaskStatus = boundary === "after-claim" ? "failed" : "succeeded";
   checkpoint("reopen without the gate and settle the durable delivery");
   const reopened = await start("reopened");
   const resumed = await authenticatePackagedServer(reopened, abort.signal);
   const settled = await resumed.rpc((rpc) => rpc[WS_METHODS.scheduledTasksSubscribe]({}).pipe(
     Stream.map(({ tasks }) => tasks.find(({ id }) => id === task.id)),
-    Stream.filter((candidate) => candidate !== undefined && candidate.lastRunStatus === expectedTaskStatus),
+    Stream.filter((candidate) => candidate !== undefined &&
+      candidate.runCount === expectedRunCount &&
+      (boundary === "after-dispatch" || candidate.lastRunStatus === expectedTaskStatus)),
     Stream.runHead,
   ));
   Assert.ok(Option.isSome(settled) && settled.value);
-  const expectedRunCount = boundary === "before-claim" ? 1 : 0;
-  Assert.equal(settled.value.runCount, expectedRunCount);
-  const retryOutcome = boundary === "before-claim" ? "duplicate" : "unresolved";
+  const retryOutcome = boundary === "after-claim" ? "unresolved" : "duplicate";
   report.retryStatuses = await Promise.all([post(reopened.origin, retryOutcome), post(reopened.origin, retryOutcome)]);
   const { delivery } = await resumed.rpc((rpc) => rpc[WS_METHODS.scheduledTasksGetWebhookDelivery]({
     id: task.id, deliveryId, acceptAnyOutcome: true,
   }));
-  if (boundary === "before-claim") {
+  if (boundary !== "after-claim") {
     Assert.equal(delivery.outcome, "accepted");
     Assert.equal(delivery.error, null);
   } else {
@@ -271,16 +281,22 @@ try {
       final = await readProjection();
     }
     Assert.equal(final.runs[0]?.status, "completed");
+    Assert.ok(final.messages.some((message) => message.role === "assistant" && message.text.includes("todo list fixture complete")));
+  }
+  if (boundary === "after-claim") {
+    Assert.deepEqual(final.messages, []);
+  } else {
     const user = final.messages.filter((message) => message.role === "user");
     Assert.equal(user.length, 1);
     Assert.equal(user[0]!.id, `scheduled-task-message:${task.id}:webhook:${deliveryId}`);
     Assert.equal(user[0]!.scheduledTaskId, task.id);
     Assert.equal(user[0]!.text, delivery.renderedPrompt);
-    Assert.ok(final.messages.some((message) => message.role === "assistant" && message.text.includes("todo list fixture complete")));
-  } else {
-    Assert.deepEqual(final.messages, []);
+    Assert.equal(final.runs[0]?.userMessageId, user[0]!.id);
   }
   Assert.equal(final.runs.length, expectedRunCount);
+  const promptsAfterReopen = promptsObserved();
+  Assert.equal(promptsAfterReopen, boundary === "before-claim" ? 1 : promptsBeforeReopen);
+  report.providerPrompts = { beforeReopen: promptsBeforeReopen, afterReopen: promptsAfterReopen };
   Assert.ok(FS.lstatSync(database).isFile());
   assertNoApplicationSqlite(baseDir);
   report.durableDelivery = {

@@ -199,10 +199,10 @@ jobs:
             exec runuser -u "$1" -- "$2" \
               apps/server/scripts/verify-provider-import-recovery.ts "$3"
           ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/built-composer-proof/provider-import"
-      - name: Verify recovery before and after the durable relay worker claim
+      - name: Verify recovery at relay admission, worker claim, and dispatch
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t09-relay-')
         run: |
-          for boundary in before-claim after-claim; do
+          for boundary in before-claim after-claim after-dispatch; do
             sudo -n unshare --net -- bash -euc '
               ip link set dev lo up
               exec runuser -u "$1" -- "$2" \
