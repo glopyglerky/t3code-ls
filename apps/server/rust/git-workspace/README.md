@@ -39,7 +39,9 @@ loopback-only network namespace. The runner executes a byte-identical copy of
 the extracted SEA entry, with no helper override. It invokes authenticated
 `vcs.listRefs` through the normal WebSocket and compares local names and HEAD
 with the installed Git oracle for a root, nested directory and linked worktree.
-Bare and included-configuration repositories exercise retained discovery.
+Bare repositories must fail the normal application's retained work-tree admission
+before the helper is reached. Included-configuration work trees exercise Core Git
+discovery after the helper returns `null`.
 `GIT_CONFIG_COUNT` and explicit upstream mode bypass native discovery. Separate
 copied-artifact trials reject a changed helper and a wrong-target manifest before
 helper execution. The original extracted entry, helper and manifest must remain
@@ -63,3 +65,31 @@ platform, or an end-to-end speedup. Stock T3
 the installed Git is the bounded branch/discovery oracle. The method pin is
 `5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
 No dependency, compiler or engine pin changes are made.
+
+### Packaged proof correction
+
+Run `45170785193` at `a7b42a4ee67e5c9f36dbe1326f503f40047cbf8e`
+built the archive and passed four optional artifact tests. The application RPC
+proof then failed on its bare-repository expectation. Its retained trace shows
+the packaged helper executing for the root, nested directory and linked worktree,
+followed by the normal work-tree detector refusing the bare directory. This was
+an incorrect fixture expectation, not complete packaged-read qualification.
+
+The production `GitWorkflowService.listRefs` asks `VcsDriverRegistry` to detect a
+Git work tree before calling Core. Stock T3's
+[`GitVcsDriver.detectRepository`](https://github.com/pingdotgg/t3code/blob/28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f/apps/server/src/vcs/GitVcsDriver.ts#L750)
+uses `rev-parse --is-inside-work-tree --show-toplevel --git-common-dir` and returns
+no repository after a nonzero exit or a first line other than `true`. The RPC
+therefore returns `isRepo: false` for a valid bare Git database. Direct Core
+component fallback is a different boundary.
+
+The corrected proof executes that exact retained Git admission oracle for every
+location and keeps independent fixture expectations: only the bare case may be
+refused. It requires the normal registry probe for every location, the packaged
+helper for each applicable work tree, no helper at the refused bare repository,
+and no Core fallback for applicable native reads. Included configuration must
+show both helper execution and Core fallback; configuration override and retained
+mode must show Core fallback without helper execution. Registry probes and Core
+discovery are counted separately. A per-location checkpoint and saved oracle/RPC
+fields identify the first mismatch even when the run stops before a phase ends.
+The corrected hosted execution remains required.

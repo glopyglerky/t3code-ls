@@ -122,6 +122,9 @@ try {
   FS.mkdirSync(bare);
   git(bare, "init", "--quiet", "--bare", "--initial-branch=main");
   const phases: unknown[] = [];
+  const observations: unknown[] = [];
+  report.phases = phases;
+  report.observations = observations;
   for (const mode of ["native", "config", "included", "upstream", "hash-refusal", "manifest-refusal"] as const) {
     checkpoint(mode);
     FS.writeFileSync(helper, helperBytes);
@@ -157,32 +160,71 @@ try {
     }
     await active.ready;
     const client = await authenticatePackagedServer(active, abort.signal);
-    const locations = mode === "native" ? [workspace, nested, linked, bare] : [workspace];
-    for (const cwd of locations) {
+    const locations = mode === "native"
+      ? [{ label: "root", cwd: workspace }, { label: "nested", cwd: nested },
+        { label: "linked", cwd: linked }, { label: "bare", cwd: bare }]
+      : [{ label: "root", cwd: workspace }];
+    for (const { label, cwd } of locations) {
+      checkpoint(`${mode}:${label}:rpc`);
       const result = await client.rpc((rpc) => rpc[WS_METHODS.vcsListRefs]({ cwd, refresh: true, refKind: "local" }));
-      const oracle = git(cwd, "for-each-ref", "--format=%(refname:strip=2)", "refs/heads").split("\n").filter(Boolean).sort();
-      Assert.equal(result.isRepo, true);
-      Assert.deepEqual(result.refs.map((ref) => ref.name).sort(), oracle);
-      Assert.equal(result.totalCount, oracle.length);
-      if (cwd !== bare) {
-        Assert.equal(result.refs.find((ref) => ref.current)?.name, git(cwd, "symbolic-ref", "--short", "HEAD"));
-        Assert.equal(result.isAtRepositoryRoot, cwd !== nested);
+      // Match stock's normal application admission, before GitVcsDriverCore.
+      // A valid bare Git database is not a supported application work tree.
+      const detection = ChildProcess.spawnSync("/usr/bin/git", ["-C", cwd, "rev-parse",
+        "--is-inside-work-tree", "--show-toplevel", "--git-common-dir"],
+      { env: baseEnv, encoding: "utf8", timeout: 10_000 });
+      Assert.equal(detection.error, undefined, `${mode}:${label}: Git detection oracle failed to run`);
+      Assert.equal(detection.signal, null, `${mode}:${label}: Git detection oracle was interrupted`);
+      const isRepo = detection.status === 0 && detection.stdout.split("\n")[0] === "true";
+      const refs = isRepo
+        ? git(cwd, "for-each-ref", "--format=%(refname:strip=2)", "refs/heads").split("\n").filter(Boolean).sort()
+        : [];
+      const current = isRepo ? git(cwd, "symbolic-ref", "--short", "HEAD") : undefined;
+      observations.push({ mode, location: label, oracle: { isRepo, detectionExit: detection.status,
+        detectionStdout: detection.stdout, detectionStderr: detection.stderr, refs, current },
+      actual: { isRepo: result.isRepo, refs: result.refs.map((ref) => ref.name).sort(),
+        totalCount: result.totalCount, current: result.refs.find((ref) => ref.current)?.name,
+        isAtRepositoryRoot: result.isAtRepositoryRoot } });
+      save();
+      Assert.equal(isRepo, cwd !== bare, `${mode}:${label}: fixture work-tree admission changed`);
+      Assert.equal(result.isRepo, isRepo, `${mode}:${label}: normal application work-tree admission`);
+      Assert.deepEqual(result.refs.map((ref) => ref.name).sort(), refs, `${mode}:${label}: branch names`);
+      Assert.equal(result.totalCount, refs.length, `${mode}:${label}: branch count`);
+      if (isRepo) {
+        Assert.equal(result.refs.find((ref) => ref.current)?.name, current, `${mode}:${label}: HEAD`);
+        Assert.equal(result.isAtRepositoryRoot, cwd !== nested, `${mode}:${label}: root identity`);
       }
     }
+    checkpoint(`${mode}:execution-witness`);
     await active.stop(); active = undefined;
     const calls = executions(trace);
     const nativeCalls = calls.filter(({ line }) => line.startsWith(`execve(${JSON.stringify(helper)},`));
     const gitDiscovery = calls.filter(({ line }) => line.includes('"--git-common-dir"') || line.includes('"--show-toplevel"'));
+    const registryProbes = gitDiscovery.filter(({ line }) => line.includes('"--is-inside-work-tree"'));
+    const coreDiscovery = gitDiscovery.filter(({ line }) => !line.includes('"--is-inside-work-tree"'));
+    for (const { label, cwd } of locations) {
+      Assert.ok(registryProbes.some(({ line }) => line.includes(`"-C", ${JSON.stringify(cwd)}`)),
+        `${mode}:${label}: normal application repository detection must run`);
+    }
     if (mode === "native") {
-      for (const cwd of locations) Assert.ok(nativeCalls.some((call) => call.cwd === cwd && call.line.includes(JSON.stringify(cwd))));
-      Assert.ok(gitDiscovery.some((call) => call.cwd === bare), "Bare repositories must retain Git discovery");
-      Assert.ok(!gitDiscovery.some((call) => call.cwd === workspace), "Applicable reads must use native discovery");
+      for (const { label, cwd } of locations.filter(({ cwd }) => cwd !== bare)) {
+        Assert.ok(nativeCalls.some((call) => call.cwd === cwd && call.line.includes(JSON.stringify(cwd))),
+          `${mode}:${label}: the packaged helper must execute in the requested work tree`);
+        Assert.ok(!coreDiscovery.some((call) => call.cwd === cwd),
+          `${mode}:${label}: applicable discovery must not fall back to Core Git discovery`);
+      }
+      Assert.ok(!nativeCalls.some((call) => call.cwd === bare || call.line.includes(JSON.stringify(bare))),
+        "The bare repository must be rejected by normal admission before helper execution");
     } else if (mode === "included") {
-      Assert.ok(nativeCalls.length > 0 && gitDiscovery.length > 0, "Included configuration must retain Git after native refusal");
-    } else Assert.equal(nativeCalls.length, 0, "Configuration overrides and retained mode must bypass native reads");
-    phases.push({ mode, locations: locations.length, nativeCalls: nativeCalls.length, retainedDiscoveryCalls: gitDiscovery.length });
+      Assert.ok(nativeCalls.some((call) => call.cwd === workspace) && coreDiscovery.some((call) => call.cwd === workspace),
+        "Included configuration must retain Core Git discovery after native refusal");
+    } else {
+      Assert.equal(nativeCalls.length, 0, "Configuration overrides and retained mode must bypass native reads");
+      Assert.ok(coreDiscovery.some((call) => call.cwd === workspace), `${mode}: retained Core Git discovery must execute`);
+    }
+    phases.push({ mode, locations: locations.length, nativeCalls: nativeCalls.length,
+      registryProbes: registryProbes.length, retainedCoreDiscoveryCalls: coreDiscovery.length });
+    save();
   }
-  report.phases = phases;
   Assert.deepEqual({ entry: sha256(sourceEntry), helper: sha256(originalHelper), manifest: sha256(originalManifest) }, original);
   report.status = "passed";
   checkpoint("complete");
