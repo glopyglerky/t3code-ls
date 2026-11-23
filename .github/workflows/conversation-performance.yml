@@ -222,7 +222,7 @@ jobs:
           export CARGO_TARGET_DIR="$RUNNER_TEMP/conversation-target"
           cd measurement
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test \
-            --locked -p t3code-ls-tools startup_probe::resources::tests
+            --locked -p t3code-ls-tools startup_probe::
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
             --release --locked -p t3code-ls-tools
           cd ..
@@ -264,6 +264,7 @@ jobs:
               if [[ "$profile" == candidate ]]; then mode=native; fi
               trial="$pair-$profile"
               result="$evidence/sample-$trial.json"
+              printf 'Reopen pair %s profile %s\n' "$pair" "$profile"
               sudo -n unshare --net -- bash -euc '
                 ip link set dev lo up
                 user="$1"
@@ -273,7 +274,7 @@ jobs:
                 "$PWD/$profile/apps/server/dist/bin.mjs" "$trial_root/$trial" \
                 "$driver" "$chrome" "$mode" | tee "$result" > /dev/null
               jq -er --argjson pair "$pair" --argjson position "$((position + 1))" --arg profile "$profile" \
-                'select(.journey == "J02" and .snapshot.valid and .fixture.total_messages == 6400) | [$pair,$position,$profile,.descriptor_micros,.browser.firstShellVisibleMillis,.browser.selectedTextVisibleMillis,.browser.authoritativeShellHttpMillis,.browser.authoritativeThreadMillis] | @tsv' \
+                'select(.journey == "J02" and .snapshot.valid and .fixture.total_messages == 6400 and .database_migration > 0 and .migration_evidence.source == (if $profile == "candidate" then "stopped-native-catalog" else "live-sqlite-descriptors" end)) | [$pair,$position,$profile,.descriptor_micros,.browser.firstShellVisibleMillis,.browser.selectedTextVisibleMillis,.browser.authoritativeShellHttpMillis,.browser.authoritativeThreadMillis] | @tsv' \
                 "$result" >> "$evidence/reopen.tsv"
               jq -er --argjson pair "$pair" --arg profile "$profile" \
                 'select(.resources.samples >= 2 and (.resources.server.processes | length) > 0 and any(.resources.browser.processes[]; .role == "browser-renderer") and (.profile != "native" or any(.resources.server.processes[]; .role == "native-database-helper"))) | [$pair,$profile,.resources.server.observed_cpu_millis,.resources.browser.observed_cpu_millis,.resources.server.sampled_peak_sum_rss_bytes,.resources.browser.sampled_peak_sum_rss_bytes,.resources.sampler_scan_wall_millis,.resources.max_sample_gap_millis] | @tsv' \

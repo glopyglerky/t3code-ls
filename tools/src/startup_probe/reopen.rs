@@ -5,7 +5,7 @@ use std::{
     env,
     ffi::OsString,
     fs::{self, File},
-    io::Write,
+    io::{Read, Write},
     net::TcpListener,
     path::Path,
     process::{Command, Stdio},
@@ -27,10 +27,11 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     let [node, bundle, trial, driver, chrome, mode] = args.as_slice() else {
         return Err("usage: t3code-ls-tools probe-reopen NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME stock|native|fork-sqlite".into());
     };
-    let implementation = match mode.to_str() {
-        Some("stock") => None,
-        Some("native") => Some("native"),
-        Some("fork-sqlite") => Some("upstream"),
+    let mode_label = mode.to_str().ok_or("invalid reopen profile")?;
+    let implementation = match mode_label {
+        "stock" => None,
+        "native" => Some("native"),
+        "fork-sqlite" => Some("upstream"),
         _ => return Err("reopen implementation must be stock, native or fork-sqlite".into()),
     };
     let node = fs::canonicalize(node)?;
@@ -98,7 +99,9 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     let initial_start = Instant::now();
     let mut initial = OwnedChild(make_server()?.spawn()?);
     let pairing = pairing_link(initial.0.stdout.take().ok_or("missing pairing pipe")?);
-    let (initial_origin, _, _, _) = sample(&mut initial.0, &state, initial_start)?;
+    let (initial_origin, _, _, initial_migration) =
+        sample(&mut initial.0, &state, initial_start)
+            .map_err(|error| format!("{mode_label} seed readiness: {error}"))?;
     if initial_origin != origin {
         return Err("fixture server bound an unexpected origin".into());
     }
@@ -123,7 +126,8 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     let resources = resource_baseline.start(reopened.0.id(), started)?;
     let _pairing_output = pairing_link(reopened.0.stdout.take().ok_or("missing reopen output")?);
     let (reopened_origin, descriptor_micros, html_micros, migration) =
-        sample(&mut reopened.0, &state, started)?;
+        sample(&mut reopened.0, &state, started)
+            .map_err(|error| format!("{mode_label} reopen readiness: {error}"))?;
     if reopened_origin != origin {
         return Err("reopened server changed the fixture origin".into());
     }
@@ -157,13 +161,37 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     let resources = resources.finish()?;
     browser.close()?;
     stop_gracefully(&mut reopened)?;
+    // The live native descriptor may omit migrations while the writer owns the engine.
+    // Verify the committed catalog after stopping, outside every measured interval.
+    let database_migration = if native {
+        let recorded = stopped_native_migration(&bundle, &state)?;
+        if [initial_migration, migration]
+            .into_iter()
+            .flatten()
+            .any(|head| head != recorded)
+        {
+            return Err("live native migration disagrees with the saved catalog".into());
+        }
+        recorded
+    } else {
+        let recorded = migration.ok_or("reopened SQLite descriptor did not report a migration")?;
+        if initial_migration != Some(recorded) {
+            return Err("SQLite migration changed across the reopen".into());
+        }
+        recorded
+    };
     println!(
         "{}",
         json!({
             "schema_version": 1, "journey": "J02", "profile": mode.to_str(),
             "fixture": {"threads": THREADS, "messages_per_thread": MESSAGES, "total_messages": THREADS * MESSAGES, "transcript_bytes": fixture_bytes},
             "descriptor_micros": descriptor_micros, "html_micros": html_micros,
-            "navigation_started_micros": navigation_started_micros, "database_migration": migration,
+            "navigation_started_micros": navigation_started_micros, "database_migration": database_migration,
+            "migration_evidence": {
+                "initial_descriptor": initial_migration,
+                "reopened_descriptor": migration,
+                "source": if native { "stopped-native-catalog" } else { "live-sqlite-descriptors" },
+            },
             "saved_thread_sequence": before_cursor,
             "browser": result["timing"], "snapshot": snapshot,
             "cache": "same authenticated browser profile with observed persisted shell and selected-thread records",
@@ -173,6 +201,69 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
         })
     );
     Ok(())
+}
+
+fn stopped_native_migration(bundle: &Path, state: &Path) -> Result<u64> {
+    let helper = bundle
+        .parent()
+        .ok_or("native bundle has no containing directory")?
+        .join("native-bin/t3-code-ls-db");
+    let mut child = OwnedChild(
+        Command::new("timeout")
+            .args(["--kill-after=1s", "5s", "--"])
+            .arg(helper)
+            .arg("read-only-local")
+            .arg(state.join("statev2.omdb"))
+            .env_clear()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()?,
+    );
+    child
+        .0
+        .stdin
+        .take()
+        .ok_or("missing native helper input")?
+        .write_all(b"{\"operation\":\"application_migrations\"}\n")?;
+    let mut response = Vec::new();
+    child
+        .0
+        .stdout
+        .take()
+        .ok_or("missing native helper output")?
+        .take(1_048_577)
+        .read_to_end(&mut response)?;
+    if response.len() > 1_048_576 || !child.0.wait()?.success() {
+        return Err("native migration inspection exceeded its bound or failed".into());
+    }
+    migration_head(&response)
+}
+
+fn migration_head(response: &[u8]) -> Result<u64> {
+    let response: Value = serde_json::from_slice(response)?;
+    let records = response["result"]
+        .as_array()
+        .filter(|records| {
+            response["ok"].as_bool() == Some(true) && !records.is_empty() && records.len() <= 4096
+        })
+        .ok_or("native migration inspection did not return a bounded catalog")?;
+    let mut head = None;
+    for record in records {
+        let id_text = record["id"]
+            .as_str()
+            .ok_or("native catalog migration has no ID")?;
+        let id = id_text.parse::<u64>()?;
+        if id.to_string() != id_text
+            || head.is_some_and(|previous| id <= previous)
+            || record["name"].as_str().is_none_or(str::is_empty)
+        {
+            return Err("native catalog migration has an invalid identity or order".into());
+        }
+        head = Some(id);
+    }
+    head.filter(|id| *id > 0)
+        .ok_or_else(|| "native catalog has no positive migration".into())
 }
 
 fn write_transcripts(codex_home: &Path, workspace: &Path) -> Result<u64> {
@@ -226,4 +317,25 @@ fn stop_gracefully(child: &mut OwnedChild) -> Result<()> {
         thread::sleep(POLL_INTERVAL);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::migration_head;
+
+    #[test]
+    fn migration_witness_requires_ordered_nonempty_committed_catalog() {
+        let response =
+            br#"{"ok":true,"result":[{"id":"1","name":"first"},{"id":"89","name":"last"}]}"#;
+        assert_eq!(migration_head(response).unwrap(), 89);
+        for response in [
+            br#"{"ok":false,"error":{"kind":"writer_busy"}}"#.as_slice(),
+            br#"{"ok":true,"result":[]}"#,
+            br#"{"ok":true,"result":[{"id":"0","name":"zero"}]}"#,
+            br#"{"ok":true,"result":[{"id":"02","name":"invalid"}]}"#,
+            br#"{"ok":true,"result":[{"id":"9","name":"a"},{"id":"9","name":"b"}]}"#,
+        ] {
+            assert!(migration_head(response).is_err());
+        }
+    }
 }

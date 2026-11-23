@@ -126,6 +126,8 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
     let pairing = child.0.stdout.take().map(pairing_link);
     let (origin, descriptor_micros, html_micros, database_migration) =
         sample(&mut child.0, &state, start)?;
+    let database_migration = database_migration
+        .ok_or("served descriptor did not identify an applied database migration")?;
     let native = implementation == Some("native");
     if state.join("statev2.sqlite").is_file() == native
         || state.join("statev2.omdb").is_file() != native
@@ -287,7 +289,11 @@ fn pairing_link(stdout: std::process::ChildStdout) -> mpsc::Receiver<String> {
     receiver
 }
 
-fn sample(child: &mut Child, state: &Path, start: Instant) -> Result<(String, u128, u128, u64)> {
+fn sample(
+    child: &mut Child,
+    state: &Path,
+    start: Instant,
+) -> Result<(String, u128, u128, Option<u64>)> {
     let runtime_path = state.join("server-runtime.json");
     let (origin, descriptor, descriptor_micros) = loop {
         if let Some(status) = child.try_wait()? {
@@ -315,8 +321,7 @@ fn sample(child: &mut Child, state: &Path, start: Instant) -> Result<(String, u1
     }
     let migration = descriptor["databaseMigration"]
         .as_u64()
-        .filter(|version| *version > 0)
-        .ok_or("served descriptor did not identify an applied database migration")?;
+        .filter(|version| *version > 0);
     let html = fetch(&origin, "/")?.ok_or("application did not serve its built web entry")?;
     let html_micros = start.elapsed().as_micros();
     if !std::str::from_utf8(&html)?.contains("id=\"root\"") {
