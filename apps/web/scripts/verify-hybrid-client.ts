@@ -446,22 +446,27 @@ async function terminalMarker(page: Page, prefix: "fixture-pty" | "fixture-reatt
   });
   await page.evaluate(() => navigator.clipboard.writeText(""));
   await input.focus();
-  await page.keyboard.insertText(`printf '${prefix}:%s %s\\n' "$$" '世界'`);
+  const selectedText = async (pattern: RegExp) => {
+    const deadline = Date.now() + 10_000;
+    do {
+      await input.press("Control+Shift+a");
+      await input.press("Control+Shift+c");
+      const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+      const match = clipboard.match(pattern);
+      if (match !== null) return match;
+      await page.waitForTimeout(100);
+    } while (Date.now() < deadline);
+    throw new Error(`Expected a rendered shell response for ${prefix}`);
+  };
+  await selectedText(/[$#]\s*$/u);
+  const command = `printf '${prefix}:%s %s\\n' "$$" '世界'`;
+  await page.evaluate((line) => navigator.clipboard.writeText(line), command);
+  await input.press("Control+Shift+v");
+  await selectedText(new RegExp(`${prefix}:%s %s`, "u"));
   await input.press("Enter");
-
-  // Copy Ghostty's selected rendered cells. The echoed printf command contains
-  // a format string, so only the actual shell output can match the PID.
-  const marker = new RegExp(`${prefix}:(\\d+) 世界`, "u");
-  const deadline = Date.now() + timeoutMs;
-  do {
-    await input.press("Control+Shift+a");
-    await input.press("Control+Shift+c");
-    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
-    const pid = clipboard.match(marker)?.[1];
-    if (pid !== undefined) return pid;
-    await page.waitForTimeout(100);
-  } while (Date.now() < deadline);
-  throw new Error(`Expected a rendered shell marker for ${prefix}`);
+  // The echoed format string contains no PID. Only rendered shell output matches.
+  const [, pid] = await selectedText(new RegExp(`${prefix}:(\\d+) 世界`, "u"));
+  return pid;
 }
 
 function summarizeSnapshot(snapshot: OrchestrationV2ThreadDetailSnapshot) {
@@ -717,6 +722,7 @@ async function exercise(implementation: Implementation): Promise<void> {
       messageUpdates: Array<{ sequence: number; length: number; streaming: boolean }>;
     } | null,
     terminalReattach: null as { sameShell: boolean; unicodeOutput: boolean } | null,
+    terminalFailure: null as string | null,
     completedSnapshots: [] as Array<
       Awaited<ReturnType<typeof assertCompleted>> & { checkpoint: string }
     >,
@@ -953,16 +959,21 @@ async function exercise(implementation: Implementation): Promise<void> {
     }
     if (bundledClient && implementation === "native") {
       starting("interactive terminal reconnect");
-      await context.grantPermissions(["clipboard-read", "clipboard-write"], {
-        origin: new URL(page.url()).origin,
-      });
-      const shell = await terminalMarker(page, "fixture-pty");
-      await page.reload({ waitUntil: "domcontentloaded" });
-      await assertCompleted(page, threadId, turnIdentity);
-      const reattached = await terminalMarker(page, "fixture-reattach");
-      Assert.equal(reattached, shell, "A browser reload must reattach to the same PTY shell");
-      proof.terminalReattach = { sameShell: true, unicodeOutput: true };
-      completed("Reattached to the same PTY and copied its rendered Unicode output after reload");
+      try {
+        await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+          origin: new URL(page.url()).origin,
+        });
+        const shell = await terminalMarker(page, "fixture-pty");
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await assertCompleted(page, threadId, turnIdentity);
+        const reattached = await terminalMarker(page, "fixture-reattach");
+        Assert.equal(reattached, shell, "A browser reload must reattach to the same PTY shell");
+        proof.terminalReattach = { sameShell: true, unicodeOutput: true };
+        completed("Reattached to the same PTY and copied its rendered Unicode output after reload");
+      } catch (error) {
+        proof.terminalFailure = redact(error instanceof Error ? error.message : String(error));
+        saveProof();
+      }
     }
     await page.goto(proof.interrupted.threadUrl, { waitUntil: "domcontentloaded" });
     await verifyInterruptedShowcase(page, proof.interrupted);
@@ -1010,6 +1021,7 @@ async function exercise(implementation: Implementation): Promise<void> {
         "Verified canonical omdb rows and event heads through read-only native inspection, with no application SQLite files",
       );
     }
+    if (proof.terminalFailure !== null) throw new Error(proof.terminalFailure);
     proof.status = "passed";
   } catch (error) {
     proof.status = "failed";
