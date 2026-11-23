@@ -122,11 +122,20 @@ try {
     throw new Error("Synthetic provider import RPC failed");
   });
   Assert.deepEqual(imported, { importedCount: 2, skippedCount: 0 });
-  const snapshot = await fetch(origin + `/api/orchestration/threads/${encodeURIComponent(threadId)}/bounded`, { headers, signal: AbortSignal.timeout(15_000) });
-  Assert.ok(snapshot.ok);
-  const data = await snapshot.json() as { projection: { thread: { id: string }; messages: { text: string }[] } };
-  Assert.equal(data.projection.thread.id, threadId);
-  Assert.ok(data.projection.messages.some((message) => message.text === "GPUI server reply café 🦀"));
+  // Verify both imported threads directly before testing pointer navigation.
+  for (const id of [threadId, `import:codex:${secondSessionId}`]) {
+    const snapshot = await fetch(origin + `/api/orchestration/threads/${encodeURIComponent(id)}/bounded`, { headers, signal: AbortSignal.timeout(15_000) });
+    Assert.ok(snapshot.ok, "Imported thread bounded route failed");
+    const data = await snapshot.json() as { snapshotSequence: number; projection: { thread: { id: string; title: string }; messages: { role: string; text: string }[] } };
+    Assert.ok(Number.isSafeInteger(data.snapshotSequence) && data.snapshotSequence >= 0);
+    Assert.equal(data.projection.thread.id, id);
+    Assert.equal(typeof data.projection.thread.title, "string");
+    Assert.deepEqual(data.projection.messages.map(({ role, text }) => ({ role, text })), [
+      { role: "user", text: "GPUI saved conversation prompt" },
+      { role: "assistant", text: "GPUI server reply café 🦀" },
+    ]);
+  }
+  console.log("GPUI direct A/B bounded reads retained exact imported identities and messages.");
   Assert.ok(FS.existsSync(Path.join(userdata, "statev2.omdb")));
   Assert.ok(!FS.existsSync(Path.join(userdata, "statev2.sqlite")));
   await new Promise<void>((resolve, reject) => {

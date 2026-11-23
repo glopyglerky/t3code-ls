@@ -5,8 +5,8 @@ use crate::{
     server_snapshot::{self, Connection, ThreadRow},
 };
 use gpui::{
-    AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, Window, div,
-    prelude::FluentBuilder as _, px,
+    AppContext, Context, Entity, InteractiveElement, IntoElement, ParentElement, Render, Role,
+    Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_base::Button;
 use std::collections::BTreeMap;
@@ -169,6 +169,16 @@ impl Render for ThreadWorkspace {
             .flex()
             .flex_col()
             .child(controls)
+            .when_some(self.selected.as_ref(), |view, (_, id)| {
+                let label = format!("Selected thread {id}");
+                view.child(
+                    div()
+                        .id("selected-thread-status")
+                        .role(Role::Status)
+                        .aria_label(label.clone())
+                        .child(label),
+                )
+            })
             .when_some(self.error, |view, error| view.child(error))
             .when_some(
                 self.selected
