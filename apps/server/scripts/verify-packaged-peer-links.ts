@@ -49,11 +49,12 @@ const post = async (origin: string, path: string, body: unknown, headers = {}) =
     method: "POST", redirect: "error", headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body), signal: AbortSignal.any([abort.signal, AbortSignal.timeout(45_000)]),
   });
-  if (response.status !== 200) {
+  const expectedStatus = path === "/oauth/mcp/register" ? 201 : 200;
+  if (response.status !== expectedStatus) {
     report.httpRefusal = { path, status: response.status };
     await response.body?.cancel();
   }
-  Assert.equal(response.status, 200, `Unexpected status at ${path}`);
+  Assert.equal(response.status, expectedStatus, `Unexpected status at ${path}`);
   return response;
 };
 // Register and approve a read-only external MCP client using a synthetic owner's code.
