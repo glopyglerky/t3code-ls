@@ -269,3 +269,18 @@ export const launchThread = Effect.fn("ThreadMessageIntake.launchThread")(functi
       }),
     );
 });
+
+
+/** Pending uploads retain the projection-based claim reconciliation path. */
+export const launchThreadForWire = Effect.fn("ThreadMessageIntake.launchThreadForWire")(function* (
+  input: ThreadLaunch.ThreadLaunchInput,
+  responseMode?: "receipt",
+) {
+  if (responseMode !== "receipt" || input.initialMessage === undefined ||
+      input.initialMessage.attachments.some(AttachmentClaims.attachmentIsPendingUpload)) {
+    return yield* launchThread(input);
+  }
+  yield* AttachmentClaims.validateAttachmentLimits(input.initialMessage.attachments);
+  const launches = yield* ThreadLaunch.ThreadLaunchService;
+  return yield* launches.launchReceipt({ ...input, initialMessage: input.initialMessage });
+});

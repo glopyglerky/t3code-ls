@@ -120,6 +120,7 @@ try {
   }).pipe(Effect.scoped, Effect.provide(protocol), Effect.timeout("45 seconds"))).catch(() => {
     throw new Error("Synthetic empty thread launch failed");
   });
+  Assert.ok("projection" in launched);
   Assert.equal(launched.threadId, threadId);
   Assert.equal(launched.projection.messages.length, 0);
   Assert.equal(launched.projection.runs.length, 0);
