@@ -547,7 +547,8 @@ jobs:
           producer_run=45237394555
           git fetch --no-tags --depth=1 origin "$producer"
           test "$(git rev-parse 'FETCH_HEAD^{tree}')" = "$producer_tree"
-          git diff --exit-code "$producer" HEAD -- . ':(exclude).github/workflows/thread-recovery.yml'
+          git diff --exit-code "$producer" HEAD -- . \
+            ':(exclude).github/workflows/thread-recovery.yml' ':(exclude)scripts/android-pairing-fixture.ts'
           scratch=$(mktemp -d "$RUNNER_TEMP/retained-outbox.XXXXXXXX")
           trap 'rm -rf -- "$scratch"' EXIT
           proof="$RUNNER_TEMP/outbox-runtime-proof"

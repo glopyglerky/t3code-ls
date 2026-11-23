@@ -13,6 +13,36 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import { authenticatePackagedServer, reservePort, startPackagedServer } from "../apps/server/scripts/packaged-server-fixture.ts";
 
+const startupPhases = [
+  "starting keybindings runtime",
+  "starting server settings runtime",
+  "recording startup heartbeat",
+  "headless access info",
+  "browser open check",
+  "waiting for http listener",
+  "publishing welcome event",
+  "publishing ready event",
+  "complete",
+] as const;
+
+function readStartupObservations(logPath: string) {
+  if (!FS.existsSync(logPath)) return { outputBytes: 0, phases: [], errorCodes: [] };
+  const fd = FS.openSync(logPath, "r");
+  try {
+    const { size } = FS.fstatSync(fd);
+    const buffer = Buffer.alloc(Math.min(size, 128 * 1024));
+    const count = FS.readSync(fd, buffer, 0, buffer.length, size - buffer.length);
+    const lines = buffer.subarray(0, count).toString("utf8");
+    return {
+      outputBytes: size,
+      phases: startupPhases.filter((phase) => lines.includes(`startup phase: ${phase}`)),
+      errorCodes: [...new Set(lines.match(/\b(?:ENOENT|EACCES|EPERM|EADDRINUSE|ENOSPC|ERR_MODULE_NOT_FOUND|SQLITE_BUSY|SQLITE_CANTOPEN)\b/gu))],
+    };
+  } finally {
+    FS.closeSync(fd);
+  }
+}
+
 /** Only the existing synthetic replay adapter may run in this disposable profile. */
 export async function withAndroidPairingFixture(input: {
   temporary: string;
@@ -54,8 +84,29 @@ export async function withAndroidPairingFixture(input: {
   let transition = 0;
   let stopped = false;
   let checkpoint = "stage";
-  const receipt: Record<string, unknown> = { schema: 1, status: "running", providerLaunchRequested: true, realProviderLaunchRequested: false,
+  const receipt: Record<string, unknown> = { schema: 1, status: "running", providerLaunchRequested: false, realProviderLaunchRequested: false,
     bundleSha256: Crypto.createHash("sha256").update(FS.readFileSync(bundle)).digest("hex") };
+  const startup: Record<string, unknown> = {};
+  receipt.startup = startup;
+  const start = async (phase: "initial" | "reopen", port: number) => {
+    const logPath = Path.join(scratch, `${phase}-startup.log`);
+    const started = startPackagedServer({ bundle, baseDir: state, env, port, logPath, signal: input.signal });
+    server = started;
+    if (phase === "initial") receipt.serverPid = started.pid;
+    let outcome = "ready";
+    try {
+      await started.ready;
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "";
+      outcome = message === "Packaged server startup timed out" ? "timeout" :
+        /^Packaged server exited during startup /u.test(message) ? "early-exit" : "startup-error";
+      throw cause;
+    } finally {
+      // Keep only fixed phase names and error codes. The scratch log never becomes an artifact.
+      startup[phase] = { outcome, ...readStartupObservations(logPath) };
+    }
+    return started;
+  };
   const reverse = (devicePort: number, hostPort: number) => {
     input.device(["reverse", "--no-rebind", `tcp:${devicePort}`, `tcp:${hostPort}`]);
     mappings.add(devicePort);
@@ -90,11 +141,7 @@ export async function withAndroidPairingFixture(input: {
     FS.writeFileSync(settingsPath, JSON.stringify(settings), { mode: 0o600 });
     const port = await reservePort();
     checkpoint = "server-start";
-    server = startPackagedServer({ bundle, baseDir: state, env, port,
-      // Do not retain debug output from a credential-bearing experiment.
-      logPath: "/dev/null", signal: input.signal });
-    receipt.serverPid = server.pid;
-    await server.ready;
+    server = await start("initial", port);
     checkpoint = "server-auth";
     let client = await authenticatePackagedServer(server, input.signal);
     await client.createProject({ projectId: ProjectId.make("t12-dispatch-project"), title: "T12 synthetic project", workspaceRoot: workspace });
@@ -191,6 +238,7 @@ export async function withAndroidPairingFixture(input: {
     reverse(47831, controlPort);
     reverse(47832, proxyPort);
     checkpoint = "installed-pair-reconnect";
+    receipt.providerLaunchRequested = true;
     const observedEnvironment = await input.execute();
     Assert.equal(observedEnvironment, descriptor.environmentId);
     Assert.equal(transition, 4);
@@ -250,8 +298,8 @@ export async function withAndroidPairingFixture(input: {
       return { launch, initialMessage: response.result };
     };
     const durableReceipt = readReceipt();
-    server = startPackagedServer({ bundle, baseDir: state, env, port, logPath: "/dev/null", signal: input.signal });
-    await server.ready;
+    checkpoint = "server-reopen";
+    server = await start("reopen", port);
     client = await authenticatePackagedServer(server, input.signal);
     Assert.deepEqual(verifyProjection(await projection()), completed);
     reopening = true;
