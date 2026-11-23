@@ -36,17 +36,44 @@ await FS.access(executable, FS.constants.X_OK);
 const oracle = await loadUpstreamModule("apps/server/src/orchestration-v2/ProjectionStore.ts");
 const fixture = await createFixture();
 const checks = [];
+let standaloneLookupCount = 0;
+let scopedLookupCount = 0;
+const watchLookups = (database) => ({
+  ...database,
+  request(request, schema) {
+    if (request.operation === "application_projections_lookup") {
+      Assert.ok(!Object.hasOwn(request, "transaction_id"));
+      standaloneLookupCount += 1;
+    }
+    return database.request(request, schema);
+  },
+  withSession(use) {
+    return database.withSession((session) => use({
+      ...session,
+      request(request, schema) {
+        if (request.operation === "application_projections_lookup") {
+          Assert.equal(typeof request.transaction_id, "string");
+          scopedLookupCount += 1;
+        }
+        return session.request(request, schema);
+      },
+    }));
+  },
+});
 const failed = (body) =>
   Effect.exit(body).pipe(Effect.tap((exit) => Effect.sync(() => Assert.ok(Exit.isFailure(exit)))));
 
 async function withServices(kind, filename, use) {
   if (kind === "redb")
-    return withNative(executable, fixture, (client) =>
-      Effect.gen(function* () {
+    return withNative(
+      executable, fixture,
+      (client) => Effect.gen(function* () {
         const store = yield* NativeProjectionLookups.make;
         const writer = yield* NativeProjectionCommit.make;
         return yield* use({ store, apply: writer.apply, transaction: client.withTransaction });
       }),
+      watchLookups,
+      { singleProjectionReads: true },
     );
   return withSqlite(filename, (sql) =>
     Effect.gen(function* () {
@@ -354,7 +381,12 @@ try {
       );
     }),
   );
-  checks.push("A reopened helper preserves committed projection lookup state");
+  Assert.ok(standaloneLookupCount > 0 && scopedLookupCount > 0);
+  checks.push(
+    "A selected standalone lookup uses one request and a committed snapshot",
+    "Lookups inside an existing writer keep its transaction ID and staged rows",
+    "A reopened helper preserves committed projection lookup state",
+  );
   Assert.equal(hash(await FS.readFile(source)), sourceHash);
   await finishProof({
     executable,

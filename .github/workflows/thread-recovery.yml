@@ -123,13 +123,15 @@ jobs:
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t16-independent-reads-')
         env:
           T3_CODE_LS_INDEPENDENT_READS: "1"
+          T3_CODE_LS_SINGLE_PROJECTION_READS: "1"
         run: |
           export T3_CODE_LS_TEST_RUNTIME="$RUNNER_TEMP/independent-read-runtime"
           export CARGO_HOME="$RUNNER_TEMP/independent-read-cargo"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/independent-read-target"
           export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
           node tools/install-server-tests.mjs
-          node tools/check-acceptance.mjs --tests '["tools/check-omdb-production.mjs"]' \
+          node tools/fetch-migration-sources.mjs
+          node tools/check-acceptance.mjs --tests '["tools/check-omdb-production.mjs","tools/check-redb-projection-lookups.mjs"]' \
             --proof-directory "$RUNNER_TEMP/independent-read-proof"
       - name: Install the pinned compiler for the trial helper
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-')

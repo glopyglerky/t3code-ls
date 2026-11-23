@@ -533,6 +533,15 @@ async fn query(session: &mut Session, query: ProjectionLookup) -> Result<LookupR
 }
 
 impl ApplicationTransactions {
+    pub async fn projections_lookup_once(&mut self, input: ProjectionLookup) -> Result<Value> {
+        let mut session = self.open_read_session().await?;
+        let result = query(&mut session, input)
+            .await
+            .and_then(|value| serde_json::to_value(value).map_err(crate::json_error));
+        let closed = session.transaction.rollback().await;
+        result.and_then(|value| closed.map(|()| value))
+    }
+
     pub async fn projections_lookup(&mut self, id: &str, input: ProjectionLookup) -> Result<Value> {
         let mut session = self.take(id)?;
         let result = async {
