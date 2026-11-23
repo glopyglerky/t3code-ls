@@ -1424,7 +1424,7 @@ async function verifyAlternateTerminalReconnect(
       `  IFS= read -r -t 10 -d R response || exit 1`,
       `  printf -v expected '\\033[%s;%s' "$2" "$3"`,
       '  [[ $response == "$expected" ]] || exit 1',
-      `  printf '%sR' "$response" > "$0.$1" || exit 1`,
+      `  printf '%sR\\n' "$response" > "$0.$1" || exit 1`,
       '}',
       `printf 'fixture-main-screen:%s\\n\\033[?1049h\\033[Hfixture-alternate-screen:%s 世界\\n' "$1" "$1"`,
       "query queried 7 11",
