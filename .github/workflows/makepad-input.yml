@@ -8,6 +8,27 @@ permissions:
   contents: read
 
 jobs:
+  linux-history-contract:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Exercise the shared reader without a toolkit window
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.99.1 --profile minimal
+          export CARGO_HOME="$RUNNER_TEMP/makepad-reader-cargo"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/makepad-reader-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          trap 'rm -rf "$CARGO_HOME" "$CARGO_TARGET_DIR"' EXIT
+          manifest=apps/desktop/makepad-input/Cargo.toml
+          git rev-parse HEAD HEAD^{tree}
+          sha256sum "$manifest" apps/desktop/makepad-input/Cargo.lock
+          cargo +1.99.1 test --locked --manifest-path "$manifest" server_snapshot | tee "$RUNNER_TEMP/makepad-reader.log"
+          grep -Eq 'test result: ok\. [1-9][0-9]* passed' "$RUNNER_TEMP/makepad-reader.log"
   macos-arm64:
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['macos-15'] || 'macos-15' }}
     timeout-minutes: 35
