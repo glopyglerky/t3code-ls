@@ -447,11 +447,11 @@ const smokeWindowsInstalledLifecycle = Effect.fn("smokeWindowsInstalledLifecycle
   yield* require(Object.values(refusalChecks).every(Boolean), "refusing a foreign Windows shim without an ownership receipt", refusalChecks);
   yield* fs.remove(launcher);
   const installed = yield* run(["install"]);
-  const generated = `@echo off\r\n"${executable}" %*`;
+  const generated = `@echo off\r\n"${executable}" %* & exit /b`;
   const recorded = yield* fs.readFileString(path.join(runtime, "launchers")).pipe(Effect.option);
   const contents = yield* fs.readFileString(launcher).pipe(Effect.option);
   const receipts = Option.isSome(recorded) ? recorded.value.split(/\r?\n/u).filter(Boolean) : [];
-  const shim = Option.isSome(contents) ? /^@echo off\r\n"([^"\r\n]+)" %\*$/u.exec(contents.value) : null;
+  const shim = Option.isSome(contents) ? /^@echo off\r\n"([^"\r\n]+)" %\* & exit \/b$/u.exec(contents.value) : null;
   const prefix = `Installed t3 ${expectedVersion} at `;
   const report = installed.stdout.split(/\r?\n/u).find((line) => line.startsWith(prefix) && line.endsWith("."));
   const reportedLauncher = report?.slice(prefix.length, -1);

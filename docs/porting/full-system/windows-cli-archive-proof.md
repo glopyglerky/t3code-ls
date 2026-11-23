@@ -248,3 +248,50 @@ unhandled spawn/ENOENT, runtime warning and unknown/truncated strings. These cas
 only validate the diagnostic distinctions. They neither reproduce the Windows
 failure nor qualify a production repair. Exact proof artifact `14824705843`
 was read and matched to source `ccea992431b5d1146b1865b85b2da8a4892baa4f`.
+
+## Self-removing Windows shim continuation
+
+Exact run [45188572016](https://github.com/glopyglerky/t3code-ls/actions/runs/45188572016)
+at `cf96f4ff9cfa046759ebd24057e2e0ee0a01e77c` isolated the failure:
+cmd reported only `The batch file cannot be found.`, with exit 1. Launcher
+removal, detached runtime removal, and all preservation checks passed. The
+executable removes its own installed `.cmd` during uninstall; the old batch
+line then requires cmd to resume from the removed file.
+
+The standalone CLI installer, updater and PowerShell installer now emit
+`"<executable>" %* & exit /b` as one parsed line. The explicit batch exit has no
+numeric argument, so it does not intentionally overwrite the child's status.
+Microsoft documents [cmd command sequencing](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cmd)
+and [exit /b](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/exit).
+Actual status propagation and self-deletion behavior require the Windows oracle
+below; documentation and local syntax checks do not qualify them.
+
+`scripts/windows-shim-oracle.mjs` runs on actual Windows cmd with Node 26.12.1
+and no installed product or package dependencies. It reproduces legacy
+self-deletion at exit zero, checks ordinary legacy statuses, then requires the
+new line to preserve exits 0, 1, 2 and 130 both with and without self-deletion.
+It also requires exact controlled argument forwarding, empty stderr for every
+new-shim case and the expected file-removal state. It uses a bounded owned temp
+folder, never installs a command or changes PATH, and removes its fixtures in
+`finally`. The focused archive workflow runs this oracle before compilation:
+
+```sh
+node scripts/windows-shim-oracle.mjs
+```
+
+Fresh archive smoke still requires the actual installed shim's exact new bytes,
+real version invocation, zero/empty-stderr uninstall, observed runtime removal,
+and unchanged unrelated files and synthetic user state. No diagnostic is removed
+or treated as success. Its invocation remains `node scripts/smoke-cli-archive.ts
+--archive <zip> --expect-version <version> --expect-upstream`.
+
+Ownership recognition accepts both the original generated line and the exact
+new tail. Legacy owned shims remain replaceable and removable; executing an old
+shim to uninstall can still show its old continuation failure until it is
+rewritten by install/update. Wrappers with extra commands, status-masking tails
+or desktop arguments remain outside this recognition. Desktop launchers are
+unchanged. This slice retains the stock T3 source/provenance pin
+`28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f` and MIT license.
+
+The Windows oracle and packaged lifecycle remain unexecuted locally. Root owns
+the exact hosted candidate run and acceptance decision.

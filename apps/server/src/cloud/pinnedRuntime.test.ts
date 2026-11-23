@@ -19,6 +19,8 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as ProcessRunner from "../processRunner.ts";
 import {
   isVersionExecutable,
+  generatedWindowsShimTarget,
+  renderWindowsCliShim,
   ensurePinnedRuntimeInstalled,
   isUnpublishedRelease,
   pinnedRuntimeCommand,
@@ -847,4 +849,15 @@ it.layer(NodeServices.layer)("prunePinnedRuntimes", (it) => {
         assert.deepEqual(removed, ["1.1.0"]);
       }),
   );
+});
+
+it("recognizes only legacy or explicit-exit generated Windows shims", () => {
+  const executable = "C:\\synthetic home\\runtime\\versions\\1.2.3\\t3.exe";
+  const legacy = `@echo off\r\n"${executable}" %*`;
+  assert.equal(renderWindowsCliShim(executable), `${legacy} & exit /b`);
+  assert.equal(generatedWindowsShimTarget(legacy), executable);
+  assert.equal(generatedWindowsShimTarget(renderWindowsCliShim(executable)), executable);
+  for (const suffix of [" & exit /b 0", " && exit /b", " & echo foreign", " & exit /b %ERRORLEVEL%"]) {
+    assert.isUndefined(generatedWindowsShimTarget(`${legacy}${suffix}`));
+  }
 });

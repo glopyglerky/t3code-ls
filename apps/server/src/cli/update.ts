@@ -32,6 +32,7 @@ import {
   pinnedRuntimeVersionsDir,
   prunePinnedRuntimes,
   recordPinnedRuntimeLauncher,
+  renderWindowsCliShim,
   resolveLauncherPath,
   windowsShimTarget,
 } from "../cloud/pinnedRuntime.ts";
@@ -170,7 +171,7 @@ export const repointLauncher = Effect.fn("cli.update.repoint_launcher")(function
     if (quoted === undefined || !ownsTarget(quoted)) return Option.none<string>();
     yield* remember(shimPath);
     yield* fs
-      .writeFileString(shimPath, `@echo off\r\n"${input.targetEntryPath}" %*`)
+      .writeFileString(shimPath, renderWindowsCliShim(input.targetEntryPath))
       .pipe(
         Effect.mapError(
           () => new CliUpdateError({ reason: `Could not rewrite the t3 launcher at ${shimPath}.` }),

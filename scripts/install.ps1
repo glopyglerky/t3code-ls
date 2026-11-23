@@ -242,7 +242,7 @@ if (Test-Path -LiteralPath $shim) {
   # The shim is UTF-8 without a BOM; Windows PowerShell 5.1 reads files as ANSI by default.
   # Only a shim exactly as written here counts; a user's wrapper that also runs t3.exe does not.
   $existing = [System.IO.File]::ReadAllText($shim, [System.Text.Encoding]::UTF8)
-  if ($existing -match '^@echo off\r?\n"([^"]+)" %\*\s*$') { $existingTarget = $Matches[1] }
+  if ($existing -match '^@echo off\r?\n"([^"]+)" %\*(?: & exit /b)?\s*$') { $existingTarget = $Matches[1] }
   # Full paths, so a target like versions\..\other cannot pass as ours.
   $ownedPrefix = [System.IO.Path]::GetFullPath($versionsDir).TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
   if ($existingTarget) { $existingTarget = [System.IO.Path]::GetFullPath($existingTarget) }
@@ -255,7 +255,7 @@ if (Test-Path -LiteralPath $shim) {
 }
 # UTF-8 without a BOM: cmd.exe reads the shim as-is, and ASCII would corrupt
 # non-ASCII characters in the user's home path.
-[System.IO.File]::WriteAllText($shim, "@echo off`r`n`"$(Join-Path $targetDir 't3.exe')`" %*", (New-Object System.Text.UTF8Encoding $false))
+[System.IO.File]::WriteAllText($shim, "@echo off`r`n`"$(Join-Path $targetDir 't3.exe')`" %* & exit /b", (New-Object System.Text.UTF8Encoding $false))
 # Pruning keeps what this shim points at; a background service cannot see $binDir otherwise.
 $launchers = Join-Path $t3Home "runtime\launchers"
 $shimPath = (Resolve-Path -LiteralPath $shim).Path

@@ -358,6 +358,9 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "win32")("install.ps1 t3
         NodePath.join(upgrade.target, "t3.exe"),
       );
 
+      expect(await NodeFSP.readFile(shim, "utf8")).toBe(
+        `@echo off\r\n"${NodePath.join(upgrade.target, "t3.exe")}" %* & exit /b`,
+      );
       const again = await installOver({ script: "install.ps1", home, binDir });
       expect(again.code, again.output).toBe(0);
 

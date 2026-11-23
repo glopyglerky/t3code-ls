@@ -512,7 +512,11 @@ export const windowsShimTarget = (contents: string) => /^"([^"]+)"/m.exec(conten
 
 /** Like {@link windowsShimTarget}, but only for a shim exactly as written; never a user's wrapper. */
 export const generatedWindowsShimTarget = (contents: string) =>
-  /^@echo off\r?\n"([^"]+)" %\*\s*$/.exec(contents)?.[1];
+  /^@echo off\r?\n"([^"]+)" %\*(?: & exit \/b)?\s*$/.exec(contents)?.[1];
+
+/** Exit from the already-parsed line even when uninstall removes this batch file. */
+export const renderWindowsCliShim = (executable: string) =>
+  `@echo off\r\n"${executable}" %* & exit /b`;
 
 /** Where the `t3` launchers written by the install scripts and `t3 update` point. */
 const shellLauncherTargets = Effect.fn("cloud.pinned_runtime.shell_launcher_targets")(function* (
