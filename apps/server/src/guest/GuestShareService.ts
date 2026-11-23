@@ -320,17 +320,25 @@ const make = Effect.gen(function* () {
       .getThreadRecords(claims.value.threadId, [])
       .pipe(Effect.mapError(() => inactive));
     const share = thread.guestShare;
+    if (!(yield* sharingEnabled) || !share) return yield* inactive;
     const now = yield* DateTime.now;
-    if (
-      !(yield* sharingEnabled) ||
-      !share ||
-      share.id !== claims.value.shareId ||
-      thread.archivedAt !== null ||
-      thread.deletedAt !== null ||
-      DateTime.toEpochMillis(now) >= Date.parse(share.expiresAt) ||
-      (kind === "session" && share.guestName === null) ||
-      (yield* connectHostname) !== share.host
-    ) {
+    const activeThread = thread.archivedAt === null && thread.deletedAt === null;
+    const eligible =
+      kind === "invite"
+        ? yield* guestShareDecisions
+            .authorizeInvite({
+              shareId: share.id,
+              inviteShareId: claims.value.shareId,
+              activeThread,
+              expiresAt: share.expiresAt,
+              now,
+            })
+            .pipe(Effect.mapError(() => new GuestShareAccessError({ reason: "unavailable" })))
+        : activeThread &&
+          share.id === claims.value.shareId &&
+          !(DateTime.toEpochMillis(now) >= Date.parse(share.expiresAt)) &&
+          share.guestName !== null;
+    if (!eligible || (yield* connectHostname) !== share.host) {
       return yield* inactive;
     }
     return { thread, share };

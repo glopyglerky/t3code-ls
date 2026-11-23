@@ -82,6 +82,18 @@ impl Expiration {
     }
 }
 
+pub fn invite_is_live(
+    share_id: &str,
+    invite_share_id: &str,
+    active_thread: bool,
+    expires_at: Option<Timestamp>,
+    now: Timestamp,
+) -> bool {
+    active_thread
+        && share_id == invite_share_id
+        && !expires_at.is_some_and(|expires| now.0 >= expires.0)
+}
+
 /// Payload retains attachment fields which the decision layer does not inspect.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Attachment<Payload> {

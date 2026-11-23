@@ -588,9 +588,34 @@ pub fn evaluate(input: &Value) -> WireResult<Value> {
         "release" => &["version", "operation", "before", "after", "parsedDates"],
         "strip" => &["version", "operation", "context"],
         "classify-uploads" => &["version", "operation", "uploads"],
+        "authorize-invite" => &[
+            "version",
+            "operation",
+            "shareId",
+            "inviteShareId",
+            "activeThread",
+            "expiresAt",
+            "now",
+        ],
         _ => return Err(Error::InvalidRequest),
     };
     allowed_fields(input, keys)?;
+    if operation == "authorize-invite" {
+        let eligible = guest_share::invite_is_live(
+            field(input, "shareId")?
+                .as_str()
+                .ok_or(Error::InvalidRequest)?,
+            field(input, "inviteShareId")?
+                .as_str()
+                .ok_or(Error::InvalidRequest)?,
+            field(input, "activeThread")?
+                .as_bool()
+                .ok_or(Error::InvalidRequest)?,
+            nullable_timestamp(field(input, "expiresAt")?)?,
+            timestamp(field(input, "now")?)?,
+        );
+        return Ok(success(Value::Bool(eligible), None));
+    }
     if operation == "classify-uploads" {
         return classify_uploads(input);
     }
