@@ -300,10 +300,12 @@ export const make = Effect.fn("Omdb.make")(
     ),
 );
 
-const layerFromPath = (databasePath: string, executable: string) =>
+const layerFromPath = (databasePath: string, executable: string, durableRelayWebhooks: boolean) =>
   Layer.unwrap(
     Effect.gen(function* () {
-      const { database, client } = yield* make({ databasePath, executable });
+      const { database, client } = yield* make({ databasePath, executable }).pipe(
+        Effect.provideService(RedbClient.DurableRelayWebhooks, durableRelayWebhooks),
+      );
       return Layer.merge(
         Layer.succeed(NativeDatabase.NativeDatabase, database),
         Layer.succeed(RedbClient.RedbClient, client),
@@ -319,6 +321,10 @@ export const layerConfig = Layer.unwrap(
       try: () => nativeExecutable("db", environment.T3_CODE_LS_DB_EXECUTABLE),
       catch: (cause) => new OmdbStartupError({ path: config.dbPath, cause }),
     });
-    return layerFromPath(config.dbPath, executable);
+    return layerFromPath(
+      config.dbPath,
+      executable,
+      environment.T3_CODE_LS_DURABLE_RELAY_WEBHOOKS === "1",
+    );
   }),
 );

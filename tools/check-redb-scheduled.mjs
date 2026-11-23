@@ -31,6 +31,8 @@ import * as ThreadLaunchService from "../apps/server/src/orchestration-v2/Thread
 import * as ManagedProjectFolders from "../apps/server/src/project/ManagedProjectFolders.ts";
 import * as Metrics from "../apps/server/src/observability/Metrics.ts";
 import * as ThreadManagementService from "../apps/server/src/orchestration-v2/ThreadManagementService.ts";
+import { OrchestratorDispatchError } from "../apps/server/src/orchestration-v2/Orchestrator.ts";
+import { userFacingDispatchErrorMessage } from "../apps/server/src/orchestration-v2/UserFacingErrors.ts";
 import * as SecretRequests from "../apps/server/src/secrets/SecretRequests.ts";
 import * as ManagedPolicy from "../apps/server/src/policy/ManagedPolicy.ts";
 import * as DueHint from "../apps/server/src/scheduling/DueHint.ts";
@@ -61,6 +63,16 @@ const [executable, proofPath] = process.argv.slice(2);
 Assert.ok(executable && Path.isAbsolute(executable), "Pass an absolute native database executable");
 await FS.access(executable, FS.constants.X_OK);
 const at = "2026-11-10T12:00:00.000Z";
+const stock = {
+  commit: "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+  root_tree: "af9112ce82be93109079ca7b7a89f7182455eca5",
+};
+const originalCitationOffsets = loadUpstream(
+  "packages/shared/src/assistantCitations.ts",
+  { ...Contracts, Option, Schema },
+  ["splitsSurrogatePair"],
+  stock,
+);
 const originalDedupe = loadUpstream(
   "apps/server/src/scheduledTasks/webhookDedupe.ts",
   {
@@ -80,6 +92,7 @@ const originalDedupe = loadUpstream(
     "decodePendingRequest",
     "dedupeError",
   ],
+  stock,
 );
 const original = loadUpstream(
   "apps/server/src/scheduledTasks/ScheduledTaskService.ts",
@@ -90,6 +103,7 @@ const original = loadUpstream(
     Digest,
     Mac,
     SecureRandom,
+    ...originalCitationOffsets.module,
     DateTime,
     Effect,
     NodeSqliteClient,
@@ -109,6 +123,8 @@ const original = loadUpstream(
     ManagedProjectFolders,
     Metrics,
     ThreadManagementService,
+    OrchestratorDispatchError,
+    userFacingDispatchErrorMessage,
     SecretRequests,
     ManagedPolicy,
     DueHint,
@@ -120,11 +136,12 @@ const original = loadUpstream(
     ...WebhookVerification,
   },
   ["layer", "ScheduledTaskService"],
+  stock,
 );
 const fixture = await createFixture();
 const checks = [];
 
-function serviceScenario(kind) {
+function serviceScenario(kind, { exercise, holdLaunch = false } = {}) {
   let time = Date.parse(at),
     random = 0;
   const workers = new Map(),
@@ -158,7 +175,8 @@ function serviceScenario(kind) {
         Effect.sync(() => {
           launches.push(normalized(input));
           return { threadId: `thread:${launches.length}`, resumed: false };
-        }),
+        }).pipe(holdLaunch ? Effect.andThen(Effect.never) : (effect) => effect),
+      isNonGitProject: () => Effect.succeed(false),
     }),
     Layer.succeed(ManagedProjectFolders.ManagedProjectFolders, {
       namedProjectsRoot: "/fixture/projects",
@@ -202,6 +220,17 @@ function serviceScenario(kind) {
     });
   return Effect.gen(function* () {
     const service = yield* serviceTag;
+    if (exercise) {
+      return yield* exercise({
+        service,
+        workers,
+        launches,
+        input,
+        advanceClock: (ms) => {
+          time += ms;
+        },
+      });
+    }
     const result = {};
     result.initial = yield* service.list();
     Assert.equal(result.initial.tasks.length, 2);
@@ -404,6 +433,180 @@ function rowScenario(rows, transaction) {
   });
 }
 
+function immediateRelayRequest(task, relayDeliveryId, value) {
+  const bodyText = JSON.stringify({ value });
+  return {
+    hookId: task.id,
+    token: task.webhook.path.split("/").at(-1),
+    method: "POST",
+    path: "/hook",
+    query: "",
+    headers: { "content-type": "application/json", "delivery-id": relayDeliveryId },
+    bodyText,
+    body: new TextEncoder().encode(bodyText),
+    relayDeliveryId,
+  };
+}
+
+function waitFor(read, check, description) {
+  return Effect.gen(function* () {
+    for (let attempt = 0; attempt < 500; attempt++) {
+      const value = yield* read;
+      if (check(value)) return value;
+      yield* Effect.yieldNow;
+    }
+    Assert.fail(description);
+  });
+}
+
+async function proveDurableImmediateRelay() {
+  const withDurableNative = (use) =>
+    withNative(executable, fixture, use, undefined, { durableRelayWebhooks: true });
+  const { task, uncertain, ready, prompt } = await withDurableNative(() =>
+    serviceScenario("native", {
+      holdLaunch: true,
+      exercise: ({ service, launches, input, advanceClock }) =>
+        Effect.gen(function* () {
+          const rows = yield* NativeScheduledRows.make;
+          const schedule = { type: "webhook", dedupe: { replayKey: "{{headers.delivery-id}}" } };
+          const task = (yield* service.upsert(yield* input("durable-hook", { schedule }))).task;
+          const uncertain = immediateRelayRequest(task, "possibly-sent", "first");
+          const ready = immediateRelayRequest(task, "committed-before-start", "a".repeat(70_000));
+          const [readPending, readLog] = [
+            (delivery) =>
+              rows.read(
+                {
+                  kind: "pending",
+                  delivery_id: `delivery:relay:${delivery}`,
+                  first: true,
+                },
+                Rows.PendingRows,
+              ),
+            (delivery) =>
+              service.getWebhookDelivery({
+                id: task.id,
+                deliveryId: `delivery:relay:${delivery}`,
+                acceptAnyOutcome: true,
+              }),
+          ];
+          Assert.equal((yield* service.triggerWebhook(uncertain)).outcome, "accepted");
+          yield* waitFor(
+            readPending(uncertain.relayDeliveryId),
+            ([row]) => row?.state === "relay_running" && launches.length === 1,
+            "Immediate work never reached the normal worker without a scheduler tick",
+          );
+          const accepted = yield* service.triggerWebhook(ready);
+          Assert.equal(accepted.outcome, "accepted");
+          const [entry] = yield* readPending(ready.relayDeliveryId);
+          Assert.equal(entry.state, "relay_ready");
+          const prompt = JSON.parse(entry.request_json);
+          Assert.ok(prompt.length > 64 * 1024 && prompt.includes("a".repeat(70_000)));
+          const { delivery } = yield* readLog(ready.relayDeliveryId);
+          Assert.equal(delivery.outcome, "accepted");
+          Assert.equal(delivery.pendingWindow, false);
+          Assert.ok(prompt.startsWith(delivery.renderedPrompt));
+          Assert.equal(delivery.renderedPrompt.length, 64 * 1024);
+          const replay = yield* rows.read(
+            {
+              kind: "has_replay",
+              task_id: task.id,
+              replay_key: Crypto.createHash("sha256").update(ready.relayDeliveryId).digest("hex"),
+              now: Date.parse(at),
+            },
+            Rows.AnyRows,
+          );
+          Assert.equal(replay.length, 1);
+          Assert.deepEqual(
+            yield* rows.write(
+              {
+                kind: "claim_relay",
+                relay_delivery_id: ready.relayDeliveryId,
+                task_id: task.id,
+                seen_at: at,
+              },
+              Rows.AnyRows,
+            ),
+            [],
+          );
+          Assert.equal((yield* service.triggerWebhook(ready)).outcome, "duplicate");
+          advanceClock(60_000);
+          yield* service.upsert(
+            yield* input("durable-hook", { prompt: "Edited while queued", schedule }),
+          );
+          return { task, uncertain, ready, prompt };
+        }),
+    }),
+  );
+  await withDurableNative(() =>
+    serviceScenario("native", {
+      exercise: ({ service, launches, workers, advanceClock }) =>
+        Effect.gen(function* () {
+          const rows = yield* NativeScheduledRows.make;
+          const deliveryId = `delivery:relay:${ready.relayDeliveryId}`;
+          const unresolvedId = `delivery:relay:${uncertain.relayDeliveryId}`;
+          advanceClock(120_000);
+          yield* workers.get("webhook-coalescing");
+          const current = yield* waitFor(
+            service.list().pipe(Effect.map(({ tasks }) => tasks.find(({ id }) => id === task.id))),
+            (task) => task?.runCount === 1 && task.lastRunStatus === "succeeded",
+            "Ready work did not complete after reopening the selected native store",
+          );
+          Assert.equal(current.prompt, "Edited while queued");
+          Assert.equal(launches.length, 1);
+          Assert.equal(launches[0].commandId, `scheduled-task:${task.id}:webhook:${deliveryId}`);
+          Assert.equal(
+            launches[0].initialMessage.messageId,
+            `scheduled-task-message:${task.id}:webhook:${deliveryId}`,
+          );
+          Assert.equal(launches[0].initialMessage.text, prompt);
+          Assert.deepEqual(
+            yield* rows.read(
+              {
+                kind: "pending",
+                delivery_id: deliveryId,
+                first: true,
+              },
+              Rows.PendingRows,
+            ),
+            [],
+          );
+          const [unresolved] = yield* rows.read(
+            {
+              kind: "pending",
+              delivery_id: unresolvedId,
+              first: true,
+            },
+            Rows.PendingRows,
+          );
+          Assert.equal(unresolved.state, "relay_unresolved");
+          Assert.equal(unresolved.request_json, "");
+          const { delivery } = yield* service.getWebhookDelivery({
+            id: task.id,
+            deliveryId: unresolvedId,
+            acceptAnyOutcome: true,
+          });
+          Assert.equal(delivery.outcome, "dispatch_failed");
+          Assert.match(delivery.error, /could not be confirmed/);
+          Assert.deepEqual(yield* service.triggerWebhook(uncertain), {
+            _tag: "unresolved",
+            deliveryId: unresolvedId,
+          });
+          Assert.equal((yield* service.triggerWebhook(ready)).outcome, "duplicate");
+          yield* rows.write(
+            { kind: "prune_relays", before: "2026-11-13T00:00:00.000Z" },
+            Rows.AnyRows,
+          );
+          Assert.deepEqual(yield* service.triggerWebhook(uncertain), {
+            _tag: "unresolved",
+            deliveryId: unresolvedId,
+          });
+          yield* workers.get("webhook-coalescing");
+          Assert.equal(launches.length, 1);
+        }),
+    }),
+  );
+}
+
 try {
   const source = Path.join(fixture.root, "source.sqlite"),
     exported = Path.join(fixture.root, "source.ndjson");
@@ -478,12 +681,24 @@ try {
   checks.push(
     "Reopening preserves native task state and does not rebuild indexes from stale imported rows",
   );
+  await proveDurableImmediateRelay();
+  await withNative(executable, fixture, (client) =>
+    Effect.gen(function* () {
+      const unopted = yield* Effect.result(client.prepareScheduled);
+      Assert.ok(Result.isFailure(unopted));
+      Assert.equal(unopted.failure.kind, "incompatible_store");
+    }),
+  );
+  checks.push(
+    "Immediate relay admission retains its full prompt and reservation before acknowledgement, recovers ready work once, retains ambiguous running claims, and fences unopted readers",
+  );
   await finishProof({
     executable,
     fixture,
     proofPath,
     checks,
-    oracles: [original.source, originalDedupe.source],
+    oracles: [original.source, originalDedupe.source, originalCitationOffsets.source],
+    oracleCommit: stock.commit,
     sourceHash,
     sourcePaths: [
       "apps/server/src/scheduledTasks/ScheduledTaskService.ts",
@@ -492,6 +707,8 @@ try {
       "apps/server/src/scheduledTasks/SqliteScheduledRows.ts",
       "apps/server/src/scheduledTasks/NativeScheduledRows.ts",
       "apps/server/src/scheduledTasks/redb_scheduled_rows.rs",
+      "apps/server/src/persistence/RedbClient.ts",
+      "crates/storage/src/bin/t3-code-ls-db.rs",
     ],
   });
 } finally {

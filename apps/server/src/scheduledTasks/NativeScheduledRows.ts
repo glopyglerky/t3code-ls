@@ -13,6 +13,7 @@ export const make = Effect.gen(function* () {
   const client = yield* RedbClient;
   while (!(yield* client.prepareScheduled).prepared) yield* Effect.yieldNow;
   return ScheduledRows.of({
+    durableRelayWebhooks: client.durableRelayWebhooks,
     read: Effect.fn("ScheduledRows.read")(<A>(query: ScheduledRead, response: Schema.Decoder<A>) =>
       client
         .request("application_scheduled_read", { query }, response)

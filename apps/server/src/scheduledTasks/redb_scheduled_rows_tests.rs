@@ -38,7 +38,7 @@ async fn setup(store: &Store) -> ApplicationTransactions {
     let mut app = ApplicationTransactions::new(store.clone());
     app.initialize(schema()).await.unwrap();
     while !store
-        .prepare_application_scheduled()
+        .prepare_application_scheduled(false)
         .await
         .unwrap()
         .prepared
@@ -380,4 +380,97 @@ async fn pending_recovery_counts_only_the_delivery_that_owned_the_running_task()
         1
     );
     app.rollback("write").await.unwrap();
+}
+
+#[tokio::test]
+async fn durable_relay_admission_and_reader_fence_commit_together() {
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    let mut app = setup(&store).await;
+    assert!(
+        store
+            .prepare_application_scheduled(true)
+            .await
+            .unwrap()
+            .prepared
+    );
+    assert!(
+        store
+            .prepare_application_scheduled(false)
+            .await
+            .unwrap()
+            .prepared
+    );
+
+    let id = "delivery:relay:fixture";
+    let prompt = "exact rendered fixture";
+    for commit in [false, true] {
+        app.begin("write").await.unwrap();
+        save(&mut app, "write", task("task", "created", None)).await;
+        assert_eq!(
+            mutate(
+                &mut app,
+                "write",
+                json!({
+                    "kind":"claim_relay", "relay_delivery_id":"fixture",
+                    "task_id":"task", "seen_at":"2026-11-10",
+                })
+            )
+            .await,
+            json!([{"relay_delivery_id":"fixture"}])
+        );
+        mutate(
+            &mut app,
+            "write",
+            json!({
+                "kind":"insert_ready_relay", "delivery_id":id, "task_id":"task",
+                "due_at":0, "task_json":"{}", "prompt_json":json!(prompt).to_string(),
+            }),
+        )
+        .await;
+        mutate(
+            &mut app,
+            "write",
+            json!({"kind":"record_delivery", "row":delivery(id, "task", "accepted")}),
+        )
+        .await;
+        assert_eq!(
+            query(
+                &mut app,
+                "write",
+                json!({"kind":"pending","delivery_id":id,"first":true})
+            )
+            .await[0]["request_json"],
+            json!(prompt).to_string()
+        );
+        if commit {
+            app.commit("write").await.unwrap();
+        } else {
+            app.rollback("write").await.unwrap();
+            assert!(
+                store
+                    .prepare_application_scheduled(false)
+                    .await
+                    .unwrap()
+                    .prepared
+            );
+        }
+    }
+    assert!(matches!(
+        store.prepare_application_scheduled(false).await,
+        Err(Error::IncompatibleStore)
+    ));
+    assert!(
+        store
+            .prepare_application_scheduled(true)
+            .await
+            .unwrap()
+            .prepared
+    );
+    app.begin("read").await.unwrap();
+    assert_eq!(
+        query(&mut app, "read", json!({"kind":"active_pending_tasks"})).await,
+        json!([{"task_id":"task"}])
+    );
+    app.rollback("read").await.unwrap();
 }
