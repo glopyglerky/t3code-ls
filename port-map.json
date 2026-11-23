@@ -2080,6 +2080,37 @@
       "retired_paths": [],
       "notes": "T15/J32 savings policy with a no_std allocation-free fold, Wasm binding and the existing Savings service. D1 owns atomic receipt deduplication and totals publication. The deployed worker uses its retained fold. Wasm packaging, Cloudflare execution and performance remain unqualified.",
       "rust_crates": ["infra/task-cache/rust", "infra/task-cache/rust/web"]
+    },
+    {
+      "id": "terminal-pty-host",
+      "state": "candidate",
+      "domain_owner": "apps/server/src/terminal",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/server/src/terminal/NodePtyAdapter.ts",
+          "blob": "cc7ae638f7df2c5605584eba1c0de3f4799acdfc"
+        }
+      ],
+      "rust_paths": [
+        "apps/server/rust/pty-host/src/lib.rs",
+        "apps/server/rust/pty-host/src/linux.rs",
+        "apps/server/rust/pty-host/src/main.rs"
+      ],
+      "adapter_paths": [],
+      "platform_routes": [
+        {
+          "targets": ["linux-x64"],
+          "state": "candidate",
+          "implementation": "standalone-component",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": ["apps/server/rust/pty-host/tests/owner.rs"],
+      "retired_paths": [],
+      "notes": "T07 Linux PTY host candidate using portable-pty 0.9.0 and nix 0.28.0. Explicit executable, cwd and environment. Bounded nonblocking byte input, exact output acknowledgement and child close/reap. The application retains NodePtyAdapter selection. Host SIGKILL, interactive foreground jobs, session-escaping descendants, platform integration and performance remain unqualified.",
+      "rust_crates": ["apps/server/rust/pty-host"]
     }
   ],
   "backend_selection": "Select before execution. Compatible Linux GNU x86_64 defaults to Rust; other hosts use the retained upstream implementation. Explicit per-component native overrides fail visibly. T3_CODE_LS_IMPLEMENTATION=upstream provides a controlled original baseline. No retry through another implementation."
