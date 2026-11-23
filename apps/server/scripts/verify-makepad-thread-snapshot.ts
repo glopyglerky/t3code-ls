@@ -14,18 +14,23 @@ import { Socket } from "effect/socket";
 import { makeWsRpcProtocolClient } from "../../../packages/client-runtime/src/rpc/protocol.ts";
 
 const executable = process.argv[2];
-Assert.ok(executable && Path.isAbsolute(executable) && process.argv.length === 3);
+const historyMode = process.argv[3] === "--history";
+Assert.ok(executable && Path.isAbsolute(executable) && process.argv.length === (historyMode ? 4 : 3));
 Assert.equal(process.platform, "darwin");
 Assert.equal(process.arch, "arm64");
-const scratch = FS.mkdtempSync(Path.join(OS.tmpdir(), "makepad-thread-snapshot-"));
 const root = Path.resolve(import.meta.dirname, "../../..");
+const historyFixture = JSON.parse(FS.readFileSync(Path.join(root, "packages/client-runtime/rust/host/fixtures/saved-history.json"), "utf8")) as {
+  sessionId: string; turnCount: number; promptPrefix: string; replyPrefix: string;
+};
+Assert.equal(historyFixture.turnCount, 40);
+const scratch = FS.mkdtempSync(Path.join(OS.tmpdir(), "makepad-thread-snapshot-"));
 const baseDir = Path.join(scratch, "profile");
 const workspace = Path.join(scratch, "workspace");
 const codexHome = Path.join(scratch, "codex");
 const userdata = Path.join(baseDir, "userdata");
 const bootstrap = Crypto.randomBytes(32).toString("hex");
 const projectId = ProjectId.make("gpui-snapshot-project");
-const sessionId = "0251af00-0000-4000-8000-000000000035";
+const sessionId = historyFixture.sessionId;
 const threadId = `import:codex:${sessionId}`;
 let server: ChildProcess.ChildProcess | undefined;
 let closed = Promise.resolve();
@@ -40,16 +45,20 @@ try {
         config: { setupMode: "existing", homePath: codexHome, binaryPath: Path.join(scratch, "absent-codex") } },
     },
   }));
-  const stamp = new Date(Date.now() - 60_000);
+  const stamp = new Date(Date.now() - (historyMode ? 120_000 : 60_000));
   const day = stamp.toISOString().slice(0, 10);
   const sessions = Path.join(codexHome, "sessions", ...day.split("-"));
   FS.mkdirSync(sessions, { recursive: true });
-  const records = [
-    { type: "session_meta", payload: { id: sessionId, cwd: workspace, source: "cli" } },
+  const conversation = historyMode ? Array.from({ length: historyFixture.turnCount }, (_, turn) => [
+    { type: "event_msg", payload: { type: "user_message", message: `${historyFixture.promptPrefix}${String(turn).padStart(3, "0")}` } },
+    { type: "response_item", payload: { type: "message", role: "assistant",
+      content: [{ type: "output_text", text: `${historyFixture.replyPrefix}${String(turn).padStart(3, "0")}` }] } },
+  ]).flat() : [
     { type: "event_msg", payload: { type: "user_message", message: "GPUI saved conversation prompt" } },
     { type: "response_item", payload: { type: "message", role: "assistant",
       content: [{ type: "output_text", text: "GPUI server reply café 🦀" }] } },
   ];
+  const records = [{ type: "session_meta", payload: { id: sessionId, cwd: workspace, source: "cli" } }, ...conversation];
   FS.writeFileSync(Path.join(sessions, `rollout-${day}T00-00-00-${sessionId}.jsonl`),
     records.map((record, index) => JSON.stringify({
       timestamp: new Date(stamp.getTime() + index * 1000).toISOString(), ...record,
@@ -123,9 +132,31 @@ try {
   Assert.deepEqual(imported, { importedCount: 1, skippedCount: 0 });
   const snapshot = await fetch(origin + `/api/orchestration/threads/${encodeURIComponent(threadId)}/bounded`, { headers, signal: AbortSignal.timeout(15_000) });
   Assert.ok(snapshot.ok);
-  const data = await snapshot.json() as { projection: { thread: { id: string }; messages: { text: string }[] } };
+  type Row = { sourceItemId: string; item: { text: string } };
+  const data = await snapshot.json() as { snapshotSequence: number; hasMoreHistory: boolean; historyCursor: string | null;
+    projection: { thread: { id: string }; messages: { text: string }[]; visibleTurnItems: Row[] } };
   Assert.equal(data.projection.thread.id, threadId);
-  Assert.ok(data.projection.messages.some((message) => message.text === "GPUI server reply café 🦀"));
+  if (historyMode) {
+    Assert.equal(data.hasMoreHistory, true, "History fixture must exceed its first page");
+    let rows = data.projection.visibleTurnItems;
+    let cursor = data.historyCursor;
+    const visited = new Set<string>();
+    for (let page = 0; cursor !== null; page++) {
+      Assert.ok(page < 8 && !visited.has(cursor), "Synthetic history did not advance");
+      visited.add(cursor);
+      const response = await fetch(origin + `/api/orchestration/threads/${encodeURIComponent(threadId)}/history?cursor=${encodeURIComponent(cursor)}&view=conversation`, { headers, redirect: "error", signal: AbortSignal.timeout(15_000) });
+      Assert.ok(response.ok);
+      const older = await response.json() as { snapshotSequence: number; items: Row[]; nextCursor: string | null; hasMoreHistory: boolean };
+      Assert.equal(older.snapshotSequence, data.snapshotSequence);
+      Assert.equal(older.hasMoreHistory, older.nextCursor !== null);
+      rows = [...older.items, ...rows];
+      cursor = older.nextCursor;
+    }
+    Assert.equal(new Set(rows.map((row) => row.sourceItemId)).size, 80);
+    Assert.deepEqual(rows.map((row) => row.item.text), Array.from({ length: 40 }, (_, turn) => [
+      `${historyFixture.promptPrefix}${String(turn).padStart(3, "0")}`, `${historyFixture.replyPrefix}${String(turn).padStart(3, "0")}`,
+    ]).flat());
+  } else Assert.ok(data.projection.messages.some((message) => message.text === "GPUI server reply café 🦀"));
   Assert.ok(FS.existsSync(Path.join(userdata, "statev2.sqlite")));
   Assert.ok(!FS.existsSync(Path.join(userdata, "statev2.omdb")));
   for (const [request, success] of [
@@ -135,12 +166,12 @@ try {
     [{ port, token, environmentId: descriptor.environmentId, threadId }, true],
   ] as const) {
     await new Promise<void>((resolve, reject) => {
-      const view = ChildProcess.spawn(executable, ["--thread-snapshot-proof"], {
+      const view = ChildProcess.spawn(executable, [historyMode ? "--thread-history-proof" : "--thread-snapshot-proof"], {
         env: process.env, stdio: ["pipe", "pipe", "pipe"],
       });
       let output = "";
       let oversized = false;
-      const timer = setTimeout(() => { view.kill("SIGKILL"); }, 20_000);
+      const timer = setTimeout(() => { view.kill("SIGKILL"); }, historyMode ? 45_000 : 20_000);
       const capture = (chunk: Buffer) => {
         if (output.length + chunk.length > 64 * 1024) { oversized = true; view.kill("SIGKILL"); }
         else output += chunk.toString("utf8");
@@ -150,7 +181,8 @@ try {
       view.once("error", () => { clearTimeout(timer); reject(new Error("Makepad snapshot window could not start")); });
       view.once("close", (code) => {
         clearTimeout(timer);
-        const marker = success ? "T14 Makepad server snapshot proof passed" : "T14 Makepad server snapshot refusal passed";
+        const kind = historyMode ? "history" : "snapshot";
+        const marker = success ? `T14 Makepad server ${kind} proof passed` : `T14 Makepad server ${kind} refusal passed`;
         if (code === 0 && !oversized && output.includes(marker) && !output.includes(token)) resolve();
         else reject(new Error("Makepad snapshot window check failed"));
       });
@@ -162,8 +194,8 @@ try {
   console.log(JSON.stringify({
     toolkit: "makepad", platform: "darwin-arm64", serverImplementation: "upstream", storage: "sqlite",
     serverSha256: digest(Path.join(root, "apps/server/dist/bin.mjs")), executableSha256: digest(executable),
-    workload: "gpui-snapshot-project/codex-three-records", positiveWindows: 1, refusalWindows: 3,
-    scope: "authenticated production bounded snapshot route and Makepad widget text after native window draw",
+    workload: historyMode ? "shared-saved-history/40-turns/80-records" : "gpui-snapshot-project/codex-three-records", positiveWindows: 1, refusalWindows: 3,
+    scope: historyMode ? "production bounded snapshot plus opaque history pages and native load-older command" : "authenticated production bounded snapshot route and Makepad widget text after native window draw",
     unqualified: ["native macOS storage", "accessibility", "physical input", "live subscription", "provider submission"],
   }));
 } finally {

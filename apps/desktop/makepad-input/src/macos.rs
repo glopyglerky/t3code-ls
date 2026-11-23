@@ -1,3 +1,4 @@
+mod history_proof;
 mod proof;
 mod snapshot_proof;
 
@@ -30,7 +31,9 @@ script_mod! {
                         height: 220
                         snapshot := Label { width: Fill text: "" }
                     }
-                    Label { text: "Synthetic local draft" }
+                    load_older := Button { text: "Load older history" visible: false grab_key_focus: false }
+                    history_status := Label { width: Fill visible: false text: "" }
+                    local_heading := Label { text: "Synthetic local draft" }
                     composer := TextInput {
                         width: Fill
                         height: 145
@@ -59,9 +62,82 @@ struct App {
     proof: Option<proof::Proof>,
     #[rust]
     snapshot_proof: Option<snapshot_proof::Proof>,
+    #[rust]
+    history: Option<crate::server_snapshot::History>,
+    #[rust]
+    history_pending: Option<std::sync::mpsc::Receiver<(crate::server_snapshot::History, bool)>>,
+    #[rust]
+    history_ticks: Option<Timer>,
+    #[rust]
+    history_proof: Option<history_proof::Proof>,
 }
 
 impl App {
+    fn load_older(&mut self, cx: &mut Cx) {
+        if self.history_pending.is_some() {
+            return;
+        }
+        let Some(mut history) = self.history.take() else {
+            return;
+        };
+        if !history.has_older() {
+            self.history = Some(history);
+            return;
+        }
+        self.ui.button(cx, ids!(load_older)).set_enabled(cx, false);
+        self.ui
+            .label(cx, ids!(history_status))
+            .set_text(cx, "Loading older history…");
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let accepted = history.load_older().is_ok();
+            let _ = sender.send((history, accepted));
+        });
+        self.history_pending = Some(receiver);
+        self.history_ticks = Some(cx.start_interval(0.08));
+    }
+
+    fn poll_history(&mut self, cx: &mut Cx, event: &Event) {
+        if !self
+            .history_ticks
+            .is_some_and(|timer| timer.is_event(event).is_some())
+        {
+            return;
+        }
+        let Some(receiver) = &self.history_pending else {
+            return;
+        };
+        match receiver.try_recv() {
+            Ok((history, accepted)) => {
+                self.ui
+                    .label(cx, ids!(snapshot))
+                    .set_text(cx, history.text());
+                self.ui
+                    .button(cx, ids!(load_older))
+                    .set_enabled(cx, history.has_older());
+                self.ui.label(cx, ids!(history_status)).set_text(
+                    cx,
+                    if accepted {
+                        "Older history loaded."
+                    } else {
+                        crate::server_snapshot::FAILED_HISTORY
+                    },
+                );
+                self.history = Some(history);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.ui
+                    .label(cx, ids!(history_status))
+                    .set_text(cx, crate::server_snapshot::FAILED_HISTORY);
+            }
+        }
+        self.history_pending = None;
+        if let Some(timer) = self.history_ticks.take() {
+            cx.stop_timer(timer);
+        }
+    }
+
     fn update_draft(&mut self, input: &TextInputRef) -> Result<(), DraftError> {
         let selection = input.selection();
         self.draft
@@ -113,6 +189,10 @@ impl App {
 
 impl MatchEvent for App {
     fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions) {
+        if self.ui.button(cx, ids!(load_older)).clicked(actions) {
+            self.load_older(cx);
+            return;
+        }
         let input = self.ui.text_input(cx, ids!(composer));
         if input.returned(actions).is_none() && !self.ui.button(cx, ids!(submit)).clicked(actions) {
             return;
@@ -155,6 +235,42 @@ impl AppMain for App {
             if std::env::args_os().any(|arg| arg == "--proof") {
                 self.proof = Some(proof::Proof::start(cx));
             }
+            if let Some(initial) = crate::HISTORY.get() {
+                self.ui
+                    .text_input(cx, ids!(composer))
+                    .set_visible(cx, false);
+                self.ui.button(cx, ids!(submit)).set_visible(cx, false);
+                self.ui
+                    .label(cx, ids!(local_heading))
+                    .set_visible(cx, false);
+                self.ui.label(cx, ids!(status)).set_visible(cx, false);
+                self.ui
+                    .label(cx, ids!(history_status))
+                    .set_visible(cx, true);
+                if let Some(result) = initial.lock().ok().and_then(|mut value| value.take()) {
+                    self.ui
+                        .label(cx, ids!(snapshot_heading))
+                        .set_text(cx, crate::server_snapshot::LABEL);
+                    match result {
+                        Ok(history) => {
+                            self.ui
+                                .label(cx, ids!(snapshot))
+                                .set_text(cx, history.text());
+                            let button = self.ui.button(cx, ids!(load_older));
+                            button.set_visible(cx, true);
+                            button.set_enabled(cx, history.has_older());
+                            self.history = Some(history);
+                        }
+                        Err(_) => self
+                            .ui
+                            .label(cx, ids!(snapshot))
+                            .set_text(cx, crate::server_snapshot::FAILED),
+                    }
+                }
+                if std::env::args_os().any(|arg| arg == "--thread-history-proof") {
+                    self.history_proof = Some(history_proof::Proof::start(cx));
+                }
+            }
             if let Some(snapshot) = crate::SNAPSHOT.get() {
                 self.ui
                     .label(cx, ids!(snapshot_heading))
@@ -171,6 +287,17 @@ impl AppMain for App {
         }
         self.match_event(cx, event);
         self.dispatch(cx, event);
+        self.poll_history(cx, event);
+        if let Some(mut proof) = self.history_proof.take() {
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                proof.advance(self, cx, event);
+            }))
+            .is_err()
+            {
+                std::process::exit(1);
+            }
+            self.history_proof = Some(proof);
+        }
         if let Some(mut proof) = self.snapshot_proof.take() {
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 proof.advance(self, cx, event);

@@ -123,3 +123,57 @@ combining characters. The shared `no_std` crate uses `alloc`, checks UTF-8
 boundaries before converting to UTF-16, and never normalizes the draft.
 [Makepad license](https://github.com/makepad/makepad/blob/888d1b501ff41d0084ddd5417446b7341d5f873e/LICENSE)
 [Unicode text segmentation](https://www.unicode.org/reports/tr29/tr29-49.html)
+
+## Load older saved conversation records
+
+`--thread-history` uses the same four-field stdin connection object. It
+opens the production bounded snapshot, preserves the server's opaque
+`historyCursor`, and enables **Load older history**. Each click runs the
+read on a worker while the native window remains responsive. A successful
+page prepends its records in returned order; the reader never sorts by
+page-local positions or decodes the cursor. The original
+`--thread-snapshot` mode remains available.
+
+The first history profile accepts local user and assistant message rows.
+Each row must bind both source and item thread IDs to the selected thread,
+with matching source/item identity and unique message identity. The
+reader checks the environment again before every authenticated page and
+requires the snapshot sequence to remain unchanged. A changed saved
+conversation needs a fresh open. Inherited/synthetic rows, work records,
+omitted bodies and compact IDs are explicit unsupported cases for this
+profile. They remain future integration work, rather than being silently
+shown as complete history.
+
+Retention is capped at 500 records, eight accepted pages including the
+initial snapshot, 4096 bytes per opaque cursor, 2 MiB of serialized retained
+rows and 2 MiB of rendered text. The existing per-response and request-time
+limits still apply. These are logical bounds, not measured RSS or allocator
+limits. Hitting a bound refuses the page and preserves already shown text.
+The view does not evict records or claim unbounded full-history support.
+Malformed, duplicate, overlapping or wrong-scope pages also preserve the
+view and disable further paging. No automatic retry follows refusal.
+
+The shared loopback fixture covers an 80-record conversation across three
+pages, exact percent encoding, next-page refusal, a later cursor cycle,
+changed sequence and wrong-thread scope. The shared declarative workload
+is `packages/client-runtime/rust/host/fixtures/saved-history.json`: forty
+turns, each with a distinct user prompt and assistant reply. The application
+runner imports those records through real scan/import RPCs and confirms
+all server pages before opening the Makepad history window. Its native
+proof checks the first page is incomplete, invokes the same command as the
+visible button, waits for each worker, and verifies all 80 records in order.
+
+```sh
+node apps/server/scripts/verify-makepad-thread-snapshot.ts \
+  "$CARGO_TARGET_DIR/debug/t3-code-ls-makepad-input" --history
+```
+
+Both toolkits can use `Connection::history`, `History::text`,
+`History::has_older` and `History::load_older` from the same host source.
+For GPUI application parity, import this exact workload on its selected
+server backend, require an incomplete initial page, then assert all eighty
+ordered records through the native history control and the existing AT-SPI
+harness. The GPUI control and that application proof remain unimplemented
+in this branch. The Makepad proof still uses the supported retained macOS
+server backend and does not qualify native storage. Neither new history
+runtime path has been executed locally.

@@ -8,6 +8,11 @@ static SNAPSHOT: std::sync::OnceLock<Result<server_snapshot::Snapshot, &'static 
     std::sync::OnceLock::new();
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+static HISTORY: std::sync::OnceLock<
+    std::sync::Mutex<Option<Result<server_snapshot::History, &'static str>>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod macos;
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -21,9 +26,14 @@ fn main() -> std::process::ExitCode {
                 .and_then(|connection| connection.snapshot());
             let _ = SNAPSHOT.set(result);
         }
+        [argument] if argument == "--thread-history" || argument == "--thread-history-proof" => {
+            let result = server_snapshot::Connection::read(std::io::stdin().lock())
+                .and_then(server_snapshot::Connection::history);
+            let _ = HISTORY.set(std::sync::Mutex::new(Some(result)));
+        }
         _ => {
             eprintln!(
-                "Usage: t3-code-ls-makepad-input [--proof | --thread-snapshot | --thread-snapshot-proof] < CONNECTION_JSON"
+                "Usage: t3-code-ls-makepad-input [--proof | --thread-snapshot | --thread-snapshot-proof | --thread-history | --thread-history-proof] < CONNECTION_JSON"
             );
             return std::process::ExitCode::from(2);
         }

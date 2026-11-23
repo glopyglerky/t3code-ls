@@ -1,5 +1,9 @@
 //! Read-only loopback adapter for the production orchestration HTTP contract.
 //! No redirect, proxy, provider action or alternate endpoint is selected here.
+#[path = "server_history.rs"]
+mod history;
+pub use history::{FAILED_HISTORY, History};
+
 use serde_json::Value;
 use std::{
     io::{Read, Write},
@@ -76,24 +80,25 @@ impl Connection {
     }
 
     pub fn snapshot(&self) -> Result<Snapshot, &'static str> {
-        let descriptor = self.get("/.well-known/t3/environment", false)?;
-        if descriptor["environmentId"].as_str() != Some(self.environment_id.as_str()) {
-            return Err(FAILED);
-        }
-        let mut encoded = String::new();
-        for byte in self.thread_id.bytes() {
-            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-                encoded.push(char::from(byte));
-            } else {
-                use std::fmt::Write;
-                write!(encoded, "%{byte:02X}").map_err(|_| FAILED)?;
-            }
-        }
+        self.verify_environment()?;
+        let encoded = encode_component(&self.thread_id);
         let snapshot = self.get(
             &format!("/api/orchestration/threads/{encoded}/bounded"),
             true,
         )?;
         parse_snapshot(&snapshot, &self.thread_id)
+    }
+
+    pub fn history(self) -> Result<History, &'static str> {
+        History::open(self)
+    }
+
+    fn verify_environment(&self) -> Result<(), &'static str> {
+        let descriptor = self.get("/.well-known/t3/environment", false)?;
+        if descriptor["environmentId"].as_str() != Some(self.environment_id.as_str()) {
+            return Err(FAILED);
+        }
+        Ok(())
     }
 
     fn get(&self, path: &str, authenticated: bool) -> Result<Value, &'static str> {
@@ -135,6 +140,19 @@ impl Connection {
         }
         decode_response(&bytes)
     }
+}
+
+fn encode_component(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            use std::fmt::Write;
+            write!(encoded, "%{byte:02X}").expect("Writing to a String cannot fail");
+        }
+    }
+    encoded
 }
 
 fn decode_response(bytes: &[u8]) -> Result<Value, &'static str> {

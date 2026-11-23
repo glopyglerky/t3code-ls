@@ -33,7 +33,7 @@ jobs:
           export CARGO_TARGET_DIR="$RUNNER_TEMP/makepad-target"
           manifest=apps/desktop/makepad-input/Cargo.toml
           cargo +1.99.1 fetch --locked --manifest-path "$manifest"
-          cargo +1.99.1 test --locked --offline --manifest-path "$manifest" server_snapshot::tests
+          cargo +1.99.1 test --locked --offline --manifest-path "$manifest" server_snapshot
           cargo +1.99.1 build --locked --offline --manifest-path "$manifest"
           shasum -a 256 "$manifest" apps/desktop/makepad-input/Cargo.lock \
             "$CARGO_TARGET_DIR/debug/t3-code-ls-makepad-input"
@@ -53,3 +53,8 @@ jobs:
         run: |
           node apps/server/scripts/verify-makepad-thread-snapshot.ts \
             "$RUNNER_TEMP/makepad-target/debug/t3-code-ls-makepad-input"
+      - name: Read older saved history through the Makepad control
+        timeout-minutes: 4
+        run: |
+          node apps/server/scripts/verify-makepad-thread-snapshot.ts \
+            "$RUNNER_TEMP/makepad-target/debug/t3-code-ls-makepad-input" --history
