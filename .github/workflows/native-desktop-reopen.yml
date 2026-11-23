@@ -40,9 +40,9 @@ jobs:
           mkdir "$TMPDIR" "$evidence"
           trap 'rm -r "$TMPDIR"' EXIT
           export T3_CODE_LS_IMPLEMENTATION=native
-          export T3_CODE_LS_NATIVE_DIR="$PWD/bin"
           node tools/build-native.mjs
           node tools/check-hybrid.mjs --verify-binaries
+          export T3_CODE_LS_NATIVE_DIR="$PWD/bin"
           pnpm exec node scripts/build-desktop-artifact.ts --platform linux --arch x64 \
             --target AppImage --keep-stage --output-dir "$TMPDIR/artifacts" --verbose
           mapfile -t bundles < <(find "$TMPDIR" -type d -name linux-unpacked)
