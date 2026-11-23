@@ -215,6 +215,9 @@ Focused command, using the pinned compiler installed by that workflow:
   server_submit::tests::streams_original_partial_then_final_for_one_dispatch_and_same_message
 ```
 
-Source and fixture changes do not establish hosted execution. Normal Electron
-selection, toolkit-only fixture proofs, other desktop platforms, general stream
-recovery, live providers and durable desktop drafts remain separately qualified.
+The Linux x64 X11/AT-SPI run observed the partial reply during the active
+turn, the same assistant message at completion and reopen, and the preserved
+unsent draft. Its dedicated approval and follow-up checks passed.
+Normal desktop integration, other platforms, stream recovery, live providers
+and durable desktop drafts still require qualification.
+[GPUI stream run](https://github.com/glopyglerky/t3code-ls/actions/runs/45232188579)

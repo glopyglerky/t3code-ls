@@ -129,6 +129,7 @@ try {
   git(workspace, "worktree", "add", "--quiet", "-b", "linked-branch", linked);
   FS.writeFileSync(Path.join(linked, "README"), "Dirty linked checkout\n");
   FS.writeFileSync(Path.join(linked, reviewPath), dirtyReviewText);
+  FS.unlinkSync(Path.join(linked, "binary.dat"));
   const reviewBase = git(linked, "rev-parse", "HEAD");
   FS.mkdirSync(bare);
   git(bare, "init", "--quiet", "--bare", "--initial-branch=main");
@@ -256,8 +257,10 @@ try {
       const working = preview.sources.find((source) => source.kind === "working-tree");
       Assert.ok(working);
       Assert.equal(working.diff, oraclePatch);
-      await Assert.rejects(client.rpc((rpc) => rpc[WS_METHODS.reviewGetDiffFileContents]({ ...contentsInput,
-        oldPath: "binary.dat", newPath: "binary.dat" })));
+      // A deleted blob has no working-tree read racing the retained diagnostic.
+      await Assert.rejects(client.rpc((rpc) => rpc[WS_METHODS.reviewGetDiffFileContents]({
+        ...contentsInput, changeType: "deleted", oldPath: "binary.dat", newPath: "binary.dat",
+      })));
       const observedReview = { sources: preview.sources, metadata: metadata.sources, contents };
       reviewByMode.set(mode, observedReview);
       if (mode === "upstream") Assert.deepEqual(observedReview, reviewByMode.get("native"));
