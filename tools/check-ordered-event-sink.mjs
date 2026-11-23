@@ -9,6 +9,11 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
+import * as Option from "effect/Option";
+import * as EventStore from "../apps/server/src/orchestration-v2/EventStore.ts";
+import * as CommandReceiptStore from "../apps/server/src/orchestration-v2/CommandReceiptStore.ts";
+import { completedWorkCases, expectedWork, readCompletedWork } from "./ordered-completed-work.mjs";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as EventSink from "../apps/server/src/orchestration-v2/EventSink.ts";
 import * as NativeEventSink from "../apps/server/src/orchestration-v2/NativeEventSink.ts";
@@ -24,7 +29,7 @@ Assert.ok(executable && Path.isAbsolute(executable));
 Assert.equal(extra.length, 0);
 Assert.ok(["direct-redb", "fjall"].includes(engine));
 const fixture = await createFixture();
-const directory = Path.join(fixture.root, "ordered");
+let directory = Path.join(fixture.root, "ordered");
 const profile = `t04-${engine}-efaf649-v1`;
 const alternateProfile = engine === "direct-redb" ? "t04-fjall-efaf649-v1" : "t04-direct-redb-efaf649-v1";
 const selection = (initialize = false) => ({
@@ -105,7 +110,10 @@ async function run(use, fault = {}) {
         }
         return result;
       }));
-      return yield* use({ sink, client, snapshot });
+      return yield* use({ sink, client, snapshot,
+        events: Context.get(services, EventStore.EventStoreV2),
+        receipts: Context.get(services, CommandReceiptStore.CommandReceiptStoreV2),
+      });
     }).pipe(Effect.provideService(RedbClient.RedbClient, client));
   }).pipe(Effect.provide(SecureRandom.layerWebCrypto)));
 }
@@ -272,8 +280,46 @@ try {
   await run(({ snapshot }) => snapshot.pipe(Effect.tap((state) => Effect.sync(() => Assert.deepEqual(state, recovered)))));
   Assert.deepEqual(unknownPublished, []);
   await assertSeed("lost-ack receipt recovery and repeated replay after reopen");
+  // This fresh candidate is separate from the fault cases above. Timings are
+  // diagnostic complete application work, including helper/transport overhead.
+  directory = Path.join(fixture.root, "completed-work");
+  Assert.equal(frames([selection(true)])[0].ok, true);
+  // Untimed empty-candidate read warms the local cache; every run still opens a new helper.
+  await run(({ snapshot }) => snapshot);
+  const cases = completedWorkCases({ command, sampleEvents, makeEvent, fixedTime });
+  const completedWork = [];
+  const allCommands = [];
+  for (const phase of cases) {
+    allCommands.push(...phase.commands);
+    const expected = expectedWork(allCommands);
+    const start = process.hrtime.bigint();
+    const observed = await run(({ sink, events, receipts, snapshot }) => at(fixedTime, Effect.gen(function* () {
+      for (const input of phase.commands) {
+        const committed = yield* sink.commitCommand(input);
+        Assert.equal(committed.committed, true);
+        const want = expected.commands.find((row) => row.receipt.commandId === input.commandId);
+        Assert.deepEqual(normalized({ receipt: committed.receipt, storedEvents: committed.storedEvents }), want);
+      }
+      return yield* readCompletedWork({ events, receipts, snapshot, expected, Effect, Stream, Option, normalized });
+    })));
+    const elapsedNs = String(process.hrtime.bigint() - start);
+    // New helper/client and actual engine reopen. Do not fold reopen or faults
+    // into the warm application-work measurement.
+    const reopened = await run(({ events, receipts, snapshot }) =>
+      readCompletedWork({ events, receipts, snapshot, expected, Effect, Stream, Option, normalized }));
+    Assert.deepEqual(reopened, observed);
+    await assertSeed(`completed-work ${phase.name} reopen`);
+    completedWork.push({ phase: phase.name, elapsedNs, canonical: observed,
+      counts: { commandsWritten: phase.commands.length, eventsWritten: phase.commands.reduce((n, c) => n + c.events.length, 0),
+        receiptsRead: allCommands.length, historyRowsRead: expected.history.length + 5,
+        pagesRead: Math.ceil(expected.history.length / 5) + 2 }, reopenedEqual: true });
+  }
   const receipt = {
-    kind: "t04-ordered-event-sink", profile,
+    kind: "t04-ordered-event-sink", profile, engine,
+    executableSha256: hash(await FS.readFile(executable)),
+    completedWork,
+    workloadSha256: hash(JSON.stringify(normalized(cases))),
+    fixtureSha256: hash(await FS.readFile(new URL(import.meta.url))),
     orderedDependency: "efaf649fb270ce70257e53862295cc10e4bddab0",
     checks: ["unknown-profile-no-session", "ordinary-mode-refusal", "exclusive-initialization", "different-engine-refusal",
       "unscoped-operation-refusal", "EventSink-atomic-commit", "exact-JSON-replay-after-reopen",
@@ -285,7 +331,10 @@ try {
     stateSha256: hash(JSON.stringify(first.state)), frames: transcript.map((frame) => frame.operation),
   };
   if (proofPath) await FS.writeFile(proofPath, JSON.stringify(receipt, null, 2) + "\n");
-  process.stdout.write(JSON.stringify(receipt) + "\n");
+  // Retain raw samples in per-arm proof files. Only the comparison gate reports timings.
+  process.stdout.write(JSON.stringify({ kind: receipt.kind, engine, checks: receipt.checks,
+    completedWork: completedWork.map(({ phase, counts, reopenedEqual }) => ({ phase, counts, reopenedEqual })),
+  }) + "\n");
 } finally {
   await fixture.close();
 }

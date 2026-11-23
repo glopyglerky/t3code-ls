@@ -888,6 +888,9 @@ jobs:
                 grep -F "lost-ack-exact-receipt-after-reopen" "$5/ordered-event-sink-$engine.json"
                 grep -F "lost-ack-no-duplicate-publication" "$5/ordered-event-sink-$engine.json"
               done
+              runuser -u "$1" -- "$3" tools/ordered-completed-work.mjs \
+                "$5/ordered-event-sink-direct-redb.json" "$5/ordered-event-sink-fjall.json" \
+                "$5/ordered-completed-work-comparison.json"
             ' _ "$(id -un)" "$TMPDIR" "$(command -v node)" "$helper" "$proof"
           fi
           "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked --release \
