@@ -111,6 +111,18 @@ it("matches retained inline markup and citation offsets across bounded streaming
     selection.removeAllRanges();
     expect(document.activeElement).toBe(composer);
   }
+  const fallbackMarkup = (selector: string) => {
+    // Independently mounted tooltip controls have distinct generated IDs.
+    const ids = new Map<string, string>();
+    return screen.container.querySelector(selector)?.innerHTML.replace(/base-ui-_r_[a-z0-9]+_/gu, (id) => {
+      let normalized = ids.get(id);
+      if (normalized === undefined) {
+        normalized = `base-ui-fixture-${ids.size + 1}`;
+        ids.set(id, normalized);
+      }
+      return normalized;
+    });
+  };
   // Every unsupported snapshot falls back as a whole. Never partially render
   // the accepted prefix and lose the remainder or enable link/media actions.
   for (const text of [
@@ -129,8 +141,8 @@ it("matches retained inline markup and citation offsets across bounded streaming
       expect(native().dataset.supported).toBe("false");
       expect(native().parentElement?.hidden).toBe(true);
       expect(screen.container.querySelector('[data-inline-retained]')).not.toBeNull();
-      expect(screen.container.querySelector('[data-inline-retained] .chat-markdown')?.innerHTML)
-        .toBe(screen.container.querySelector('[data-inline-oracle] .chat-markdown')?.innerHTML);
+      expect(fallbackMarkup("[data-inline-retained] .chat-markdown"))
+        .toBe(fallbackMarkup("[data-inline-oracle] .chat-markdown"));
       expect(native().querySelector('p, a, img, script, iframe')).toBeNull();
     });
   }
