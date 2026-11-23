@@ -1,3 +1,4 @@
+mod history_view;
 mod navigation;
 mod replay;
 #[path = "../../../../packages/client-runtime/rust/host/server_snapshot.rs"]
@@ -33,7 +34,7 @@ const SUBMIT_LABEL: &str = "Submit message";
 const STOP_LABEL: &str = "Stop";
 const APPROVAL_LABEL: &str = "Allow once";
 const REPLY_LABEL: &str = "Recorded assistant reply";
-const USAGE: &str = "Usage: t3-code-ls-desktop-gpui --fixture showcase | --thread-snapshot | --thread-workspace | --thread-compose < CONNECTION_JSON";
+const USAGE: &str = "Usage: t3-code-ls-desktop-gpui --fixture showcase | --thread-snapshot | --thread-workspace | --thread-compose | --thread-history < CONNECTION_JSON";
 const SHORTCUT: &str = if cfg!(target_os = "macos") {
     "Command+Enter"
 } else {
@@ -694,6 +695,7 @@ fn main() -> ExitCode {
         println!("{USAGE}");
         return ExitCode::SUCCESS;
     }
+    let mut history_connection = None;
     let mut navigation = None;
     let mut server_session = None;
     let snapshot = if first.as_deref() == Some(OsStr::new("--thread-compose"))
@@ -704,6 +706,13 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         };
         server_session = Some(session);
+        None
+    } else if first.as_deref() == Some(OsStr::new("--thread-history")) && args.next().is_none() {
+        let Ok(connection) = server_snapshot::Connection::read(std::io::stdin().lock()) else {
+            eprintln!("Invalid server connection input.");
+            return ExitCode::from(2);
+        };
+        history_connection = Some(connection);
         None
     } else if first.as_deref() == Some(OsStr::new("--thread-workspace")) && args.next().is_none() {
         navigation = Some(server_snapshot::Connection::read(std::io::stdin().lock()));
@@ -724,7 +733,9 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
 
-    let title = if navigation.is_some() {
+    let title = if history_connection.is_some() {
+        "T3 Code · Saved conversation"
+    } else if navigation.is_some() {
         "T3 Code · Thread workspace"
     } else if server_session.is_some() {
         "T3 Code · Server composer"
@@ -754,7 +765,11 @@ fn main() -> ExitCode {
                     ..Default::default()
                 },
                 move |window, cx| {
-                    if let Some(connection) = navigation {
+                    if let Some(connection) = history_connection {
+                        let workspace =
+                            cx.new(|cx| history_view::HistoryView::new(connection, window, cx));
+                        cx.new(|cx| Root::new(workspace, window, cx))
+                    } else if let Some(connection) = navigation {
                         let workspace =
                             cx.new(|cx| navigation::ThreadWorkspace::new(connection, window, cx));
                         cx.new(|cx| Root::new(workspace, window, cx))

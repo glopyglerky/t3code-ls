@@ -2335,6 +2335,7 @@
       "rust_paths": [
         "apps/desktop/rust/src/main.rs",
         "apps/desktop/rust/src/replay.rs",
+        "apps/desktop/rust/src/history_view.rs",
         "packages/client-runtime/rust/host/server_snapshot.rs",
         "apps/desktop/rust/src/server_submit.rs"
       ],
@@ -2358,12 +2359,16 @@
         "packages/client-runtime/rust/tests/text_revision.rs",
         "apps/server/scripts/verify-gpui-thread-snapshot.ts",
         "apps/server/scripts/verify-gpui-thread-submit.ts",
-        "tools/check-gpui-showcase.py"
+        "tools/check-gpui-showcase.py",
+        "tools/check-gpui-history.py",
+        "apps/server/scripts/verify-gpui-thread-history.ts"
       ],
       "hosted_acceptance": {
         "apps/server/scripts/verify-gpui-thread-snapshot.ts": ".github/workflows/gpui-showcase.yml",
         "apps/server/scripts/verify-gpui-thread-submit.ts": ".github/workflows/gpui-showcase.yml",
-        "tools/check-gpui-showcase.py": ".github/workflows/gpui-showcase.yml"
+        "tools/check-gpui-showcase.py": ".github/workflows/gpui-showcase.yml",
+        "tools/check-gpui-history.py": ".github/workflows/gpui-showcase.yml",
+        "apps/server/scripts/verify-gpui-thread-history.ts": ".github/workflows/gpui-showcase.yml"
       },
       "retired_paths": [],
       "notes": "T01 and T14. The root Rust workspace checks the shared text owner. The isolated GPUI manifest has its own fixture tests and requires hosted X11, input and assistive-technology checks. The replay fixture remains in memory. The opt-in native thread reader consumes the selected loopback server's authenticated bounded snapshot and checks environment and thread identity. The opt-in composer uses the real WebSocket message.dispatch contract, retains supplied identities on uncertainty and matches a completed run by its exact message. Run 45190876195 at 3a78fa7432094ad34fac6b449d5a08cb0e4698f3 verified keyboard activation of the named Allow once control, the real runtime-request.respond command and one resolved request in the completed run. Run 45193805889 at 2b542934fb966675836e42ab75a37a81ab062412 verified a second GPUI window sent a follow-up in the same idle thread, with two completed runs and preserved earlier messages. The T14/T02 source candidate adds bounded selected-thread WebSocket full-message delivery through the shared TextRevision owner and a four-slot UI queue. Its authored checks require original ACP partial text before completion, the same reply identity at final/reopen and retention of a later unsent draft; hosted execution of this increment remains pending. Live providers, general stream recovery/delta negotiation, other approval actions, busy-thread writes, durable desktop identities and drafts, and normal launcher integration remain open.",

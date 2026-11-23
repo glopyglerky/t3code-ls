@@ -76,7 +76,8 @@ jobs:
           node tools/check-hybrid.mjs --verify-binaries
           pnpm --dir apps/web run build
           T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$GITHUB_WORKSPACE/bin" \
-            pnpm --dir apps/server run build:bundle
+            pnpm exec node apps/server/scripts/cli.ts build --verbose
+          test -s apps/server/dist/client/index.html
           sha256sum apps/server/dist/bin.mjs apps/server/dist/native-bin/manifest.json
       - name: Read a real native thread through the GPUI window
         timeout-minutes: 4
@@ -86,8 +87,34 @@ jobs:
             exec runuser -u "$1" -- xvfb-run -a -s "-screen 0 1280x1024x24" dbus-run-session -- \
               "$2" apps/server/scripts/verify-gpui-thread-snapshot.ts "$3"
           ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/gpui-target/debug/t3-code-ls-desktop-gpui"
+      - name: Page durable native history through the GPUI window
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t14-gpui-showcase-history-')
+        timeout-minutes: 10
+        run: |
+          set -euo pipefail
+          export CARGO_HOME="$RUNNER_TEMP/gpui-server-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/gpui-server-target"
+          export T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$GITHUB_WORKSPACE/bin"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            build --locked --release --manifest-path native/resource-monitor/Cargo.toml
+          pnpm exec node apps/server/scripts/cli.ts build-exe --verbose
+          mkdir -p apps/server/dist/resource-monitor
+          install -m 0755 "$CARGO_TARGET_DIR/release/t3-resource-monitor" apps/server/dist/resource-monitor/
+          packaging="$(mktemp -d "$RUNNER_TEMP/gpui-history-package.XXXXXX")"
+          trap 'rm -rf -- "$packaging"' EXIT
+          version="$(node -p 'require("./apps/server/package.json").version')"
+          package="t3-$version-linux-x64"
+          pnpm exec node scripts/build-cli-archive.ts --platform linux --arch x64 \
+            --version "$version" --output-dir "$packaging"
+          sha256sum "$packaging/$package.tar.gz"
+          tar -xzf "$packaging/$package.tar.gz" -C "$packaging"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- xvfb-run -a -s "-screen 0 1280x1024x24" dbus-run-session -- \
+              "$2" apps/server/scripts/verify-gpui-thread-history.ts "$3" --server-executable "$4"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/gpui-target/debug/t3-code-ls-desktop-gpui" "$packaging/$package/t3"
       - name: Keep a late thread response with its original GPUI workspace
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t14-gpui-showcase-navigation-')
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t14-gpui-showcase-navigation-') || startsWith(github.ref_name, 'candidate/t3code-ls-t14-gpui-showcase-history-navigation-')
         timeout-minutes: 3
         run: |
           sudo -n unshare --net -- bash -euc '
