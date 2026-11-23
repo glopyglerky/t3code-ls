@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalJsonInEffect:off globalTimers:off - synthetic loopback/process transport fixture.
+// @effect-diagnostics nodeBuiltinImport:off globalJsonInEffect:off - synthetic loopback/process transport fixture.
 import * as NodeAssert from "node:assert/strict";
 import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
@@ -119,7 +119,12 @@ function runner(endpoint: string, receivedText: string[]): CursorAgentSdk.Cursor
     open: (input) => Effect.tryPromise({
       try: async () => {
         NodeAssert.equal(input.operation, "create");
-        const child = NodeChildProcess.spawn(executable!, [endpoint], { env: {}, stdio: ["pipe", "pipe", "pipe"] });
+        const child = NodeChildProcess.spawn(executable!, [endpoint], {
+          env: {},
+          stdio: ["pipe", "pipe", "pipe"],
+          timeout: 10_000,
+          killSignal: "SIGKILL",
+        });
         child.stderr.resume();
         child.stdin.on("error", () => { child.kill("SIGTERM"); });
         const exited = new Promise<number | null>((resolve, reject) => {
@@ -129,8 +134,6 @@ function runner(endpoint: string, receivedText: string[]): CursorAgentSdk.Cursor
         // Attach rejection immediately, including startup failure before the first frame.
         void exited.catch(() => undefined);
         const lines = NodeReadline.createInterface({ input: child.stdout, crlfDelay: Infinity })[Symbol.asyncIterator]();
-        const timer = setTimeout(() => child.kill("SIGKILL"), 10_000);
-        void exited.finally(() => clearTimeout(timer)).catch(() => undefined);
         child.stdin.write(`${JSON.stringify({ operation: "create", options: input.options })}\n`);
         const opened = await lines.next();
         NodeAssert.equal(opened.done, false);
