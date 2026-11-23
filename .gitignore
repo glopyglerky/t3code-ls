@@ -51,6 +51,7 @@ node_modules/
 .pnpm-store/
 
 /target/
+/apps/desktop/makepad-input/target/
 /apps/web/public/client-text-wasm/
 .lust-cache/
 .lust-daemon-*.sock

@@ -1,0 +1,21 @@
+[package]
+name = "t3-code-ls-makepad-input"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+
+# Keep the candidate and its toolkit resolution outside the main workspace lock.
+[workspace]
+resolver = "3"
+
+[dependencies]
+t3-code-ls-client-text = { path = "../../../packages/client-runtime/rust" }
+
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+makepad-widgets = { git = "https://github.com/makepad/makepad.git", rev = "888d1b501ff41d0084ddd5417446b7341d5f873e", default-features = false }
+
+[profile.dev]
+debug = 0
+incremental = false
