@@ -22,6 +22,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import * as CatalogStore from "./catalog-store";
+import { makeEnvironmentRemovalRecovery, reserveEnvironmentRemoval } from "./environment-removal-recovery";
 
 function targetPersistenceError(
   operation:
@@ -42,6 +43,7 @@ function targetPersistenceError(
 export const layer = Layer.effectContext(
   Effect.gen(function* () {
     const catalog = yield* CatalogStore.make();
+    const removalRecovery = yield* makeEnvironmentRemovalRecovery(catalog);
     const githubRoutingPermissions = yield* makePullRequestRoutingPermissions({
       read: catalog.read.pipe(Effect.map((document) => document.githubRoutingPermissions ?? [])),
       write: (githubRoutingPermissions) =>
@@ -60,10 +62,19 @@ export const layer = Layer.effectContext(
     });
     const registrationStore = Persistence.ConnectionRegistrationStore.of({
       register: Effect.fn("Persistence.ConnectionRegistrationStore.register")(
-        (registration, routes) =>
-          catalog
-            .update((document) => registerConnectionInCatalog(document, registration, routes))
-            .pipe(Effect.mapError((error) => targetPersistenceError("register-connection", error))),
+        function* (registration, routes) {
+          yield* removalRecovery.beforeRegister(registration.target.environmentId).pipe(
+            Effect.mapError((error) => targetPersistenceError("register-connection", error)),
+          );
+          yield* catalog.updateEffect((document) => {
+            if (document.environmentRemovals?.pending.some((removal) => removal.environmentId === registration.target.environmentId)) {
+              return Effect.fail(new ConnectionTransientError({ reason: "remote-unavailable",
+                detail: "Local environment removal is still pending. Reconnect after its data has been cleared.",
+              }));
+            }
+            return Effect.succeed(registerConnectionInCatalog(document, registration, routes));
+          }).pipe(Effect.mapError((error) => targetPersistenceError("register-connection", error)));
+        },
       ),
       setRoutes: Effect.fn("Persistence.ConnectionRegistrationStore.setRoutes")(
         (environmentId, routes) =>
@@ -75,7 +86,9 @@ export const layer = Layer.effectContext(
       ),
       remove: Effect.fn("Persistence.ConnectionRegistrationStore.remove")((environmentId) =>
         catalog
-          .update((document) => removeConnectionFromCatalog(document, environmentId))
+          .updateEffect((document) => reserveEnvironmentRemoval(document, environmentId).pipe(
+            Effect.map((reserved) => removeConnectionFromCatalog(reserved, environmentId)),
+          ))
           .pipe(Effect.mapError((error) => targetPersistenceError("remove-connection", error))),
       ),
       setEnabled: Effect.fn("Persistence.ConnectionRegistrationStore.setEnabled")(
@@ -161,6 +174,9 @@ export const layer = Layer.effectContext(
     return Context.make(Persistence.ConnectionTargetStore, targetStore).pipe(
       Context.add(PullRequestRoutingPermissions, githubRoutingPermissions),
       Context.add(Persistence.ConnectionRegistrationStore, registrationStore),
+      Context.add(Persistence.EnvironmentOwnedDataCleanup, Persistence.EnvironmentOwnedDataCleanup.of({
+        clear: removalRecovery.clear,
+      })),
       Context.add(ProfileStore.ConnectionProfileStore, profileStore),
       Context.add(CredentialStore.ConnectionCredentialStore, credentialStore),
       Context.add(TokenStore.RemoteDpopAccessTokenStore, remoteTokenStore),

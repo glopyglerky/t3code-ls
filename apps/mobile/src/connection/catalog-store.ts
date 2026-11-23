@@ -41,8 +41,11 @@ const encodeCatalog = Effect.fn("mobile.connectionStorage.encodeCatalog")(functi
   );
 });
 
-interface CatalogStore {
+export interface CatalogStore {
   readonly read: Effect.Effect<ConnectionCatalogDocumentType, ConnectionTransientError>;
+  readonly updateEffect: <E, R>(
+    transform: (catalog: ConnectionCatalogDocumentType) => Effect.Effect<ConnectionCatalogDocumentType, E, R>,
+  ) => Effect.Effect<void, E | ConnectionTransientError, R>;
   readonly update: (
     transform: (catalog: ConnectionCatalogDocumentType) => ConnectionCatalogDocumentType,
   ) => Effect.Effect<void, ConnectionTransientError>;
@@ -104,18 +107,19 @@ export const make = Effect.fn("mobile.connectionStorage.makeCatalogStore")(funct
   });
 
   const read = lock.withPermits(1)(loadUnlocked());
-  const update: CatalogStore["update"] = Effect.fn("mobile.connectionStorage.updateCatalog")(
-    function* (transform) {
-      yield* lock.withPermits(1)(
-        Effect.gen(function* () {
-          const next = transform(yield* loadUnlocked());
-          const encoded = yield* encodeCatalog(next);
-          yield* setItem(CONNECTION_CATALOG_KEY, encoded);
-          yield* Ref.set(state, Option.some(next));
-        }),
-      );
-    },
-  );
+  const updateEffect = <E, R>(
+    transform: (catalog: ConnectionCatalogDocumentType) => Effect.Effect<ConnectionCatalogDocumentType, E, R>,
+  ): Effect.Effect<void, E | ConnectionTransientError, R> =>
+    lock.withPermits(1)(Effect.gen(function* () {
+      const next = yield* transform(yield* loadUnlocked());
+      const encoded = yield* encodeCatalog(next);
+      yield* Effect.uninterruptible(Effect.gen(function* () {
+        yield* setItem(CONNECTION_CATALOG_KEY, encoded);
+        yield* Ref.set(state, Option.some(next));
+      }));
+    }));
+  const update: CatalogStore["update"] = (transform) =>
+    updateEffect((document) => Effect.succeed(transform(document)));
 
-  return { read, update } satisfies CatalogStore;
+  return { read, update, updateEffect } satisfies CatalogStore;
 });
