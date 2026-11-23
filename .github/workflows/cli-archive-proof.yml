@@ -7,6 +7,7 @@ on:
       - "candidate/t3code-ls-t14-windows-cli-*"
       - "candidate/t3code-ls-t05-packaged-preparation-*"
       - "candidate/t3code-ls-t06-gix-packaged-*"
+      - "candidate/t3code-ls-t10-packaged-guest-*"
       - "candidate/t3code-ls-t02-bundled-native-integrated-*"
       - "candidate/t3code-ls-t05-launcher-promotion-*"
 
@@ -135,6 +136,21 @@ jobs:
             ip link set dev lo up
             exec runuser -u "$1" -- "$2" apps/server/scripts/verify-packaged-git-workspace.ts "$3" "$4"
           ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/cli-proof/git-workspace" "$entry"
+      - name: Verify guest authorization and redemption across a native reopen
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t10-packaged-guest-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p 'require("./apps/server/package.json").version')
+          extracted=$(mktemp -d "$RUNNER_TEMP/guest-archive.XXXXXX")
+          trap 'rm -rf -- "$extracted"' EXIT
+          tar -xzf "$RUNNER_TEMP/cli-archive/t3-$version-linux-x64.tar.gz" -C "$extracted"
+          entry="$extracted/t3-$version-linux-x64/t3"
+          test -x "$entry"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- "$2" apps/server/scripts/verify-packaged-guest-authorization.ts "$3" "$4"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/cli-proof/guest-authorization" "$entry"
       - name: Retain the archive identity and smoke results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
