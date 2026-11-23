@@ -66,6 +66,10 @@ async function verifyUnactivatedUpgrade(
         operation: "import_sqlite_application",
         path: archive,
       });
+      const importedIdentity = nativeRequest(executable, fixture, "connect", {
+        operation: "application_generation_identity",
+      });
+      NodeAssert.equal(importedIdentity.generation, imported.generation);
       const sourceBefore = hash(await NodeFSP.readFile(source));
       // Drive the actual selected adapter through conversion and every index
       // preparation, then interrupt just before publishing the ownership marker.
@@ -96,6 +100,13 @@ async function verifyUnactivatedUpgrade(
         nativeRequest(executable, fixture, "connect", { operation: "application_migrations" }),
         currentSchema.migrations,
       );
+      const upgradedIdentity = nativeRequest(executable, fixture, "connect", {
+        operation: "application_generation_identity",
+      });
+      NodeAssert.notEqual(upgradedIdentity.generation, importedIdentity.generation);
+      NodeAssert.notEqual(upgradedIdentity.catalog_sha256, importedIdentity.catalog_sha256);
+      NodeAssert.equal(upgradedIdentity.engine_revision, importedIdentity.engine_revision);
+      NodeAssert.equal(upgradedIdentity.layout, importedIdentity.layout);
       NodeAssert.deepEqual(
         nativeRequest(executable, fixture, "connect", { operation: "application_import" }),
         { ...imported, replayed: true },
@@ -150,6 +161,12 @@ async function verifyUnactivatedUpgrade(
         nativeRequest(executable, fixture, "connect", { operation: "application_import" }),
         { ...imported, replayed: true },
         "activation retries retain the original import receipt",
+      );
+      NodeAssert.deepEqual(
+        nativeRequest(executable, fixture, "connect", {
+          operation: "application_generation_identity",
+        }),
+        upgradedIdentity,
       );
       NodeAssert.equal(
         (await NodeFSP.readdir(fixture.root)).filter((path) => path.startsWith(".omdb-import-"))

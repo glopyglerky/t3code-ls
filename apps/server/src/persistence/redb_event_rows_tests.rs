@@ -492,3 +492,173 @@ async fn restored_non_string_prompts_keep_sqlite_types_or_fail_without_coercing_
         Err(Error::IncompatibleStore)
     ));
 }
+
+#[tokio::test]
+async fn assistant_text_revisions_store_suffixes_and_replay_exactly_after_rollback_reopen_and_prune()
+ {
+    use crate::application::{ApplicationEventLayout, ApplicationTransactionMode};
+
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    let layout = Some(ApplicationEventLayout::AssistantTextRevisionsV1);
+    assert!(
+        store
+            .bootstrap_application_with_event_layout(layout)
+            .await
+            .unwrap()
+            .initialized
+    );
+    let mut app = ApplicationTransactions::new(store.clone());
+    let identity = app.generation_identity().await.unwrap().unwrap();
+    assert_eq!(
+        identity.layout,
+        "t3-application-keyspace-v1+assistant-text-revisions-v1"
+    );
+    prepare(&store).await;
+    while !store
+        .prepare_application_maintenance()
+        .await
+        .unwrap()
+        .prepared
+    {}
+
+    let marker = "synthetic checkpoint prefix".repeat(48);
+    let token = format!(r"{marker}\u0061");
+    let message = |id: &str, text_token: &str, streaming: bool| {
+        let mut event = row(id, "thread");
+        event.event_type = "message.updated".into();
+        event.actor_kind = "provider".into();
+        event.payload_json = format!(
+            r#"{{"threadId":"thread","id":"message","text":"{text_token}","context":{{"variant":1e+21}},"role":"assistant","createdBy":"agent","creationSource":"provider","streaming":{streaming},"runId":"run","nodeId":"node","createdAt":"2026-11-10T00:00:00.000Z","updatedAt":"2026-11-10T00:00:01.000Z","attachments":[]}}"#
+        );
+        event
+    };
+    let first = message("first", &token, true);
+    let second = message("second", &format!(r"{token}雪\n"), true);
+    let third = message("third", &format!(r"{token}雪\nmore"), true);
+    let rewrite = message("rewrite", &format!("new {token}"), true);
+    let completion = message("completion", &format!("new {token} done"), false);
+
+    app.begin("write").await.unwrap();
+    app.events_append("write", first.clone(), None)
+        .await
+        .unwrap();
+    app.savepoint("write", "attempt").await.unwrap();
+    app.events_append(
+        "write",
+        message("discarded", &format!("{token} discarded"), true),
+        None,
+    )
+    .await
+    .unwrap();
+    app.rollback_to("write", "attempt").await.unwrap();
+    app.release("write", "attempt").await.unwrap();
+    for event in [&second, &third, &rewrite, &completion] {
+        app.events_append("write", event.clone(), None)
+            .await
+            .unwrap();
+    }
+    app.commit("write").await.unwrap();
+    drop(app);
+    store.shutdown().await.unwrap();
+
+    let store = fixture.connect().await;
+    assert!(!store.bootstrap_application().await.unwrap().initialized);
+    let mut raw = store.db.begin_read_only().await.unwrap();
+    let catalog = decode_catalog(&raw.get(&schema_key()).await.unwrap().unwrap()).unwrap();
+    let plain_catalog: Value =
+        serde_json::from_slice(&raw.get(&schema_key()).await.unwrap().unwrap()).unwrap();
+    assert_eq!(plain_catalog["event_layout"], "assistant_text_revisions_v1");
+    let mut physical = Vec::new();
+    for sequence in 1..=5 {
+        physical.push(
+            raw.get(&event_key(&catalog, sequence).unwrap())
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+    }
+    raw.rollback().await.unwrap();
+    for (index, (predecessor, suffix)) in [(1, r"雪\n"), (2, "more")].into_iter().enumerate() {
+        let bytes = &physical[index + 1];
+        let stored: Value = serde_json::from_slice(bytes).unwrap();
+        let revision = &stored["text_revision"];
+        assert_eq!(revision["previous"]["sequence"], predecessor);
+        assert_eq!(revision["suffix"], suffix);
+        assert!(!std::str::from_utf8(bytes).unwrap().contains(&marker));
+    }
+    for index in [0, 3, 4] {
+        let stored: ApplicationRow = serde_json::from_slice(&physical[index]).unwrap();
+        assert!(text(&stored.row, "payload_json").unwrap().contains(&marker));
+    }
+
+    let mut app = ApplicationTransactions::new(store.clone());
+    app.begin_mode("read", ApplicationTransactionMode::Read, None)
+        .await
+        .unwrap();
+    let expected =
+        [&first, &second, &third, &rewrite, &completion].map(|r| r.payload_json.as_str());
+    let replay = app.events_read("read", read_all()).await.unwrap();
+    assert_eq!(
+        replay
+            .iter()
+            .map(|r| r.payload_json.as_str())
+            .collect::<Vec<_>>(),
+        expected
+    );
+    let page = app.scan("read", EVENTS, None, 10).await.unwrap();
+    for (index, payload) in expected.into_iter().enumerate() {
+        let key = [int_cell(index + 1)];
+        let row = app.get("read", EVENTS, &key).await.unwrap().unwrap();
+        assert_eq!(text(&row, "payload_json").unwrap(), payload);
+        assert!(
+            page.rows
+                .iter()
+                .any(|found| found.key == key && found.row == row)
+        );
+    }
+    assert_eq!(
+        app.events_stats("read", stats("application", None, 0, 5, None))
+            .await
+            .unwrap()
+            .raw_payload_bytes,
+        expected
+            .iter()
+            .map(|payload| payload.len() as u64)
+            .sum::<u64>()
+    );
+    app.rollback("read").await.unwrap();
+
+    app.begin("prune").await.unwrap();
+    app.maintenance_write(
+        "prune",
+        MaintenanceWrite::DeleteEvents { sequences: vec![1] },
+    )
+    .await
+    .unwrap();
+    app.commit("prune").await.unwrap();
+    let mut raw = store.db.begin_read_only().await.unwrap();
+    let key = event_key(&catalog, 1).unwrap();
+    assert!(raw.get(&key).await.unwrap().is_none());
+    let key = event_key(&catalog, 2).unwrap();
+    let bytes = raw.get(&key).await.unwrap().unwrap();
+    let reanchored: ApplicationRow = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        text(&reanchored.row, "payload_json").unwrap(),
+        second.payload_json
+    );
+    raw.rollback().await.unwrap();
+    app.begin_mode("after-prune", ApplicationTransactionMode::Read, None)
+        .await
+        .unwrap();
+    let replay = app.events_read("after-prune", read_all()).await.unwrap();
+    assert_eq!(
+        replay
+            .iter()
+            .map(|r| r.payload_json.as_str())
+            .collect::<Vec<_>>(),
+        expected[1..]
+    );
+    app.rollback("after-prune").await.unwrap();
+    store.shutdown().await.unwrap();
+}

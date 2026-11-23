@@ -11,6 +11,7 @@ async fn fixture_80() -> (TestFixture, Store, ApplicationCatalog) {
     let store = fixture.initialize().await;
     let previous: Definition = serde_json::from_str(include_str!("omdb-schema-80.json")).unwrap();
     let source = ApplicationCatalog {
+        event_layout: None,
         schema: previous.schema,
         generation: "native".into(),
     };
@@ -238,6 +239,7 @@ async fn interrupted_staging_retries_from_current_source_and_removes_stale_candi
     let store = Store::open_exclusive(fixture.path()).await.unwrap();
     let current = definition().unwrap();
     let target = ApplicationCatalog {
+        event_layout: None,
         generation: request_digest(&json!([
             "native-schema-upgrade",
             source.generation,

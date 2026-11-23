@@ -1,5 +1,8 @@
 import packageJson from "../../package.json" with { type: "json" };
-import { BUILD_MIGRATION_HEAD, recordedMigrations } from "../persistence/databaseMigrationHead.ts";
+import {
+  BUILD_MIGRATION_HEAD,
+  inspectRecordedMigrations,
+} from "../persistence/databaseMigrationHead.ts";
 import { skippedV2Migrations } from "../persistence/Migrations.ts";
 import { reconciledV2PreviewHistory } from "../persistence/reconcileV2PreviewMigration.ts";
 import {
@@ -19,6 +22,7 @@ export type ServicePreflightResult =
       readonly status: "blocked";
       readonly version: string;
       readonly reason: string;
+      readonly code?: "recovery_required";
     };
 
 export function runServicePreflight(input: {
@@ -43,7 +47,15 @@ export function runServicePreflight(input: {
     };
   }
 
-  const recorded = recordedMigrations(input.databasePath);
+  const recorded = inspectRecordedMigrations(input.databasePath);
+  if (recorded === "recovery_required") {
+    return {
+      status: "blocked",
+      version,
+      code: "recovery_required",
+      reason: "The native database needs recovery after an unclean shutdown. Start the active server runtime and wait until it is ready before retrying the update.",
+    };
+  }
   if (recorded === null) {
     return {
       status: "blocked",
@@ -97,7 +109,12 @@ export function decodeServicePreflightResult(
     typeof record.version === "string" &&
     typeof record.reason === "string"
   ) {
-    return { status: "blocked", version: record.version, reason: record.reason };
+    return {
+      status: "blocked",
+      version: record.version,
+      reason: record.reason,
+      ...(record.code === "recovery_required" ? { code: record.code } : {}),
+    };
   }
   return undefined;
 }

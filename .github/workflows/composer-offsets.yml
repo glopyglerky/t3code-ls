@@ -70,6 +70,7 @@ jobs:
         if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
         env:
           T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
+          T3_CODE_LS_DURABLE_TEXT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-durable-') }}
           VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
         run: |
           proof="$RUNNER_TEMP/built-composer-proof"
