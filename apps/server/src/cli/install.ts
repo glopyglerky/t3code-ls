@@ -7,7 +7,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { Command, Prompt } from "effect/cli";
+import { CliError, Command, Prompt } from "effect/cli";
 import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
@@ -24,6 +24,10 @@ export class CliInstallError extends Schema.TaggedError<CliInstallError>()("CliI
   cause: Schema.optional(Schema.Defect()),
 }) {
   override get message(): string {
+    return this.reason;
+  }
+
+  override get [CliError.userMessage](): string {
     return this.reason;
   }
 }

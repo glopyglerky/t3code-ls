@@ -7,6 +7,7 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as TestClock from "effect/testing/TestClock";
+import { CliError } from "effect/cli";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { installCli, isForegroundProcStat, isForegroundPs, offerCliInstall } from "./install.ts";
@@ -84,6 +85,7 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
       yield* fs.remove(link);
       yield* fs.writeFileString(link, "#!/bin/sh\n");
       const error = yield* provide(installCli()).pipe(Effect.flip);
+      assert.equal(CliError.getUserMessage(error), error.message);
       assert.include(error.message, "Another t3 is already at");
       assert.equal(yield* fs.readFileString(link), "#!/bin/sh\n");
 
