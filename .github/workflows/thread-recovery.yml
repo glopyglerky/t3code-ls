@@ -155,6 +155,8 @@ jobs:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
     runs-on: macos-15
     timeout-minutes: 35
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
