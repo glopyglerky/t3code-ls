@@ -13,6 +13,9 @@
     "../apps/server/src/persistence/DatabaseStorageBackend.ts",
     "../apps/server/src/persistence/SqliteDatabaseStorageBackend.ts",
     "../apps/server/src/persistence/NativeDatabaseStorageBackend.ts",
-    "../apps/server/src/persistence/NativeDatabaseMaintenance.ts"
+    "../apps/server/src/persistence/NativeDatabaseMaintenance.ts",
+    "../apps/server/src/orchestration-v2/NativeEventSink.ts",
+    "../apps/server/src/orchestration-v2/NativeProjectionStore.ts",
+    "../apps/server/src/orchestration-v2/NativeProjectionMaintenance.ts"
   ]
 }

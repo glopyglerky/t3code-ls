@@ -1668,6 +1668,7 @@
         "tools/check-redb-runtime-state.mjs",
         "tools/check-redb-scheduled.mjs",
         "tools/check-redb-storage-maintenance.mjs",
+        "tools/redb-aged-retention-fixture.mjs",
         "tools/check-redb-thread-find.mjs",
         "tools/check-redb-thread-search.mjs",
         "tools/check-redb-transactions.mjs",

@@ -22,6 +22,7 @@ import * as NativeMaintenance from "../apps/server/src/persistence/NativeDatabas
 import * as NativeOwnership from "../apps/server/src/persistence/NativeServerOwnershipLock.ts";
 import * as ServerOwnership from "../apps/server/src/serverOwnership.ts";
 import * as ProcessRunner from "../apps/server/src/processRunner.ts";
+import { verifyAgedRetention } from "./redb-aged-retention-fixture.mjs";
 import { createFixture } from "./database-fixture.mjs";
 import { exportSqliteState } from "./export-sqlite-state.mjs";
 import {
@@ -467,7 +468,9 @@ try {
   checks.push(
     "Actual native maintenance makes a verified restorable backup before pruning/compaction, reopens the compacted store, preserves values and all legacy SQLite bytes, and classifies missing stores correctly",
   );
-  console.log(JSON.stringify({ storage: result }, null, 2));
+  const retention = await verifyAgedRetention(executable);
+  checks.push(...retention.checks);
+  console.log(JSON.stringify({ storage: result, retention }, null, 2));
   await finishProof({
     executable,
     fixture,
@@ -491,6 +494,14 @@ try {
       "crates/storage/Cargo.toml",
       "crates/storage/src/backend.rs",
       "tools/check-redb-storage-maintenance.mjs",
+      "tools/redb-aged-retention-fixture.mjs",
+      "tools/redb-event-sink-fixtures.mjs",
+      "apps/server/src/orchestration-v2/NativeEventSink.ts",
+      "apps/server/src/orchestration-v2/EventSink.ts",
+      "apps/server/src/orchestration-v2/NativeProjectionStore.ts",
+      "apps/server/src/orchestration-v2/ProjectionMaintenance.ts",
+      "apps/server/src/orchestration-v2/NativeProjectionMaintenance.ts",
+      "apps/server/src/persistence/redb_projection_maintenance.rs",
     ],
   });
 } finally {

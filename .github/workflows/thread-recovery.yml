@@ -619,6 +619,7 @@ jobs:
           export CARGO_TARGET_DIR="$RUNNER_TEMP/maintenance-target"
           export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
           node tools/install-server-tests.mjs
+          node tools/fetch-migration-sources.mjs
           node tools/check-acceptance.mjs --tests '["tools/check-redb-storage-maintenance.mjs"]' \
             --proof-directory "$RUNNER_TEMP/maintenance-proof"
       - name: Retain snapshot qualification
