@@ -10,13 +10,16 @@ on:
       - "candidate/t3code-ls-t12-outbox-native-*"
       - "candidate/t3code-ls-t12-outbox-package-*"
       - "candidate/t3code-ls-t15-task-cache-*"
+      - "candidate/t3code-ls-acceptance-types-*"
 
 permissions:
   contents: read
 
 jobs:
   thread-recovery:
-    if: "!startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')"
+    if: >-
+      !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-') &&
+      !startsWith(github.ref_name, 'candidate/t3code-ls-acceptance-types-')
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
@@ -244,6 +247,35 @@ jobs:
         with:
           name: outbox-android-proof
           path: ${{ runner.temp }}/outbox-android-proof/
+          if-no-files-found: warn
+          retention-days: 14
+
+  server-acceptance-types:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-acceptance-types-')
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Check the native persistence project's TypeScript surface
+        run: |
+          export T3_CODE_LS_TEST_RUNTIME="$RUNNER_TEMP/acceptance-test-runtime"
+          node tools/install-server-tests.mjs
+          status=0
+          "$T3_CODE_LS_TEST_RUNTIME/node_modules/.bin/effect-tsgo" tsrs --noEmit \
+            -p tools/omdb-production-tsconfig.json > "$RUNNER_TEMP/omdb-types.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/omdb-types.log"
+          exit "$status"
+      - name: Retain the full TypeScript diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: omdb-types
+          path: ${{ runner.temp }}/omdb-types.log
           if-no-files-found: warn
           retention-days: 14
 
