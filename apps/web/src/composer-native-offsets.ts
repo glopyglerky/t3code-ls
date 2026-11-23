@@ -30,6 +30,7 @@ interface OffsetModule {
     start: number,
     end: number,
   ) => Uint32Array;
+  reconcile_composer_drafts?: (words: Uint32Array) => Uint32Array | undefined;
   ThreadMessageText?: {
     readonly prototype?: NativeMessageText;
     from_message(sequence: number, text: string, maxBytes: number): NativeMessageText | undefined;
@@ -39,19 +40,33 @@ interface OffsetModule {
 const runKinds = { text: 0, token: 2, break: 3, prefix: 4 } satisfies Record<RichRun["kind"], number>;
 const maps = new WeakMap<RichDocMap, NativeMap>();
 let offsetModule: OffsetModule | undefined;
+let draftReconciler: OffsetModule["reconcile_composer_drafts"];
+let recordedDraftReconciliation = false;
 let recordedUse = false;
 let recordedTextAppend = false;
 let recordedTextSplice = false;
 let recordedVoiceDraftSelection = false;
 
 export async function initializeComposerOffsets(): Promise<void> {
-  if (import.meta.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS !== "rust") return;
+  const offsets = import.meta.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
+  const drafts = import.meta.env.VITE_T3_CODE_LS_DRAFT_RECONCILIATION === "rust";
+  if (!offsets && !drafts) return;
   const url = new URL(
     `${import.meta.env.BASE_URL}client-text-wasm/composer_offsets.js`,
     window.location.origin,
   );
-  const module: OffsetModule = await import(/* @vite-ignore */ url.href);
-  await module.default();
+  let module: OffsetModule;
+  try {
+    module = await import(/* @vite-ignore */ url.href);
+    await module.default();
+  } catch (cause) {
+    // Draft reconciliation is pure. No write has started, so the retained
+    // implementation can safely serve a browser whose Wasm is unavailable.
+    if (!drafts) throw cause;
+    return;
+  }
+  if (drafts) draftReconciler = module.reconcile_composer_drafts;
+  if (!offsets) return;
   offsetModule = module;
   const textBinding = module.ThreadMessageText;
   if (textBinding !== undefined) {
@@ -125,4 +140,19 @@ export function nativeComposerOffsetMap(map: RichDocMap): NativeMap | undefined 
     recordedUse = true;
   }
   return nativeMap;
+}
+
+/** Select before serialization or storage effects; never retry a storage write here. */
+export function nativeComposerDraftReconciler() {
+  if (import.meta.env.VITE_T3_CODE_LS_DRAFT_RECONCILIATION !== "rust") return undefined;
+  const reconcile = draftReconciler;
+  if (!reconcile) return undefined;
+  return (words: Uint32Array) => {
+    const result = reconcile(words);
+    if (words.length > 0 && result !== undefined && !recordedDraftReconciliation) {
+      performance.mark("t3-composer-rust-draft-reconciliation");
+      recordedDraftReconciliation = true;
+    }
+    return result;
+  };
 }

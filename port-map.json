@@ -1867,11 +1867,16 @@
       ],
       "rust_paths": [
         "packages/client-runtime/rust/src/lib.rs",
+        "packages/client-runtime/rust/src/draft.rs",
         "packages/client-runtime/rust/web/src/lib.rs"
       ],
       "adapter_paths": [
         ".github/workflows/composer-offsets.yml",
         "apps/web/src/composer-native-offsets.ts",
+        "apps/web/src/composerDraftStore.ts",
+        "apps/web/src/composerDraftStore.test.ts",
+        "apps/web/src/composerDraftReconciliation.browser.test.ts",
+        "apps/web/scripts/verify-hybrid-client.ts",
         "apps/web/src/components/ComposerPromptEditorTiptap.input.browser.test.tsx",
         "apps/web/src/main.tsx",
         "apps/web/src/vite-env.d.ts"
@@ -1885,9 +1890,18 @@
           "acceptance_evidence": {}
         }
       ],
-      "acceptance_tests": ["packages/client-runtime/rust/tests/offsets.rs"],
+      "acceptance_tests": [
+        "packages/client-runtime/rust/tests/offsets.rs",
+        "packages/client-runtime/rust/tests/draft.rs",
+        "apps/web/src/composerDraftReconciliation.browser.test.ts",
+        "apps/web/scripts/verify-hybrid-client.ts"
+      ],
+      "hosted_acceptance": {
+        "apps/web/src/composerDraftReconciliation.browser.test.ts": ".github/workflows/composer-offsets.yml",
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
+      },
       "retired_paths": [],
-      "notes": "T01 and J37. Dependency-free no_std core and opt-in WebAssembly adapter for the browser composer's numeric rich-document offsets. The existing editor owns DOM composition. Browser qualification and performance evidence remain required.",
+      "notes": "T01 and J37. Dependency-free no_std core and opt-in WebAssembly adapter for the browser composer's numeric rich-document offsets. The existing editor owns DOM composition. T11/J19 draft reconciliation now has a source candidate in the same portable owner and opt-in Wasm boundary. Rust chooses record no-op/delete/replace, four grouped field sources and empty collapse over JS-interned Effect equality classes. JS retains keys, trust, v9 serialization, acknowledgement and retry. TS remains the oracle and unavailable-Wasm fallback. Packaged draft, quota/read-denial, clear and fallback proofs are selected in the existing composer workflow. Draft lineage is stock 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f. Hosted execution, browser qualification and performance evidence remain required.",
       "rust_crates": ["packages/client-runtime/rust", "packages/client-runtime/rust/web"]
     },
     {

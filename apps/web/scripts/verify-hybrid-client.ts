@@ -154,6 +154,7 @@ Assert.ok(!pdfExternalOnlyProof || [
   composerSubmitRenderer !== undefined,
 ].every((enabled) => !enabled), "PDF-only qualification cannot replace another selected proof scope");
 Assert.ok(!htmlInteractionProof || bundledClient, "Interactive HTML must exercise the packaged browser route");
+const expectsRustDrafts = process.env.VITE_T3_CODE_LS_DRAFT_RECONCILIATION === "rust";
 const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
 const capturedApproval = {
   path: "apps/server/src/orchestration-v2/testkit/fixtures/tool_call_read_only_on_request/registry_transcript.ndjson",
@@ -1197,7 +1198,20 @@ async function verifyDraftMerge(page: Page) {
     Assert.equal(await editor(second).innerText(), newerPrompt);
     await second.getByRole("button", { name: "Write approval", exact: true })
       .waitFor({ state: "visible" });
-    return { visiblePrompt: newerPrompt, model: "approval", sameDraft: true };
+    // Clear the body after the second tab refreshed, then save only a model
+    // from the now-stale first tab. The cleared text must not be resurrected.
+    await editor(second).fill("");
+    await waitSaved(second, "approval", "");
+    Assert.equal(await editor(page).innerText(), newerPrompt, "The first tab must still have the old body");
+    await chooseModel(page, "Write approval");
+    await waitSaved(page, "approval", "");
+    await second.reload({ waitUntil: "domcontentloaded" });
+    await editor(second).waitFor({ state: "visible" });
+    Assert.equal(await editor(second).innerText(), "");
+    const rustReconciliation = await page.evaluate(() =>
+      performance.getEntriesByName("t3-composer-rust-draft-reconciliation").length > 0);
+    return { visiblePrompt: newerPrompt, model: "approval", sameDraft: true,
+      clearedBodyPreserved: true, rustReconciliation };
   } finally {
     await second.close();
   }
@@ -1257,6 +1271,33 @@ async function verifyDraftStorageRecovery(page: Page) {
     await page.reload({ waitUntil: "domcontentloaded" });
     await editor.waitFor({ state: "visible" });
     Assert.equal(await editor.innerText(), revised);
+
+    const readDenied = "Draft edited while live reads are denied 雪";
+    await page.evaluate((key) => {
+      const getItem = Storage.prototype.getItem;
+      window.addEventListener("fixture-restore-draft-reads", () => {
+        Storage.prototype.getItem = getItem;
+      }, { once: true });
+      Storage.prototype.getItem = function (name) {
+        if (this === window.localStorage && name === key) {
+          throw new DOMException("Synthetic composer read denial", "SecurityError");
+        }
+        return getItem.call(this, name);
+      };
+    }, storageKey);
+    try {
+      await editor.fill(readDenied);
+      await notice.waitFor({ state: "visible" });
+      Assert.equal(await editor.innerText(), readDenied);
+    } finally {
+      await page.evaluate(() => window.dispatchEvent(new Event("fixture-restore-draft-reads")));
+    }
+    await saved(revised);
+    await retry.click();
+    await saved(readDenied);
+    await notice.waitFor({ state: "hidden" });
+    await editor.fill(revised);
+    await saved(revised);
 
     const other = await page.context().newPage();
     other.setDefaultTimeout(timeoutMs);
@@ -2962,6 +3003,26 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
     if (multiTabDraftProof) {
       starting("two-tab unsent draft and model merge");
       proof.draftMerge = await verifyDraftMerge(page);
+      Assert.equal(proof.draftMerge.rustReconciliation, expectsRustDrafts);
+      if (expectsRustDrafts) {
+        // Fresh synthetic profile, inherited fixture pairing only. Deny the
+        // actual packaged module before navigation, not a mocked Rust result.
+        const fallbackContext = await browser!.newContext({ ...contextOptions,
+          storageState: await context.storageState() });
+        let denied = 0;
+        try {
+          await fallbackContext.route("**/client-text-wasm/**", async (route) => {
+            denied++;
+            await route.abort("failed");
+          });
+          const fallback = await fallbackContext.newPage();
+          fallback.setDefaultTimeout(timeoutMs);
+          await fallback.goto(page.url(), { waitUntil: "domcontentloaded" });
+          const fallbackProof = await verifyDraftMerge(fallback);
+          Assert.equal(fallbackProof.rustReconciliation, false);
+          Assert.ok(denied > 0, "The packaged binding must actually be unavailable");
+        } finally { await fallbackContext.close(); }
+      }
       completed("Kept the newer draft from the first tab and the model selected in the second");
     }
     starting(

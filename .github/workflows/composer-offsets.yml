@@ -164,10 +164,23 @@ jobs:
           VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
         working-directory: apps/web
         run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/ComposerPromptEditorTiptap.input.browser.test.tsx
+      - name: Exercise portable draft reconciliation and binding validation
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-')
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/composer-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/composer-target"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked -p t3-code-ls-client-text --test draft
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked -p t3-code-ls-client-text-web --lib draft_binding_tests
       - name: Exercise same-draft saves in both orders
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-')
         working-directory: apps/web
         run: pnpm exec vp test run --project unit --maxWorkers 2 src/composerDraftStore.test.ts
+      - name: Compare draft reconciliation with the retained oracle through real Wasm
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-')
+        env:
+          VITE_T3_CODE_LS_DRAFT_RECONCILIATION: rust
+        working-directory: apps/web
+        run: pnpm exec vp test run --project browser --maxWorkers 2 "$GITHUB_WORKSPACE/apps/web/src/composerDraftReconciliation.browser.test.ts"
       - name: Exercise voice draft selection through the Rust browser binding
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-voice-')
         env:
@@ -248,13 +261,14 @@ jobs:
           T3_CODE_LS_SPLICE_NEGOTIATION_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-splice-') }}
           T3_CODE_LS_SPLIT_PTY_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-') }}
           T3_CODE_LS_MULTI_TAB_DRAFT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-') }}
-          T3_CODE_LS_DRAFT_STORAGE_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-storage-') }}
+          T3_CODE_LS_DRAFT_STORAGE_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-storage-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-') }}
           T3_CODE_LS_FILE_EDITOR_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
           T3_CODE_LS_DURABLE_TEXT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-durable-') }}
           DURABLE_BYTE_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-byte-accounting-') }}
           T3_CODE_LS_HTML_INTERACTION_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-html-') }}
           T3_CODE_LS_PDF_LINK_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-') }}
           VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
+          VITE_T3_CODE_LS_DRAFT_RECONCILIATION: ${{ (env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-')) && 'rust' || '' }}
         run: |
           proof="$RUNNER_TEMP/built-composer-proof"
           mkdir "$proof"

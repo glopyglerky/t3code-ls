@@ -724,6 +724,34 @@ describe("composerDraftStore context persistence", () => {
     }
   });
 
+  it("keeps visible draft edits and stored bytes when a live merge read is denied", async () => {
+    const sharedStorage = createMemoryStorage();
+    const read = sharedStorage.getItem.bind(sharedStorage);
+    let denyReads = false;
+    vi.stubGlobal("localStorage", { ...sharedStorage, getItem: (key: string) => {
+      if (denyReads && key === COMPOSER_DRAFT_STORAGE_KEY) throw new DOMException("Synthetic denial", "SecurityError");
+      return read(key);
+    } });
+    vi.stubGlobal("window", new EventTarget());
+    vi.useFakeTimers();
+    vi.resetModules();
+    try {
+      const tab = await import("./composerDraftStore");
+      tab.useComposerDraftStore.getState().setPrompt(threadRef, "Saved before denial");
+      await vi.advanceTimersByTimeAsync(300);
+      const before = read(COMPOSER_DRAFT_STORAGE_KEY);
+      denyReads = true;
+      tab.useComposerDraftStore.getState().setPrompt(threadRef, "Unsaved text 雪🐟");
+      await vi.advanceTimersByTimeAsync(300);
+      expect(read(COMPOSER_DRAFT_STORAGE_KEY)).toBe(before);
+      expect(tab.useComposerDraftStorageStatus.getState()).toBe("unavailable");
+      expect(tab.useComposerDraftStore.getState().draftsByThreadKey[scopedThreadKey(threadRef)]?.prompt)
+        .toBe("Unsaved text 雪🐟");
+    } finally {
+      vi.useRealTimers(); vi.unstubAllGlobals(); vi.resetModules();
+    }
+  });
+
   // regression: #35010 typing a draft in one tab erased drafts another tab saved after it loaded
   it("keeps a draft another tab saved after this tab loaded", async () => {
     const sharedStorage = createMemoryStorage();
