@@ -61,6 +61,10 @@ jobs:
         run: |
           set -euo pipefail
           df -k "$RUNNER_TEMP"
+          toolchain="$RUNNER_TEMP/t03-layout-toolchain"
+          if [[ -d "$toolchain" ]]; then
+            find "$toolchain" -type d -exec chmod u+w {} +
+          fi
           rm -rf "$RUNNER_TEMP/t03-layout-cargo" "$RUNNER_TEMP/t03-layout-target" \
-            "$RUNNER_TEMP/t03-layout-profiles" "$RUNNER_TEMP/t03-layout-toolchain"
+            "$RUNNER_TEMP/t03-layout-profiles" "$toolchain"
           df -k "$RUNNER_TEMP"
