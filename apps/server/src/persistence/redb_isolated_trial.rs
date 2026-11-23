@@ -1,20 +1,18 @@
 use super::{
     IsolatedTrialPreparation, IsolatedTrialRequest, IsolatedTrialVerification,
-    MAX_TRIAL_FILE_BYTES, TrialFileIdentity, TrialRestoreDirectories, TrialSnapshot,
-    checked_generation, io_error, trial_file_digest, trial_file_identity,
-    validate_isolated_trial_preparation, verify_restore_snapshot,
+    MAX_TRIAL_FILE_BYTES, TrialBackupReceipt, TrialFileIdentity, TrialRestoreDirectories,
+    TrialSnapshot, checked_generation, io_error, read_trial_receipt, trial_file_digest,
+    trial_file_identity, validate_isolated_trial_preparation, verify_restore_snapshot,
+    write_trial_receipt,
 };
 use crate::application_bootstrap::bootstrap_schema_sha256;
 use crate::application_server_ownership::OwnerLock;
 use crate::backend::{Backend, path_identity};
 use crate::{Error, Result, Store};
 use std::fs;
-use std::io::{self, Read};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::io;
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use tempfile::NamedTempFile;
-
-const MAX_RECEIPT_BYTES: u64 = 8 * 1024;
 
 struct TrialInput {
     path: PathBuf,
@@ -58,35 +56,6 @@ fn disposable_file_exists(path: &Path) -> Result<bool> {
     }
 }
 
-fn read_preparation_receipt(path: &Path) -> Result<Option<IsolatedTrialVerification>> {
-    let file = match fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-        .open(path)
-    {
-        Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
-            return Err(Error::IncompatibleStore);
-        }
-        Err(error) => return Err(io_error(error)),
-    };
-    let metadata = file.metadata().map_err(io_error)?;
-    if !metadata.is_file() || metadata.nlink() != 1 || metadata.len() > MAX_RECEIPT_BYTES {
-        return Err(Error::IncompatibleStore);
-    }
-    let mut bytes = Vec::new();
-    file.take(MAX_RECEIPT_BYTES + 1)
-        .read_to_end(&mut bytes)
-        .map_err(io_error)?;
-    if bytes.len() as u64 > MAX_RECEIPT_BYTES {
-        return Err(Error::IncompatibleStore);
-    }
-    serde_json::from_slice(&bytes)
-        .map(Some)
-        .map_err(|_| Error::IncompatibleStore)
-}
-
 struct TrialLease {
     home: PathBuf,
     live: TrialInput,
@@ -105,6 +74,13 @@ impl TrialLease {
         let state = TrialRestoreDirectories::pinned(&directories.state);
         let backups = TrialRestoreDirectories::pinned(&directories.backups);
         let owner = OwnerLock::acquire_existing_native(&state.join("server-owner.sqlite"))?;
+        let receipt = read_trial_receipt::<TrialBackupReceipt>(
+            &backups.join(format!("{}.backup-receipt-v1.json", request.update_id)),
+        )?
+        .ok_or(Error::IncompatibleStore)?;
+        if receipt.database != request.database || receipt.snapshot != request.checkpoint {
+            return Err(Error::IncompatibleStore);
+        }
         let live = TrialInput::open(state.join("statev2.omdb"), &request.checkpoint).await?;
         if live.identity != request.database {
             return Err(Error::IncompatibleStore);
@@ -168,7 +144,7 @@ pub(super) async fn prepare(
     let lease = TrialLease::open(home, &request).await?;
     let trial = &lease.trial;
     let receipt = trial.with_extension("receipt-v1.json");
-    if let Some(saved) = read_preparation_receipt(&receipt)? {
+    if let Some(saved) = read_trial_receipt::<IsolatedTrialVerification>(&receipt)? {
         if saved.request != request {
             return Err(Error::IncompatibleStore);
         }
@@ -252,15 +228,11 @@ pub(super) async fn prepare(
         request,
         preparation,
     };
-    let mut staged_receipt =
-        NamedTempFile::new_in(TrialRestoreDirectories::pinned(&lease.directories.state))
-            .map_err(io_error)?;
-    serde_json::to_writer(staged_receipt.as_file_mut(), &verification)
-        .map_err(|_| Error::UnknownCommit)?;
-    staged_receipt.as_file().sync_all().map_err(io_error)?;
-    staged_receipt
-        .persist_noclobber(receipt)
-        .map_err(|error| io_error(error.error))?;
+    write_trial_receipt(
+        &receipt,
+        &TrialRestoreDirectories::pinned(&lease.directories.state),
+        &verification,
+    )?;
     lease.sync_publication()?;
     Ok(verification.preparation)
 }
