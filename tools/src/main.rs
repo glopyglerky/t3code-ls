@@ -1,3 +1,4 @@
+mod download_catalog;
 mod migration;
 
 use serde_json::Value;
@@ -196,7 +197,11 @@ fn run() -> Result<()> {
         Some("check-source") => check_source(),
         Some("check-upstream-readme") => upstream_readme(),
         Some("build") => build(),
-        _ => Err("usage: t3code-ls-tools <check-source|check-upstream-readme|build>".into()),
+        Some("download-catalog") => download_catalog::run(),
+        _ => Err(
+            "usage: t3code-ls-tools <check-source|check-upstream-readme|build|download-catalog>"
+                .into(),
+        ),
     }
 }
 fn main() {
