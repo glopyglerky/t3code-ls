@@ -674,6 +674,14 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
     let before = fs::read(&live).unwrap();
     let original_checkpoint = fs::read(&checkpoint).unwrap();
 
+    let backup_receipt = checkpoint.with_extension("backup-receipt-v1.json");
+    let held_receipt = backup_receipt.with_extension("held");
+    fs::rename(&backup_receipt, &held_receipt).unwrap();
+    assert_eq!(prepare(&request)["error"]["kind"], "incompatible_store");
+    assert_eq!(fs::read(&checkpoint).unwrap(), original_checkpoint);
+    assert!(!trial.exists());
+    fs::rename(&held_receipt, &backup_receipt).unwrap();
+
     let target_digest = request["target_schema_sha256"].clone();
     request["target_schema_sha256"] = json!("0".repeat(64));
     assert_eq!(prepare(&request)["error"]["kind"], "incompatible_store");

@@ -13,10 +13,8 @@ use std::io;
 use std::io::Read;
 #[cfg(target_os = "linux")]
 use std::os::fd::AsRawFd;
-#[cfg(target_os = "linux")]
-use std::os::unix::fs::OpenOptionsExt;
 #[cfg(unix)]
-use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
@@ -72,6 +70,14 @@ pub struct TrialSnapshot {
     pub catalog_sha256: String,
     pub rows: u64,
     pub checksum: String,
+}
+
+#[cfg(unix)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct TrialBackupReceipt {
+    database: TrialFileIdentity,
+    snapshot: TrialSnapshot,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -311,6 +317,48 @@ fn sync_publication(_: &Path, _: &Path) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn read_trial_receipt<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>> {
+    const MAX_RECEIPT_BYTES: u64 = 8 * 1024;
+    let file = match fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
+            return Err(Error::IncompatibleStore);
+        }
+        Err(error) => return Err(io_error(error)),
+    };
+    let metadata = file.metadata().map_err(io_error)?;
+    if !metadata.is_file() || metadata.nlink() != 1 || metadata.len() > MAX_RECEIPT_BYTES {
+        return Err(Error::IncompatibleStore);
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_RECEIPT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(io_error)?;
+    if bytes.len() as u64 > MAX_RECEIPT_BYTES {
+        return Err(Error::IncompatibleStore);
+    }
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|_| Error::IncompatibleStore)
+}
+
+#[cfg(unix)]
+fn write_trial_receipt(path: &Path, directory: &Path, receipt: &impl Serialize) -> Result<()> {
+    let mut staged = tempfile::NamedTempFile::new_in(directory).map_err(io_error)?;
+    serde_json::to_writer(staged.as_file_mut(), receipt).map_err(|_| Error::UnknownCommit)?;
+    staged.as_file().sync_all().map_err(io_error)?;
+    staged
+        .persist_noclobber(path)
+        .map_err(|error| io_error(error.error))?;
+    Ok(())
+}
+
 async fn checked_checkpoint(path: &Path) -> Result<(Store, ApplicationGenerationIdentity)> {
     let store = Store {
         db: Backend::open_offline_snapshot(path).await?,
@@ -392,6 +440,17 @@ async fn backup_trial(home: PathBuf, update_id: String, expected: String) -> Res
     }
     let directory = checked_directory(directory)?;
     let destination = directory.join(format!("{update_id}.omdb"));
+    #[cfg(unix)]
+    let (receipt_path, receipt) = {
+        let path = directory.join(format!("{update_id}.backup-receipt-v1.json"));
+        let receipt = read_trial_receipt::<TrialBackupReceipt>(&path)?;
+        if receipt.as_ref().is_some_and(|saved| {
+            saved.database != database || saved.snapshot.catalog_sha256 != identity.catalog_sha256
+        }) {
+            return Err(Error::IncompatibleStore);
+        }
+        (path, receipt)
+    };
     // The exclusive home lease serializes reuse of this update's staging name.
     let staging = directory.join(format!("{update_id}.staging"));
     match fs::symlink_metadata(&destination) {
@@ -402,6 +461,12 @@ async fn backup_trial(home: PathBuf, update_id: String, expected: String) -> Res
             }
             let backup = checkpoint.db.storage_fingerprint().await?;
             let current = source.db.storage_fingerprint().await?;
+            #[cfg(unix)]
+            if !receipt.as_ref().is_some_and(|saved| {
+                saved.snapshot.rows == backup.rows && saved.snapshot.checksum == backup.checksum
+            }) {
+                return Err(Error::IncompatibleStore);
+            }
             if current.rows != backup.rows || current.checksum != backup.checksum {
                 return Err(Error::IncompatibleStore);
             }
@@ -433,6 +498,26 @@ async fn backup_trial(home: PathBuf, update_id: String, expected: String) -> Res
         source.db.verify_identity()?;
         if path_identity(&staging)? != staged_identity {
             return Err(Error::IncompatibleStore);
+        }
+        #[cfg(unix)]
+        {
+            let verified = TrialBackupReceipt {
+                database: database.clone(),
+                snapshot: TrialSnapshot {
+                    catalog_sha256: identity.catalog_sha256,
+                    rows: backup.rows,
+                    checksum: backup.checksum.clone(),
+                },
+            };
+            if let Some(saved) = &receipt {
+                if saved != &verified {
+                    return Err(Error::IncompatibleStore);
+                }
+            } else {
+                write_trial_receipt(&receipt_path, &directory, &verified)?;
+            }
+            // Bind the update ID to this stopped file before making the backup visible.
+            sync_publication(&directory, &runtime).map_err(|_| Error::UnknownCommit)?;
         }
         // A hard link publishes the verified file without replacing a prior backup.
         fs::hard_link(&staging, &destination).map_err(io_error)?;
@@ -1222,6 +1307,51 @@ mod tests {
         ));
         assert_eq!(fs::read(&destination).unwrap(), backup_bytes);
         assert_eq!(fs::read(&fixture.database).unwrap(), diverged);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn service_trial_backup_binds_the_update_to_the_original_database_file() {
+        let fixture = TrialFixture::start().await;
+        let original = fixture.backup().await.unwrap();
+        let destination = fixture.backups.join(format!("{UPDATE}.omdb"));
+        let staging = fixture.backups.join(format!("{UPDATE}.staging"));
+        let receipt = fixture
+            .backups
+            .join(format!("{UPDATE}.backup-receipt-v1.json"));
+        let receipt_bytes = fs::read(&receipt).unwrap();
+
+        // Model a stop after the receipt is durable and before the backup link is published.
+        fs::rename(&destination, &staging).unwrap();
+        let completed = fixture.backup().await.unwrap();
+        assert!(!completed.reused);
+        assert_eq!(completed.database, original.database);
+        assert_eq!(completed.backup.checksum, original.backup.checksum);
+        assert_eq!(fs::read(&receipt).unwrap(), receipt_bytes);
+
+        let displaced = fixture.database.with_extension("original");
+        fs::rename(&fixture.database, &displaced).unwrap();
+        fs::copy(&displaced, &fixture.database).unwrap();
+        let checkpoint = fs::read(&destination).unwrap();
+        assert!(matches!(
+            fixture.backup().await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert_eq!(fs::read(&destination).unwrap(), checkpoint);
+        assert_eq!(fs::read(&receipt).unwrap(), receipt_bytes);
+        assert_eq!(
+            fs::read(&fixture.database).unwrap(),
+            fs::read(&displaced).unwrap()
+        );
+
+        fs::rename(&displaced, &fixture.database).unwrap();
+        fs::remove_file(&receipt).unwrap();
+        assert!(matches!(
+            fixture.backup().await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert_eq!(fs::read(&destination).unwrap(), checkpoint);
+        assert!(!receipt.exists());
     }
 
     #[cfg(unix)]
