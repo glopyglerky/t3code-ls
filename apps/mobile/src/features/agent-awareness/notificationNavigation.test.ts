@@ -155,6 +155,26 @@ describe("routeAgentNotificationResponseOnce", () => {
     expect(responses.has("notification-1")).toBe(true);
   });
 
+  it("does not clear a newer native response after a queued dispatch", async () => {
+    const older = responseWithData({ deepLink: "/threads/env/older" }, "notification-old") as NotificationResponse;
+    const newer = responseWithData({ deepLink: "/threads/env/newer" }, "notification-new") as NotificationResponse;
+    const getLastResponse = vi.fn()
+      .mockResolvedValueOnce(older)
+      .mockResolvedValueOnce(newer);
+    const clearLastResponse = vi.fn(() => Promise.resolve());
+    const handleResponse = vi.fn(() => Promise.resolve());
+
+    await consumeLastAgentNotificationResponse({
+      getLastResponse,
+      clearLastResponse,
+      handleResponse,
+    });
+
+    expect(handleResponse).toHaveBeenCalledExactlyOnceWith(older);
+    expect(getLastResponse).toHaveBeenCalledTimes(2);
+    expect(clearLastResponse).not.toHaveBeenCalled();
+  });
+
   it("waits for dispatch before clearing a retained cold-start tap", async () => {
     const responses = new Map<string, Promise<void>>();
     const response = responseWithData({

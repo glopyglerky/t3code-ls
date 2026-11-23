@@ -45,6 +45,17 @@ export async function consumeLastAgentNotificationResponse(input: {
   }
 
   try {
+    // Navigation may wait for the root to mount. During that wait, the OS can
+    // replace the retained response with another tap that this call does not own.
+    const current = await input.getLastResponse();
+    if (
+      !current ||
+      current.notification.request.identifier !== response.notification.request.identifier ||
+      current.notification.date !== response.notification.date ||
+      current.actionIdentifier !== response.actionIdentifier
+    ) {
+      return;
+    }
     await input.clearLastResponse();
   } catch (cause) {
     console.error(
