@@ -2,6 +2,9 @@
 
 #[path = "../../../apps/server/src/orchestration-v2/Adapters/claude_stdio_control.rs"]
 pub mod claude_stdio_control;
+#[cfg(unix)]
+#[path = "../../../apps/server/src/orchestration-v2/Adapters/claude_stdio_host.rs"]
+pub mod claude_stdio_host;
 pub mod codex_generation;
 pub mod codex_generation_wire;
 pub mod command_policy;

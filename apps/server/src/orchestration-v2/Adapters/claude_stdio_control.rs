@@ -4,13 +4,7 @@
 extern crate alloc;
 
 use crate::json::{self, Value};
-use alloc::{
-    borrow::ToOwned,
-    collections::{BTreeMap, BTreeSet},
-    format,
-    string::String,
-    vec,
-};
+use alloc::{borrow::ToOwned, collections::BTreeMap, format, string::String, sync::Arc, vec};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProtocolError {
@@ -34,11 +28,22 @@ pub fn frame(input: &[u8], max_bytes: usize) -> Result<Option<(&str, &[u8])>, Pr
     Ok(None)
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct PermissionTicket {
     request_id: String,
     issued: u64,
+    owner: Arc<()>,
 }
+
+impl PartialEq for PermissionTicket {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.owner, &other.owner)
+            && self.issued == other.issued
+            && self.request_id == other.request_id
+    }
+}
+
+impl Eq for PermissionTicket {}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Incoming {
@@ -49,6 +54,10 @@ pub enum Incoming {
         request: Value,
     },
     PermissionWithdrawn(PermissionTicket),
+    InitializeResponse {
+        success: bool,
+        response: Value,
+    },
     InterruptResponse {
         request_id: String,
         success: bool,
@@ -57,25 +66,32 @@ pub enum Incoming {
     Ignored,
 }
 
+enum RequestKind {
+    Initialize,
+    Interrupt,
+}
+
 pub struct ControlSession {
+    owner: Arc<()>,
     next_sequence: u64,
     max_pending: usize,
-    interrupts: BTreeSet<String>,
+    requests: BTreeMap<String, RequestKind>,
     permissions: BTreeMap<String, u64>,
 }
 
 impl ControlSession {
-    pub const fn new(max_pending: usize) -> Self {
+    pub fn new(max_pending: usize) -> Self {
         Self {
+            owner: Arc::new(()),
             next_sequence: 0,
             max_pending,
-            interrupts: BTreeSet::new(),
+            requests: BTreeMap::new(),
             permissions: BTreeMap::new(),
         }
     }
 
     fn reserve_request(&mut self) -> Result<u64, ProtocolError> {
-        if self.interrupts.len().saturating_add(self.permissions.len()) >= self.max_pending {
+        if self.requests.len().saturating_add(self.permissions.len()) >= self.max_pending {
             return Err(ProtocolError::TooManyRequests);
         }
         let issued = self
@@ -86,15 +102,23 @@ impl ControlSession {
         Ok(issued)
     }
 
+    pub fn request_initialize(&mut self) -> Result<Value, ProtocolError> {
+        self.request(RequestKind::Initialize, "initialize")
+    }
+
     pub fn request_interrupt(&mut self) -> Result<Value, ProtocolError> {
-        let request_id = format!("t3-interrupt-{}", self.reserve_request()?);
-        self.interrupts.insert(request_id.clone());
+        self.request(RequestKind::Interrupt, "interrupt")
+    }
+
+    fn request(&mut self, kind: RequestKind, subtype: &str) -> Result<Value, ProtocolError> {
+        let request_id = format!("t3-{subtype}-{}", self.reserve_request()?);
+        self.requests.insert(request_id.clone(), kind);
         Ok(Value::Object(vec![
             ("type".into(), Value::String("control_request".into())),
             ("request_id".into(), Value::String(request_id)),
             (
                 "request".into(),
-                Value::Object(vec![("subtype".into(), Value::String("interrupt".into()))]),
+                Value::Object(vec![("subtype".into(), Value::String(subtype.into()))]),
             ),
         ]))
     }
@@ -102,6 +126,10 @@ impl ControlSession {
     pub fn receive(&mut self, line: &str, limits: json::Limits) -> Result<Incoming, ProtocolError> {
         let message =
             json::parse_with_limits(line, limits).map_err(|_| ProtocolError::InvalidFrame)?;
+        self.receive_value(message)
+    }
+
+    pub(crate) fn receive_value(&mut self, message: Value) -> Result<Incoming, ProtocolError> {
         match text(&message, "type")? {
             "control_request" => {
                 let request = field(&message, "request")?;
@@ -116,6 +144,7 @@ impl ControlSession {
                 let ticket = PermissionTicket {
                     request_id: request_id.to_owned(),
                     issued,
+                    owner: self.owner.clone(),
                 };
                 self.permissions.insert(ticket.request_id.clone(), issued);
                 Ok(Incoming::PermissionRequested {
@@ -132,13 +161,14 @@ impl ControlSession {
                         Incoming::PermissionWithdrawn(PermissionTicket {
                             request_id: request_id.to_owned(),
                             issued,
+                            owner: self.owner.clone(),
                         })
                     }))
             }
             "control_response" => {
                 let response = field(&message, "response")?;
                 let request_id = text(response, "request_id")?;
-                if !self.interrupts.contains(request_id) {
+                if !self.requests.contains_key(request_id) {
                     return Ok(Incoming::Ignored);
                 }
                 let success = match text(response, "subtype")? {
@@ -146,11 +176,17 @@ impl ControlSession {
                     "error" => false,
                     _ => return Err(ProtocolError::InvalidFrame),
                 };
-                self.interrupts.remove(request_id);
-                Ok(Incoming::InterruptResponse {
-                    request_id: request_id.to_owned(),
-                    success,
-                    response: response.clone(),
+                Ok(match self.requests.remove(request_id) {
+                    Some(RequestKind::Initialize) => Incoming::InitializeResponse {
+                        success,
+                        response: response.clone(),
+                    },
+                    Some(RequestKind::Interrupt) => Incoming::InterruptResponse {
+                        request_id: request_id.to_owned(),
+                        success,
+                        response: response.clone(),
+                    },
+                    None => Incoming::Ignored,
                 })
             }
             "result"
@@ -172,7 +208,9 @@ impl ControlSession {
         ticket: &PermissionTicket,
         decision: Value,
     ) -> Option<Value> {
-        if self.permissions.get(&ticket.request_id) != Some(&ticket.issued) {
+        if !Arc::ptr_eq(&ticket.owner, &self.owner)
+            || self.permissions.get(&ticket.request_id) != Some(&ticket.issued)
+        {
             return None;
         }
         self.permissions.remove(&ticket.request_id);
