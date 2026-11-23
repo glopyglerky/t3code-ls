@@ -169,7 +169,7 @@ try {
   const identityA = await descriptor(a);
   const identityB = await descriptor(b);
   Assert.notEqual(identityA.environmentId, identityB.environmentId);
-  const pairing = await peer.request("/api/auth/pairing-token", { access: "read-only" }) as { credential: string };
+  const pairing = await peer.request("/api/auth/pairing-token", {}) as { credential: string };
   let unexpectedRequests = 0;
   let credentialRequests = 0;
   let probes = 0;
@@ -201,6 +201,7 @@ try {
   Assert.ok(probes > 0);
   Assert.equal(credentialRequests, 0);
   Assert.equal(unexpectedRequests, 0);
+  checkpoint("link both packaged servers through a plain pairing code");
   const linked = await owner.rpc((rpc) => rpc[WS_METHODS.peerLinksLink]({
     url: b.origin, pairingCode: pairing.credential, access: "read-only",
   }));
