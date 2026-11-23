@@ -606,8 +606,11 @@ A fresh read and database reopen see the new inherited row and ancestry
 revision with the same child replay watermark. [Baseline](https://github.com/glopyglerky/t3code-ls/actions/runs/45173713610)
 · [Candidate](https://github.com/glopyglerky/t3code-ls/actions/runs/45173707988)
 
-Live propagation into an already-open child subscription and full J04 history
-performance remain open.
+The negotiated live refresh sends a payload-free notification when an ancestor
+changes the inherited view. The hosted check covers the active SQLite
+subscription, same-cursor page rejection in the shared client, and a native
+anchored read. Packaged native live refresh and J04 performance remain open.
+[Live refresh check](https://github.com/glopyglerky/t3code-ls/actions/runs/45181752443)
 
 ## T05 offline publication under the serving fence
 
@@ -637,7 +640,14 @@ the durable rollback phases and verified retry without moving either file.
 [Baseline](https://github.com/glopyglerky/t3code-ls/actions/runs/45178423071)
 · [Cancellation recovery](https://github.com/glopyglerky/t3code-ls/actions/runs/45178489482)
 
-Launcher selection handoff, catalog unsealing and ordinary native update
+The packaged launcher cancelled the unstarted publication and reopened the
+previous runtime with the original database inode and committed receipt. A
+separate packaged `serve` invocation refused the published sealed candidate.
+The refusal left runtime readiness unpublished and preserved the database,
+checkpoint and selection. [Packaged rollback](https://github.com/glopyglerky/t3code-ls/actions/runs/45183245968)
+· [Packaged serving refusal](https://github.com/glopyglerky/t3code-ls/actions/runs/45185612395)
+
+Promotion to the target runtime, catalog unsealing and ordinary native update
 admission still require production recovery proof.
 
 ## Native startup migration inspection

@@ -90,10 +90,18 @@ jobs:
             tools/service-launcher-trial.test.mjs | tee "$RUNNER_TEMP/cli-proof/preparation.log"
           grep -E '^ok [1-9][0-9]* - compiled Rust helper restores ' "$RUNNER_TEMP/cli-proof/preparation.log"
           if [[ "$LAUNCHER_PROMOTION_PROOF" == true ]]; then
-            T3_TEST_LAUNCHER_PROMOTION_INTENT=1 T3_TEST_LAUNCHER_SEALED_PUBLICATION=1 \
-              node --test --test-reporter tap --test-name-pattern 'compiled Rust helper records' \
-                tools/service-launcher-trial.test.mjs | tee "$RUNNER_TEMP/cli-proof/promotion-intent.log"
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- env T3_TEST_LAUNCHER_PROMOTION_INTENT=1 \
+                T3_TEST_LAUNCHER_SEALED_PUBLICATION=1 T3_TEST_LAUNCHER_SEALED_SERVING=1 \
+                T3_TEST_PREPARE_ENTRY="$3" T3_TEST_SEALED_TRIAL_HELPER="$4" \
+                "$2" --test --test-reporter tap \
+                --test-name-pattern "compiled Rust helper records" tools/service-launcher-trial.test.mjs
+            ' _ "$(id -un)" "$(command -v node)" "$entry" "$T3_TEST_SEALED_TRIAL_HELPER" \
+              | tee "$RUNNER_TEMP/cli-proof/promotion-intent.log"
             grep -E '^ok [1-9][0-9]* - compiled Rust helper records ' "$RUNNER_TEMP/cli-proof/promotion-intent.log"
+            grep -F 'Packaged serve refused the sealed catalog without publishing runtime state or modifying the database.' \
+              "$RUNNER_TEMP/cli-proof/promotion-intent.log"
             grep -F 'Packaged native helper published, verified the serving fence, and restored the original sealed-trial source.' \
               "$RUNNER_TEMP/cli-proof/promotion-intent.log"
           fi
