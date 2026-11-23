@@ -81,7 +81,11 @@ export const expoThreadOutboxStorage: ThreadOutboxStorage = {
           continue;
         }
         try {
-          messages.push(decodeQueuedThreadMessage(JSON.parse(await entry.text()) as unknown));
+          const message = decodeQueuedThreadMessage(JSON.parse(await entry.text()) as unknown);
+          if (entry.name !== messageFileName(message.messageId)) {
+            throw new Error("Queued message ID does not match its file name.");
+          }
+          messages.push(message);
         } catch (cause) {
           errors.push(
             new ThreadOutboxStorageError({
