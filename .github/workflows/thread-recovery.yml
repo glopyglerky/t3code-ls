@@ -45,3 +45,33 @@ jobs:
         run: |
           pnpm --filter @t3tools/task-cache test src/Cleanup.test.ts src/Cache.test.ts \
             src/NativeClients.test.ts src/Savings.test.ts
+      - name: Install the pinned compiler for native savings
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-task-cache-savings-')
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/savings-toolchain"
+      - name: Compare native savings and atomic D1 receipt accounting
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-task-cache-savings-')
+        env:
+          WASM_BINDGEN_VERSION: "0.2.130"
+          WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/savings-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/savings-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test \
+            --locked -p t3-code-ls-task-cache-accounting
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" check \
+            --locked --target wasm32-unknown-unknown -p t3-code-ls-task-cache-accounting
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
+            --release --locked --target wasm32-unknown-unknown -p t3-code-ls-task-cache-accounting-web
+          archive="wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive.tar.gz" \
+            "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$WASM_BINDGEN_VERSION/$archive.tar.gz"
+          printf '%s  %s\n' "$WASM_BINDGEN_SHA256" "$RUNNER_TEMP/$archive.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$archive.tar.gz" -O "$archive/wasm-bindgen" > "$RUNNER_TEMP/wasm-bindgen"
+          chmod u+x "$RUNNER_TEMP/wasm-bindgen"
+          "$RUNNER_TEMP/wasm-bindgen" --target nodejs --out-name savings \
+            --out-dir "$RUNNER_TEMP/savings-wasm" \
+            "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/t3_code_ls_task_cache_accounting_web.wasm"
+          sha256sum "$RUNNER_TEMP/savings-wasm/savings_bg.wasm"
+          pnpm --filter @t3tools/task-cache typecheck
+          node infra/task-cache/scripts/verify-savings-native.ts "$RUNNER_TEMP/savings-wasm/savings.js"

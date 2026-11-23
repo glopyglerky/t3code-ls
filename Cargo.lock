@@ -2917,6 +2917,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "t3-code-ls-task-cache-accounting"
+version = "0.1.0"
+
+[[package]]
+name = "t3-code-ls-task-cache-accounting-web"
+version = "0.1.0"
+dependencies = [
+ "t3-code-ls-task-cache-accounting",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "t3-code-ls-transport"
 version = "0.1.0"
 dependencies = [
