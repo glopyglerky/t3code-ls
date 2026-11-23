@@ -233,6 +233,9 @@ jobs:
       - name: Check installed helper identity before starting native trials
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-')
         run: node --test tools/service-launcher-trial.test.mjs
+      - name: Install the pinned compiler for event preparation
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t16-event-preparation-')
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/event-preparation-toolchain"
       - name: Verify repeated native event index preparation
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t16-event-preparation-')
         shell: bash
@@ -241,9 +244,8 @@ jobs:
           export CARGO_HOME="$RUNNER_TEMP/event-preparation-cargo"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/event-preparation-target"
           export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
-          node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/event-preparation-toolchain"
           for test in preparation_metadata_pair_revalidates_completed_state_and_fails_closed preparation_resumes_after_reopen_and_does_not_rebuild_live_events; do
-            "$RUNNER_TEMP/event-preparation-toolchain/bin/lustr" --bluefe-root "$RUNNER_TEMP/event-preparation-toolchain" \
+            "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
               test --locked -p t3-code-ls-storage --lib "$test" | tee "$RUNNER_TEMP/$test.log"
             grep -F 'test result: ok. 1 passed; 0 failed' "$RUNNER_TEMP/$test.log"
           done
