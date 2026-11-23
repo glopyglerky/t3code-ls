@@ -21,6 +21,7 @@ import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 import { chromium, type Browser, type Page } from "playwright";
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
+import { verifyBundledVoiceDraft } from "./hybrid-client-voice.ts";
 import { inspectNativeMessageUpdates, inspectNativeReplay } from "./hybrid-client-database.ts";
 import {
   assertReplayTurnLinks,
@@ -51,6 +52,7 @@ const fileEditorProof = process.env.T3_CODE_LS_FILE_EDITOR_PROOF === "true";
 const tasksFile = "fixture-tasks.md";
 const initialTasks = "- [ ] First milestone\n- [ ] Second milestone\n- [ ] Keep the draft\n";
 const durableTextProof = process.env.T3_CODE_LS_DURABLE_TEXT_PROOF === "true";
+const voiceDraftProof = process.env.T3_CODE_LS_VOICE_DRAFT_PROOF === "true";
 const pdfLinkProof = process.env.T3_CODE_LS_PDF_LINK_PROOF === "true";
 const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
 const capturedApproval = {
@@ -1010,6 +1012,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     historyFind: null as { query: string; count: string; draftPreserved: boolean } | null,
     draftMerge: null as Awaited<ReturnType<typeof verifyDraftMerge>> | null,
     draftStorage: null as Awaited<ReturnType<typeof verifyDraftStorageRecovery>> | null,
+    voiceDraft: null as Awaited<ReturnType<typeof verifyBundledVoiceDraft>> | null,
     messageAppends: null as {
       requests: number;
       spliceCapableRequests: number;
@@ -1218,6 +1221,12 @@ async function exercise(implementation: Implementation): Promise<void> {
       starting("draft write quota denial and recovery");
       proof.draftStorage = await verifyDraftStorageRecovery(page);
       completed("Kept the unsent draft through quota denial, retry and reload");
+    }
+
+    if (voiceDraftProof) {
+      starting("capture synthetic microphone audio into an unsent draft");
+      proof.voiceDraft = await verifyBundledVoiceDraft(page);
+      completed("Preserved a concurrent Unicode draft edit through dictated insertion and cancellation");
     }
 
     starting("normal composer submission and controlled approval");
@@ -1531,7 +1540,10 @@ const run = {
 };
 try {
   const executablePath = process.env.T3_CODE_LS_CHROMIUM_EXECUTABLE;
-  browser = await chromium.launch(executablePath ? { executablePath } : {});
+  browser = await chromium.launch({
+    ...(executablePath ? { executablePath } : {}),
+    ...(voiceDraftProof ? { args: ["--use-fake-device-for-media-stream"] } : {}),
+  });
   console.log(`Original client acceptance: ${requested.join(", ")}; Chromium ${browser.version()}`);
   for (const implementation of requested) {
     await exercise(implementation);
