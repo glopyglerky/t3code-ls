@@ -203,3 +203,10 @@ The exact suffix-disclosure code was checked with dependency-free synthetic path
 known owned launcher/runtime layouts were accepted, while another home, an unknown
 filename/version and unresolved input returned null. This checks disclosure
 filtering only and grants no Windows install or lifecycle qualification.
+
+The [diagnostic run](https://github.com/glopyglerky/t3code-ls/actions/runs/45185058912)
+found that both spellings named the same regular file by device and inode.
+Native realpath resolved them to the same path within the fixture home. Default
+synchronous realpath returned different paths. The fixture now uses native
+realpath for its same-file assertion, matching the installer. It also continues
+to require matching file identities and the original lifecycle assertions.

@@ -382,7 +382,8 @@ const smokeWindowsInstalledLifecycle = Effect.fn("smokeWindowsInstalledLifecycle
       const second = NodeFS.statSync(right, { bigint: true });
       return first.isFile() && second.isFile() && first.dev === second.dev && first.ino === second.ino &&
         NodePath.win32.isAbsolute(left) && NodePath.win32.isAbsolute(right) &&
-        windowsPath(NodeFS.realpathSync(left)) === windowsPath(NodeFS.realpathSync(right));
+        // The installed receipt uses the native Windows realpath result.
+        windowsPath(NodeFS.realpathSync.native(left)) === windowsPath(NodeFS.realpathSync.native(right));
     } catch { return false; }
   };
   const snapshot = (root: string): string => {
@@ -466,67 +467,6 @@ const smokeWindowsInstalledLifecycle = Effect.fn("smokeWindowsInstalledLifecycle
     exactlyOneReceipt: receipts.length === 1,
     receiptNamesSameLauncher: receipts.length === 1 && sameFile(receipts[0]!, launcher),
   };
-  const receiptTarget = receipts[0] ?? "";
-  const trimmedReceipt = receiptTarget.replace(/^\uFEFF/u, "").trim();
-  const probe = (value: string, native: boolean) => {
-    try {
-      const canonical = native ? NodeFS.realpathSync.native(value) : NodeFS.realpathSync(value);
-      const stat = NodeFS.statSync(value, { bigint: true });
-      return { canonical, stat };
-    } catch { return undefined; }
-  };
-  const receiptProbe = probe(receiptTarget, false);
-  const nativeReceiptProbe = probe(receiptTarget, true);
-  const expectedProbe = probe(launcher, false);
-  const nativeExpectedProbe = probe(launcher, true);
-  const cleanedProbe = probe(trimmedReceipt, true);
-  const ownedHome = NodeFS.realpathSync.native(home);
-  const relative = (value: string) => NodePath.win32.relative(ownedHome, value);
-  const within = (value: string) => {
-    const suffix = relative(value);
-    return suffix !== "" && !NodePath.win32.isAbsolute(suffix) && suffix !== ".." && !suffix.startsWith("..\\");
-  };
-  // Only disclose a suffix after canonical resolution proves fixture ownership,
-  // and only if every segment is a known literal from this fixture's layout.
-  const allowed = new Set(["fixture-bin", "t3.cmd", "runtime", "versions", "t3.exe", "launchers"]);
-  if (/^[A-Za-z0-9.+-]{1,128}$/u.test(expectedVersion)) allowed.add(expectedVersion);
-  const suffix = nativeReceiptProbe && within(nativeReceiptProbe.canonical)
-    ? relative(nativeReceiptProbe.canonical).split(/[\\/]/u) : undefined;
-  const fixtureSuffix = suffix && suffix.length <= 5 && suffix.every((part) => allowed.has(part)) ? suffix.join("/") : null;
-  const receiptChecks = {
-    basenameIsLauncher: NodePath.win32.basename(receiptTarget).toLowerCase() === "t3.cmd",
-    trimmedBasenameIsLauncher: NodePath.win32.basename(trimmedReceipt).toLowerCase() === "t3.cmd",
-    unchangedByTrim: receiptTarget === receiptTarget.trim(),
-    hasLeadingBom: receiptTarget.startsWith("\uFEFF"),
-    hasControlCharacter: /[\u0000-\u001f\u007f]/u.test(receiptTarget),
-    windowsAbsolute: NodePath.win32.isAbsolute(receiptTarget),
-    driveAbsolute: /^[A-Za-z]:[\\/]/u.test(receiptTarget),
-    extendedNamespace: receiptTarget.startsWith("\\\\?\\"),
-    uncForm: receiptTarget.startsWith("\\\\") && !receiptTarget.startsWith("\\\\?\\"),
-    fileUrlForm: receiptTarget.startsWith("file:"),
-    forwardSlashes: receiptTarget.includes("/"),
-    backslashes: receiptTarget.includes("\\"),
-    sameDrive: NodePath.win32.parse(receiptTarget).root.toLowerCase() === NodePath.win32.parse(launcher).root.toLowerCase(),
-    normalizedEqualsExpected: windowsPath(receiptTarget) === windowsPath(launcher),
-    cleanedNormalizedEqualsExpected: windowsPath(trimmedReceipt) === windowsPath(launcher),
-    pathServiceResolveAgrees: windowsPath(path.resolve(receiptTarget)) === windowsPath(NodePath.win32.resolve(receiptTarget)),
-    defaultRealpathSucceeded: receiptProbe !== undefined,
-    nativeRealpathSucceeded: nativeReceiptProbe !== undefined,
-    cleanedNativeRealpathSucceeded: cleanedProbe !== undefined,
-    expectedDefaultRealpathSucceeded: expectedProbe !== undefined,
-    expectedNativeRealpathSucceeded: nativeExpectedProbe !== undefined,
-    canonicalEqualsExpected: receiptProbe !== undefined && expectedProbe !== undefined && windowsPath(receiptProbe.canonical) === windowsPath(expectedProbe.canonical),
-    nativeCanonicalEqualsExpected: nativeReceiptProbe !== undefined && nativeExpectedProbe !== undefined && windowsPath(nativeReceiptProbe.canonical) === windowsPath(nativeExpectedProbe.canonical),
-    cleanedNativeCanonicalEqualsExpected: cleanedProbe !== undefined && nativeExpectedProbe !== undefined && windowsPath(cleanedProbe.canonical) === windowsPath(nativeExpectedProbe.canonical),
-    receiptRegularFile: receiptProbe?.stat.isFile() === true,
-    receiptDirectory: receiptProbe?.stat.isDirectory() === true,
-    expectedRegularFile: expectedProbe?.stat.isFile() === true,
-    deviceIdentityMatches: receiptProbe !== undefined && expectedProbe !== undefined && receiptProbe.stat.dev === expectedProbe.stat.dev,
-    inodeIdentityMatches: receiptProbe !== undefined && expectedProbe !== undefined && receiptProbe.stat.ino === expectedProbe.stat.ino,
-    canonicalWithinOwnedHome: nativeReceiptProbe !== undefined && within(nativeReceiptProbe.canonical),
-    validatedFixtureSuffix: fixtureSuffix !== null,
-  };
-  yield* Effect.sync(() => { process.stdout.write(`WINDOWS_MANAGED_RECEIPT_CHECKS ${JSON.stringify({ ...receiptChecks, fixtureSuffix })}\n`); });
   const spellingChecks = {
     shimLiteralMatchesConstructedPath: Option.isSome(contents) && contents.value === generated,
     reportLiteralMatchesConstructedPath: installed.stdout.includes(`${prefix}${launcher}.`),
