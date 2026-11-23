@@ -105,13 +105,22 @@ impl Browser {
             "/url",
             Some(json!({"url": format!("{origin}{route}")})),
         )?;
-        self.wait_for("the restored thread and authoritative HTTP responses", || {
-            self.script("const t = window.fixtureReopenTiming; return !!t && t.firstShellVisibleMillis > 0 && t.selectedTextVisibleMillis > 0 && t.composerInteractiveMillis > 0 && t.authoritativeShellHttpMillis > 0 && t.authoritativeThreadHttpMillis > 0;")
+        let restored = self.wait_for("the restored thread and authoritative synchronization", || {
+            self.script("const t = window.fixtureReopenTiming; return !!t && t.firstShellVisibleMillis > 0 && t.selectedTextVisibleMillis > 0 && t.composerInteractiveMillis > 0 && t.authoritativeShellHttpMillis > 0 && t.authoritativeThreadMillis > 0;")
                 .map(|value| value == true)
-        })?;
+        });
         let timing = self.script("return window.fixtureReopenTiming;")?;
-        if timing["shellHttpStatus"] != 200 || timing["threadHttpStatus"] != 200 {
-            return Err("reopened client did not complete its authoritative HTTP loads".into());
+        if let Err(error) = restored {
+            return Err(format!("{error}; reopen timing: {timing}").into());
+        }
+        let thread_synchronized = timing["threadFreshnessTransport"] == "websocket-synchronized"
+            || (timing["threadFreshnessTransport"] == "http-snapshot"
+                && timing["threadHttpStatus"] == 200);
+        if timing["shellHttpStatus"] != 200 || !thread_synchronized {
+            return Err(format!(
+                "reopened client did not synchronize authoritative state: {timing}"
+            )
+            .into());
         }
         let snapshot = self.reopen_snapshot(selected_thread, thread_count, message_count)?;
         Ok(json!({"timing": timing, "snapshot": snapshot}))

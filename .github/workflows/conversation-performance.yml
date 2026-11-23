@@ -270,7 +270,7 @@ jobs:
                 "$PWD/$profile/apps/server/dist/bin.mjs" "$trial_root/$trial" \
                 "$driver" "$chrome" "$mode" | tee "$result" > /dev/null
               jq -er --argjson pair "$pair" --argjson position "$((position + 1))" --arg profile "$profile" \
-                'select(.journey == "J02" and .snapshot.valid and .fixture.total_messages == 6400) | [$pair,$position,$profile,.descriptor_micros,.browser.firstShellVisibleMillis,.browser.selectedTextVisibleMillis,.browser.authoritativeShellHttpMillis,.browser.authoritativeThreadHttpMillis] | @tsv' \
+                'select(.journey == "J02" and .snapshot.valid and .fixture.total_messages == 6400) | [$pair,$position,$profile,.descriptor_micros,.browser.firstShellVisibleMillis,.browser.selectedTextVisibleMillis,.browser.authoritativeShellHttpMillis,.browser.authoritativeThreadMillis] | @tsv' \
                 "$result" >> "$evidence/reopen.tsv"
               rm -r "${trial_root:?}/${trial:?}"
             done
