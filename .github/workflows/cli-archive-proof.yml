@@ -96,11 +96,13 @@ jobs:
               ip link set dev lo up
               exec runuser -u "$1" -- env T3_TEST_LAUNCHER_PROMOTION_INTENT=1 \
                 T3_TEST_LAUNCHER_SEALED_PUBLICATION=1 T3_TEST_LAUNCHER_SEALED_SERVING=1 \
-                T3_TEST_PREPARE_ENTRY="$3" T3_TEST_SEALED_TRIAL_HELPER="$4" \
+                T3_TEST_PREPARE_ENTRY="$3" T3_TEST_SEALED_TRIAL_HELPER="$4" T3_TEST_PREVIOUS_RUNTIME_VERSION="$5" \
                 "$2" --test --test-reporter tap \
                 --test-name-pattern "compiled Rust helper records" tools/service-launcher-trial.test.mjs
-            ' _ "$(id -un)" "$(command -v node)" "$entry" "$helper" | tee "$RUNNER_TEMP/cli-proof/preparation.log"
+            ' _ "$(id -un)" "$(command -v node)" "$entry" "$helper" "$version" | tee "$RUNNER_TEMP/cli-proof/preparation.log"
             grep -F 'Packaged serve refused the sealed catalog without publishing runtime state or modifying the database.' \
+              "$RUNNER_TEMP/cli-proof/preparation.log"
+            grep -F 'The packaged launcher rolled back the published sealed trial and reopened the previous runtime.' \
               "$RUNNER_TEMP/cli-proof/preparation.log"
           else
             T3_TEST_PREPARE_ENTRY="$entry" T3_TEST_SEALED_TRIAL_HELPER="$helper" \
@@ -110,7 +112,7 @@ jobs:
           if [[ "$LAUNCHER_PROMOTION_PROOF" == true ]]; then
             grep -E '^ok [1-9][0-9]* - compiled Rust helper records ' "$RUNNER_TEMP/cli-proof/preparation.log"
           fi
-          if [[ "$T3_TEST_LAUNCHER_SEALED_PUBLICATION" == 1 ]]; then
+          if [[ "$T3_TEST_LAUNCHER_SEALED_PUBLICATION" == 1 && "$LAUNCHER_SEALED_SERVING_PROOF" != true ]]; then
             grep -F 'Packaged native helper published, verified the serving fence, and restored the original sealed-trial source.' \
               "$RUNNER_TEMP/cli-proof/preparation.log"
           fi

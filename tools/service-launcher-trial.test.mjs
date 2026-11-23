@@ -243,6 +243,7 @@ const launcherPromotionProof = process.env.T3_TEST_LAUNCHER_PROMOTION_INTENT ===
 const launcherPublicationProof = process.env.T3_TEST_LAUNCHER_SEALED_PUBLICATION === "1";
 const launcherCancelProof = process.env.T3_TEST_LAUNCHER_CANCEL_BEFORE_PUBLICATION === "1";
 const launcherSealedServingProof = process.env.T3_TEST_LAUNCHER_SEALED_SERVING === "1";
+const launchesPackagedPrevious = launcherCancelProof || launcherSealedServingProof;
 
 test(launcherPromotionProof
   ? "compiled Rust helper records an installed launcher's native promotion intent"
@@ -259,10 +260,10 @@ test(launcherPromotionProof
   t.diagnostic(JSON.stringify({ helperBytes, installedArtifactLimitBytes: 128 * 1024 * 1024 }));
   assert.ok(helperBytes <= 128 * 1024 * 1024,
     "The installed helper must fit the native trial's 128 MiB artifact hash limit");
-  const previousVersion = launcherCancelProof ? process.env.T3_TEST_PREVIOUS_RUNTIME_VERSION : activeVersion;
+  const previousVersion = launchesPackagedPrevious ? process.env.T3_TEST_PREVIOUS_RUNTIME_VERSION : activeVersion;
   assert.ok(previousVersion !== undefined && isExactServiceVersion(previousVersion),
     "Use the exact installed package version when launching the previous runtime");
-  const candidateVersion = launcherCancelProof
+  const candidateVersion = launchesPackagedPrevious
     ? `${BigInt(previousVersion.split(".", 1)[0]) + 1n}.0.0`
     : targetVersion;
   assert.ok(isExactServiceVersion(candidateVersion) && compareExactServiceVersions(previousVersion, candidateVersion) < 0);
@@ -320,7 +321,7 @@ test(launcherPromotionProof
     t.diagnostic(JSON.stringify({ runtimeEntryBytes, installedRuntimeLimitBytes: 256 * 1024 * 1024 }));
     assert.ok(runtimeEntryBytes <= 256 * 1024 * 1024,
       "The installed runtime must fit its independent 256 MiB artifact hash limit");
-    if (launcherCancelProof || launcherSealedServingProof) {
+    if (launchesPackagedPrevious) {
       await fs.cp(path.dirname(preparationEntry), target, { recursive: true });
       await fs.cp(path.dirname(preparationEntry), previous, { recursive: true });
     } else {
@@ -335,7 +336,7 @@ test(launcherPromotionProof
   const helperSha256 = digest(await fs.readFile(executable));
   for (const directory of [previous, target]) {
     const nativeDirectory = path.join(directory, "native-bin");
-    if (launcherCancelProof || launcherSealedServingProof) {
+    if (launchesPackagedPrevious) {
       assert.equal(digest(await fs.readFile(path.join(nativeDirectory, "t3-code-ls-db"))), helperSha256);
       continue;
     }
@@ -468,6 +469,74 @@ test(launcherPromotionProof
       assert.deepEqual(await fs.readFile(observationPath), persisted);
       await assert.rejects(fs.stat(f.starts), { code: "ENOENT" });
       await assert.rejects(fs.stat(path.join(f.userdata, "server-runtime.json")), { code: "ENOENT" });
+      async function reopenPreviousRuntime(retainedCandidate) {
+        const output = await fs.open(path.join(f.runtime, "rollback-recovery.log"), "a+", 0o600);
+        const port = 48123;
+        const launcher = f.launcher(pending, {
+          HOME: home,
+          PATH: "/usr/bin:/bin",
+          T3CODE_HOST: "127.0.0.1",
+          T3CODE_PORT: String(port),
+          T3CODE_NO_BROWSER: "true",
+          T3CODE_TELEMETRY_ENABLED: "false",
+          T3CODE_OTEL_SDK_DISABLED: "true",
+          T3_CODE_LS_SEALED_TRIAL_RECOVERY: "1",
+        }, output.fd);
+        const running = launcher.run().then(() => "completed", (error) => error.message);
+        try {
+          const origin = `http://127.0.0.1:${port}`;
+          const deadline = Date.now() + 45_000;
+          let descriptor;
+          while (Date.now() < deadline) {
+            const outcome = await Promise.race([delay(50), running]);
+            if (outcome !== undefined) {
+              const log = Buffer.alloc(64 * 1024);
+              const { bytesRead } = await output.read(log, 0, log.length, 0);
+              const text = log.toString("utf8", 0, bytesRead);
+              t.diagnostic(JSON.stringify({
+                childReportedVersionMismatch: text.includes("The service launcher started a different t3 version."),
+                childReportedInvalidContext: text.includes("The service launcher supplied invalid startup context."),
+                childReportedStorageError: /OmdbStartupError|ServerOwnershipError|NativeDatabaseError/u.test(text),
+                childReportedBindError: /EADDRINUSE|EACCES/u.test(text),
+              }));
+            }
+            assert.equal(outcome, undefined, "The selected launcher must remain active");
+            const response = await fetch(origin + "/.well-known/t3/environment", {
+              redirect: "error", signal: AbortSignal.timeout(400),
+            }).catch(() => undefined);
+            if (response?.ok) {
+              descriptor = await response.json();
+              break;
+            }
+          }
+          assert.ok(descriptor, "The previous packaged runtime must become ready after rollback");
+          assert.equal(descriptor.databaseMigration, Number(seeded[0].migrations.at(-1).id));
+          assert.deepEqual(await readServiceState(f.statePath), {
+            ...selected, update: { id, fromVersion: previousVersion, targetVersion: candidateVersion,
+              status: "rolled-back", reason: "sealed-trial-recovery" },
+          });
+          const runtime = JSON.parse(await fs.readFile(path.join(f.userdata, "server-runtime.json"), "utf8"));
+          assert.ok(Number.isSafeInteger(runtime.pid) && runtime.pid > 1);
+          assert.equal(await fs.realpath(`/proc/${runtime.pid}/exe`), path.join(previous, "t3"));
+          assert.equal((await fs.stat(dbPath, { bigint: true })).ino, sourceIdentity.ino);
+          const [restored] = runHelper(["read-only-local", dbPath], [
+            { operation: "receipt", command_id: commandId },
+          ]);
+          assert.deepEqual(restored, seeded[3]);
+          assert.equal((await fs.stat(retainedCandidate, { bigint: true })).ino, stageIdentity.ino);
+          assert.deepEqual(await fs.readFile(retainedCandidate), stageBytes);
+          assert.deepEqual(await fs.readFile(checkpoint), checkpointBytes);
+          assert.deepEqual(await fs.readFile(backupReceipt), backupReceiptBytes);
+          assert.equal(JSON.parse(await fs.readFile(observationPath, "utf8")).sealed_publication.phase, "rolled_back");
+        } finally {
+          try {
+            await launcher.stop("SIGTERM");
+            await running;
+          } finally {
+            await output.close();
+          }
+        }
+      }
       if (launcherPublicationProof) {
         assert.equal(capabilities.sealedIntentPublication, 1);
         const installedHelper = path.join(previous, "native-bin", "t3-code-ls-db");
@@ -520,6 +589,13 @@ test(launcherPromotionProof
         const [retry] = runHelper(publish, undefined, installedHelper);
         assert.deepEqual(retry, { ...publication, reused: true });
 
+        if (launcherSealedServingProof) {
+          await reopenPreviousRuntime(failedPath);
+          assertRefused(publish);
+          t.diagnostic("The packaged launcher rolled back the published sealed trial and reopened the previous runtime.");
+          return;
+        }
+
         runHelper(["trial-rollback-sealed", home, id], undefined, installedHelper);
         assert.equal((await fs.stat(dbPath, { bigint: true })).ino, sourceIdentity.ino);
         assert.equal((await fs.stat(failedPath, { bigint: true })).ino, stageIdentity.ino);
@@ -540,72 +616,8 @@ test(launcherPromotionProof
       }
       if (launcherCancelProof) {
         assert.equal(JSON.parse(await fs.readFile(observationPath, "utf8")).sealed_publication, undefined);
-        const output = await fs.open(path.join(f.runtime, "cancel-recovery.log"), "a+", 0o600);
-        const port = 48123;
-        const launcher = f.launcher(pending, {
-          HOME: home,
-          PATH: "/usr/bin:/bin",
-          T3CODE_HOST: "127.0.0.1",
-          T3CODE_PORT: String(port),
-          T3CODE_NO_BROWSER: "true",
-          T3CODE_TELEMETRY_ENABLED: "false",
-          T3CODE_OTEL_SDK_DISABLED: "true",
-          T3_CODE_LS_SEALED_TRIAL_RECOVERY: "1",
-        }, output.fd);
-        const running = launcher.run().then(() => "completed", (error) => error.message);
-        try {
-          const origin = `http://127.0.0.1:${port}`;
-          const deadline = Date.now() + 45_000;
-          let descriptor;
-          while (Date.now() < deadline) {
-            const outcome = await Promise.race([delay(50), running]);
-            if (outcome !== undefined) {
-              const log = Buffer.alloc(64 * 1024);
-              const { bytesRead } = await output.read(log, 0, log.length, 0);
-              const text = log.toString("utf8", 0, bytesRead);
-              t.diagnostic(JSON.stringify({
-                childReportedVersionMismatch: text.includes("The service launcher started a different t3 version."),
-                childReportedInvalidContext: text.includes("The service launcher supplied invalid startup context."),
-                childReportedStorageError: /OmdbStartupError|ServerOwnershipError|NativeDatabaseError/u.test(text),
-                childReportedBindError: /EADDRINUSE|EACCES/u.test(text),
-              }));
-            }
-            assert.equal(outcome, undefined, "The selected launcher must remain active");
-            const response = await fetch(origin + "/.well-known/t3/environment", {
-              redirect: "error", signal: AbortSignal.timeout(400),
-            }).catch(() => undefined);
-            if (response?.ok) {
-              descriptor = await response.json();
-              break;
-            }
-          }
-          assert.ok(descriptor, "The previous packaged runtime must become ready after cancellation");
-          assert.equal(descriptor.databaseMigration, Number(seeded[0].migrations.at(-1).id));
-          assert.deepEqual(await readServiceState(f.statePath), {
-            ...selected, update: { id, fromVersion: previousVersion, targetVersion: candidateVersion,
-              status: "rolled-back", reason: "sealed-trial-recovery" },
-          });
-          const runtime = JSON.parse(await fs.readFile(path.join(f.userdata, "server-runtime.json"), "utf8"));
-          assert.ok(Number.isSafeInteger(runtime.pid) && runtime.pid > 1);
-          assert.equal(await fs.realpath(`/proc/${runtime.pid}/exe`), path.join(previous, "t3"));
-          assert.equal((await fs.stat(dbPath, { bigint: true })).ino, sourceIdentity.ino);
-          const [restored] = runHelper(["read-only-local", dbPath], [
-            { operation: "receipt", command_id: commandId },
-          ]);
-          assert.deepEqual(restored, seeded[3]);
-          assert.deepEqual(await fs.readFile(trial), stageBytes);
-          assert.deepEqual(await fs.readFile(checkpoint), checkpointBytes);
-          assert.deepEqual(await fs.readFile(backupReceipt), backupReceiptBytes);
-          assert.equal(JSON.parse(await fs.readFile(observationPath, "utf8")).sealed_publication.phase, "rolled_back");
-          t.diagnostic("Cancelled the unstarted promotion and reopened the exact previous packaged server.");
-        } finally {
-          try {
-            await launcher.stop("SIGTERM");
-            await running;
-          } finally {
-            await output.close();
-          }
-        }
+        await reopenPreviousRuntime(trial);
+        t.diagnostic("Cancelled the unstarted promotion and reopened the exact previous packaged server.");
       }
       return;
     }
