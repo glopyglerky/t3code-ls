@@ -63,6 +63,7 @@ jobs:
           export CARGO_TARGET_DIR="$RUNNER_TEMP/independent-read-target"
           export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
           node tools/install-server-tests.mjs
+          node tools/fetch-migration-sources.mjs
           node tools/check-acceptance.mjs --tests '["tools/check-omdb-production.mjs","tools/check-redb-projection-lookups.mjs"]' \
             --proof-directory "$RUNNER_TEMP/independent-read-proof"
       - name: Install the pinned compiler for the trial helper
