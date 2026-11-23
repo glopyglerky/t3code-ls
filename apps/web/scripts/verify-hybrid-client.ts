@@ -525,7 +525,7 @@ async function terminalInput(page: Page) {
   return input;
 }
 
-async function waitForTerminalCopy(page: Page, input: Locator, pattern: RegExp) {
+async function waitForTerminalCopy(page: Page, input: Locator, pattern: RegExp, phase?: string) {
   const deadline = Date.now() + 10_000;
   do {
     await input.press("Control+Shift+a");
@@ -535,7 +535,7 @@ async function waitForTerminalCopy(page: Page, input: Locator, pattern: RegExp) 
     if (match !== null) return match;
     await page.waitForTimeout(100);
   } while (Date.now() < deadline);
-  throw new Error(`Expected a rendered terminal response matching ${pattern}`);
+  throw new Error(`Expected a rendered terminal response matching ${pattern}${phase ? ` ${phase}` : ""}`);
 }
 
 async function terminalMarker(page: Page, prefix: "fixture-pty" | "fixture-reattach") {
@@ -554,28 +554,41 @@ async function terminalMarker(page: Page, prefix: "fixture-pty" | "fixture-reatt
 
 async function verifySplitTerminalReconnect(page: Page, workspace: string, shell: string) {
   const gate = NodePath.join(workspace, ".fixture-terminal-resume");
-  const quotedGate = `'${gate.replaceAll("'", "'\\''")}'`;
-  const command = [
-    `printf 'fixture-fragment-start:%s\\n\\033[3' "$$"`,
-    "attempt=0",
-    `while [ ! -f ${quotedGate} ] && [ "$attempt" -lt 600 ]; do /usr/bin/sleep 0.1; attempt=$((attempt+1)); done`,
-    `if [ -f ${quotedGate} ]; then printf '2mfixture-fragment-end:%s \\360\\237' "$$"; /usr/bin/sleep 0.2; printf '\\246\\200\\033[0m\\n'; fi`,
-  ].join("; ");
-  const started = /(?:^|\n)fixture-fragment-start:(\d+)\s*$/u;
+  const script = NodePath.join(workspace, "fixture-terminal-fragments.sh");
+  NodeFS.writeFileSync(
+    script,
+    [
+      `printf 'fixture-fragment-start:%s\\n\\033[3' "$1"`,
+      "attempt=0",
+      'while [ ! -f "$2" ] && [ "$attempt" -lt 600 ]; do',
+      "  /usr/bin/sleep 0.1",
+      "  attempt=$((attempt+1))",
+      "done",
+      '[ -f "$2" ] || exit 1',
+      `printf '2mfixture-fragment-end:%s \\360\\237' "$1"`,
+      "/usr/bin/sleep 0.2",
+      "printf '\\246\\200\\033[0m\\n'",
+      "",
+    ].join("\n"),
+    { mode: 0o600, flag: "wx" },
+  );
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+  const command = `/bin/sh ${quote(script)} "$$" ${quote(gate)}`;
+  const started = /(?:^|\n)fixture-fragment-start:(\d+)/u;
   const ended = /(?:^|\n)fixture-fragment-end:(\d+) 🦀(?:\r?\n|\s*$)/u;
   const input = await terminalInput(page);
   await page.evaluate((line) => navigator.clipboard.writeText(line), command);
   await input.press("Control+Shift+v");
-  await waitForTerminalCopy(page, input, /fixture-fragment-end:%s/u);
+  await waitForTerminalCopy(page, input, /fixture-terminal-fragments\.sh/u, "before submission");
   await input.press("Enter");
-  const [, before] = await waitForTerminalCopy(page, input, started);
+  const [, before] = await waitForTerminalCopy(page, input, started, "before reconnect");
   Assert.equal(before, shell);
   await page.reload({ waitUntil: "domcontentloaded" });
   const reattached = await terminalInput(page);
-  const [, restored] = await waitForTerminalCopy(page, reattached, started);
+  const [, restored] = await waitForTerminalCopy(page, reattached, started, "after reconnect");
   Assert.equal(restored, shell);
   NodeFS.writeFileSync(gate, "resume\n", { flag: "wx" });
-  const [, after] = await waitForTerminalCopy(page, reattached, ended);
+  const [, after] = await waitForTerminalCopy(page, reattached, ended, "after releasing PTY output");
   Assert.equal(after, shell);
   return { sameShell: true, controlSequenceResumed: true, splitUnicode: "🦀" };
 }
