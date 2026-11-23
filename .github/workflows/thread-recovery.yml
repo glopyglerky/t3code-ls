@@ -6,12 +6,14 @@ on:
       - "candidate/t3code-ls-t03-text-revision-*"
       - "candidate/t3code-ls-t12-outbox-identity-*"
       - "candidate/t3code-ls-t12-outbox-native-*"
+      - "candidate/t3code-ls-t12-outbox-package-*"
 
 permissions:
   contents: read
 
 jobs:
   thread-recovery:
+    if: "!startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')"
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
@@ -74,9 +76,9 @@ jobs:
             src/state/threadOutboxDelivery.permissions.test.ts
 
   mobile-outbox-android:
-    if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-') || startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-') && 35 || 10 }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -99,6 +101,55 @@ jobs:
               "$RUNNER_TEMP/$target-symbols.txt"
             sha256sum "$library"
           done
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')
+        with:
+          node-version: "26.12.1"
+      - name: Package the Rust policy in the development app
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')
+        env:
+          APP_VARIANT: development
+          EXPO_NO_DOTENV: "1"
+          EXPO_NO_GIT_STATUS: "1"
+          T3CODE_MOBILE_UPDATES_ENABLED: "0"
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+          VP_REMOTE_CACHE: "off"
+          VP_REMOTE_CACHE_URL: ""
+          ORG_GRADLE_PROJECT_reactNativeArchitectures: arm64-v8a
+        shell: bash
+        run: |
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          export GRADLE_USER_HOME="$RUNNER_TEMP/outbox-gradle"
+          staging=apps/mobile/modules/t3-native-controls/android/src/main/jniLibs/arm64-v8a/libt3_outbox.so
+          install -Dm644 "$RUNNER_TEMP/outbox-target/aarch64-linux-android/release/libt3_outbox.so" "$staging"
+          trap 'rm -f "$staging"' EXIT
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          pnpm --dir apps/mobile exec expo prebuild --platform android --no-install
+          apps/mobile/android/gradlew -p apps/mobile/android --no-daemon --max-workers=2 :app:assembleDebug
+          apk=apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          evidence="$RUNNER_TEMP/outbox-android-proof"
+          mkdir "$evidence"
+          git show -s --format='%H %T' > "$evidence/source.txt"
+          sha256sum "$staging" "$apk" > "$evidence/build.sha256"
+          library="$RUNNER_TEMP/packaged-libt3_outbox.so"
+          unzip -p "$apk" lib/arm64-v8a/libt3_outbox.so > "$library"
+          sha256sum "$library" >> "$evidence/build.sha256"
+          readelf --file-header "$library" > "$evidence/packaged-header.txt"
+          grep -F AArch64 "$evidence/packaged-header.txt"
+          readelf --wide --dyn-syms "$library" |
+            grep -F 'Java_expo_modules_t3nativecontrols_T3OutboxDelivery_resolveV1' > "$evidence/jni.txt"
+          unzip -p "$apk" 'classes*.dex' | strings |
+            grep -F 'expo/modules/t3nativecontrols/T3OutboxDelivery' > "$evidence/dex.txt"
+      - name: Retain the app and library identities
+        if: always() && startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: outbox-android-proof
+          path: ${{ runner.temp }}/outbox-android-proof/
+          if-no-files-found: warn
+          retention-days: 14
 
   mobile-outbox-ios:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
