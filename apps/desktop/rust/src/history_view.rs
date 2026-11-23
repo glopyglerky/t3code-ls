@@ -164,20 +164,24 @@ impl Render for HistoryView {
                     .text_2xl()
                     .child("Saved conversation"),
             )
-            .child(
-                Button::new("load-older-history")
-                    .accessibility_label(LOAD)
-                    .disabled(
-                        self.pending || !self.history.as_ref().is_some_and(History::has_older),
+            .when(
+                !self.pending && self.history.as_ref().is_some_and(History::has_older),
+                |view| {
+                    view.child(
+                        Button::new("load-older-history")
+                            .accessibility_label(LOAD)
+                            .border_2()
+                            .border_color(rgb(0x174887))
+                            .focus(|style| style.border_color(rgb(0xfdd166)))
+                            .rounded_md()
+                            .px_4()
+                            .py_2()
+                            .child(LOAD)
+                            .on_click(
+                                cx.listener(|view, _, window, cx| view.load_older(window, cx)),
+                            ),
                     )
-                    .border_2()
-                    .border_color(rgb(0x174887))
-                    .focus(|style| style.border_color(rgb(0xfdd166)))
-                    .rounded_md()
-                    .px_4()
-                    .py_2()
-                    .child(LOAD)
-                    .on_click(cx.listener(|view, _, window, cx| view.load_older(window, cx))),
+                },
             )
             .child(
                 div()

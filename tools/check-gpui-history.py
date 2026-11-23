@@ -13,6 +13,7 @@ import pyatspi
 # Reuse the existing X11/AT-SPI adapter without changing its fixture entry.
 helpers = runpy.run_path(str(Path(__file__).with_name("check-gpui-showcase.py")))
 find = helpers["find"]
+accessible_nodes = helpers["accessible_nodes"]
 find_window = helpers["find_window"]
 request_window_close = helpers["request_window_close"]
 wait_for = helpers["wait_for"]
@@ -25,6 +26,10 @@ def body(application):
     text = document.queryText()
     return text.getText(0, text.characterCount)
 
+
+def assert_no_load_action():
+    nodes = accessible_nodes(pyatspi.Registry.getDesktop(0))
+    assert all(node.name != "Load older" for node in nodes)
 
 def activate_older(application):
     button = find("Load older", application, pyatspi.STATE_ENABLED)
@@ -75,7 +80,7 @@ def main():
             if scenario == "initial-refusal":
                 find("Could not read the selected server thread. Reopen to refresh.", application)
                 assert body(application) == ""
-                assert not find("Load older", application).getState().contains(pyatspi.STATE_ENABLED)
+                assert_no_load_action()
             else:
                 def loaded():
                     value = body(application)
@@ -92,7 +97,7 @@ def main():
                     activate_older(application)
                     find("Could not load older history. Reopen to refresh.", application)
                     assert body(application) == initial
-                    assert not find("Load older", application).getState().contains(pyatspi.STATE_ENABLED)
+                    assert_no_load_action()
                     find("Saved thread history", application, pyatspi.STATE_FOCUSED)
                 else:
                     previous = newest
@@ -111,7 +116,8 @@ def main():
                         if len(rows) == 80:
                             break
                     assert previous == expected
-                    assert not find("Load older", application).getState().contains(pyatspi.STATE_ENABLED)
+                    find("80 saved records loaded. All saved history loaded.", application)
+                    assert_no_load_action()
             request_window_close(window)
             assert application.wait(timeout=10) == 0
         except Exception as error:
