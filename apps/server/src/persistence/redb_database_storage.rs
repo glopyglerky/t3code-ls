@@ -5,11 +5,22 @@ use crate::application_server_ownership::OwnerLock;
 use crate::backend::{Backend, path_identity};
 use crate::{Error, Result, Store};
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::io;
 #[cfg(unix)]
+use std::io::Read;
+#[cfg(target_os = "linux")]
+use std::os::fd::AsRawFd;
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::OpenOptionsExt;
+#[cfg(unix)]
 use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 use std::path::{Path, PathBuf};
+
+#[cfg(unix)]
+const MAX_TRIAL_FILE_BYTES: u64 = 128 * 1024 * 1024;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct StorageStatistics {
@@ -78,9 +89,34 @@ pub struct TrialRestoreRequest {
     pub target: TrialSnapshot,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct TrialRestorePreparation {
     pub staged_database: TrialFileIdentity,
+    pub staged_file_sha256: String,
+    pub reused: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum TrialRestoreWitness {
+    /// The offline operator independently witnessed the failed pre-activation trial
+    /// and holds exclusive control of the home namespace through publication.
+    OfflinePreActivation { target_file_sha256: String },
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct TrialRestorePublicationRequest {
+    pub restore: TrialRestoreRequest,
+    pub preparation: TrialRestorePreparation,
+    pub witness: TrialRestoreWitness,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TrialRestorePublication {
+    pub database: TrialFileIdentity,
+    pub preserved_database: TrialFileIdentity,
     pub reused: bool,
 }
 
@@ -162,8 +198,8 @@ async fn checked_generation(store: &Store) -> Result<ApplicationGenerationIdenti
 }
 
 #[cfg(unix)]
-fn trial_file_identity(store: &Store) -> Result<(TrialFileIdentity, u64)> {
-    let metadata = store.db.offline_file_metadata()?;
+fn trial_file_identity(file: &fs::File) -> Result<(TrialFileIdentity, u64)> {
+    let metadata = file.metadata().map_err(io_error)?;
     let created = metadata
         .created()
         .ok()
@@ -179,18 +215,40 @@ fn trial_file_identity(store: &Store) -> Result<(TrialFileIdentity, u64)> {
     ))
 }
 
+#[cfg(unix)]
+fn trial_file_digest(file: &fs::File) -> Result<String> {
+    let mut input = file.take(MAX_TRIAL_FILE_BYTES + 1);
+    let mut digest = Sha256::new();
+    let mut buffer = [0; 32 * 1024];
+    loop {
+        let count = input.read(&mut buffer).map_err(io_error)?;
+        if count == 0 {
+            return Ok(digest
+                .finalize()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect());
+        }
+        if input.limit() == 0 {
+            return Err(Error::IncompatibleStore);
+        }
+        digest.update(&buffer[..count]);
+    }
+}
+
 async fn backup_trial(home: PathBuf, update_id: String, expected: String) -> Result<TrialBackup> {
     let home = fs::canonicalize(home).map_err(io_error)?;
     let state = checked_directory(home.join("userdata"))?;
     let owner = OwnerLock::acquire_existing_native(&state.join("server-owner.sqlite"))?;
-    let (source, identity) = checked_checkpoint(&state.join("statev2.omdb")).await?;
+    let live_path = state.join("statev2.omdb");
+    let (source, identity) = checked_checkpoint(&live_path).await?;
     if identity.catalog_sha256 != expected {
         return Err(Error::IncompatibleStore);
     }
     owner.verify_native()?;
     source.db.verify_identity()?;
     #[cfg(unix)]
-    let (database, _) = trial_file_identity(&source)?;
+    let (database, _) = trial_file_identity(&source.db.open_verified_offline_file(&live_path)?)?;
 
     let runtime = checked_directory(home.join("runtime"))?;
     let directory = runtime.join("native-db-backup");
@@ -275,22 +333,7 @@ pub async fn prepare_service_trial_restore(
     update_id: String,
     request: TrialRestoreRequest,
 ) -> Result<TrialRestorePreparation> {
-    if !home.is_absolute()
-        || !valid_update_id(&update_id)
-        || update_id != request.update_id
-        || [&request.checkpoint, &request.target]
-            .iter()
-            .any(|snapshot| {
-                !valid_digest(&snapshot.catalog_sha256) || !valid_digest(&snapshot.checksum)
-            })
-    {
-        return Err(Error::Invalid("invalid trial restore identity".into()));
-    }
-    if request.database.created.is_none() {
-        return Err(Error::Invalid(
-            "trial restore requires a recorded file creation time".into(),
-        ));
-    }
+    validate_trial_restore_request(&home, &update_id, &request)?;
     #[cfg(unix)]
     {
         // Keep the ownership leases alive if the request future is cancelled
@@ -305,11 +348,34 @@ pub async fn prepare_service_trial_restore(
     ))
 }
 
+fn validate_trial_restore_request(
+    home: &Path,
+    update_id: &str,
+    request: &TrialRestoreRequest,
+) -> Result<()> {
+    if !home.is_absolute()
+        || !valid_update_id(update_id)
+        || update_id != request.update_id
+        || [&request.checkpoint, &request.target]
+            .iter()
+            .any(|snapshot| {
+                !valid_digest(&snapshot.catalog_sha256) || !valid_digest(&snapshot.checksum)
+            })
+    {
+        return Err(Error::Invalid("invalid trial restore identity".into()));
+    }
+    if request.database.created.is_none() {
+        return Err(Error::Invalid(
+            "trial restore requires a recorded file creation time".into(),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 async fn verify_restore_snapshot(path: &Path, expected: &TrialSnapshot) -> Result<Store> {
-    const MAX_FILE_BYTES: u64 = 128 * 1024 * 1024;
     let store = Store {
-        db: Backend::open_bounded_offline_snapshot(path, MAX_FILE_BYTES).await?,
+        db: Backend::open_bounded_offline_snapshot(path, MAX_TRIAL_FILE_BYTES).await?,
     };
     let actual = store.db.bounded_storage_fingerprint().await?;
     let catalog = checked_generation(&store).await?;
@@ -334,8 +400,11 @@ async fn prepare_trial_restore(
     let backups = checked_directory(home.join("runtime").join("native-db-backup"))?;
     let checkpoint_path = backups.join(format!("{}.omdb", request.update_id));
     let checkpoint = verify_restore_snapshot(&checkpoint_path, &request.checkpoint).await?;
-    let live = verify_restore_snapshot(&state.join("statev2.omdb"), &request.target).await?;
-    if trial_file_identity(&live)? != (request.database, 1) {
+    let live_path = state.join("statev2.omdb");
+    let live = verify_restore_snapshot(&live_path, &request.target).await?;
+    if trial_file_identity(&live.db.open_verified_offline_file(&live_path)?)?
+        != (request.database, 1)
+    {
         return Err(Error::IncompatibleStore);
     }
 
@@ -349,10 +418,12 @@ async fn prepare_trial_restore(
     match fs::symlink_metadata(&stage) {
         Ok(_) => {
             let existing = verify_restore_snapshot(&stage, &request.checkpoint).await?;
-            let (staged_database, links) = trial_file_identity(&existing)?;
+            let staged_file = existing.db.open_verified_offline_file(&stage)?;
+            let (staged_database, links) = trial_file_identity(&staged_file)?;
             if staged_database.created.is_none() {
                 return Err(Error::IncompatibleStore);
             }
+            let staged_file_sha256 = trial_file_digest(&staged_file)?;
             verify_inputs()?;
             existing.db.verify_identity()?;
             if links == 2 && path_identity(&draft)? == path_identity(&stage)? {
@@ -361,7 +432,11 @@ async fn prepare_trial_restore(
                 return Err(Error::IncompatibleStore);
             }
             sync_publication(&state, &home).map_err(|_| Error::UnknownCommit)?;
-            if trial_file_identity(&existing).map_err(|_| Error::UnknownCommit)?
+            existing
+                .db
+                .verify_identity()
+                .map_err(|_| Error::UnknownCommit)?;
+            if trial_file_identity(&staged_file).map_err(|_| Error::UnknownCommit)?
                 != (staged_database.clone(), 1)
             {
                 return Err(Error::UnknownCommit);
@@ -369,6 +444,7 @@ async fn prepare_trial_restore(
             verify_inputs().map_err(|_| Error::UnknownCommit)?;
             return Ok(TrialRestorePreparation {
                 staged_database,
+                staged_file_sha256,
                 reused: true,
             });
         }
@@ -385,11 +461,12 @@ async fn prepare_trial_restore(
         Err(error) => return Err(io_error(error)),
     }
     let restored = verify_restore_snapshot(&draft, &request.checkpoint).await?;
-    let (staged_database, links) = trial_file_identity(&restored)?;
+    let staged_file = restored.db.open_verified_offline_file(&draft)?;
+    let (staged_database, links) = trial_file_identity(&staged_file)?;
     if links != 1 || staged_database.created.is_none() {
         return Err(Error::IncompatibleStore);
     }
-    let draft_file = path_identity(&draft)?;
+    let staged_file_sha256 = trial_file_digest(&staged_file)?;
     verify_inputs()?;
     restored.db.verify_identity()?;
     fs::hard_link(&draft, &stage).map_err(io_error)?;
@@ -397,13 +474,241 @@ async fn prepare_trial_restore(
     fs::remove_file(&draft).map_err(|_| Error::UnknownCommit)?;
     sync_publication(&state, &home).map_err(|_| Error::UnknownCommit)?;
     verify_inputs().map_err(|_| Error::UnknownCommit)?;
-    if path_identity(&stage).map_err(|_| Error::UnknownCommit)? != draft_file {
+    let published = restored
+        .db
+        .open_verified_offline_file(&stage)
+        .map_err(|_| Error::UnknownCommit)?;
+    if trial_file_identity(&published).map_err(|_| Error::UnknownCommit)?
+        != (staged_database.clone(), 1)
+    {
         return Err(Error::UnknownCommit);
     }
     Ok(TrialRestorePreparation {
         staged_database,
+        staged_file_sha256,
         reused: false,
     })
+}
+
+/// Publish a prepared restore during an offline, independently witnessed failed trial.
+/// The caller must retain the original witness and preparation receipt across retries.
+/// Launcher integration requires a separate trusted pre-activation witness protocol.
+pub async fn publish_service_trial_restore(
+    home: PathBuf,
+    update_id: String,
+    request: TrialRestorePublicationRequest,
+) -> Result<TrialRestorePublication> {
+    validate_trial_restore_request(&home, &update_id, &request.restore)?;
+    let TrialRestoreWitness::OfflinePreActivation { target_file_sha256 } = &request.witness;
+    if request.preparation.staged_database.created.is_none()
+        || request.preparation.staged_database == request.restore.database
+        || !valid_digest(&request.preparation.staged_file_sha256)
+        || !valid_digest(target_file_sha256)
+    {
+        return Err(Error::Invalid("invalid trial publication identity".into()));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        tokio::spawn(publish_trial_restore(home, request))
+            .await
+            .map_err(|_| Error::UnknownCommit)?
+    }
+    #[cfg(not(target_os = "linux"))]
+    Err(Error::Invalid(
+        "trial restore publication is unsupported on this platform".into(),
+    ))
+}
+
+#[cfg(target_os = "linux")]
+struct TrialRestoreDirectories {
+    state: fs::File,
+    backups: fs::File,
+}
+
+#[cfg(target_os = "linux")]
+impl TrialRestoreDirectories {
+    fn open(home: &Path) -> Result<Self> {
+        use std::path::Component;
+
+        let mut directory = Self::open_directory(Path::new("/"))?;
+        for component in home.components().skip(1) {
+            let Component::Normal(name) = component else {
+                return Err(Error::IncompatibleStore);
+            };
+            directory = Self::open_directory(&Self::pinned(&directory).join(name))?;
+        }
+        let home = Self::pinned(&directory);
+        let state = Self::open_directory(&home.join("userdata"))?;
+        let runtime = Self::open_directory(&home.join("runtime"))?;
+        let backups = Self::open_directory(&Self::pinned(&runtime).join("native-db-backup"))?;
+        Ok(Self { state, backups })
+    }
+
+    fn open_directory(path: &Path) -> Result<fs::File> {
+        fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(path)
+            .map_err(|error| match error.raw_os_error() {
+                Some(libc::ELOOP | libc::ENOTDIR) => Error::IncompatibleStore,
+                _ => io_error(error),
+            })
+    }
+
+    fn pinned(directory: &fs::File) -> PathBuf {
+        // Each real path component is opened separately with O_NOFOLLOW. Use the
+        // held directory for all database opens, link, rename and directory sync.
+        PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd()))
+    }
+
+    fn verify(&self, home: &Path) -> Result<()> {
+        let current = Self::open(home)?;
+        for (pinned, current) in [
+            (&self.state, &current.state),
+            (&self.backups, &current.backups),
+        ] {
+            let before = pinned.metadata().map_err(io_error)?;
+            let now = current.metadata().map_err(io_error)?;
+            if (before.dev(), before.ino()) != (now.dev(), now.ino()) {
+                return Err(Error::IncompatibleStore);
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn trial_entry_exists(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(io_error(error)),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn verify_trial_file(
+    store: &Store,
+    path: &Path,
+    expected: &TrialFileIdentity,
+    links: u64,
+) -> Result<fs::File> {
+    let file = store.db.open_verified_offline_file(path)?;
+    let (actual, actual_links) = trial_file_identity(&file)?;
+    if &actual != expected || actual_links != links {
+        return Err(Error::IncompatibleStore);
+    }
+    Ok(file)
+}
+
+#[cfg(target_os = "linux")]
+async fn publish_trial_restore(
+    home: PathBuf,
+    request: TrialRestorePublicationRequest,
+) -> Result<TrialRestorePublication> {
+    let TrialRestorePublicationRequest {
+        restore,
+        preparation,
+        witness,
+    } = request;
+    let TrialRestorePhase::FailedBeforeActivation = restore.phase;
+    let TrialRestoreWitness::OfflinePreActivation { target_file_sha256 } = witness;
+    let directories = TrialRestoreDirectories::open(&home)?;
+    let state = TrialRestoreDirectories::pinned(&directories.state);
+    let backups = TrialRestoreDirectories::pinned(&directories.backups);
+    let owner = OwnerLock::acquire_existing_native(&state.join("server-owner.sqlite"))?;
+    let live = state.join("statev2.omdb");
+    let stage = state.join(format!(".statev2-restore-{}.omdb", restore.update_id));
+    let preserved = state.join(format!(".statev2-failed-{}.omdb", restore.update_id));
+    let checkpoint_path = backups.join(format!("{}.omdb", restore.update_id));
+    let reused = !trial_entry_exists(&stage)?;
+
+    let result = async {
+        let checkpoint = verify_restore_snapshot(&checkpoint_path, &restore.checkpoint).await?;
+        let has_preserved = trial_entry_exists(&preserved)?;
+        let (failed_path, prepared_path) = if reused {
+            (&preserved, &live)
+        } else {
+            (&live, &stage)
+        };
+        let failed = verify_restore_snapshot(failed_path, &restore.target).await?;
+        let prepared = verify_restore_snapshot(prepared_path, &restore.checkpoint).await?;
+        let failed_links = if !reused && has_preserved { 2 } else { 1 };
+        let failed_file = verify_trial_file(&failed, failed_path, &restore.database, failed_links)?;
+        let prepared_file =
+            verify_trial_file(&prepared, prepared_path, &preparation.staged_database, 1)?;
+        if trial_file_digest(&failed_file)? != target_file_sha256
+            || trial_file_digest(&prepared_file)? != preparation.staged_file_sha256
+        {
+            return Err(Error::IncompatibleStore);
+        }
+
+        let verify_inputs = || {
+            directories.verify(&home)?;
+            owner.verify_native()?;
+            checkpoint.db.verify_identity()
+        };
+        verify_inputs()?;
+        if !reused {
+            if has_preserved {
+                verify_trial_file(&failed, &preserved, &restore.database, 2)?;
+            }
+            prepared_file.sync_all().map_err(io_error)?;
+            failed.db.verify_identity()?;
+            prepared.db.verify_identity()?;
+            verify_inputs()?;
+            if !has_preserved {
+                fs::hard_link(&live, &preserved).map_err(io_error)?;
+            }
+            // Commit preservation of the old inode before replacing its live name.
+            // Hold both exclusive engine locks across the replacement and final sync.
+            failed_file.sync_all().map_err(|_| Error::UnknownCommit)?;
+            directories
+                .state
+                .sync_all()
+                .map_err(|_| Error::UnknownCommit)?;
+            #[cfg(test)]
+            tests::interrupt_trial_publication("preserved");
+            verify_inputs().map_err(|_| Error::UnknownCommit)?;
+            failed
+                .db
+                .verify_identity()
+                .map_err(|_| Error::UnknownCommit)?;
+            prepared
+                .db
+                .verify_identity()
+                .map_err(|_| Error::UnknownCommit)?;
+            verify_trial_file(&failed, &preserved, &restore.database, 2)
+                .map_err(|_| Error::UnknownCommit)?;
+            fs::rename(&stage, &live).map_err(|_| Error::UnknownCommit)?;
+            #[cfg(test)]
+            tests::interrupt_trial_publication("renamed");
+        }
+
+        directories
+            .state
+            .sync_all()
+            .map_err(|_| Error::UnknownCommit)?;
+        verify_inputs().map_err(|_| Error::UnknownCommit)?;
+        verify_trial_file(&failed, &preserved, &restore.database, 1)
+            .map_err(|_| Error::UnknownCommit)?;
+        verify_trial_file(&prepared, &live, &preparation.staged_database, 1)
+            .map_err(|_| Error::UnknownCommit)?;
+        if trial_entry_exists(&stage).map_err(|_| Error::UnknownCommit)? {
+            return Err(Error::UnknownCommit);
+        }
+        Ok(TrialRestorePublication {
+            database: preparation.staged_database,
+            preserved_database: restore.database,
+            reused,
+        })
+    }
+    .await;
+    if reused {
+        result.map_err(|_| Error::UnknownCommit)
+    } else {
+        result
+    }
 }
 
 fn remove_owned_staging(path: &Path, expected: &same_file::Handle) {
@@ -528,6 +833,200 @@ mod tests {
             self.database
                 .with_file_name(format!(".statev2-restore-{UPDATE}.omdb"))
         }
+
+        #[cfg(target_os = "linux")]
+        async fn publication_request(&self) -> TrialRestorePublicationRequest {
+            let restore = self.restore_request().await;
+            let preparation = self.prepare(restore.clone()).await.unwrap();
+            let target_file_sha256 =
+                trial_file_digest(&fs::File::open(&self.database).unwrap()).unwrap();
+            TrialRestorePublicationRequest {
+                restore,
+                preparation,
+                witness: TrialRestoreWitness::OfflinePreActivation { target_file_sha256 },
+            }
+        }
+
+        #[cfg(target_os = "linux")]
+        async fn publish(
+            &self,
+            request: &TrialRestorePublicationRequest,
+        ) -> Result<TrialRestorePublication> {
+            let replay = serde_json::from_value(serde_json::to_value(request).unwrap()).unwrap();
+            publish_service_trial_restore(self.home.clone(), UPDATE.into(), replay).await
+        }
+
+        #[cfg(target_os = "linux")]
+        fn failed_trial(&self) -> PathBuf {
+            self.database
+                .with_file_name(format!(".statev2-failed-{UPDATE}.omdb"))
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn interrupt_trial_publication(boundary: &str) {
+        if std::env::var("T3_TEST_INTERRUPT_TRIAL_PUBLICATION").as_deref() == Ok(boundary) {
+            // Exit the fixture process without unwinding or dropping the lock handles.
+            std::process::exit(73);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn trial_publication_interrupt_fixture() {
+        let Some(home) = std::env::var_os("T3_TEST_TRIAL_PUBLICATION_HOME").map(PathBuf::from)
+        else {
+            return;
+        };
+        assert!(
+            home.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("t3-redb-test-"))
+        );
+        let request =
+            serde_json::from_slice(&fs::read(home.join("witness.json")).unwrap()).unwrap();
+        publish_service_trial_restore(home, UPDATE.into(), request)
+            .await
+            .unwrap();
+        panic!("fixture did not interrupt publication");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn service_trial_publication_retries_both_interrupted_boundaries() {
+        let fixture = TrialFixture::start().await;
+        let request = fixture.publication_request().await;
+        let checkpoint = fixture.backups.join(format!("{UPDATE}.omdb"));
+        let checkpoint_bytes = fs::read(&checkpoint).unwrap();
+        let failed_bytes = fs::read(&fixture.database).unwrap();
+        let staged_bytes = fs::read(fixture.restore_stage()).unwrap();
+        assert_ne!(failed_bytes, staged_bytes);
+
+        fs::write(
+            fixture.home.join("witness.json"),
+            serde_json::to_vec(&request).unwrap(),
+        )
+        .unwrap();
+        let interrupt = |boundary| {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "application_storage::tests::trial_publication_interrupt_fixture",
+                ])
+                .env("T3_TEST_TRIAL_PUBLICATION_HOME", &fixture.home)
+                .env("T3_TEST_INTERRUPT_TRIAL_PUBLICATION", boundary)
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(73), "{output:?}");
+        };
+
+        interrupt("preserved");
+        assert_eq!(fs::read(&fixture.database).unwrap(), failed_bytes);
+        assert_eq!(
+            path_identity(&fixture.database).unwrap(),
+            path_identity(&fixture.failed_trial()).unwrap()
+        );
+        assert_eq!(fs::read(fixture.restore_stage()).unwrap(), staged_bytes);
+        interrupt("renamed");
+        assert_eq!(fs::read(&fixture.database).unwrap(), staged_bytes);
+        assert!(!fixture.restore_stage().exists());
+
+        let completed = fixture.publish(&request).await.unwrap();
+        assert!(completed.reused);
+        assert_eq!(completed.database, request.preparation.staged_database);
+        assert_eq!(completed.preserved_database, request.restore.database);
+        assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);
+        assert_eq!(fs::read(fixture.failed_trial()).unwrap(), failed_bytes);
+        let live = Store::open_local(&fixture.database).await.unwrap();
+        assert!(
+            live.db
+                .read(&crate::store_key("fixture/trial-only"))
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let mut transaction = live.db.begin().await.unwrap();
+        transaction
+            .insert(crate::store_key("fixture/new-commit"), b"keep".to_vec())
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
+        live.shutdown().await.unwrap();
+        let newer_bytes = fs::read(&fixture.database).unwrap();
+        assert!(matches!(
+            fixture.publish(&request).await,
+            Err(Error::UnknownCommit)
+        ));
+        assert_eq!(fs::read(&fixture.database).unwrap(), newer_bytes);
+        assert_eq!(fs::read(fixture.failed_trial()).unwrap(), failed_bytes);
+        assert_eq!(fs::read(checkpoint).unwrap(), checkpoint_bytes);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn service_trial_publication_refuses_busy_redirected_or_changed_inputs() {
+        let fixture = TrialFixture::start().await;
+        let mut request = fixture.publication_request().await;
+        let stage = fixture.restore_stage();
+        let original_bytes = fs::read(&fixture.database).unwrap();
+        let hold = OwnerLock::acquire(&fixture.owner).unwrap();
+        assert!(matches!(
+            fixture.publish(&request).await,
+            Err(Error::WriterBusy)
+        ));
+        drop(hold);
+        for path in [&fixture.database, &stage] {
+            let reader = Store::open_read_only(path).await.unwrap();
+            assert!(matches!(
+                fixture.publish(&request).await,
+                Err(Error::WriterBusy)
+            ));
+            reader.shutdown().await.unwrap();
+        }
+
+        let redirected_state = fixture.home.join("redirected-state");
+        let state = fixture.database.parent().unwrap();
+        fs::rename(state, &redirected_state).unwrap();
+        std::os::unix::fs::symlink(&redirected_state, state).unwrap();
+        assert!(matches!(
+            fixture.publish(&request).await,
+            Err(Error::IncompatibleStore)
+        ));
+        fs::remove_file(state).unwrap();
+        fs::rename(&redirected_state, state).unwrap();
+
+        let alternate = stage.with_extension("alternate");
+        fs::rename(&stage, &alternate).unwrap();
+        fs::copy(&alternate, &stage).unwrap();
+        assert!(matches!(
+            fixture.publish(&request).await,
+            Err(Error::IncompatibleStore)
+        ));
+        fs::rename(&alternate, &stage).unwrap();
+        let stage_digest =
+            std::mem::replace(&mut request.preparation.staged_file_sha256, "0".repeat(64));
+        assert!(matches!(
+            fixture.publish(&request).await,
+            Err(Error::IncompatibleStore)
+        ));
+        request.preparation.staged_file_sha256 = stage_digest;
+        let TrialRestoreWitness::OfflinePreActivation { target_file_sha256 } = &mut request.witness;
+        let target_digest = std::mem::replace(target_file_sha256, "0".repeat(64));
+        assert!(matches!(
+            fixture.publish(&request).await,
+            Err(Error::IncompatibleStore)
+        ));
+        request.witness = TrialRestoreWitness::OfflinePreActivation {
+            target_file_sha256: target_digest,
+        };
+        fs::write(fixture.failed_trial(), b"unrelated data").unwrap();
+        assert!(matches!(
+            fixture.publish(&request).await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert_eq!(fs::read(fixture.failed_trial()).unwrap(), b"unrelated data");
+        assert_eq!(fs::read(&fixture.database).unwrap(), original_bytes);
+        assert!(stage.is_file());
     }
 
     #[tokio::test]

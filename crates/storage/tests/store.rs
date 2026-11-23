@@ -492,9 +492,9 @@ async fn service_trial_restore_cli_reports_one_result_and_prepares_reopenable_st
         "checkpoint": snapshot,
         "target": snapshot,
     });
-    let prepare = |request: &Value| {
+    let run_restore = |mode, request: &Value| {
         let mut child = Command::new(executable)
-            .arg("trial-prepare-restore")
+            .arg(mode)
             .arg(&home)
             .arg(UPDATE_ID)
             .stdin(Stdio::piped())
@@ -512,18 +512,57 @@ async fn service_trial_restore_cli_reports_one_result_and_prepares_reopenable_st
         );
         serde_json::from_slice::<Value>(&output.stdout).unwrap()
     };
+    let prepare = |request: &Value| run_restore("trial-prepare-restore", request);
 
     let stage = state.join(format!(".statev2-restore-{UPDATE_ID}.omdb"));
     let live_bytes = fs::read(&database).unwrap();
     assert_eq!(prepare(&request)["error"]["kind"], "invalid_request");
     assert!(!stage.exists());
     request["phase"] = json!("failed-before-activation");
-    assert_eq!(prepare(&request)["result"]["reused"], false);
+    let preparation = prepare(&request)["result"].clone();
+    assert_eq!(preparation["reused"], false);
     assert_eq!(prepare(&request)["result"]["reused"], true);
-    let reopened = Store::open_read_only(stage).await.unwrap();
+    let reopened = Store::open_read_only(&stage).await.unwrap();
     assert!(reopened.read_receipt("before").await.unwrap().is_some());
     reopened.shutdown().await.unwrap();
     assert_eq!(fs::read(&database).unwrap(), live_bytes);
+
+    #[cfg(target_os = "linux")]
+    {
+        use sha2::{Digest, Sha256};
+
+        let publish = |request: &Value| run_restore("trial-publish-restore-offline", request);
+        let checkpoint = home.join(format!("runtime/native-db-backup/{UPDATE_ID}.omdb"));
+        let checkpoint_bytes = fs::read(&checkpoint).unwrap();
+        let stage_bytes = fs::read(&stage).unwrap();
+        let preserved = state.join(format!(".statev2-failed-{UPDATE_ID}.omdb"));
+        let mut publication = json!({"restore": request, "preparation": preparation});
+        assert_eq!(publish(&publication)["error"]["kind"], "invalid_request");
+        assert!(!preserved.exists());
+        let target_digest: String = Sha256::digest(&live_bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        publication["witness"] = json!({
+            "kind": "offline-pre-activation",
+            "target_file_sha256": target_digest,
+        });
+        let published = publish(&publication);
+        assert_eq!(published["ok"], true, "{published}");
+        assert_eq!(published["result"]["reused"], false);
+        assert_eq!(
+            published["result"]["database"],
+            preparation["staged_database"]
+        );
+        assert_eq!(publish(&publication)["result"]["reused"], true);
+        assert!(!stage.exists());
+        assert_eq!(fs::read(&database).unwrap(), stage_bytes);
+        assert_eq!(fs::read(&preserved).unwrap(), live_bytes);
+        assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);
+        let reopened = Store::open_read_only(&database).await.unwrap();
+        assert!(reopened.read_receipt("before").await.unwrap().is_some());
+        reopened.shutdown().await.unwrap();
+    }
 }
 
 #[tokio::test]
