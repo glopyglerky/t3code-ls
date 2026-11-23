@@ -109,6 +109,13 @@ jobs:
             if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-* ]]; then
               grep -F 'T05 sealed readiness witness survived interruption and refused changed inputs' "$proof/forward-catalog.log"
             fi
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-* ]]; then
+              grep -F 'T05 inherited child valid: exit 0' "$proof/forward-catalog.log"
+              for rejected in lost reopened foreign stale version runtime; do
+                grep -F "T05 inherited child $rejected: exit 78" "$proof/forward-catalog.log"
+              done
+              grep -F 'T05 inherited child child-failure: exit 73' "$proof/forward-catalog.log"
+            fi
             cp "$RUNNER_TEMP/promotion-toolchain/installation-proof.json" "$proof/"
             exit 0
           fi
