@@ -627,16 +627,17 @@ async function submitReplay(
     name: projectName === undefined ? "New thread in hybrid-fixture" : "New thread",
     exact: true,
   }).click();
-  await page.waitForURL((url) => url.pathname.startsWith("/draft/"));
   if (projectName !== undefined) {
-    const projectPicker = page.locator("[data-draft-project-trigger]");
-    await projectPicker.click();
-    await page.getByRole("combobox", { name: "Search projects", exact: true }).fill(projectName);
-    await page.getByRole("option").filter({
+    const picker = page.getByRole("dialog");
+    await picker.getByPlaceholder("Search...", { exact: true }).fill(projectName);
+    await picker.getByRole("option").filter({
       has: page.getByText(projectName, { exact: true }),
     }).click();
-    await projectPicker.getByText(projectName, { exact: true }).waitFor({ state: "visible" });
+    await picker.waitFor({ state: "hidden" });
+    await page.locator("[data-draft-project-trigger]")
+      .getByText(projectName, { exact: true }).waitFor({ state: "visible" });
   }
+  await page.waitForURL((url) => url.pathname.startsWith("/draft/"));
   const picker = page.locator('[data-chat-provider-model-picker="true"]:visible');
   const search = page.getByPlaceholder("Search models...");
   await picker.click();
