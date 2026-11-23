@@ -366,8 +366,25 @@ const smokeWindowsInstalledLifecycle = Effect.fn("smokeWindowsInstalledLifecycle
     LOCALAPPDATA: path.join(home, "AppData", "Local"),
     PATH: path.join(systemRoot, "System32"), ComSpec: comspec,
   };
-  const require = (condition: boolean, step: string) => condition ? Effect.void :
-    new CliArchiveSmokeError({ step, detail: "The disposable Windows managed lifecycle invariant failed." });
+  const require = (condition: boolean, step: string, checks?: Readonly<Record<string, boolean>>) => condition ? Effect.void :
+    new CliArchiveSmokeError({ step, detail: checks === undefined
+      ? "The disposable Windows managed lifecycle invariant failed."
+      : `Safe field checks: ${JSON.stringify(checks)}` });
+  // Node's executable spelling and realPath can differ from the harness's path
+  // spelling. Preserve the generated script shape and compare its actual target.
+  const windowsPath = (value: string) => {
+    const normalized = NodePath.win32.normalize(value);
+    return (normalized.startsWith("\\\\?\\") ? normalized.slice(4) : normalized).toLowerCase();
+  };
+  const sameFile = (left: string, right: string): boolean => {
+    try {
+      const first = NodeFS.statSync(left, { bigint: true });
+      const second = NodeFS.statSync(right, { bigint: true });
+      return first.isFile() && second.isFile() && first.dev === second.dev && first.ino === second.ino &&
+        NodePath.win32.isAbsolute(left) && NodePath.win32.isAbsolute(right) &&
+        windowsPath(NodeFS.realpathSync(left)) === windowsPath(NodeFS.realpathSync(right));
+    } catch { return false; }
+  };
   const snapshot = (root: string): string => {
     const files: Array<[string, string]> = [];
     const walk = (directory: string, prefix: string) => {
@@ -412,42 +429,82 @@ const smokeWindowsInstalledLifecycle = Effect.fn("smokeWindowsInstalledLifecycle
   const foreign = '@echo off\r\n"foreign-runtime.exe" %*';
   yield* fs.writeFileString(launcher, foreign);
   const sessionsBefore = yield* run(["auth", "session", "list", "--base-dir", home, "--json"]);
-  yield* require(sessionsBefore.exitCode === 0 && sessionsBefore.stderr === "", "reading the original managed Windows sessions");
+  const originalChecks = { exitZero: sessionsBefore.exitCode === 0, stderrEmpty: sessionsBefore.stderr === "" };
+  yield* require(Object.values(originalChecks).every(Boolean), "reading the original managed Windows sessions", originalChecks);
   const stateBefore = yield* Effect.sync(() => snapshot(path.join(home, "userdata")));
   const appDataBefore = yield* Effect.sync(() => snapshot(path.join(home, "AppData")));
 
   const refused = yield* run(["install"]);
-  yield* require(refused.exitCode === 1 && refused.stdout === "" && refused.stderr.includes("Another t3 is already at") &&
-    (yield* fs.readFileString(launcher)) === foreign && !(yield* fs.exists(path.join(runtime, "launchers"))) &&
-    (yield* Effect.sync(() => snapshot(path.join(home, "userdata")))) === stateBefore &&
-    (yield* fs.readFileString(unrelated)) === "Synthetic unrelated binary-directory entry.\n",
-    "refusing a foreign Windows shim without an ownership receipt");
+  const refusalChecks = {
+    exitOne: refused.exitCode === 1, stdoutEmpty: refused.stdout === "",
+    foreignDiagnostic: refused.stderr.includes("Another t3 is already at"),
+    foreignShimUnchanged: (yield* fs.readFileString(launcher)) === foreign,
+    noOwnershipReceipt: !(yield* fs.exists(path.join(runtime, "launchers"))),
+    userDataUnchanged: (yield* Effect.sync(() => snapshot(path.join(home, "userdata")))) === stateBefore,
+    unrelatedFileUnchanged: (yield* fs.readFileString(unrelated)) === "Synthetic unrelated binary-directory entry.\n",
+  };
+  yield* require(Object.values(refusalChecks).every(Boolean), "refusing a foreign Windows shim without an ownership receipt", refusalChecks);
   yield* fs.remove(launcher);
   const installed = yield* run(["install"]);
   const generated = `@echo off\r\n"${executable}" %*`;
-  const recorded = yield* fs.readFileString(path.join(runtime, "launchers"));
-  const receipts = recorded.split(/\r?\n/u).filter(Boolean);
-  yield* require(installed.exitCode === 0 && installed.stderr === "" && installed.stdout.includes(`Installed t3 ${expectedVersion} at ${launcher}.`) &&
-    (yield* fs.readFileString(launcher)) === generated && receipts.length === 1 && path.resolve(receipts[0]!).toLowerCase() === launcher.toLowerCase(),
-    "installing the exact managed t3.cmd and its ownership receipt");
+  const recorded = yield* fs.readFileString(path.join(runtime, "launchers")).pipe(Effect.option);
+  const contents = yield* fs.readFileString(launcher).pipe(Effect.option);
+  const receipts = Option.isSome(recorded) ? recorded.value.split(/\r?\n/u).filter(Boolean) : [];
+  const shim = Option.isSome(contents) ? /^@echo off\r\n"([^"\r\n]+)" %\*$/u.exec(contents.value) : null;
+  const prefix = `Installed t3 ${expectedVersion} at `;
+  const report = installed.stdout.split(/\r?\n/u).find((line) => line.startsWith(prefix) && line.endsWith("."));
+  const reportedLauncher = report?.slice(prefix.length, -1);
+  const installChecks = {
+    exitZero: installed.exitCode === 0,
+    stderrEmpty: installed.stderr === "",
+    expectedVersionReport: report !== undefined,
+    reportedLauncherSameFile: reportedLauncher !== undefined && sameFile(reportedLauncher, launcher),
+    shimReadable: Option.isSome(contents),
+    generatedShimStructure: shim !== null && Option.isSome(contents) && shim[0] === contents.value,
+    shimTargetSameExecutable: shim !== null && sameFile(shim[1]!, executable),
+    receiptReadable: Option.isSome(recorded),
+    exactlyOneReceipt: receipts.length === 1,
+    receiptNamesSameLauncher: receipts.length === 1 && sameFile(receipts[0]!, launcher),
+  };
+  const spellingChecks = {
+    shimLiteralMatchesConstructedPath: Option.isSome(contents) && contents.value === generated,
+    reportLiteralMatchesConstructedPath: installed.stdout.includes(`${prefix}${launcher}.`),
+    receiptLiteralMatchesConstructedPath: receipts.length === 1 && receipts[0] === launcher,
+  };
+  yield* Effect.sync(() => { process.stdout.write(`WINDOWS_MANAGED_INSTALL_CHECKS ${JSON.stringify({ ...installChecks, ...spellingChecks })}\n`); });
+  yield* require(Object.values(installChecks).every(Boolean), "installing the exact managed t3.cmd and its ownership receipt", installChecks);
+  const canonicalLauncher = yield* fs.realPath(launcher);
+  const canonicalRuntime = yield* fs.realPath(runtime);
   const version = yield* runShim(["--version"]);
-  yield* require(version.exitCode === 0 && version.stderr === "" && version.stdout.includes(expectedVersion), "running the managed Windows shim");
+  const versionChecks = { exitZero: version.exitCode === 0, stderrEmpty: version.stderr === "", expectedVersion: version.stdout.includes(expectedVersion) };
+  yield* require(Object.values(versionChecks).every(Boolean), "running the managed Windows shim", versionChecks);
   const uninstalled = yield* runShim(["uninstall", "--base-dir", home, "--yes"]);
   const runtimePresentAtExit = yield* fs.exists(runtime);
-  yield* require(uninstalled.exitCode === 0 && uninstalled.stderr === "" &&
-    uninstalled.stdout.includes(`Removed ${launcher}.`) && uninstalled.stdout.includes(`${runtime} will be removed once t3 exits.`) &&
-    !(yield* fs.exists(launcher)), "scheduling owned Windows runtime removal after shim uninstall");
+  const removed = uninstalled.stdout.split(/\r?\n/u).filter((line) => line.startsWith("Removed ") && line.endsWith("."))
+    .map((line) => line.slice("Removed ".length, -1));
+  const deferred = " will be removed once t3 exits.";
+  const scheduled = uninstalled.stdout.split(/\r?\n/u).filter((line) => line.endsWith(deferred)).map((line) => line.slice(0, -deferred.length));
+  const uninstallChecks = {
+    exitZero: uninstalled.exitCode === 0,
+    stderrEmpty: uninstalled.stderr === "",
+    ownedLauncherRemovalReported: removed.some((target) => windowsPath(target) === windowsPath(canonicalLauncher) || windowsPath(target) === windowsPath(launcher)),
+    ownedRuntimeCleanupReported: scheduled.some((target) => windowsPath(target) === windowsPath(canonicalRuntime) || windowsPath(target) === windowsPath(runtime)),
+    launcherAbsent: !(yield* fs.exists(launcher)),
+  };
+  yield* require(Object.values(uninstallChecks).every(Boolean), "scheduling owned Windows runtime removal after shim uninstall", uninstallChecks);
   yield* fs.exists(runtime).pipe(
     Effect.flatMap((exists) => exists ? Effect.fail(new CliArchiveSmokeError({ step: "observing detached Windows runtime removal", detail: "The runtime still exists after the uninstall command exited." })) : Effect.void),
     Effect.retry({ times: 200, schedule: Schedule.spaced("100 millis") }),
   );
-  yield* require((yield* fs.readFileString(unrelated)) === "Synthetic unrelated binary-directory entry.\n" &&
-    (yield* Effect.sync(() => snapshot(path.join(home, "userdata")))) === stateBefore &&
-    (yield* Effect.sync(() => snapshot(path.join(home, "AppData")))) === appDataBefore,
-    "preserving original Windows state and unrelated files through detached cleanup");
+  const preservationChecks = {
+    unrelatedFileUnchanged: (yield* fs.readFileString(unrelated)) === "Synthetic unrelated binary-directory entry.\n",
+    userDataByteIdentical: (yield* Effect.sync(() => snapshot(path.join(home, "userdata")))) === stateBefore,
+    appDataByteIdentical: (yield* Effect.sync(() => snapshot(path.join(home, "AppData")))) === appDataBefore,
+  };
+  yield* require(Object.values(preservationChecks).every(Boolean), "preserving original Windows state and unrelated files through detached cleanup", preservationChecks);
   const reopened = yield* runExecutable(archiveExecutable, ["auth", "session", "list", "--base-dir", home, "--json"], home, undefined, environment);
-  yield* require(reopened.exitCode === 0 && reopened.stderr === "" && reopened.stdout === sessionsBefore.stdout,
-    "reopening retained sessions after Windows managed uninstall");
+  const reopenChecks = { exitZero: reopened.exitCode === 0, stderrEmpty: reopened.stderr === "", identicalSessionJson: reopened.stdout === sessionsBefore.stdout };
+  yield* require(Object.values(reopenChecks).every(Boolean), "reopening retained sessions after Windows managed uninstall", reopenChecks);
   const proof = { version: expectedVersion, installedShim: true, foreignShimRefused: true,
     ownershipReceipt: true, shimVersionRan: true, shimUninstallRan: true, detachedRemovalObserved: true,
     runtimePresentAtExit, originalStatePreserved: true, sessionsReopened: true, unrelatedFilePreserved: true,

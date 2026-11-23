@@ -128,3 +128,35 @@ The existing scratch finalizer removes the owned fixture after observation, whil
 the hosted job cleans its package/dependency staging. Only bounded proof artifacts
 remain. Actual installer distribution, signing, service registration and Windows
 ARM64 still require their own qualification.
+
+## Managed install oracle diagnostics
+
+Exact run `45179869859` built the monitor and archive from
+`e5e85ff2dcb590af4b3864b0ef719212f47da0a0`, passed the original retained smoke and
+seeded the managed state. It then failed the combined shim/receipt assertion.
+The receipt file was successfully read before that assertion, but artifact
+`14818754973` contains no captured install fields. It does not establish which
+individual comparison failed or demonstrate a production installer defect.
+
+The production installer uses the running executable's path spelling and records
+a canonical launcher path. The original fixture compared those with its constructed
+path spelling, including a literal stdout path and literal shim bytes. The repaired
+oracle still requires the exact generated two-line structure, one ownership receipt,
+and the actual shim commands. It verifies targets using Windows path semantics,
+canonical filesystem paths and matching regular-file identity. Different path
+spellings cannot redirect the expected executable or launcher to another file.
+
+`WINDOWS_MANAGED_INSTALL_CHECKS` emits booleans for each required exit, stderr,
+version-report, reported-launcher, generated-shim and ownership-receipt check. It
+also records literal-spelling comparisons separately. A failure reports these
+required booleans rather than captured streams or full paths. The later version
+and uninstall checks likewise report their fields. Removal messages are compared
+with the known canonical or original owned paths, since the shim has already been
+removed when they are checked. No install, shim or uninstall production policy
+changed. The exact first failing field remains unconfirmed until the follow-up
+Windows run supplies these diagnostics.
+
+Local checks cover syntax, patch hygiene and a dependency-free test of the exact
+fixture path normalizer against slash, case and extended-path spellings and a
+different target. This is not a Windows executable test or a product build. The
+hosted lifecycle and detached-removal result remain pending.
