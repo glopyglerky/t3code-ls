@@ -6,6 +6,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as HookInboxStore from "./HookInboxStore.ts";
 
@@ -88,6 +89,31 @@ describe("HookInboxStore", () => {
         expect(sent[0]).toEqual({ baseUrl: BASE_URL, hook: first });
         expect(yield* HookInboxStore.deliverDue(send)).toBeNull();
         expect(sent).toHaveLength(2);
+      }),
+    ),
+  );
+
+  it.effect("expires an unsent prefetched request during a slow drain", () =>
+    withInbox(
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const receivedAt = DateTime.formatIso(DateTime.makeUnsafe(now - 24 * 60 * 60 * 1_000));
+        yield* HookInboxStore.hold(yield* hook("first", { receivedAt }), BASE_URL);
+        yield* HookInboxStore.hold(yield* hook("expires-next", { receivedAt }), BASE_URL);
+        yield* HookInboxStore.hold(yield* hook("fresh"), BASE_URL);
+
+        const sent: string[] = [];
+        const nextAt = yield* HookInboxStore.deliverDue((_baseUrl, held) =>
+          Effect.gen(function* () {
+            sent.push(held.id);
+            if (held.id === "first") yield* TestClock.adjust("1 millis");
+            return "delivered" as const;
+          }),
+        );
+        expect(sent).toEqual(["first", "fresh"]);
+        expect(nextAt).toBeNull();
+        const sql = yield* SqlClient.SqlClient;
+        expect(yield* sql`SELECT id FROM held_hooks`).toEqual([]);
       }),
     ),
   );
