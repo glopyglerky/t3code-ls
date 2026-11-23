@@ -1,0 +1,36 @@
+name: Native Makepad composer input
+
+on:
+  push:
+    branches: ["candidate/t3code-ls-t01-makepad-input-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  macos-arm64:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['macos-15'] || 'macos-15' }}
+    timeout-minutes: 25
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build the locked desktop candidate
+        run: |
+          test "$(uname -m)" = arm64
+          sw_vers
+          rustup toolchain install 1.99.1 --profile minimal
+          export CARGO_HOME="$RUNNER_TEMP/makepad-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/makepad-target"
+          manifest=apps/desktop/makepad-input/Cargo.toml
+          cargo +1.99.1 fetch --locked --manifest-path "$manifest"
+          cargo +1.99.1 build --locked --offline --manifest-path "$manifest"
+          shasum -a 256 "$manifest" apps/desktop/makepad-input/Cargo.lock \
+            "$CARGO_TARGET_DIR/debug/t3-code-ls-makepad-input"
+      - name: Exercise input in the native window
+        timeout-minutes: 3
+        run: |
+          "$RUNNER_TEMP/makepad-target/debug/t3-code-ls-makepad-input" --proof
