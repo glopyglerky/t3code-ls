@@ -215,7 +215,7 @@ const smokePipedThread = Effect.fn("smokePipedThread")(function* (
     });
   }
 
-  const message = "Replay a recorded approval from stdin.\nSecond line: λ 🚀";
+  const message = "Replay a recorded question from stdin.\nSecond line: λ 🚀";
   const started = yield* runExecutable(
     executable,
     [
@@ -228,7 +228,7 @@ const smokePipedThread = Effect.fn("smokePipedThread")(function* (
       "--provider",
       "devReplay",
       "--model",
-      "approval",
+      "question",
       "--wait",
       "--json",
     ],
@@ -253,7 +253,7 @@ const smokePipedThread = Effect.fn("smokePipedThread")(function* (
     started.stderr.includes("\u001b")
   ) {
     return yield* new CliArchiveSmokeError({
-      step: "starting a recorded approval from stdin with --wait --json",
+      step: "starting a recorded question from stdin with --wait --json",
       detail: `exit ${String(started.exitCode)}\n${started.stdout}${started.stderr}`,
     });
   }
@@ -279,7 +279,7 @@ const smokePipedThread = Effect.fn("smokePipedThread")(function* (
     !history.value.messages.some((entry) => entry.role === "user" && entry.text === message)
   ) {
     return yield* new CliArchiveSmokeError({
-      step: "reading the exact piped prompt and pending approval from the running server",
+      step: "reading the exact piped prompt and pending question from the running server",
       detail: `exit ${String(shown.exitCode)}\n${shown.stdout}${shown.stderr}`,
     });
   }
