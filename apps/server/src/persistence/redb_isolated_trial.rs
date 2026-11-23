@@ -1217,6 +1217,10 @@ pub(super) async fn run_forward_owner(home: PathBuf, update_id: String) -> Resul
     // No candidate engine or output exists until owners and saved bindings agree.
     lease.verify_promotion_runtimes(&saved).await?;
     verify()?;
+    // Retain the selected entry only inside the physical owner's lifetime.
+    // This image has no execution path: SEA relative assets and a bounded
+    // no-startup-effects entry still need independent qualification.
+    let mut entry_image = None;
     let mut input = io::stdin().lock();
     let mut output = io::stdout().lock();
     loop {
@@ -1233,15 +1237,31 @@ pub(super) async fn run_forward_owner(home: PathBuf, update_id: String) -> Resul
         #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
         enum Request {
             ForwardOwnerCheck,
+            ForwardOwnerBindEntry,
         }
-        if count > 4096
-            || frame.last() != Some(&b'\n')
-            || serde_json::from_slice::<Request>(&frame).is_err()
-        {
+        if count > 4096 || frame.last() != Some(&b'\n') {
             return Err(Error::IncompatibleStore);
         }
+        let request: Request =
+            serde_json::from_slice(&frame).map_err(|_| Error::IncompatibleStore)?;
         lease.verify_promotion_runtimes(&saved).await?;
         verify()?;
+        if matches!(request, Request::ForwardOwnerBindEntry) && entry_image.is_none() {
+            // Both path and digest come from the retained, checked activation.
+            // The request supplies no executable, version, digest or authority.
+            let entry = lease
+                .home
+                .join("runtime/versions")
+                .join(&activation.target_version)
+                .join("t3");
+            entry_image = Some(crate::forward_child_readiness::stage_image(
+                &entry,
+                &activation.target_entry_sha256,
+            )?);
+        }
+        if let Some(image) = &entry_image {
+            crate::forward_child_readiness::verify_image(image, &activation.target_entry_sha256)?;
+        }
         let store = Store {
             db: candidate.snapshot().await?,
         };
@@ -1257,10 +1277,28 @@ pub(super) async fn run_forward_owner(home: PathBuf, update_id: String) -> Resul
         closed?;
         lease.verify_promotion_runtimes(&saved).await?;
         verify()?;
-        writeln!(
-            output,
-            "{{\"ok\":true,\"result\":{{\"checked\":true,\"serving\":false}}}}"
-        )
+        match request {
+            Request::ForwardOwnerCheck => writeln!(
+                output,
+                "{{\"ok\":true,\"result\":{{\"checked\":true,\"serving\":false}}}}"
+            ),
+            Request::ForwardOwnerBindEntry => {
+                let image = entry_image.as_ref().ok_or(Error::IncompatibleStore)?;
+                crate::forward_child_readiness::verify_image(
+                    image,
+                    &activation.target_entry_sha256,
+                )?;
+                writeln!(
+                    output,
+                    "{}",
+                    serde_json::json!({"ok": true, "result": {
+                        "checked": true, "serving": false, "launched": false,
+                        "entryBound": true, "targetVersion": activation.target_version,
+                        "entrySha256": activation.target_entry_sha256,
+                    }})
+                )
+            }
+        }
         .map_err(io_error)?;
         output.flush().map_err(io_error)?;
     }

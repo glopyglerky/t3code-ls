@@ -3588,7 +3588,17 @@ fn forward_owner_protocol_cases(home: &std::path::Path) {
     assert_eq!(refused.status.code(), Some(78));
     assert!(refused.stdout.is_empty());
     drop(owner);
-    for replace_selection in [true, false] {
+    let entry = home.join("runtime/versions/1.2.4/t3");
+    let entry_bytes = std::fs::read(&entry).unwrap();
+    let entry_digest = forward_fixture_sha256(&entry_bytes);
+    // Wrong selected bytes must refuse before an image can be bound. The
+    // helper is a real executable but cannot stand in for the selected entry.
+    std::fs::write(&entry, std::fs::read(&helper).unwrap()).unwrap();
+    let refused = launch().wait_with_output().unwrap();
+    assert_eq!(refused.status.code(), Some(78));
+    assert!(refused.stdout.is_empty());
+    std::fs::write(&entry, &entry_bytes).unwrap();
+    for change in ["selection", "entry", "helper", "none"] {
         let mut child = launch();
         let mut input = child.stdin.take().unwrap();
         let mut output = BufReader::new(child.stdout.take().unwrap());
@@ -3607,9 +3617,33 @@ fn forward_owner_protocol_cases(home: &std::path::Path) {
             ),
             Err(Error::WriterBusy)
         ));
-        if replace_selection {
-            let selected = std::fs::read(&selection).unwrap();
-            std::fs::write(&selection, b"foreign selection").unwrap();
+        // The existing proof installs synthetic entry bytes. Binding those
+        // bytes proves retention only, never SEA launch or installed readiness.
+        for _ in 0..2 {
+            input
+                .write_all(b"{\"operation\":\"forward_owner_bind_entry\"}\n")
+                .unwrap();
+            input.flush().unwrap();
+            line.clear();
+            output.read_line(&mut line).unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&line).unwrap(),
+                json!({
+                    "ok": true, "result": {"checked": true, "serving": false,
+                    "launched": false, "entryBound": true, "targetVersion": "1.2.4",
+                    "entrySha256": entry_digest}
+                })
+            );
+        }
+        let changed = match change {
+            "selection" => Some(&selection),
+            "entry" => Some(&entry),
+            "helper" => Some(&helper),
+            _ => None,
+        };
+        if let Some(path) = changed {
+            let original = std::fs::read(path).unwrap();
+            std::fs::write(path, b"foreign bytes").unwrap();
             input.write_all(request).unwrap();
             input.flush().unwrap();
             drop(input);
@@ -3617,9 +3651,9 @@ fn forward_owner_protocol_cases(home: &std::path::Path) {
             assert_eq!(result.status.code(), Some(78));
             line.clear();
             assert_eq!(output.read_line(&mut line).unwrap(), 0);
-            std::fs::write(&selection, selected).unwrap();
+            std::fs::write(path, original).unwrap();
         } else {
-            // EOF releases ownership; recovery reacquires the same exact proof.
+            // EOF releases ownership and the image; reacquisition binds anew.
             drop(input);
             assert!(child.wait_with_output().unwrap().status.success());
         }
@@ -3628,7 +3662,51 @@ fn forward_owner_protocol_cases(home: &std::path::Path) {
             before
         );
     }
+    // Requests cannot replace receipt-bound identity. A failed output must
+    // release every owner and image without promoting readiness.
+    for lose_output in [false, true] {
+        let mut command = Command::new(&image_path);
+        command
+            .arg("forward-owner")
+            .arg(home)
+            .arg(ISOLATED_UPDATE)
+            .env_clear()
+            .stdin(Stdio::piped())
+            .stderr(Stdio::piped());
+        if lose_output {
+            command.stdout(Stdio::from(
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open("/dev/full")
+                    .unwrap(),
+            ));
+        } else {
+            command.stdout(Stdio::piped());
+        }
+        let mut child = command.spawn().unwrap();
+        let mut input = child.stdin.take().unwrap();
+        input
+            .write_all(if lose_output {
+                b"{\"operation\":\"forward_owner_bind_entry\"}\n"
+            } else {
+                b"{\"operation\":\"forward_owner_bind_entry\",\"targetVersion\":\"foreign\"}\n"
+            })
+            .unwrap();
+        drop(input);
+        let result = child.wait_with_output().unwrap();
+        assert_eq!(result.status.code(), Some(78));
+        assert!(result.stdout.is_empty());
+        let owner = crate::application_server_ownership::OwnerLock::acquire_existing_native(
+            &state.join("server-owner.sqlite"),
+        )
+        .unwrap();
+        owner.verify_native().unwrap();
+        assert_eq!(
+            paths.each_ref().map(|path| capture_forward_file(path)),
+            before
+        );
+    }
     println!(
-        "T05 forward owner: immutable image, live-owner refusal, continuing selection checks, EOF release and reacquisition; never serving"
+        "T05 forward owner: immutable helper and selected-entry binding, wrong-entry refusal, continuing selection/entry/helper checks, EOF release and reacquisition; no entry launch or serving"
     );
 }
