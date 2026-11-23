@@ -2066,6 +2066,7 @@
         "apps/mobile/src/native/outboxDelivery.ts",
         "apps/mobile/app.config.ts",
         "apps/mobile/outbox-runtime-proof.ts",
+        "apps/mobile/outbox-dispatch-proof.ts",
         "apps/mobile/plugins/withAndroidOutboxProof.cjs",
         "apps/mobile/modules/t3-native-controls/android/build.gradle",
         "apps/mobile/src/connection/platform.ts",

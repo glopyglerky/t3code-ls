@@ -66,7 +66,7 @@ let ownsScratch = false;
 let ownsAdb = false;
 let failure: unknown;
 
-type FixturePhase = "pair-reconnect" | "seed" | "seed-creation" | "reopen-remove" | "reopen-empty";
+type FixturePhase = "dispatch-reopen" | "pair-reconnect" | "seed" | "seed-creation" | "reopen-remove" | "reopen-empty";
 const pendingTaskTitle = "T12 offline pending task";
 
 const launchedPids = new Set<string>();
@@ -92,7 +92,7 @@ async function launchFixture(label: string, fixturePhase: FixturePhase) {
   launchedPids.add(pid);
   report[`${label}Process`] = { pid, stopped: false };
   checkpoint(`${label}:await-receipt`);
-  const deadline = Date.now() + (fixturePhase === "pair-reconnect" ? 240_000 : 60_000);
+  const deadline = Date.now() + ((fixturePhase === "pair-reconnect" || fixturePhase === "dispatch-reopen") ? 240_000 : 60_000);
   while (true) {
     abort.signal.throwIfAborted();
     const read = device([
@@ -105,11 +105,11 @@ async function launchFixture(label: string, fixturePhase: FixturePhase) {
       const receipt = JSON.parse(frame) as Record<string, unknown>;
       report[label] = receipt;
       save();
-      if (fixturePhase !== "pair-reconnect") FS.writeFileSync(
+      if ((fixturePhase !== "pair-reconnect" && fixturePhase !== "dispatch-reopen")) FS.writeFileSync(
         Path.join(proof, `${label}-logcat.txt`),
         device(["logcat", "-d", "-t", "300"]).stdout,
       );
-      Assert.equal(receipt.schema, fixturePhase === "pair-reconnect" ? 3 : 2);
+      Assert.equal(receipt.schema, (fixturePhase === "pair-reconnect" || fixturePhase === "dispatch-reopen") ? 3 : 2);
       Assert.equal(receipt.phase, fixturePhase);
       return { pid, receipt };
     }
@@ -418,7 +418,27 @@ try {
             Assert.deepEqual(observations.map((item) => item.authenticated), [true, null, true, null, true]);
             Assert.ok(observations[2]!.generation > observations[0]!.generation);
             Assert.ok(observations[4]!.generation > observations[2]!.generation);
+            const dispatch = result.receipt.dispatch as Record<string, unknown>;
+            Assert.equal(dispatch.commandId, "t12-dispatch-command");
+            Assert.equal(dispatch.messageId, "t12-dispatch-message");
+            Assert.equal(dispatch.cleanupFailures, 1);
+            Assert.equal(dispatch.durableQueueCount, 0);
+            Assert.equal(dispatch.runCount, 1);
+            Assert.equal(dispatch.reopened, false);
             await stopFixture("pair-reconnect", result.pid);
+            return result.receipt.environmentId;
+          },
+          reopen: async () => {
+            const result = await launchFixture("dispatch-reopen", "dispatch-reopen");
+            assertCompleted(result.receipt);
+            const dispatch = result.receipt.dispatch as Record<string, unknown>;
+            const first = (report["pair-reconnect"] as Record<string, unknown>).dispatch as Record<string, unknown>;
+            for (const key of ["environmentId", "threadId", "messageId", "commandId", "text", "runId", "userMessageCount", "runCount", "durableQueueCount"]) {
+              Assert.deepEqual(dispatch[key], first[key]);
+            }
+            Assert.equal(dispatch.reopened, true);
+            Assert.equal(dispatch.cleanupFailures, 0);
+            await stopFixture("dispatch-reopen", result.pid);
             return result.receipt.environmentId;
           },
           record: (receipt) => { report.pairingServer = receipt; save(); },
@@ -432,7 +452,7 @@ try {
   report.status = "failed";
   report.failure = error instanceof Error ? error.message : String(error);
   failure = error;
-  if (child !== undefined && !String(report.checkpoint).startsWith("pair-reconnect")) {
+  if (child !== undefined && !String(report.checkpoint).startsWith("pair-reconnect") && !String(report.checkpoint).startsWith("dispatch-reopen")) {
     const diagnostic = ChildProcess.spawnSync(adb, ["-s", serial, "logcat", "-d", "-t", "300"], {
       env: commandEnvironment, timeout: 5_000, encoding: "utf8", maxBuffer: 1_048_576,
     });
