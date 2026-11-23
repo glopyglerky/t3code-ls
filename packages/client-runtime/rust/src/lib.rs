@@ -4,6 +4,7 @@
 //! The map borrows runs from the editor. UTF-16 text lengths and one-position
 //! atoms match `apps/web/src/composer-rich-text-doc.ts` in the pinned source.
 
+pub mod composer_draft;
 pub mod draft;
 pub mod outbox;
 pub mod text_revision;

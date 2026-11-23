@@ -1,5 +1,9 @@
 //! Read-only loopback adapter for the production orchestration HTTP contract.
 //! No redirect, proxy, provider action or alternate endpoint is selected here.
+#[path = "server_history.rs"]
+mod history;
+pub use history::{FAILED_HISTORY, History};
+
 use serde_json::Value;
 use std::{
     io::{Read, Write},
@@ -24,6 +28,12 @@ pub struct Connection {
 
 pub struct Snapshot {
     pub text: String,
+}
+
+#[derive(Clone, Copy)]
+pub enum SnapshotFormat {
+    Conversation,
+    WithMessageIds,
 }
 
 impl Connection {
@@ -75,25 +85,13 @@ impl Connection {
         })
     }
 
-    pub fn snapshot(&self) -> Result<Snapshot, &'static str> {
-        let descriptor = self.get("/.well-known/t3/environment", false)?;
-        if descriptor["environmentId"].as_str() != Some(self.environment_id.as_str()) {
-            return Err(FAILED);
-        }
-        let mut encoded = String::new();
-        for byte in self.thread_id.bytes() {
-            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-                encoded.push(char::from(byte));
-            } else {
-                use std::fmt::Write;
-                write!(encoded, "%{byte:02X}").map_err(|_| FAILED)?;
-            }
-        }
-        let snapshot = self.get(
-            &format!("/api/orchestration/threads/{encoded}/bounded"),
-            true,
-        )?;
-        parse_snapshot(&snapshot, &self.thread_id)
+    pub fn snapshot(&self, format: SnapshotFormat) -> Result<Snapshot, &'static str> {
+        let snapshot = self.projection()?;
+        parse_snapshot(&snapshot, &self.thread_id, format)
+    }
+
+    pub fn history(self) -> Result<History, &'static str> {
+        History::open(self)
     }
 
     pub(super) fn port(&self) -> u16 {
@@ -116,7 +114,7 @@ impl Connection {
         )
     }
     pub(super) fn snapshot_from(&self, value: &Value) -> Result<Snapshot, &'static str> {
-        parse_snapshot(value, &self.thread_id)
+        parse_snapshot(value, &self.thread_id, SnapshotFormat::WithMessageIds)
     }
     fn verify_environment(&self) -> Result<(), &'static str> {
         let descriptor = self.get("/.well-known/t3/environment", false)?;
@@ -221,7 +219,11 @@ fn decode_response(bytes: &[u8]) -> Result<Value, &'static str> {
     serde_json::from_slice(body).map_err(|_| FAILED)
 }
 
-fn parse_snapshot(value: &Value, thread: &str) -> Result<Snapshot, &'static str> {
+fn parse_snapshot(
+    value: &Value,
+    thread: &str,
+    format: SnapshotFormat,
+) -> Result<Snapshot, &'static str> {
     let projection = &value["projection"];
     if projection["thread"]["id"].as_str() != Some(thread) || value.get("idTable").is_some() {
         return Err(FAILED);
@@ -246,7 +248,7 @@ fn parse_snapshot(value: &Value, thread: &str) -> Result<Snapshot, &'static str>
         if text.len() + role.len() + body.len() + 3 > MAX_REPLY {
             return Err(FAILED);
         }
-        if let Some(id) = message["id"].as_str() {
+        if let (SnapshotFormat::WithMessageIds, Some(id)) = (format, message["id"].as_str()) {
             if id.len() > 1024 || id.chars().any(char::is_control) {
                 return Err(FAILED);
             }
@@ -330,18 +332,44 @@ mod tests {
         })).unwrap();
         let result = Connection::read(input.as_slice())
             .unwrap()
-            .snapshot()
+            .snapshot(SnapshotFormat::WithMessageIds)
             .unwrap();
         assert!(result.text.contains("Bounded reply"));
         peer.join().unwrap();
     }
 
     #[test]
+    fn preserves_order_and_refuses_excess_rows_and_compact_ids() {
+        let mut reply = json!({"snapshotSequence": 9, "projection": {
+            "thread": {"id": "thread", "title": "Synthetic café"},
+            "messages": [{"role": "user", "text": "first"}, {"role": "assistant", "text": "second"}],
+        }});
+        let text = parse_snapshot(&reply, "thread", SnapshotFormat::Conversation)
+            .unwrap()
+            .text;
+        assert!(text.find("first").unwrap() < text.find("second").unwrap());
+        reply["idTable"] = json!([]);
+        assert!(parse_snapshot(&reply, "thread", SnapshotFormat::Conversation).is_err());
+        reply.as_object_mut().unwrap().remove("idTable");
+        reply["projection"]["messages"] =
+            json!(vec![json!({"role": "assistant", "text": "row"}); 201]);
+        assert!(parse_snapshot(&reply, "thread", SnapshotFormat::Conversation).is_err());
+        assert!(
+            decode_response(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n0\r\n\r\n")
+                .is_err()
+        );
+        assert!(
+            decode_response(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Length: 2\r\n\r\n{}")
+                .is_err()
+        );
+    }
+
+    #[test]
     fn refuses_wrong_identity_auth_failure_and_incomplete_http() {
         let reply = json!({"snapshotSequence": 9, "projection": {"thread": {"id": "thread", "title": "Synthetic café"}, "messages": [{"role": "assistant", "text": "Reply 🦀"}]}});
-        assert!(parse_snapshot(&reply, "other").is_err());
+        assert!(parse_snapshot(&reply, "other", SnapshotFormat::WithMessageIds).is_err());
         assert!(
-            parse_snapshot(&reply, "thread")
+            parse_snapshot(&reply, "thread", SnapshotFormat::WithMessageIds)
                 .unwrap()
                 .text
                 .contains("Reply 🦀")

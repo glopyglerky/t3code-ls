@@ -2268,6 +2268,52 @@
       "rust_crates": ["packages/client-runtime/rust", "apps/mobile/modules/t3-native-controls/rust"]
     },
     {
+      "id": "desktop-makepad-input",
+      "state": "candidate",
+      "domain_owner": "apps/desktop",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/desktop/src/main.ts",
+          "blob": "f241e14587f34d742a7721b46d9be990a0dd2409"
+        },
+        {
+          "path": "apps/web/src/components/ComposerPromptEditorTiptap.tsx",
+          "blob": "5a036e34611ed5a72c7eb463a4a4e819ae1c2863"
+        }
+      ],
+      "rust_paths": [
+        "apps/desktop/makepad-input/src/main.rs",
+        "apps/desktop/makepad-input/src/macos.rs",
+        "packages/client-runtime/rust/host/server_snapshot.rs",
+        "packages/client-runtime/rust/host/server_history.rs",
+        "packages/client-runtime/rust/src/composer_draft.rs"
+      ],
+      "adapter_paths": [
+        "apps/desktop/package.json",
+        "apps/desktop/makepad-input/README.md",
+        "apps/server/scripts/verify-makepad-thread-snapshot.ts"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["darwin-arm64"],
+          "state": "candidate",
+          "implementation": "rust",
+          "compiler_route": "bootstrap-cargo",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "apps/desktop/makepad-input/src/macos/proof.rs",
+        "apps/desktop/makepad-input/src/macos/snapshot_proof.rs",
+        "apps/desktop/makepad-input/src/macos/history_proof.rs",
+        "packages/client-runtime/rust/host/server_snapshot.rs"
+      ],
+      "retired_paths": [],
+      "notes": "T01, J37 and C07. Explicit desktop candidate for plain-text editing, committed IME text, directed selection, local submission and a bounded authenticated production thread read with opt-in local conversation history paging. The macOS snapshot proof explicitly uses retained server storage and does not qualify native macOS persistence. The root workspace and retained clients select their existing routes.",
+      "rust_crates": ["apps/desktop/makepad-input", "packages/client-runtime/rust"]
+    },
+    {
       "id": "desktop-gpui-showcase",
       "state": "candidate",
       "domain_owner": "apps/desktop",
@@ -2285,7 +2331,7 @@
       "rust_paths": [
         "apps/desktop/rust/src/main.rs",
         "apps/desktop/rust/src/replay.rs",
-        "apps/desktop/rust/src/server_snapshot.rs",
+        "packages/client-runtime/rust/host/server_snapshot.rs",
         "apps/desktop/rust/src/server_submit.rs"
       ],
       "adapter_paths": [

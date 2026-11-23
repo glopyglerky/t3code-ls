@@ -1,0 +1,336 @@
+name: Native Makepad composer input
+
+on:
+  push:
+    branches: ["candidate/t3code-ls-t01-makepad-input-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  linux-history-contract:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Exercise the shared reader without a toolkit window
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.99.1 --profile minimal
+          export CARGO_HOME="$RUNNER_TEMP/makepad-reader-cargo"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/makepad-reader-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          trap 'rm -rf "$CARGO_HOME" "$CARGO_TARGET_DIR"' EXIT
+          manifest=apps/desktop/makepad-input/Cargo.toml
+          git rev-parse HEAD HEAD^{tree}
+          sha256sum "$manifest" apps/desktop/makepad-input/Cargo.lock
+          resolution=(--manifest-path "$manifest" --format-version 1 --filter-platform x86_64-unknown-linux-gnu)
+          if ! cargo +1.99.1 metadata --locked "${resolution[@]}" > /dev/null; then
+            cargo +1.99.1 metadata "${resolution[@]}" > /dev/null
+            git --no-pager diff -- apps/desktop/makepad-input/Cargo.lock
+            exit 1
+          fi
+          cargo +1.99.1 test --locked --offline --manifest-path "$manifest" server_snapshot | tee "$RUNNER_TEMP/makepad-reader.log"
+          grep -Eq 'test result: ok\. [1-9][0-9]* passed' "$RUNNER_TEMP/makepad-reader.log"
+  macos-arm64:
+    if: ${{ !startsWith(github.ref_name, 'candidate/t3code-ls-t01-makepad-input-lock-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t01-makepad-input-cross-') }}
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['macos-15'] || 'macos-15' }}
+    timeout-minutes: 35
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Build the locked desktop candidate
+        run: |
+          test "$(uname -m)" = arm64
+          sw_vers
+          rustup toolchain install 1.99.1 --profile minimal
+          export CARGO_HOME="$RUNNER_TEMP/makepad-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/makepad-target"
+          manifest=apps/desktop/makepad-input/Cargo.toml
+          cargo +1.99.1 fetch --locked --manifest-path "$manifest"
+          cargo +1.99.1 test --locked --offline --manifest-path "$manifest" server_snapshot
+          cargo +1.99.1 build --locked --offline --manifest-path "$manifest"
+          shasum -a 256 "$manifest" apps/desktop/makepad-input/Cargo.lock \
+            "$CARGO_TARGET_DIR/debug/t3-code-ls-makepad-input"
+      - name: Exercise input in the native window
+        timeout-minutes: 3
+        run: |
+          "$RUNNER_TEMP/makepad-target/debug/t3-code-ls-makepad-input" --proof
+      - name: Build the supported retained application server
+        run: |
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          pnpm --dir apps/web run build
+          T3_CODE_LS_IMPLEMENTATION=upstream pnpm --dir apps/server run build:bundle
+          shasum -a 256 apps/server/dist/bin.mjs apps/server/dist/native-bin/manifest.json
+      - name: Read an authenticated saved thread in the Makepad window
+        timeout-minutes: 4
+        run: |
+          node apps/server/scripts/verify-makepad-thread-snapshot.ts \
+            "$RUNNER_TEMP/makepad-target/debug/t3-code-ls-makepad-input"
+      - name: Read older saved history through the Makepad control
+        timeout-minutes: 4
+        run: |
+          node apps/server/scripts/verify-makepad-thread-snapshot.ts \
+            "$RUNNER_TEMP/makepad-target/debug/t3-code-ls-makepad-input" --history
+
+  macos-intel-arm64-build:
+    # Build-only fallback. The arm64 job above remains the native runtime gate.
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-makepad-input-cross-')
+    runs-on: macos-15-intel
+    timeout-minutes: 50
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      GIT_TERMINAL_PROMPT: "0"
+      NODE_OPTIONS: --max-old-space-size=4096
+      T3_CODE_LS_IMPLEMENTATION: upstream
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+          architecture: x64
+      - name: Cross-build the locked arm64 candidate without executing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          rustup toolchain install 1.99.1 --profile minimal --target aarch64-apple-darwin
+          export CARGO_HOME="$RUNNER_TEMP/makepad-cross-cargo"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/makepad-cross-target"
+          SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+          export SDKROOT
+          unset RUSTC RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER RUSTFLAGS CARGO_ENCODED_RUSTFLAGS MAKEPAD
+          trap 'rm -rf "$CARGO_HOME" "$CARGO_TARGET_DIR" "$RUNNER_TEMP/makepad-server-monitor" "$RUNNER_TEMP/makepad-server-inspect"' EXIT
+          manifest=apps/desktop/makepad-input/Cargo.toml
+          target=aarch64-apple-darwin
+          stage="$RUNNER_TEMP/makepad-arm64-build"
+          trap 'rm -rf "$stage" "$CARGO_HOME" "$CARGO_TARGET_DIR" "$RUNNER_TEMP/makepad-server-monitor" "$RUNNER_TEMP/makepad-server-inspect"' EXIT
+          mkdir -p "$stage"
+          cargo +1.99.1 fetch --locked --target "$target" --manifest-path "$manifest"
+          MAKEPAD_PACKAGE_DIR=. cargo +1.99.1 build --locked --offline --target "$target" --manifest-path "$manifest"
+          binary="$CARGO_TARGET_DIR/$target/debug/t3-code-ls-makepad-input"
+          test "$(lipo -archs "$binary")" = arm64
+          install -m 0755 "$binary" "$stage/t3-code-ls-makepad-input"
+          cp apps/server/scripts/verify-makepad-thread-snapshot.ts "$stage/"
+          cp LICENSE "$stage/LICENSE"
+          makepad=("$CARGO_HOME"/git/checkouts/makepad-*/888d1b5)
+          test "${#makepad[@]}" = 1
+          test "$(git -C "${makepad[0]}" rev-parse HEAD)" = 888d1b501ff41d0084ddd5417446b7341d5f873e
+          cp "${makepad[0]}/LICENSE" "$stage/Makepad-LICENSE"
+          # Pinned app_main!(App) selects the International set. Preserve it.
+          # desktop bundle rejects --target; use its executable-relative map format.
+          mkdir -p "$stage/resources/makepad_widgets/resources"
+          for font in IBMPlexSans-Text.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Italic.ttf \
+            IBMPlexSans-BoldItalic.ttf LiberationMono-Regular.ttf fa-solid-900.ttf \
+            LXGWWenKaiRegular.ttf LXGWWenKaiBold.ttf NotoColorEmoji.ttf; do
+            cp "${makepad[0]}/widgets/resources/$font" "$stage/resources/makepad_widgets/resources/"
+          done
+          cp -R "${makepad[0]}/widgets/resources/icons" "$stage/resources/makepad_widgets/resources/"
+          printf 'makepad_widgets\tresources/makepad_widgets\n' \
+            > "$stage/t3-code-ls-makepad-input.makepad-package-paths"
+          (cd "$stage" && find resources -type f -exec shasum -a 256 {} \; \
+            | LC_ALL=C sort > resources.sha256)
+          rm -r "$stage/resources"
+          shasum -a 256 "$manifest" apps/desktop/makepad-input/Cargo.lock \
+            apps/server/scripts/verify-makepad-thread-snapshot.ts \
+            packages/client-runtime/rust/host/fixtures/saved-history.json \
+            pnpm-lock.yaml toolchain.lock.json > "$stage/source.sha256"
+          {
+            git rev-parse HEAD 'HEAD^{tree}'
+            printf '%s\n' 'bootstrap Rust 1.99.1; not packaged Lustr/BlueFe qualification' \
+              'build-only; no native input, snapshot or history execution' \
+              'Makepad 888d1b501ff41d0084ddd5417446b7341d5f873e; MIT' \
+              'Stage executable-relative resources from the pinned Makepad Git object on the runtime host.'
+            rustc +1.99.1 -vV
+            cargo +1.99.1 -V
+            shasum -a 256 "$(rustc +1.99.1 --print sysroot)/lib/rustlib/$target/lib/"libstd-*.rlib
+            xcrun clang --version
+            shasum -a 256 "$(rustup which --toolchain 1.99.1 rustc)"
+            xcodebuild -version
+            xcrun --sdk macosx --show-sdk-version
+            sw_vers
+            otool -L "$binary"
+          } > "$stage/identity.txt"
+          cargo +1.99.1 tree --locked --offline --target "$target" \
+            --manifest-path "$manifest" --prefix none > "$stage/dependencies.txt"
+          # Supported retained upstream CLI package, cross-built on free Intel.
+          cargo +1.99.1 build --locked --release --target "$target" --manifest-path native/resource-monitor/Cargo.toml
+          mkdir "$RUNNER_TEMP/makepad-server-monitor"
+          install -m 0755 "$CARGO_TARGET_DIR/$target/release/t3-resource-monitor" "$RUNNER_TEMP/makepad-server-monitor/"
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          pnpm --dir apps/web run build
+          pnpm exec node apps/server/scripts/cli.ts build --verbose
+          pnpm exec node apps/server/scripts/cli.ts build-exe --verbose --target darwin-arm64
+          version=$(node -p 'require("./apps/server/package.json").version')
+          unset T3CODE_CLI_MAC_SIGN_IDENTITY APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER
+          pnpm exec node scripts/build-cli-archive.ts --platform mac --arch arm64 --version "$version" \
+            --resource-monitor-dir "$RUNNER_TEMP/makepad-server-monitor" --output-dir "$stage"
+          printf '%s\n' "t3-$version-darwin-arm64" > "$stage/server-stem.txt"
+          mkdir "$RUNNER_TEMP/makepad-server-inspect"
+          tar -xzf "$stage/t3-$version-darwin-arm64.tar.gz" -C "$RUNNER_TEMP/makepad-server-inspect"
+          packaged="$RUNNER_TEMP/makepad-server-inspect/t3-$version-darwin-arm64"
+          test "$(lipo -archs "$packaged/t3"):$(lipo -archs "$packaged/resource-monitor/t3-resource-monitor")" = arm64:arm64
+          codesign --verify --strict "$packaged/t3"
+          codesign --verify --strict "$packaged/resource-monitor/t3-resource-monitor"
+          node --input-type=module - "$packaged/native-bin/manifest.json" <<'JS'
+          import assert from "node:assert/strict";
+          import fs from "node:fs";
+          const manifest = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          assert.equal(manifest.implementation, "upstream");
+          assert.equal(manifest.selection, "explicit-upstream");
+          assert.equal(manifest.target, "darwin-arm64");
+          JS
+          (cd "$packaged" && find . -type f -exec shasum -a 256 {} \; | LC_ALL=C sort) > "$stage/server-files.sha256"
+          node --input-type=module - "$stage/verify-makepad-thread-snapshot.mjs" <<'JS'
+          import esbuild from "./node_modules/.pnpm/esbuild@0.28.2/node_modules/esbuild/lib/main.js";
+          import assert from "node:assert/strict";
+          import { isBuiltin } from "node:module";
+          import fs from "node:fs";
+          const result = await esbuild.build({
+            entryPoints: ["apps/server/scripts/verify-makepad-thread-snapshot.ts"],
+            bundle: true, platform: "node", format: "esm", target: "node26", outfile: process.argv[2], metafile: true,
+            banner: { js: 'import { createRequire as fixtureCreateRequire } from "node:module"; const require = fixtureCreateRequire(import.meta.url);' },
+          });
+          for (const output of Object.values(result.metafile.outputs)) {
+            for (const entry of output.imports) assert.ok(isBuiltin(entry.path), `External fixture dependency: ${entry.path}`);
+          }
+          fs.writeFileSync(process.argv[2] + ".meta.json", JSON.stringify(result.metafile, null, 2));
+          JS
+          cp packages/client-runtime/rust/host/fixtures/saved-history.json "$stage/"
+          # Smoke only the bundled CLI parser on Intel. Never execute an ARM64 image.
+          (cd / && env -i PATH=/usr/bin:/bin "$(command -v node)" "$stage/verify-makepad-thread-snapshot.mjs" --help)
+          shasum -a 256 apps/server/dist/bin.mjs apps/server/dist-exe/bin.mjs \
+            apps/server/dist-exe/native-bin/manifest.json >> "$stage/source.sha256"
+          # Retain hashes for every source input actually consumed by the fixture bundle.
+          node --input-type=module - "$stage/verify-makepad-thread-snapshot.mjs.meta.json" >> "$stage/source.sha256" <<'JS'
+          import fs from "node:fs";
+          import crypto from "node:crypto";
+          const meta = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+          for (const file of Object.keys(meta.inputs).sort()) {
+            console.log(crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex") + "  " + file);
+          }
+          JS
+          printf '%s\n' 'Intel package staging only; no ARM64 server or window execution' \
+            'stock denominator 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f' \
+            'Node 26.12.1; pnpm 12.14.0; esbuild 0.28.2; explicit upstream SQLite' >> "$stage/identity.txt"
+          cat > "$stage/verify-package.sh" <<'VERIFY'
+          #!/bin/bash
+          set -euo pipefail
+          artifact=$(cd "$(dirname "$0")" && pwd)
+          cd "$artifact"
+          shasum -a 256 -c SHA256SUMS
+          if [[ "$#" == 1 ]]; then
+            pin=888d1b501ff41d0084ddd5417446b7341d5f873e
+            test "$(git -C "$1" rev-parse --verify "$pin^{commit}")" = "$pin"
+            test ! -e resources
+            while IFS= read -r record; do
+              entry=${record#*  }
+              case "$entry" in
+                *'/../'*|*'/./'*|*'//'*|*'/..'|*'/.'|*'/') exit 1 ;;
+                resources/makepad_widgets/resources/*) ;;
+                *) exit 1 ;;
+              esac
+              mkdir -p "$(dirname "$entry")"
+              git -C "$1" cat-file blob "$pin:widgets/${entry#resources/makepad_widgets/}" > "$entry"
+            done < resources.sha256
+          else
+            test "$#" = 0
+          fi
+          shasum -a 256 -c resources.sha256
+          VERIFY
+          chmod 0755 "$stage/verify-package.sh"
+          cat > "$stage/run-loopback.sh" <<'RUNNER'
+          #!/bin/bash
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          test "$#" = 2
+          artifact=$(cd "$(dirname "$0")" && pwd)
+          makepad_source=$(cd "$1" && pwd)
+          node=$2
+          [[ "$node" = /* ]]
+          test "$("$node" --version)" = v26.12.1
+          test "$("$node" -p 'process.platform + "-" + process.arch')" = darwin-arm64
+          scratch=$(mktemp -d)
+          trap 'rm -rf "$scratch"' EXIT
+          mkdir "$scratch/relocated package" "$scratch/unrelated-cwd" "$scratch/server"
+          cp -R "$artifact/." "$scratch/relocated package/"
+          artifact="$scratch/relocated package"
+          /bin/bash "$artifact/verify-package.sh" "$makepad_source"
+          stem=$(cat "$artifact/server-stem.txt")
+          [[ "$stem" = t3-*-darwin-arm64 && "$stem" != */* ]]
+          tar -xzf "$artifact/$stem.tar.gz" -C "$scratch/server"
+          (cd "$scratch/server/$stem" && shasum -a 256 -c "$artifact/server-files.sha256")
+          entry="$scratch/server/$stem/t3"
+          test -x "$entry"
+          # Logged-in graphical session, no installed profile, deps or compiler.
+          clean=(env -i HOME="$scratch" TMPDIR="$scratch/" PATH=/usr/bin:/bin)
+          cd "$scratch/unrelated-cwd"
+          "${clean[@]}" "$artifact/t3-code-ls-makepad-input" --proof
+          "${clean[@]}" "$node" "$artifact/verify-makepad-thread-snapshot.mjs" \
+            "$artifact/t3-code-ls-makepad-input" --server-executable "$entry"
+          "${clean[@]}" "$node" "$artifact/verify-makepad-thread-snapshot.mjs" \
+            "$artifact/t3-code-ls-makepad-input" --history --server-executable "$entry"
+          RUNNER
+          chmod 0755 "$stage/run-loopback.sh"
+          (cd "$stage" && shasum -a 256 t3-code-ls-makepad-input \
+            verify-makepad-thread-snapshot.ts run-loopback.sh verify-package.sh \
+            t3-code-ls-makepad-input.makepad-package-paths LICENSE Makepad-LICENSE \
+            resources.sha256 source.sha256 identity.txt dependencies.txt \
+            verify-makepad-thread-snapshot.mjs verify-makepad-thread-snapshot.mjs.meta.json \
+            saved-history.json server-stem.txt server-files.sha256 t3-*-darwin-arm64.tar.gz > SHA256SUMS)
+          # Integrity relocation/refusal checks do not execute the arm64 app.
+          relocation=$(mktemp -d)
+          trap 'rm -rf "$relocation" "$stage" "$CARGO_HOME" "$CARGO_TARGET_DIR" "$RUNNER_TEMP/makepad-server-monitor" "$RUNNER_TEMP/makepad-server-inspect"' EXIT
+          cp -R "$stage" "$relocation/moved package"
+          (cd / && /bin/bash "$relocation/moved package/verify-package.sh" "${makepad[0]}")
+          victim="$relocation/moved package/resources/makepad_widgets/resources/IBMPlexSans-Text.ttf"
+          mv "$victim" "$relocation/font.saved"
+          if /bin/bash "$relocation/moved package/verify-package.sh"; then
+            echo 'Missing resource accepted' >&2; exit 1
+          fi
+          mv "$relocation/font.saved" "$victim"
+          printf 'changed' >> "$victim"
+          if /bin/bash "$relocation/moved package/verify-package.sh"; then
+            echo 'Hash-mismatched resource accepted' >&2; exit 1
+          fi
+          rm -rf "$relocation"
+          # Preserve the executable without redistributing dependency assets.
+          test ! -e "$stage/resources"
+          tar -czf "$RUNNER_TEMP/makepad-arm64-build.tar.gz" -C "$stage" .
+      - name: Retain the build-only candidate and exact rerun inputs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: makepad-arm64-cross-build-${{ github.sha }}
+          path: ${{ runner.temp }}/makepad-arm64-build.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove owned dependency and bundle intermediates
+        if: always()
+        shell: bash
+        run: |
+          df -k "$RUNNER_TEMP"
+          node --run clean
+          rm -rf "$RUNNER_TEMP/makepad-server-monitor" "$RUNNER_TEMP/makepad-server-inspect" \
+            "$RUNNER_TEMP/makepad-cross-cargo" "$RUNNER_TEMP/makepad-cross-target" "$RUNNER_TEMP/makepad-arm64-build"
+          df -k "$RUNNER_TEMP"
