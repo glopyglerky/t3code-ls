@@ -14,6 +14,7 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as ServerOwnership from "../serverOwnership.ts";
 import * as NativeServerOwnershipLock from "./NativeServerOwnershipLock.ts";
 import * as RedbClient from "./RedbClient.ts";
+import { BootstrappedDatabaseMigration } from "./BootstrappedDatabaseMigration.ts";
 import currentSchema from "./omdb-schema.json" with { type: "json" };
 
 export class OmdbStartupError extends Schema.TaggedError<OmdbStartupError>()("OmdbStartupError", {
@@ -259,7 +260,28 @@ export const make = Effect.fn("Omdb.make")(
           );
         }
       }
-      yield* database.request({ operation: "application_bootstrap" }, Bootstrap);
+      const bootstrapped = yield* database.request({ operation: "application_bootstrap" }, Bootstrap);
+      let migrationHead = -1;
+      for (const migration of bootstrapped.migrations) {
+        const id = Number(migration.id);
+        if (
+          !/^(?:0|[1-9][0-9]*)$/.test(migration.id) ||
+          !Number.isSafeInteger(id) ||
+          id <= migrationHead
+        ) {
+          return yield* new OmdbStartupError({
+            path: options.databasePath,
+            cause: new Error("Invalid bootstrapped migration history"),
+          });
+        }
+        migrationHead = id;
+      }
+      if (migrationHead < 0) {
+        return yield* new OmdbStartupError({
+          path: options.databasePath,
+          cause: new Error("Missing bootstrapped migration history"),
+        });
+      }
       const readDatabase = options.independentReads
         ? yield* NativeDatabase.make({ ...options, mode: "current-read-local", requestTimeout: "15 minutes" })
         : undefined;
@@ -295,7 +317,11 @@ export const make = Effect.fn("Omdb.make")(
         yield* readDatabase.request({ operation: "application_schema" }, RedbClient.ApplicationSchema);
       }
       if (activate !== undefined) yield* activate;
-      return { database, client };
+      return {
+        database,
+        client,
+        migrationWitness: { databasePath: options.databasePath, head: migrationHead },
+      };
     });
     const runtime = yield* awaitLost === undefined
       ? bootstrap
@@ -320,13 +346,18 @@ const layerFromPath = (
 ) =>
   Layer.unwrap(
     Effect.gen(function* () {
-      const { database, client } = yield* make({ databasePath, executable, independentReads }).pipe(
+      const { database, client, migrationWitness } = yield* make({
+        databasePath,
+        executable,
+        independentReads,
+      }).pipe(
         Effect.provideService(RedbClient.DurableRelayWebhooks, durableRelayWebhooks),
         Effect.provideService(RedbClient.SingleProjectionReads, singleProjectionReads),
       );
-      return Layer.merge(
+      return Layer.mergeAll(
         Layer.succeed(NativeDatabase.NativeDatabase, database),
         Layer.succeed(RedbClient.RedbClient, client),
+        Layer.succeed(BootstrappedDatabaseMigration, migrationWitness),
       );
     }),
   );

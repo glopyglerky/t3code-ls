@@ -7,6 +7,7 @@ import * as NodePath from "node:path";
 import * as NodeReadline from "node:readline";
 import * as Effect from "effect/Effect";
 import * as Logger from "effect/Logger";
+import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
@@ -14,6 +15,11 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NativeOwnership from "../apps/server/src/persistence/NativeServerOwnershipLock.ts";
 import { persistServerRuntimeState } from "../apps/server/src/serverRuntimeState.ts";
 import * as Omdb from "../apps/server/src/persistence/Omdb.ts";
+import { BootstrappedDatabaseMigration } from "../apps/server/src/persistence/BootstrappedDatabaseMigration.ts";
+import * as ServerEnvironment from "../apps/server/src/environment/ServerEnvironment.ts";
+import * as ServerSecretStore from "../apps/server/src/auth/ServerSecretStore.ts";
+import * as ServerConfig from "../apps/server/src/config.ts";
+import { databaseMigrationHead } from "../apps/server/src/persistence/databaseMigrationHead.ts";
 import { createFixture } from "./database-fixture.mjs";
 import { createMigratedSqlite, hash, nativeRequest, withSqlite } from "./redb-domain-fixture.mjs";
 import { verifyNativeSchema88Upgrade } from "./omdb-schema-upgrade-fixture.mjs";
@@ -88,6 +94,61 @@ try {
       yield* locks.acquire(NodePath.join(fixture.root, "server-owner.sqlite"));
     }),
   );
+  const refusedInspector = NodePath.join(fixture.root, "refused-migration-inspector");
+  const refusalLog = NodePath.join(fixture.root, "refused-migration-inspections");
+  const quotedLog = "'" + refusalLog.replaceAll("'", "'\\''") + "'";
+  await NodeFSP.writeFile(refusedInspector, `#!/bin/sh\nprintf 'x\\n' >> ${quotedLog}\nexit 73\n`, { mode: 0o700 });
+  await run(({ client, migrationWitness }) =>
+    client.withTransaction(Effect.gen(function* () {
+      NodeAssert.deepEqual(migrationWitness, { databasePath: fixture.databasePath, head: 89 });
+      const refused = NodeChildProcess.spawnSync(refusedInspector, ["read-only-local", fixture.databasePath], {
+        input: JSON.stringify({ operation: "application_migrations" }) + "\n",
+        env: {}, encoding: "utf8", timeout: 5_000, maxBuffer: 8192, killSignal: "SIGKILL",
+      });
+      NodeAssert.equal(refused.error, undefined);
+      NodeAssert.equal(refused.status, 73);
+      const describe = Effect.gen(function* () {
+        const environment = yield* ServerEnvironment.ServerEnvironment;
+        const first = yield* environment.getDescriptor;
+        const second = yield* environment.getDescriptor;
+        NodeAssert.equal(first.databaseMigration, 89);
+        NodeAssert.deepEqual(second, first);
+      }).pipe(Effect.provide(ServerEnvironment.layerServing.pipe(
+        Layer.provide(Layer.succeed(BootstrappedDatabaseMigration, migrationWitness)),
+        Layer.provide(Layer.succeed(ServerSecretStore.ServerSecretStore, {
+          get: () => Effect.succeedNone, set: () => Effect.void, create: () => Effect.void,
+          getOrCreateRandom: () => Effect.succeed(new Uint8Array()), remove: () => Effect.void,
+        })),
+      )));
+      const config = yield* ServerConfig.ServerConfig;
+      yield* Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const prior = { executable: process.env.T3_CODE_LS_DB_EXECUTABLE, implementation: process.env.T3_CODE_LS_IMPLEMENTATION };
+          process.env.T3_CODE_LS_DB_EXECUTABLE = refusedInspector;
+          delete process.env.T3_CODE_LS_IMPLEMENTATION;
+          return prior;
+        }),
+        () => Effect.gen(function* () {
+          NodeAssert.equal(databaseMigrationHead(fixture.databasePath), undefined,
+            "The former serving probe must reproduce missing metadata under controlled inspector refusal");
+          const callsBeforeDescriptor = yield* Effect.promise(() => NodeFSP.readFile(refusalLog, "utf8"));
+          yield* describe.pipe(Effect.provideService(ServerConfig.ServerConfig, {
+            ...config, dbPath: fixture.databasePath,
+          }));
+          const callsAfterDescriptor = yield* Effect.promise(() => NodeFSP.readFile(refusalLog, "utf8"));
+          NodeAssert.equal(callsAfterDescriptor, callsBeforeDescriptor,
+            "Serving construction and repeated descriptor reads must not spawn another inspector");
+        }),
+        (prior) => Effect.sync(() => {
+          if (prior.executable === undefined) delete process.env.T3_CODE_LS_DB_EXECUTABLE;
+          else process.env.T3_CODE_LS_DB_EXECUTABLE = prior.executable;
+          if (prior.implementation === undefined) delete process.env.T3_CODE_LS_IMPLEMENTATION;
+          else process.env.T3_CODE_LS_IMPLEMENTATION = prior.implementation;
+        }),
+      );
+    }).pipe(Effect.provide(ServerConfig.layerTest(process.cwd(), fixture.root)))),
+  );
+  checks.push("Normal native environment descriptors retain the bootstrapped migration witness during a real write transaction and controlled independent-inspector refusal");
   NodeAssert.equal(
     await NodeFSP.readFile(NodePath.join(fixture.root, "server-owner.sqlite"), "utf8"),
     "t3code-omdb-owner-v1\n",
@@ -297,9 +358,11 @@ for (const changed of [false, true]) {
       VALUES ('retry-row','original','[]','token','2026-01-01','2099-01-01')
     `.pipe(Effect.asVoid),
     );
-    await NodeAssert.rejects(Effect.runPromise(isolated(retry, failedActivation(retry))), (error) =>
-      hasCauseMessage(error, "injected activation failure"),
-    );
+    let failedWitness;
+    await NodeAssert.rejects(Effect.runPromise(isolated(retry, failedActivation(retry).pipe(
+      Effect.tap((runtime) => Effect.sync(() => { failedWitness = runtime.migrationWitness; })),
+    ))), (error) => hasCauseMessage(error, "injected activation failure"));
+    NodeAssert.equal(failedWitness, undefined, "Failed activation must not release a serving migration witness");
     NodeAssert.equal(
       await NodeFSP.readFile(NodePath.join(retry.root, "server-owner.sqlite"), "utf8"),
       "",

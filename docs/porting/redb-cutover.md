@@ -432,3 +432,32 @@ verifies migration/source preservation and older-server exclusion. The browser
 flow additionally checks its native database and absence of new application
 SQLite files. These are integration assertions, not a claim that every platform
 or a not-yet-qualified commit has passed.
+
+
+### Serving migration metadata
+
+Normal native serving obtains `databaseMigration` from the ordered migrations
+returned by its selected owner's successful `application_bootstrap`. `Omdb.make`
+releases the scoped witness only after index preparation, optional independent
+reader validation and ownership activation succeed. `Omdb.layerConfig` shares
+that witness with both normal environment-layer sites through the same memoized
+persistence owner. No second database owner or persistent status record is added.
+
+The native serving environment requires this dependency before constructing its
+descriptor and refuses a witness for a different database path. Repeated descriptor
+reads reuse the earned head. SQLite serving, the standalone environment CLI,
+preflight and staged candidate pre-admission retain their existing inspection
+paths. The observation is startup metadata, with no new event, replay, migration,
+provider or activation operation.
+
+The startup fixture holds a real native write transaction and injects a bounded
+independent-inspector refusal. It first confirms that the former probe reports no
+head, then requires the scoped serving layer to report the earned head repeatedly
+without another inspection. Existing native inspection tests continue to allow
+independent reads during a writer when the engine grants them. Failed ownership
+activation must return no witness. Environment layer regressions also cover a
+failed persistence dependency and a synthetic head different from the build head.
+These runtime checks await hosted qualification. Local syntax and patch checks
+passed. Source lineage remains MIT T3 Code at
+`28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`, under method SHA-256
+`5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.

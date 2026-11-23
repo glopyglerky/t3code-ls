@@ -19,6 +19,7 @@ import {
   RELAY_URL_SECRET,
 } from "../cloud/config.ts";
 import * as ServerConfig from "../config.ts";
+import { BootstrappedDatabaseMigration } from "../persistence/BootstrappedDatabaseMigration.ts";
 import * as ServerEnvironment from "./ServerEnvironment.ts";
 
 const layerServerEnvironment = (baseDir: string) =>
@@ -75,6 +76,54 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
 });
 
 it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("ServerEnvironmentLive", (it) => {
+  it.effect("native serving publishes only the selected owner's migration witness", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const baseDir = yield* fs.makeTempDirectoryScoped();
+      const config = yield* makeServerConfig(baseDir);
+      yield* fs.makeDirectory(config.stateDir, { recursive: true });
+      const descriptor = yield* Effect.gen(function* () {
+        const environment = yield* ServerEnvironment.ServerEnvironment;
+        return yield* environment.getDescriptor;
+      }).pipe(Effect.provide(ServerEnvironment.layerServing.pipe(
+        Layer.provide(Layer.succeed(BootstrappedDatabaseMigration, {
+          databasePath: config.dbPath, head: 17,
+        })),
+        Layer.provide(layerEmptySecretStore),
+        Layer.provide(ServerConfig.layer(config)),
+      )));
+      // A missing file would make the standalone probe claim the build head instead.
+      expect(descriptor.databaseMigration).toBe(17);
+      expect(yield* fs.exists(config.dbPath)).toBe(false);
+    }),
+  );
+
+  it.effect("failed persistence never releases a native serving descriptor", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const baseDir = yield* fs.makeTempDirectoryScoped();
+      const config = yield* makeServerConfig(baseDir);
+      yield* fs.makeDirectory(config.stateDir, { recursive: true });
+      let published = false;
+      const refused = yield* Effect.gen(function* () {
+        const environment = yield* ServerEnvironment.ServerEnvironment;
+        const descriptor = yield* environment.getDescriptor;
+        published = true;
+        return descriptor;
+      }).pipe(
+        Effect.provide(ServerEnvironment.layerServing.pipe(
+          Layer.provide(Layer.effect(BootstrappedDatabaseMigration, Effect.fail("bootstrap-refused"))),
+          Layer.provide(layerEmptySecretStore),
+          Layer.provide(ServerConfig.layer(config)),
+        )),
+        Effect.flip,
+      );
+      expect(refused).toBe("bootstrap-refused");
+      expect(published).toBe(false);
+      expect(yield* fs.exists(config.dbPath)).toBe(false);
+    }),
+  );
+
   it.effect("publishes proven install ownership only for manually updated servers", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
