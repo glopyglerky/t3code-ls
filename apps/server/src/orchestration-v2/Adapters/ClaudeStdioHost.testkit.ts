@@ -183,10 +183,17 @@ export function makeClaudeStdioFixture(
             closing !== undefined ||
             typeof permit !== "function" ||
             (onUserDialog !== undefined && typeof onUserDialog !== "function") ||
-            (onElicitation !== undefined && typeof onElicitation !== "function") ||
-            !NodeUtil.isDeepStrictEqual(settings, expected)
+            (onElicitation !== undefined && typeof onElicitation !== "function")
           ) {
             throw new Error("Expected a fresh approval-required Claude fixture session.");
+          }
+          if (!NodeUtil.isDeepStrictEqual(settings, expected)) {
+            const keys = new Set([...Object.keys(settings), ...Object.keys(expected)]);
+            const differing = [...keys].filter((key) =>
+              Object.hasOwn(settings, key) !== Object.hasOwn(expected, key) ||
+              !NodeUtil.isDeepStrictEqual(Reflect.get(settings, key), Reflect.get(expected, key)),
+            );
+            throw new Error(`Unsupported Claude fixture options: ${differing.join(", ")}`);
           }
           const started = startHelper(executable, peer, directory);
           helper = started;

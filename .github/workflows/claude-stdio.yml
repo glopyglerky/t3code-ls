@@ -75,6 +75,7 @@ jobs:
             apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts \
             -t 'runs ClaudeAdapterV2 against the Rust stdio host'
       - name: Open and reap the pinned vendor CLI without network or a prompt
+        id: vendor-handshake
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-claude-adapter-vendor-') || startsWith(github.ref_name, 'candidate/t3code-ls-t08-claude-vendor-')
         shell: bash
         run: |
@@ -104,7 +105,7 @@ jobs:
             "$GITHUB_WORKSPACE/apps/server/scripts/check-claude-stdio-helper.mjs" | tee "$proof/handshake.log"
           grep -F 'Pinned vendor CLI acknowledged initialization and was reaped without a prompt.' "$proof/handshake.log"
       - name: Retain vendor handshake evidence
-        if: always() && (startsWith(github.ref_name, 'candidate/t3code-ls-t01-claude-adapter-vendor-') || startsWith(github.ref_name, 'candidate/t3code-ls-t08-claude-vendor-'))
+        if: always() && (steps.vendor-handshake.outcome == 'success' || steps.vendor-handshake.outcome == 'failure')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: claude-vendor-handshake

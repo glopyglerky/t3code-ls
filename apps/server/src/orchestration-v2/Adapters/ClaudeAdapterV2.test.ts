@@ -299,6 +299,7 @@ it.skipIf(claudeStdioHelperExecutable === undefined && claudeStdioFixtureExecuta
               title: "Claude attachment test",
               resume: false,
               cwd: directory,
+              attachmentsDir: directory,
               environment,
               settings: DEFAULT_CLAUDE_SETTINGS,
               supportedDialogKinds: ["resume_return"],
