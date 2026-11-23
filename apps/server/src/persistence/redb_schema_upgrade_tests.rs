@@ -2913,7 +2913,12 @@ fn forward_packaged_child_cases(
             _ => Stdio::from(candidate.inherited_file()?),
         };
         let output_fd = if case == "output-failure" {
-            Stdio::from(std::fs::File::open("/dev/null").unwrap())
+            Stdio::from(
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open("/dev/full")
+                    .unwrap(),
+            )
         } else {
             Stdio::piped()
         };
@@ -2971,7 +2976,10 @@ fn forward_packaged_child_cases(
             forward_fixture_sha256(&std::fs::read(home.join("userdata/statev2.omdb")).unwrap()),
             database_hash
         );
-        println!("T05 packaged readiness {case}: exit {}", status.code().unwrap());
+        println!(
+            "T05 packaged readiness {case}: exit {}",
+            status.code().unwrap()
+        );
     }
     Ok(())
 }
