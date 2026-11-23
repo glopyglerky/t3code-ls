@@ -3491,8 +3491,8 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       terminalPid: process.pid,
       cause,
     });
-    const pending = yield* Effect.try({
-      try: () => process.write(input.data),
+    const { pending } = yield* Effect.try({
+      try: () => ({ pending: process.write(input.data) }),
       catch: writeError,
     });
     if (pending === undefined) return;
