@@ -150,3 +150,33 @@ it("matches retained inline markup and citation offsets across bounded streaming
   await vi.waitFor(() => expect(native().parentElement?.hidden).toBe(false));
   expect(native()).toBe(original);
 });
+
+it.each([
+  { language: "Hebrew", text: "שלום עולם!", ancestor: "ltr", direction: "rtl" },
+  { language: "Arabic", text: "مرحبا بالعالم!", ancestor: "ltr", direction: "rtl" },
+  { language: "Arabic with an English opener", text: "API مرحبا بالعالم!", ancestor: "ltr", direction: "rtl" },
+  { language: "English", text: "Hello world!", ancestor: "rtl", direction: "ltr" },
+])("matches the retained paragraph direction for $language", async ({ text, ancestor, direction }) => {
+  await using screen = await render(
+    <div dir={ancestor}>
+      <div data-direction-oracle><ChatMarkdown text={text} cwd={undefined} /></div>
+      <div data-direction-result>
+        <DioxusAssistantText text={text} sequence="31" updatedAt="2026-11-23T00:00:00.000Z" streaming>
+          <ChatMarkdown text={text} cwd={undefined} />
+        </DioxusAssistantText>
+      </div>
+    </div>,
+  );
+  const result = screen.container.querySelector('[data-direction-result]')!;
+  await vi.waitFor(() => {
+    const native = result.querySelector<HTMLElement>('[data-assistant-text-renderer="dioxus-wasm"]');
+    expect(native?.dataset.snapshotSequence).toBe("31");
+    expect(native?.parentElement?.hidden).toBe(native?.dataset.supported !== "true");
+  });
+  const oracle = screen.container.querySelector('[data-direction-oracle] p')!;
+  const paragraph = result.querySelector<HTMLElement>("p:not([hidden] *)")!;
+  expect(oracle.getAttribute("dir")).toBe(direction);
+  expect(paragraph.textContent).toBe(oracle.textContent);
+  expect(paragraph.getAttribute("dir")).toBe(oracle.getAttribute("dir"));
+  expect(window.getComputedStyle(paragraph).direction).toBe(direction);
+});
