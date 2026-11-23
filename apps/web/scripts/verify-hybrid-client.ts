@@ -2592,8 +2592,9 @@ async function exercise(implementation: Implementation): Promise<void> {
       Assert.equal(messages[0]?.id, request.messageId);
       let wasmSha256: string | null = null;
       if (composerSubmit.renderer === "dioxus") {
-        Assert.ok(composerWasm?.ok(), "Send must load the bundled Wasm");
-        wasmSha256 = NodeCrypto.createHash("sha256").update(await composerWasm.body()).digest("hex");
+        const response = composerWasm;
+        Assert.ok(response !== undefined && response.ok(), "Send must load the bundled Wasm");
+        wasmSha256 = NodeCrypto.createHash("sha256").update(await response.body()).digest("hex");
         const bundledWasm = NodePath.join(repoRoot, "apps/web/dist", composerSubmitWasmPath.slice(1));
         Assert.equal(wasmSha256, NodeCrypto.createHash("sha256")
           .update(NodeFS.readFileSync(bundledWasm)).digest("hex"));
