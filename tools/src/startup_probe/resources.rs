@@ -126,13 +126,16 @@ fn process_role(stat: Stat) -> Result<&'static str> {
     if bytes.len() > MAX_STAT_BYTES as usize {
         return Ok("command-exceeded-observation-bound");
     }
-    let current = std::fs::read_to_string(format!("{directory}/stat"));
-    if current
-        .as_deref()
-        .ok()
-        .and_then(|text| parse_stat(text).ok())
-        .map(|value| value.identity())
-        != Some(stat.identity())
+    let mut current = Vec::new();
+    let read = File::open(format!("{directory}/stat"))
+        .and_then(|file| file.take(MAX_STAT_BYTES + 1).read_to_end(&mut current));
+    if read.is_err()
+        || current.len() > MAX_STAT_BYTES as usize
+        || std::str::from_utf8(&current)
+            .ok()
+            .and_then(|text| parse_stat(text).ok())
+            .map(|value| value.identity())
+            != Some(stat.identity())
     {
         return Ok("exited-before-role-observation");
     }
@@ -223,16 +226,24 @@ impl Group {
         Ok(())
     }
 
-    fn observe_roles(&mut self, table: &BTreeMap<u32, Stat>) -> Result<()> {
+    fn observe_roles(
+        &mut self,
+        table: &BTreeMap<u32, Stat>,
+        mut read_role: impl FnMut(Stat) -> Result<&'static str>,
+    ) -> Result<()> {
         for (identity, process) in &mut self.seen {
-            if process.role == "unobserved" {
-                process.role = match table
-                    .get(&identity.0)
-                    .filter(|stat| stat.identity() == *identity)
-                {
-                    Some(stat) => process_role(*stat)?,
-                    None => "exited-before-role-observation",
-                };
+            // Zygote children can acquire their renderer command line after the first sample.
+            // Keep checking live, unclassified identities until a specific role is witnessed.
+            if matches!(process.role, "browser-renderer" | "native-database-helper") {
+                continue;
+            }
+            if let Some(stat) = table
+                .get(&identity.0)
+                .filter(|stat| stat.identity() == *identity)
+            {
+                process.role = read_role(*stat)?;
+            } else if process.role == "unobserved" {
+                process.role = "exited-before-role-observation";
             }
         }
         Ok(())
@@ -334,8 +345,8 @@ impl Baseline {
             let (table, skipped) = process_table()?;
             application.observe(&table, server, true, &self.table)?;
             browser.observe(&table, self.driver, false, &self.table)?;
-            application.observe_roles(&table)?;
-            browser.observe_roles(&table)?;
+            application.observe_roles(&table, process_role)?;
+            browser.observe_roles(&table, process_role)?;
             if browser.seen.is_empty() {
                 return Err("owned browser process tree was empty".into());
             }
@@ -481,6 +492,66 @@ mod tests {
                 .is_err()
         );
     }
+    #[test]
+    fn role_observation_refreshes_live_children_and_keeps_identity_bound_witnesses() {
+        let root = stat(10, 1, 10, 10, 10);
+        let child = stat(11, 10, 11, 4, 20);
+        let helper = stat(12, 10, 12, 5, 30);
+        let table = BTreeMap::from([(10, root), (11, child), (12, helper)]);
+        let mut group = Group::default();
+        group
+            .observe(&table, root.identity(), false, &BTreeMap::new())
+            .unwrap();
+        group
+            .observe_roles(&table, |_| Ok("other-process"))
+            .unwrap();
+        assert_eq!(group.seen[&child.identity()].role, "other-process");
+        assert_eq!(group.seen[&helper.identity()].role, "other-process");
+
+        let mut classified = Vec::new();
+        group
+            .observe_roles(&table, |stat| {
+                classified.push(stat.identity());
+                Ok(if stat.pid == child.pid {
+                    "browser-renderer"
+                } else {
+                    "native-database-helper"
+                })
+            })
+            .unwrap();
+        assert_eq!(classified, [child.identity(), helper.identity()]);
+        assert_eq!(group.seen[&child.identity()].role, "browser-renderer");
+        assert_eq!(
+            group.seen[&helper.identity()].role,
+            "native-database-helper"
+        );
+        group
+            .observe_roles(&table, |_| panic!("specific witnesses must be retained"))
+            .unwrap();
+
+        let replacement = stat(child.pid, 99, 111, 400, 900);
+        let reused = BTreeMap::from([(10, root), (11, replacement)]);
+        group
+            .observe_roles(&reused, |_| panic!("reused PID must not replace a witness"))
+            .unwrap();
+        assert_eq!(group.seen[&child.identity()].role, "browser-renderer");
+        assert_eq!(group.report(100, 4096)["observed_cpu_ticks"], 9);
+
+        let mut unclassified = Group::default();
+        unclassified
+            .observe(&table, root.identity(), false, &BTreeMap::new())
+            .unwrap();
+        unclassified
+            .observe_roles(&table, |_| Ok("unavailable"))
+            .unwrap();
+        unclassified
+            .observe_roles(&reused, |_| {
+                panic!("reused PID cannot classify an old identity")
+            })
+            .unwrap();
+        assert_eq!(unclassified.seen[&child.identity()].role, "unavailable");
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn kernel_process_table_tracks_an_owned_child_without_charging_its_parent() {
@@ -492,7 +563,7 @@ mod tests {
         group
             .observe(&table, child_stat.identity(), true, &BTreeMap::new())
             .unwrap();
-        group.observe_roles(&table).unwrap();
+        group.observe_roles(&table, process_role).unwrap();
         assert_eq!(group.seen.len(), 1);
         assert!(group.seen.contains_key(&child_stat.identity()));
         assert_eq!(group.peak_rss_pages, child_stat.rss);
