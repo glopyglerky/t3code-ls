@@ -151,20 +151,6 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
     } else {
         None
     };
-    let server_spans = if record_server_spans {
-        let start = browser
-            .as_ref()
-            .and_then(|proof| proof["conversation"]["timing"]["submitEpochMillis"].as_f64())
-            .ok_or("missing browser submit timestamp")?;
-        let end = provider_trace
-            .as_ref()
-            .and_then(|entries| entries.iter().find(|entry| entry["phase"] == "prompt"))
-            .and_then(|entry| entry["millis"].as_f64())
-            .ok_or("missing provider prompt timestamp")?;
-        Some(read_server_spans(&server_trace, start, end)?)
-    } else {
-        None
-    };
     child.stop()?;
     let provider_trace = if trace.is_some() {
         let entries = fs::read_to_string(trace_log)?
@@ -182,6 +168,20 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
             }
         }
         Some(entries)
+    } else {
+        None
+    };
+    let server_spans = if record_server_spans {
+        let start = browser
+            .as_ref()
+            .and_then(|proof| proof["conversation"]["timing"]["submitEpochMillis"].as_f64())
+            .ok_or("missing browser submit timestamp")?;
+        let end = provider_trace
+            .as_ref()
+            .and_then(|entries| entries.iter().find(|entry| entry["phase"] == "prompt"))
+            .and_then(|entry| entry["millis"].as_f64())
+            .ok_or("missing provider prompt timestamp")?;
+        Some(read_server_spans(&server_trace, start, end)?)
     } else {
         None
     };
@@ -231,6 +231,7 @@ fn read_server_spans(path: &Path, submit: f64, prompt: f64) -> Result<Vec<Value>
         let start = start / 1_000_000.0;
         let end = end / 1_000_000.0;
         if start < submit
+            || end < start
             || end > prompt
             || !name
                 .bytes()
