@@ -283,11 +283,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - runner: macos-15
-            arch: arm64
-          - runner: macos-15-intel
-            arch: x64
+        include: ${{
+          startsWith(github.ref_name, 'candidate/t3code-ls-t14-macos-cli-apple-silicon-') &&
+          fromJSON('[{"runner":"macos-26","arch":"arm64"}]') ||
+          fromJSON('[{"runner":"macos-15","arch":"arm64"},{"runner":"macos-15-intel","arch":"x64"}]')
+          }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     env:
