@@ -92,6 +92,32 @@ describe("HookInboxStore", () => {
     ),
   );
 
+  it.effect("keeps recoverable work when an older admission lost its target", () =>
+    withInbox(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const now = yield* Clock.currentTimeMillis;
+        const ttl = 24 * 60 * 60 * 1_000;
+        const fresh = yield* hook("fresh");
+        const receivedAt = DateTime.formatIso(DateTime.makeUnsafe(now - ttl - 1));
+        yield* HookInboxStore.hold(yield* hook("expired", { receivedAt }), BASE_URL);
+        yield* HookInboxStore.hold(fresh, BASE_URL);
+        // Recreate the state that could survive an interrupted older admission.
+        yield* sql`DELETE FROM held_hooks_target`;
+        const { sent, send } = deliverer(() => "delivered");
+        expect(yield* HookInboxStore.deliverDue(send)).toBe(now + ttl + 1);
+        expect(sent).toEqual([]);
+        expect(yield* sql`SELECT id FROM held_hooks`).toEqual([{ id: "fresh" }]);
+
+        const reopenedTarget = "https://reopened.example.test/";
+        expect(yield* HookInboxStore.wake(reopenedTarget)).toBe(true);
+        expect(yield* HookInboxStore.deliverDue(send)).toBeNull();
+        expect(sent).toEqual([{ baseUrl: reopenedTarget, hook: fresh }]);
+        expect(yield* sql`SELECT id FROM held_hooks`).toEqual([]);
+      }),
+    ),
+  );
+
   it.effect("keeps a request the environment did not take and backs off", () =>
     withInbox(
       Effect.gen(function* () {

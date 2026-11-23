@@ -1,0 +1,31 @@
+name: Relay inbox recovery
+
+on:
+  push:
+    branches: ["candidate/t3code-ls-t09-relay-inbox-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  relay-inbox:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 8
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      VP_REMOTE_CACHE: "off"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install the locked relay dependencies
+        run: |
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+      - name: Exercise inbox capacity, expiry and wake recovery
+        run: pnpm --dir infra/relay test src/hooks/HookInboxStore.test.ts
+      - name: Check the Durable Object transaction types
+        run: pnpm --dir infra/relay run typecheck
