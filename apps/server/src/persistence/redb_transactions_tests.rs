@@ -85,10 +85,7 @@ async fn application_generation_checks_engine_layout_and_exact_catalog() {
     let catalog = decode_catalog(&bytes).unwrap();
     let key = generation_identity_key(&catalog);
     let identity = transactions.generation_identity().await.unwrap().unwrap();
-    assert_eq!(
-        identity.catalog_sha256,
-        format!("{:x}", Sha256::digest(bytes))
-    );
+    assert_eq!(identity, generation_identity(&catalog, &bytes));
     let expected_pin = format!(
         "name = \"redb\"\nversion = \"{}\"\nsource = \"git+https://github.com/glopyglerky/omdb?rev={}#{}\"",
         identity.engine_version, identity.engine_revision, identity.engine_revision

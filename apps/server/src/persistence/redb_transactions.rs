@@ -90,7 +90,10 @@ fn generation_identity(
         engine_revision: OMDB_REVISION.into(),
         layout: "t3-application-keyspace-v1".into(),
         schema_version: catalog.schema.version,
-        catalog_sha256: format!("{:x}", Sha256::digest(encoded_catalog)),
+        catalog_sha256: Sha256::digest(encoded_catalog)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
     }
 }
 
