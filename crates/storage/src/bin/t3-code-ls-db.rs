@@ -714,9 +714,11 @@ async fn evaluate(
     }
     match request {
         #[cfg(feature = "ordered-engine-fixture")]
-        Request::ApplicationOrderedFixtureSelect { .. } => Err(Error::Invalid(
-            "ordered fixture requires isolated helper mode".into(),
-        )),
+        Request::ApplicationOrderedFixtureSelect { .. } => {
+            return Err(Error::Invalid(
+                "ordered fixture requires isolated helper mode".into(),
+            ));
+        }
         Request::Shutdown {} => {
             return Err(Error::Invalid(
                 "shutdown must be handled by the helper owner".into(),
