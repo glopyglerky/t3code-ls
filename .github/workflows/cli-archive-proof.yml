@@ -284,6 +284,8 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{
+          startsWith(github.ref_name, 'candidate/t3code-ls-t14-macos-cli-cross-') &&
+          fromJSON('[{"runner":"macos-15-intel","arch":"arm64","cross":true}]') ||
           startsWith(github.ref_name, 'candidate/t3code-ls-t14-macos-cli-apple-silicon-') &&
           fromJSON('[{"runner":"macos-26","arch":"arm64"}]') ||
           fromJSON('[{"runner":"macos-15","arch":"arm64"},{"runner":"macos-15-intel","arch":"x64"}]')
@@ -292,6 +294,7 @@ jobs:
     timeout-minutes: 20
     env:
       ARCHIVE_ARCH: ${{ matrix.arch }}
+      CROSS_PACKAGE_ONLY: ${{ matrix.cross == true }}
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
@@ -307,27 +310,37 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "26.12.1"
-      - name: Build, sign and run the same-architecture CLI archive
+      - name: Build and sign the CLI archive
         shell: bash
         run: |
           set -euo pipefail
-          test "$(node -p '`${process.platform}-${process.arch}`')" = "darwin-$ARCHIVE_ARCH"
-          case "$(uname -m):$ARCHIVE_ARCH" in arm64:arm64|x86_64:x64) ;; *) exit 1 ;; esac
+          host_arch=$(node -p 'process.arch')
+          monitor_args=()
+          executable_args=()
+          monitor_prefix=
+          if [[ "$CROSS_PACKAGE_ONLY" == true ]]; then
+            [[ "$(uname -m):$host_arch:$ARCHIVE_ARCH" == x86_64:x64:arm64 ]]
+            monitor_args=(--target aarch64-apple-darwin)
+            executable_args=(--target darwin-arm64)
+            monitor_prefix=aarch64-apple-darwin/
+          else
+            case "$(uname -m):$host_arch:$ARCHIVE_ARCH" in arm64:arm64:arm64|x86_64:x64:x64) ;; *) exit 1 ;; esac
+          fi
           proof="$RUNNER_TEMP/cli-macos-proof"
           scratch="$(mktemp -d "$RUNNER_TEMP/cli-macos.XXXXXX")"
           trap 'rm -rf -- "$scratch"' EXIT
           mkdir "$proof" "$scratch/extracted" "$scratch/resources"
           git rev-parse HEAD HEAD^{tree} > "$proof/source.txt"
           export CARGO_HOME="$scratch/cargo" CARGO_TARGET_DIR="$scratch/target" RUSTUP_HOME="$scratch/rustup"
-          rustup toolchain install 1.99.1 --profile minimal
+          rustup toolchain install 1.99.1 --profile minimal "${monitor_args[@]}"
           rustc +1.99.1 --version --verbose > "$proof/compiler.txt"
-          cargo +1.99.1 build --locked --release --manifest-path native/resource-monitor/Cargo.toml
-          install -m 0755 "$CARGO_TARGET_DIR/release/t3-resource-monitor" "$scratch/resources/"
+          cargo +1.99.1 build --locked --release --manifest-path native/resource-monitor/Cargo.toml "${monitor_args[@]}"
+          install -m 0755 "$CARGO_TARGET_DIR/${monitor_prefix}release/t3-resource-monitor" "$scratch/resources/"
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
           pnpm --dir apps/web run build
           pnpm exec node apps/server/scripts/cli.ts build --verbose
-          pnpm exec node apps/server/scripts/cli.ts build-exe --verbose
+          pnpm exec node apps/server/scripts/cli.ts build-exe --verbose "${executable_args[@]}"
           version="$(node -p 'require("./apps/server/package.json").version')"
           unset T3CODE_CLI_MAC_SIGN_IDENTITY APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER
           pnpm exec node scripts/build-cli-archive.ts --platform mac --arch "$ARCHIVE_ARCH" \
@@ -342,9 +355,34 @@ jobs:
             codesign --verify --strict t3
             codesign --verify --strict resource-monitor/t3-resource-monitor
             file t3 resource-monitor/t3-resource-monitor > "$proof/file.txt"
+            if [[ "$CROSS_PACKAGE_ONLY" == true ]]; then
+              test "$(lipo -archs t3):$(lipo -archs resource-monitor/t3-resource-monitor)" = arm64:arm64
+            fi
           )
-          node scripts/smoke-cli-archive.ts --archive "$archive" --expect-version "$version" \
-            --expect-upstream | tee "$proof/smoke.log"
+          if [[ "$CROSS_PACKAGE_ONLY" == true ]]; then
+            harness="$proof/harness"
+            mkdir -p "$harness/scripts"
+            node --input-type=module - "$harness/scripts/smoke-cli-archive.mjs" <<'JS'
+          import esbuild from "./node_modules/.pnpm/esbuild@0.28.2/node_modules/esbuild/lib/main.js";
+          await esbuild.build({
+            entryPoints: ["scripts/smoke-cli-archive.ts"],
+            bundle: true, platform: "node", format: "esm", target: "node26", outfile: process.argv[2],
+            banner: { js: 'import { createRequire as smokeCreateRequire } from "node:module"; const require = smokeCreateRequire(import.meta.url);' },
+          });
+          JS
+            git archive HEAD upstream.lock.json apps/server/scripts/dev-replay-agent.ts \
+              apps/server/src/orchestration-v2/testkit/fixtures/acp_elicitation/registry_transcript.ndjson \
+              apps/server/src/orchestration-v2/testkit/fixtures/stop_background_work_after_failed_turn/registry_transcript.ndjson \
+              | tar -x -C "$harness"
+            node "$harness/scripts/smoke-cli-archive.mjs" --help
+            cp "$archive" "$proof/"
+            printf '%s\n' "$version" > "$proof/version.txt"
+            printf '%s\n' "macOS x64 builder, Apple Silicon execution required" > "$proof/stage.txt"
+            (cd "$proof" && find harness -type f -print0 | xargs -0 shasum -a 256) > "$proof/harness.sha256"
+          else
+            node scripts/smoke-cli-archive.ts --archive "$archive" --expect-version "$version" \
+              --expect-upstream | tee "$proof/smoke.log"
+          fi
       - name: Retain exact archive hashes and smoke results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
