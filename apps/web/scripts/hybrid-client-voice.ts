@@ -221,10 +221,11 @@ export async function verifyBundledVoiceDraft(
     const failedPcm = decodeSpeechPcmRequest(failedEncoded).pcm;
     Assert.ok(failedPcm.length > 0 && failedPcm.length % 4 === 0);
     await page.getByRole("status", { name: "Transcribing…", exact: true }).waitFor({ state: "visible" });
-    const concurrentDraft = "🦀 café e\u0301 👩‍💻 雪\nConcurrent unsent draft";
+    const concurrentLines = ["🦀 café e\u0301 👩‍💻 雪", "Concurrent unsent draft"];
+    const concurrentDraft = concurrentLines.join("\n");
     await concurrentEditor.fill(concurrentDraft);
-    Assert.equal(await concurrentEditor.innerText(), concurrentDraft);
     await saved(concurrentDraft);
+    Assert.deepEqual(await concurrentEditor.locator(":scope > p").allTextContents(), concurrentLines);
     release.resolve(true);
     Assert.equal(await responseServed.promise, true);
     await page.getByRole("status", {
@@ -232,7 +233,7 @@ export async function verifyBundledVoiceDraft(
     }).waitFor({ state: "visible" });
     Assert.equal(await editor.innerText(), expected);
     Assert.equal(await editor.evaluate((element) => (element as HTMLElement).isContentEditable), true);
-    Assert.equal(await concurrentEditor.innerText(), concurrentDraft);
+    Assert.deepEqual(await concurrentEditor.locator(":scope > p").allTextContents(), concurrentLines);
     await saved(concurrentDraft);
     Assert.equal(page.url(), draftRoute);
     await page.getByRole("button", { name: "Dismiss voice input error", exact: true }).click();
@@ -242,7 +243,7 @@ export async function verifyBundledVoiceDraft(
     concurrent = undefined;
     await page.reload({ waitUntil: "domcontentloaded" });
     await editor.waitFor({ state: "visible" });
-    Assert.equal(await editor.innerText(), concurrentDraft);
+    Assert.deepEqual(await editor.locator(":scope > p").allTextContents(), concurrentLines);
     Assert.equal(await editor.evaluate((element) => (element as HTMLElement).isContentEditable), true);
     await start.waitFor({ state: "visible" });
     await saved(concurrentDraft);
