@@ -40,6 +40,7 @@ import { resolveSpawnCommand, runsGitWithoutConsole } from "@t3tools/shared/shel
 import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { resolveProjectFileBackedSetting } from "@t3tools/shared/projectSettings";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
+import * as ProcessRunner from "../processRunner.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import { removeEmptyDirectory, type RemoveEmptyDirectoryError } from "./removeEmptyDirectory.ts";
 import {
@@ -189,6 +190,15 @@ interface GitRepositoryPaths {
   readonly isAtRepositoryRoot: boolean | undefined;
   readonly currentBranch: string | null;
 }
+
+const decodeGixRepositoryPaths = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.NullOr(
+  Schema.Struct({
+    gitCommonDir: Schema.String,
+    worktreeRoot: Schema.String,
+    isAtRepositoryRoot: Schema.Boolean,
+    currentBranch: Schema.NullOr(Schema.String),
+  }),
+)));
 
 interface GitRefsSnapshot {
   readonly localBranches: ReadonlyArray<VcsRef>;
@@ -970,6 +980,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const isServerInternalPath = yield* makeIsServerInternalPath;
   const digest = yield* Digest.Digest;
   const hostPlatform = yield* HostProcess.Platform;
+  const environment = yield* HostProcess.Environment;
+  const gixExecutable = environment.T3_CODE_LS_GIT_WORKSPACE_EXECUTABLE;
+  const gixRunner = hostPlatform === "linux" && environment.T3_CODE_LS_IMPLEMENTATION !== "upstream" &&
+    gixExecutable !== undefined && path.isAbsolute(gixExecutable)
+    ? yield* ProcessRunner.make()
+    : undefined;
   const serviceScope = yield* Effect.scope;
   const statusFetches = new Map<string, Fiber.Fiber<void, GitCommandError>>();
   const statusFetchProcesses = yield* Semaphore.make(4);
@@ -1498,6 +1514,23 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const resolveRepositoryPathsUncached = Effect.fn("resolveRepositoryPathsUncached")(function* (
     cwd: string,
   ) {
+    if (gixRunner !== undefined && gixExecutable !== undefined) {
+      const native = yield* gixRunner.run({
+        command: gixExecutable,
+        args: [cwd],
+        cwd,
+        env: {},
+        extendEnv: false,
+        timeout: "2 seconds",
+        maxOutputBytes: 32_768,
+      }).pipe(Effect.option);
+      if (Option.isSome(native) && native.value.code === 0 && !native.value.stdoutInvalidUtf8) {
+        const paths = Option.getOrNull(decodeGixRepositoryPaths(native.value.stdout));
+        if (paths !== null && path.isAbsolute(paths.gitCommonDir) && path.isAbsolute(paths.worktreeRoot)) {
+          return paths;
+        }
+      }
+    }
     const gitCommonDir = yield* readGitCommonDir(cwd);
     if (gitCommonDir === null) return null;
     const [worktreeRoot, currentBranchResult] = yield* Effect.all(
