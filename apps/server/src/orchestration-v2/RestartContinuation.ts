@@ -51,8 +51,10 @@ export function relayContinuationMessageIds(
       : runs.find((candidate) => candidate.id === run?.restartContinuationOfRunId)
   ) {
     visited.add(run.id);
-    if (run.userMessageId.startsWith("scheduled-task-message:") &&
-      run.userMessageId.includes(":webhook:delivery:relay:")) {
+    if (
+      run.userMessageId?.startsWith("scheduled-task-message:") &&
+      run.userMessageId.includes(":webhook:delivery:relay:")
+    ) {
       ids.push(run.userMessageId);
     }
   }

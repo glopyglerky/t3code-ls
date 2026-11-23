@@ -143,6 +143,8 @@ jobs:
             src/NativeClients.test.ts src/Savings.test.ts
       - name: Exercise restart recovery and persisted continuation effects
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t09-relay-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
         run: |
           pnpm --dir apps/server exec vp test run --maxWorkers 2 \
             src/orchestration-v2/RestartContinuation.test.ts src/orchestration-v2/ProviderRuntimeRecoveryService.test.ts
