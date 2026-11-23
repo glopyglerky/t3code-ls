@@ -27,11 +27,11 @@ replay across helper restart. Linux SIGKILL of the helper, interactive foregroun
 job groups, descendants that create another session, and OS restart still require
 containment qualification before application selection.
 
-The host bounds frames at 128 KiB, commands at 4,096, chunks at 8 KiB and total
-acknowledged output at 4 MiB. Writes yield on kernel backpressure and return their
-accepted prefix within a 250 ms retry interval. Reads are nonblocking. There is
-one retained output chunk. The stdio transport requires a continuously consumed
-response pipe. Blocking stdout and blocking stdin lifetime cancellation remain
+The host bounds frames at 128 KiB and chunks at 8 KiB. It keeps one output chunk
+until acknowledgement and advances a byte cursor within the exact JSON integer
+range. Writes yield on kernel backpressure and return their accepted prefix
+within a 250 ms retry interval. Reads are nonblocking. The stdio transport
+requires a continuously consumed response pipe. Input and output lifetime cancellation remain
 caller responsibilities. The API uses `std` and Linux host APIs.
 
 `portable-pty` 0.9.0 is pinned with defaults disabled. Its MIT source package has

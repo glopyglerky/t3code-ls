@@ -119,6 +119,32 @@ fn bounded_write_refuses_to_block_forever() {
 }
 
 #[test]
+fn continuous_output_keeps_only_the_offered_chunk() {
+    let mut owner = spawn("exec head -c 5242880 /dev/zero");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut cursor = 0;
+    loop {
+        let offered = owner.offer().unwrap();
+        assert_eq!(offered.start, cursor);
+        assert_eq!(offered.end, cursor + offered.bytes.len() as u64);
+        assert!(offered.bytes.iter().all(|byte| *byte == 0));
+        if offered.ended {
+            break;
+        }
+        let end = offered.end;
+        if end == cursor {
+            thread::sleep(Duration::from_millis(1));
+        } else {
+            owner.acknowledge(end).unwrap();
+            cursor = end;
+        }
+        assert!(Instant::now() < deadline, "stopped at byte {cursor}");
+    }
+    assert_eq!(cursor, 5 * 1024 * 1024);
+    assert!(owner.close().unwrap().unwrap().success());
+}
+
+#[test]
 fn invalid_spawn_and_failed_exec_return_without_a_child() {
     let env = BTreeMap::new();
     for (executable, cwd, cols) in [

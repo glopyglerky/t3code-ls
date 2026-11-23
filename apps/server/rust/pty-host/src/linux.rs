@@ -11,7 +11,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 pub const MAX_CHUNK: usize = 8192;
-pub const MAX_OUTPUT: u64 = 4 * 1024 * 1024;
+// JSON peers must be able to round-trip the exact byte cursor.
+const MAX_CURSOR: u64 = (1 << 53) - 1;
 const IO_DEADLINE: Duration = Duration::from_millis(250);
 
 fn invalid(message: &'static str) -> io::Error {
@@ -167,8 +168,8 @@ impl PtyOwner {
             match self.reader.read(&mut buffer) {
                 Ok(0) => self.ended = true,
                 Ok(count) => {
-                    if self.acknowledged + count as u64 > MAX_OUTPUT {
-                        return Err(invalid("terminal output budget exhausted"));
+                    if self.acknowledged + count as u64 > MAX_CURSOR {
+                        return Err(invalid("terminal output cursor exhausted"));
                     }
                     self.pending.extend_from_slice(&buffer[..count]);
                 }
