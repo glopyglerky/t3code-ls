@@ -2303,6 +2303,13 @@ async function exercise(implementation: Implementation): Promise<void> {
       rustDecoder: boolean;
       reopenedTextMatches: boolean;
     } | null,
+    messageSpliceRecovery: null as {
+      rejectedSequence: number;
+      staleBaseSequence: number;
+      resumedAfterSequence: number;
+      replayBaseSequence: number;
+      completedTextMatches: boolean;
+    } | null,
     terminalReattach: null as { sameShell: boolean; unicodeOutput: boolean } | null,
     terminalSplit: null as Awaited<ReturnType<typeof verifySplitTerminalReconnect>> | null,
     terminalAlternate: null as Awaited<ReturnType<typeof verifyAlternateTerminalReconnect>> | null,
@@ -2933,6 +2940,95 @@ async function exercise(implementation: Implementation): Promise<void> {
         reopenedTextMatches: true,
       };
       completed("Rendered an exact Unicode splice in Rust and recovered the completed reply after reload");
+
+      starting("stale splice base recovery through the selected thread owner");
+      const recoveryPage = await context.newPage();
+      observePage(recoveryPage);
+      let recoveryThread: string | undefined;
+      let rejectedSequence: number | undefined;
+      let staleBaseSequence: number | undefined;
+      let resumedAfterSequence: number | undefined;
+      let resumedRequestId: string | undefined;
+      let replayBaseSequence: number | undefined;
+      try {
+        // Intercept only this page's sockets, before its first connection. The
+        // server and durable fixture remain untouched; one wire base is stale.
+        await recoveryPage.routeWebSocket("**/*", (socket) => {
+          const server = socket.connectToServer();
+          socket.onMessage((payload) => {
+            const request = JSON.parse(payload.toString());
+            if (
+              rejectedSequence !== undefined &&
+              request.tag === ORCHESTRATION_V2_WS_METHODS.subscribeThread &&
+              request.payload?.threadId === recoveryThread
+            ) {
+              Assert.equal(request.payload.messageTextAppends, 2);
+              Assert.ok(Number.isSafeInteger(request.payload.afterSequence));
+              Assert.ok(request.payload.afterSequence < rejectedSequence,
+                "A rejected splice must not advance the owner's replay watermark");
+              resumedAfterSequence = request.payload.afterSequence;
+              resumedRequestId = String(request.id);
+            }
+            server.send(payload);
+          });
+          server.onMessage((payload) => {
+            // The proof uses the ordinary JSON wire envelope. Forward other
+            // frames intact, and fail below if no eligible splice was exercised.
+            let envelope;
+            try { envelope = JSON.parse(payload.toString()); } catch {
+              socket.send(payload);
+              return;
+            }
+            let changed = false;
+            for (const item of envelope.values ?? []) {
+              if (item.event?.type !== "message.updated" ||
+                item.event.payload.threadId !== recoveryThread) continue;
+              if (rejectedSequence === undefined && item.kind === "message-text-splice") {
+                Assert.ok(item.baseSequence > 0);
+                rejectedSequence = item.sequence;
+                staleBaseSequence = item.baseSequence - 1;
+                item.baseSequence = staleBaseSequence;
+                changed = true;
+              } else if (resumedAfterSequence !== undefined && replayBaseSequence === undefined &&
+                String(envelope.requestId) === resumedRequestId) {
+                Assert.equal(item.kind, "event",
+                  "A new subscription must establish a full JSON message before any edit");
+                Assert.ok(item.sequence > resumedAfterSequence);
+                replayBaseSequence = item.sequence;
+              }
+            }
+            socket.send(changed ? JSON.stringify(envelope) : payload);
+          });
+        });
+        await recoveryPage.goto(page.url(), { waitUntil: "domcontentloaded" });
+        recoveryThread = await submitReplay(recoveryPage, "Text splices", "Replay: text splices");
+        await recoveryPage.getByRole("button", { name: /^(Yes|Approve)$/u }).first().click();
+        await recoveryPage.getByText(original, { exact: true }).last().waitFor({ state: "visible" });
+        const pending = await readThreadSnapshot(recoveryPage, recoveryThread);
+        const recovered = await assertCompleted(
+          recoveryPage, recoveryThread, replayTurnIdentity(pending, "text-splices"), finalText,
+        );
+        await recoveryPage.getByText(finalText, { exact: true }).last().waitFor({ state: "visible" });
+        Assert.ok(rejectedSequence !== undefined, "Inject exactly one stale splice base");
+        Assert.ok(staleBaseSequence !== undefined);
+        Assert.ok(resumedAfterSequence !== undefined, "The shared owner must resubscribe");
+        Assert.ok(replayBaseSequence !== undefined, "Recovery must receive an authoritative message base");
+        const completedSnapshot = await readThreadSnapshot(recoveryPage, recoveryThread);
+        Assert.deepEqual(
+          completedSnapshot.projection.messages.filter((message) => message.role === "assistant")
+            .map(({ id, text, streaming }) => ({ id, text, streaming })),
+          [{ id: recovered.assistantMessageId, text: finalText, streaming: false }],
+          "Completion replaces the original message exactly once after rejected edits",
+        );
+        proof.messageSpliceRecovery = {
+          rejectedSequence, staleBaseSequence, resumedAfterSequence, replayBaseSequence,
+          completedTextMatches: true,
+        };
+        completed("Rejected a stale Rust splice and recovered exact completion without advancing its watermark");
+      } finally {
+        await recoveryPage.close();
+      }
+
     }
 
     if (fileEditorProof) {
