@@ -227,8 +227,10 @@ jobs:
           xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Debug \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath "$derived" \
             CODE_SIGNING_ALLOWED=NO ENABLE_DEBUG_DYLIB=NO ARCHS=arm64 -jobs 2 build \
-            > "$RUNNER_TEMP/outbox-xcodebuild.log" 2>&1 || {
-              tail -120 "$RUNNER_TEMP/outbox-xcodebuild.log"
+            > "$evidence/xcodebuild.log" 2>&1 || {
+              grep -n -m 12 -B 12 -A 24 -E 'error:|fatal error:|Error Domain=|command not found|No such file or directory|failed with' \
+                "$evidence/xcodebuild.log" || true
+              tail -120 "$evidence/xcodebuild.log"
               exit 1
             }
           applications=("$derived"/Build/Products/Debug-iphonesimulator/*.app)
