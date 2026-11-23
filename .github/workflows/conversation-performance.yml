@@ -1,0 +1,157 @@
+name: Paired conversation measurement
+
+on:
+  push:
+    branches: ["measure/t3code-ls-t16-conversation-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  conversation:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 25
+    env:
+      STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
+      STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
+      CANDIDATE_COMMIT: c8e1245f85f48699f91de99e749635d8d06c2c6e
+      CANDIDATE_TREE: 0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a
+      WASM_BINDGEN_VERSION: "0.2.130"
+      WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      NODE_OPTIONS: --max-old-space-size=6144
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      GIT_TERMINAL_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          path: measurement
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Fetch and verify the two frozen source trees
+        run: |
+          for profile in stock candidate; do
+            git init "$profile"
+            if [[ "$profile" == stock ]]; then
+              repository=https://github.com/pingdotgg/t3code.git
+              commit="$STOCK_COMMIT"
+              tree="$STOCK_TREE"
+            else
+              repository=https://github.com/glopyglerky/t3code-ls.git
+              commit="$CANDIDATE_COMMIT"
+              tree="$CANDIDATE_TREE"
+            fi
+            git -C "$profile" fetch --no-tags --depth=1 "$repository" "$commit"
+            git -C "$profile" checkout --detach --no-recurse-submodules FETCH_HEAD
+            test "$(git -C "$profile" rev-parse HEAD)" = "$commit"
+            test "$(git -C "$profile" rev-parse 'HEAD^{tree}')" = "$tree"
+          done
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+      - name: Build the optimized stock bundle
+        working-directory: stock
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir apps/web run build
+          pnpm --dir apps/server run build:bundle
+      - name: Install the pinned compiler for the candidate and probe
+        working-directory: measurement
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/conversation-toolchain"
+      - name: Build the native server and Rust composer bundle
+        working-directory: candidate
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/conversation-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/conversation-target"
+          pnpm install --frozen-lockfile
+          lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
+            --release --locked --target wasm32-unknown-unknown -p t3-code-ls-client-text-web
+          archive="wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive.tar.gz" \
+            "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$WASM_BINDGEN_VERSION/$archive.tar.gz"
+          printf '%s  %s\n' "$WASM_BINDGEN_SHA256" "$RUNNER_TEMP/$archive.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$archive.tar.gz" -O "$archive/wasm-bindgen" > "$RUNNER_TEMP/wasm-bindgen"
+          chmod u+x "$RUNNER_TEMP/wasm-bindgen"
+          "$RUNNER_TEMP/wasm-bindgen" --target web --out-name composer_offsets \
+            --out-dir apps/web/public/client-text-wasm \
+            "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/t3_code_ls_client_text_web.wasm"
+          VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust pnpm --dir apps/web run build
+          T3_CODE_LS_IMPLEMENTATION=native node tools/build-native.mjs
+          node tools/check-hybrid.mjs --verify-binaries
+          T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$PWD/bin" \
+            pnpm --dir apps/server run build:bundle
+      - name: Measure completed fixture turns in alternating order
+        shell: bash
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/conversation-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/conversation-target"
+          cd measurement
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
+            --release --locked -p t3code-ls-tools
+          cd ..
+          node_path="$(command -v node)"
+          chrome="$(command -v google-chrome)"
+          driver="$(command -v chromedriver || printf '%s/chromedriver' "$CHROMEWEBDRIVER")"
+          test -x "$driver"
+          probe="$CARGO_TARGET_DIR/release/t3code-ls-tools"
+          replay="$PWD/stock/apps/server/scripts/dev-replay-agent.ts"
+          transcript=apps/server/src/orchestration-v2/testkit/fixtures/todo_list/registry_transcript.ndjson
+          evidence="$RUNNER_TEMP/conversation-evidence"
+          mkdir "$evidence"
+          printf '%s  %s\n' 560623d69777188138a1d9a7fbc0cc994f4067eb2a7d30ae113b0667456ec45e \
+            "stock/$transcript" | sha256sum --check
+          sha256sum "$probe" "$replay" "stock/$transcript" > "$evidence/fixture.sha256"
+          for profile in stock candidate; do
+            (
+              cd "$profile"
+              sha256sum pnpm-lock.yaml
+              find apps/web/dist apps/server/dist -type f -print0 | sort -z | xargs -0 -r sha256sum
+            ) > "$evidence/$profile.sha256"
+          done
+          jq -n --arg stock "$STOCK_COMMIT" --arg stockTree "$STOCK_TREE" \
+            --arg candidate "$CANDIDATE_COMMIT" --arg candidateTree "$CANDIDATE_TREE" \
+            --arg probe "$(git -C measurement rev-parse HEAD)" --arg node "$(node --version)" \
+            --arg chrome "$("$chrome" --version)" --arg driver "$("$driver" --version)" \
+            --arg image "${ImageOS:-unknown}/${ImageVersion:-unknown}" --arg kernel "$(uname -r)" \
+            --arg cpu "$(LC_ALL=C lscpu | sed -n 's/^Model name:[[:space:]]*//p')" \
+            --arg systemLoad "$(uptime)" --argjson cpus "$(nproc)" \
+            '{stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
+            > "$evidence/inputs.json"
+          printf 'pair\tposition\tprofile\tfirst_visible_ms\tterminal_ms\tmax_frame_gap_ms\n' > "$evidence/trials.tsv"
+          for pair in 1 2 3 4 5 6 7 8; do
+            profiles=(stock candidate)
+            if (( pair % 2 == 0 )); then profiles=(candidate stock); fi
+            for position in 0 1; do
+              profile="${profiles[$position]}"
+              trial="$pair-$profile"
+              result="$evidence/sample-$trial.json"
+              mode=stock
+              if [[ "$profile" == candidate ]]; then mode=native; fi
+              sudo -n unshare --net -- bash -euc '
+                ip link set dev lo up
+                user="$1"
+                shift
+                exec runuser -u "$user" -- "$@"
+              ' _ "$(id -un)" "$probe" probe-conversation "$node_path" \
+                "$PWD/$profile/apps/server/dist/bin.mjs" "$RUNNER_TEMP/conversation-trial-$trial" \
+                "$driver" "$chrome" "$replay" "$mode" | tee "$result" > /dev/null
+              jq -er --argjson pair "$pair" --argjson position "$((position + 1))" --arg profile "$profile" \
+                'select(.browser.loaded_rust_composer == ($profile == "candidate") and .browser.conversation.snapshot.valid) | .browser.conversation.timing | [$pair,$position,$profile,.firstVisibleMillis,.terminalMillis,.maxFrameGapMillis] | @tsv' \
+                "$result" >> "$evidence/trials.tsv"
+              rm -r "$RUNNER_TEMP/conversation-trial-$trial"
+            done
+            diff <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-stock.json") \
+              <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-candidate.json")
+          done
+      - name: Retain exact artifacts and matched observations
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: conversation-evidence
+          path: ${{ runner.temp }}/conversation-evidence/
+          if-no-files-found: warn
+          retention-days: 30

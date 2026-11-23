@@ -17,16 +17,26 @@ use std::{
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 
-pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
+pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<()> {
     let args: Vec<_> = args.collect();
-    let (node, bundle, trial, browsers, fork_sqlite) = match args.as_slice() {
-        [node, bundle, trial] => (node, bundle, trial, None, false),
-        [node, bundle, trial, driver, chrome] => {
-            (node, bundle, trial, Some((driver, chrome)), false)
+    let (node, bundle, trial, browsers, implementation, replay) = match args.as_slice() {
+        [node, bundle, trial] if !conversation => (node, bundle, trial, None, None, None),
+        [node, bundle, trial, driver, chrome] if !conversation => {
+            (node, bundle, trial, Some((driver, chrome)), None, None)
         }
-        [node, bundle, trial, driver, chrome, mode] if mode.as_os_str() == "fork-sqlite" => {
-            (node, bundle, trial, Some((driver, chrome)), true)
+        [node, bundle, trial, driver, chrome, mode] if !conversation && mode == "fork-sqlite" => {
+            (node, bundle, trial, Some((driver, chrome)), Some("upstream"), None)
         }
+        [node, bundle, trial, driver, chrome, replay, mode] if conversation => (
+            node, bundle, trial, Some((driver, chrome)),
+            match mode.to_str() {
+                Some("stock") => None,
+                Some("native") => Some("native"),
+                _ => return Err("conversation implementation must be stock or native".into()),
+            },
+            Some(fs::canonicalize(replay)?),
+        ),
+        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|native".into()),
         _ => return Err("usage: t3code-ls-tools probe-startup NODE BUNDLE NEW_TRIAL_DIRECTORY [CHROMEDRIVER CHROME [fork-sqlite]]".into()),
     };
     let node = fs::canonicalize(node)?;
@@ -36,6 +46,32 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     let trial = fs::canonicalize(trial)?;
     let base = trial.join("profile");
     let state = base.join("userdata");
+    let workspace = trial.join("conversation-fixture");
+    if let Some(replay) = &replay {
+        fs::create_dir_all(&state)?;
+        fs::create_dir(&workspace)?;
+        fs::write(
+            workspace.join("notes.txt"),
+            "Disposable conversation measurement.\n",
+        )?;
+        fs::write(
+            state.join("settings.json"),
+            serde_json::to_vec(&json!({
+                "responseStreamingMode": "paragraph",
+                "providerInstances": {
+                    "devReplay": {
+                        "displayName": "Replay (dev)",
+                        "driver": "acpRegistry",
+                        "config": {
+                            "source": "local",
+                            "commandPath": node,
+                            "commandArgs": [replay],
+                        }
+                    }
+                }
+            }))?,
+        )?;
+    }
     let browser = browsers
         .map(|(driver, chrome)| {
             browser::Browser::start(Path::new(driver), Path::new(chrome), &trial)
@@ -58,8 +94,8 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
             Stdio::null()
         })
         .stderr(Stdio::null());
-    if fork_sqlite {
-        command.env("T3_CODE_LS_IMPLEMENTATION", "upstream");
+    if let Some(implementation) = implementation {
+        command.env("T3_CODE_LS_IMPLEMENTATION", implementation);
     }
 
     let start = Instant::now();
@@ -67,8 +103,11 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     let pairing = child.0.stdout.take().map(pairing_link);
     let (origin, descriptor_micros, html_micros, database_migration) =
         sample(&mut child.0, &state, start)?;
-    if !state.join("statev2.sqlite").is_file() || state.join("statev2.omdb").exists() {
-        return Err("fresh profile did not use the selected SQLite database".into());
+    let native = implementation == Some("native");
+    if state.join("statev2.sqlite").is_file() == native
+        || state.join("statev2.omdb").is_file() != native
+    {
+        return Err("fresh profile did not use the expected database".into());
     }
     let browser = if let Some(browser) = browser {
         let pairing = pairing.ok_or("missing server pairing output pipe")?;
@@ -80,7 +119,14 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
         {
             return Err("pairing link does not target the owned loopback application".into());
         }
-        let result = browser.attach(&link, start);
+        let result = browser
+            .attach(&link, start, conversation)
+            .and_then(|mut result| {
+                if conversation {
+                    result["conversation"] = browser.conversation(&workspace)?;
+                }
+                Ok(result)
+            });
         let closed = browser.close();
         let result = result?;
         closed?;
@@ -89,10 +135,11 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
         None
     };
     child.stop()?;
-    let profile = match (fork_sqlite, browser.is_some()) {
-        (true, _) => "new-fork-linux-browser-profile",
-        (false, true) => "new-stock-linux-browser-profile",
-        (false, false) => "new-stock-linux-server-home",
+    let profile = match (implementation, browser.is_some()) {
+        (Some("native"), _) => "new-native-linux-browser-profile",
+        (Some("upstream"), _) => "new-fork-linux-browser-profile",
+        (_, true) => "new-stock-linux-browser-profile",
+        (_, false) => "new-stock-linux-server-home",
     };
     println!(
         "{}",

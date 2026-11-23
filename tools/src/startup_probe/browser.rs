@@ -12,6 +12,8 @@ use std::{
 
 use super::OwnedChild;
 
+mod conversation;
+
 const WINDOW_WAIT: Duration = Duration::from_secs(30);
 const ELEMENT: &str = "element-6066-11e4-a52e-4f735466cecf";
 
@@ -85,7 +87,12 @@ impl Browser {
         })
     }
 
-    pub(super) fn attach(&self, link: &str, server_started: Instant) -> Result<Value> {
+    pub(super) fn attach(
+        &self,
+        link: &str,
+        server_started: Instant,
+        replay: bool,
+    ) -> Result<Value> {
         let navigation_started = Instant::now();
         self.command("POST", "/url", Some(json!({"url": link})))?;
         self.wait_for("the authenticated welcome page", || self.script(
@@ -94,12 +101,20 @@ impl Browser {
         let welcome_micros = server_started.elapsed().as_micros();
         let navigation_to_welcome_micros = navigation_started.elapsed().as_micros();
 
-        let action = self.script(
-            "return [...document.querySelectorAll('button')].find(e => !e.disabled && e.textContent.trim() === 'Start without an agent' && e.getClientRects().length > 0) ?? null;",
-        )?;
-        let element = action[ELEMENT]
-            .as_str()
-            .ok_or("fresh profile did not offer Start without an agent")?;
+        if replay {
+            self.wait_for("the replay provider and completed welcome scan", || {
+                self.script("const text = document.querySelector('main, [role=main]')?.innerText; return !!text && text.includes('Replay (dev)') && !text.includes('Looking for projects');").map(|value| value == true)
+            })?;
+        }
+        let action = match replay {
+            true => {
+                "return [...document.querySelectorAll('button')].find(e => !e.disabled && e.textContent.trim() === 'Start' && e.getClientRects().length > 0) ?? null;"
+            }
+            false => {
+                "return [...document.querySelectorAll('button')].find(e => !e.disabled && e.textContent.trim() === 'Start without an agent' && e.getClientRects().length > 0) ?? null;"
+            }
+        };
+        let element = self.wait_element("the welcome action", action)?;
         let setup_started = Instant::now();
         self.command(
             "POST",
@@ -138,11 +153,24 @@ impl Browser {
     }
 
     fn script(&self, script: &str) -> Result<Value> {
+        self.script_with_args(script, json!([]))
+    }
+
+    fn script_with_args(&self, script: &str, args: Value) -> Result<Value> {
         self.command(
             "POST",
             "/execute/sync",
-            Some(json!({"script": script, "args": []})),
+            Some(json!({"script": script, "args": args})),
         )
+    }
+
+    fn wait_element(&self, label: &str, script: &str) -> Result<String> {
+        let mut found = None;
+        self.wait_for(label, || {
+            found = self.script(script)?[ELEMENT].as_str().map(str::to_owned);
+            Ok(found.is_some())
+        })?;
+        found.ok_or_else(|| format!("missing {label}").into())
     }
 
     fn command(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value> {
@@ -154,7 +182,7 @@ impl Browser {
         )
     }
 
-    fn wait_for(&self, label: &str, predicate: impl Fn() -> Result<bool>) -> Result<()> {
+    fn wait_for(&self, label: &str, mut predicate: impl FnMut() -> Result<bool>) -> Result<()> {
         let start = Instant::now();
         while !predicate()? {
             if start.elapsed() >= WINDOW_WAIT {

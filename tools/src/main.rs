@@ -197,9 +197,10 @@ fn run() -> Result<()> {
         Some("check-source") => check_source(),
         Some("check-upstream-readme") => upstream_readme(),
         Some("build") => build(),
-        Some("probe-startup") => startup_probe::run(env::args_os().skip(2)),
+        Some("probe-startup") => startup_probe::run(env::args_os().skip(2), false),
+        Some("probe-conversation") => startup_probe::run(env::args_os().skip(2), true),
         _ => Err(
-            "usage: t3code-ls-tools <check-source|check-upstream-readme|build|probe-startup>"
+            "usage: t3code-ls-tools <check-source|check-upstream-readme|build|probe-startup|probe-conversation>"
                 .into(),
         ),
     }
