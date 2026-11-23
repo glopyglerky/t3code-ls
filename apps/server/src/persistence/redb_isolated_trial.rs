@@ -2148,7 +2148,6 @@ async fn verify_intent_helper(
     fence_helper_sha256: Option<&str>,
 ) -> Result<()> {
     use std::process::Stdio;
-    use tokio::io::AsyncReadExt;
     let pinned = if let Some(sha256) = fence_helper_sha256 {
         let mut options = fs::OpenOptions::new();
         options.read(true);
@@ -2177,9 +2176,34 @@ async fn verify_intent_helper(
         .kill_on_drop(true)
         .spawn()
         .map_err(io_error)?;
-    let stdout = child.stdout.take().ok_or(Error::IncompatibleStore)?;
-    let stderr = child.stderr.take().ok_or(Error::IncompatibleStore)?;
-    let read = async move {
+    let output = capture_intent_helper(&mut child).await?;
+    let frame: serde_json::Value =
+        serde_json::from_slice(&output).map_err(|_| Error::IncompatibleStore)?;
+    if frame["ok"] != true
+        || frame["result"]["version"] != 1
+        || frame["result"]["engine"] != "omdb"
+        || frame["result"]["engineRevision"] != crate::application::OMDB_REVISION
+        || frame["result"]["sealedTrialRollback"] != 1
+        || frame["result"]["promotionIntent"] != 1
+        || (publication && frame["result"]["sealedIntentPublication"] != 1)
+        || (fence_helper_sha256.is_some()
+            && frame["result"]["sealedGenericRestoreFence"]
+                != super::SEALED_GENERIC_RESTORE_FENCE_VERSION)
+        || frame["result"]["targetSchemaSha256"] != schema
+    {
+        return Err(Error::IncompatibleStore);
+    }
+    Ok(())
+}
+
+// Keep Child outside the bounded future: dropping that future must leave a
+// handle we can kill and reap before the caller releases its lease or pinned file.
+// Dropping the caller itself still has only kill_on_drop's best-effort cleanup.
+async fn capture_intent_helper(child: &mut tokio::process::Child) -> Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    let read = async {
+        let stdout = child.stdout.take().ok_or(Error::IncompatibleStore)?;
+        let stderr = child.stderr.take().ok_or(Error::IncompatibleStore)?;
         let mut output = Vec::new();
         let mut errors = Vec::new();
         let out = async { stdout.take(8193).read_to_end(&mut output).await };
@@ -2188,27 +2212,153 @@ async fn verify_intent_helper(
         if !status.success() || output.len() > 8192 || !errors.is_empty() {
             return Err(Error::IncompatibleStore);
         }
-        let frame: serde_json::Value =
-            serde_json::from_slice(&output).map_err(|_| Error::IncompatibleStore)?;
-        if frame["ok"] != true
-            || frame["result"]["version"] != 1
-            || frame["result"]["engine"] != "omdb"
-            || frame["result"]["engineRevision"] != crate::application::OMDB_REVISION
-            || frame["result"]["sealedTrialRollback"] != 1
-            || frame["result"]["promotionIntent"] != 1
-            || (publication && frame["result"]["sealedIntentPublication"] != 1)
-            || (fence_helper_sha256.is_some()
-                && frame["result"]["sealedGenericRestoreFence"]
-                    != super::SEALED_GENERIC_RESTORE_FENCE_VERSION)
-            || frame["result"]["targetSchemaSha256"] != schema
-        {
-            return Err(Error::IncompatibleStore);
-        }
-        Ok(())
+        Ok(output)
     };
-    tokio::time::timeout(std::time::Duration::from_secs(5), read)
+    let result = tokio::time::timeout(std::time::Duration::from_secs(5), read)
         .await
-        .map_err(|_| Error::IncompatibleStore)?
+        .unwrap_or(Err(Error::IncompatibleStore));
+    if result.is_err() {
+        // Always attempt wait, including when signaling fails or wait already
+        // completed in try_join. A completed wait returns its cached exit status.
+        let killed = child.start_kill();
+        child.wait().await.map_err(io_error)?;
+        killed.map_err(io_error)?;
+    }
+    result
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod intent_helper_process_tests {
+    use super::*;
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::Stdio;
+
+    // Re-execute only this synthetic fixture, never an installed helper/profile.
+    fn spawn_fixture(mode: &str, ready: &Path, stdout: Stdio) -> tokio::process::Child {
+        let module = module_path!().split_once("::").unwrap().1;
+        tokio::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                &format!("{module}::fixture"),
+                "--ignored",
+                "--nocapture",
+            ])
+            .env_clear()
+            .env("T3_INTENT_FIXTURE_MODE", mode)
+            .env("T3_INTENT_FIXTURE_READY", ready)
+            .stdin(Stdio::null())
+            .stdout(stdout)
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap()
+    }
+
+    fn assert_reaped(child: &mut tokio::process::Child, pid: u32) -> std::process::ExitStatus {
+        assert_eq!(child.id(), None, "capture returned without completed wait");
+        let status = child.try_wait().unwrap().expect("cached child exit");
+        assert!(
+            !PathBuf::from(format!("/proc/{pid}")).exists(),
+            "child PID still exists"
+        );
+        status
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture invoked only by intent helper tests"]
+    fn fixture() {
+        let Ok(mode) = std::env::var("T3_INTENT_FIXTURE_MODE") else {
+            return;
+        };
+        fs::write(
+            std::env::var_os("T3_INTENT_FIXTURE_READY").unwrap(),
+            b"ready",
+        )
+        .unwrap();
+        match mode.as_str() {
+            "exit" => std::process::exit(23),
+            "stderr" => {
+                std::io::stderr().write_all(b"synthetic refusal").unwrap();
+                std::process::exit(0);
+            }
+            "stdout" => {
+                std::io::stdout().write_all(b"synthetic output").unwrap();
+                std::io::stdout().flush().unwrap();
+                std::process::exit(0);
+            }
+            "both" => {
+                std::io::stdout().write_all(&[b'x'; 4096]).unwrap();
+                std::io::stdout().flush().unwrap();
+                std::io::stderr().write_all(&[b'y'; 4096]).unwrap();
+                std::io::stderr().flush().unwrap();
+            }
+            "timeout" => {}
+            _ => panic!("unknown synthetic mode"),
+        }
+        std::thread::sleep(std::time::Duration::from_secs(60));
+    }
+
+    #[tokio::test]
+    async fn captures_stdout_and_reaps_successful_exit() {
+        let dir = tempfile::tempdir().unwrap();
+        let ready = dir.path().join("ready");
+        let mut child = spawn_fixture("stdout", &ready, Stdio::piped());
+        let pid = child.id().unwrap();
+        let output = capture_intent_helper(&mut child).await.unwrap();
+        assert!(
+            output
+                .windows(b"synthetic output".len())
+                .any(|w| w == b"synthetic output")
+        );
+        assert!(assert_reaped(&mut child, pid).success());
+        assert!(ready.exists());
+    }
+
+    #[tokio::test]
+    async fn refuses_exit_and_stderr_after_reaping() {
+        for (mode, code) in [("exit", 23), ("stderr", 0)] {
+            let dir = tempfile::tempdir().unwrap();
+            let ready = dir.path().join("ready");
+            let mut child = spawn_fixture(mode, &ready, Stdio::piped());
+            let pid = child.id().unwrap();
+            assert!(matches!(
+                capture_intent_helper(&mut child).await,
+                Err(Error::IncompatibleStore)
+            ));
+            assert_eq!(assert_reaped(&mut child, pid).code(), Some(code));
+            assert!(ready.exists());
+        }
+    }
+
+    #[tokio::test]
+    async fn timeout_kills_and_reaps_direct_child() {
+        for mode in ["timeout", "both"] {
+            let dir = tempfile::tempdir().unwrap();
+            let ready = dir.path().join("ready");
+            let mut child = spawn_fixture(mode, &ready, Stdio::piped());
+            let pid = child.id().unwrap();
+            let started = std::time::Instant::now();
+            assert!(matches!(
+                capture_intent_helper(&mut child).await,
+                Err(Error::IncompatibleStore)
+            ));
+            assert!(started.elapsed() >= std::time::Duration::from_secs(5));
+            assert_eq!(assert_reaped(&mut child, pid).signal(), Some(9));
+            assert!(ready.exists(), "fixture was not selected");
+        }
+    }
+
+    #[tokio::test]
+    async fn failed_capture_kills_and_reaps_direct_child() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut child = spawn_fixture("timeout", &dir.path().join("ready"), Stdio::null());
+        let pid = child.id().unwrap();
+        assert!(matches!(
+            capture_intent_helper(&mut child).await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert_eq!(assert_reaped(&mut child, pid).signal(), Some(9));
+    }
 }
 
 pub(super) async fn record_promotion_intent(
