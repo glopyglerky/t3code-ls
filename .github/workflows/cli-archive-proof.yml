@@ -2,7 +2,9 @@ name: Native CLI archive proof
 
 on:
   push:
-    branches: ["candidate/t3code-ls-t14-cli-contract-*"]
+    branches:
+      - "candidate/t3code-ls-t14-cli-contract-*"
+      - "candidate/t3code-ls-t02-bundled-native-integrated-*"
 
 permissions:
   contents: read
