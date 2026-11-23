@@ -14,8 +14,8 @@ use crate::backend::{Backend, path_identity};
 use crate::{Error, Result, Store};
 use serde::Deserialize;
 use std::fs;
-use std::io::{self, Read};
-use std::os::unix::fs::MetadataExt;
+use std::io::{self, BufRead, BufReader, Read};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 struct TrialInput {
@@ -66,6 +66,7 @@ struct TrialLease {
     checkpoint: TrialInput,
     trial: PathBuf,
     owner: OwnerLock,
+    selection_lock: Option<SelectionLock>,
     directories: TrialRestoreDirectories,
 }
 
@@ -75,6 +76,12 @@ impl TrialLease {
             return Err(Error::IncompatibleStore);
         }
         let directories = TrialRestoreDirectories::open(&home)?;
+        // The shared selection lease precedes the home and database leases.
+        let selection_lock = request
+            .activation
+            .as_ref()
+            .map(|_| SelectionLock::acquire(&directories.runtime))
+            .transpose()?;
         let state = TrialRestoreDirectories::pinned(&directories.state);
         let backups = TrialRestoreDirectories::pinned(&directories.backups);
         let owner = OwnerLock::acquire_existing_native(&state.join("server-owner.sqlite"))?;
@@ -100,6 +107,7 @@ impl TrialLease {
             checkpoint,
             trial: state.join(format!(".statev2-trial-{}.omdb", request.update_id)),
             owner,
+            selection_lock,
             directories,
         };
         lease.verify_inputs()?;
@@ -108,6 +116,9 @@ impl TrialLease {
 
     fn verify_inputs(&self) -> Result<()> {
         self.directories.verify(&self.home)?;
+        if let Some(selection_lock) = &self.selection_lock {
+            selection_lock.verify()?;
+        }
         self.owner.verify_native()?;
         self.live.verify()?;
         self.checkpoint.verify()
@@ -237,6 +248,150 @@ impl TrialLease {
             .sync_all()
             .map_err(|_| Error::UnknownCommit)
     }
+}
+
+/// Same populated-directory lease used by cloud/serviceSelectionLock.ts.
+/// The numeric owner and boot time allow either launcher to recover a dead holder.
+struct SelectionLock {
+    path: PathBuf,
+    directory: fs::File,
+    owner: String,
+}
+
+impl SelectionLock {
+    fn acquire(runtime: &fs::File) -> Result<Self> {
+        let runtime = TrialRestoreDirectories::pinned(runtime);
+        let path = runtime.join("service-state.json.selection-lock");
+        let boot = BufReader::new(fs::File::open("/proc/stat").map_err(io_error)?)
+            .lines()
+            .find_map(|line| line.ok()?.strip_prefix("btime ")?.parse::<u64>().ok())
+            .ok_or(Error::IncompatibleStore)?;
+        let candidate = tempfile::Builder::new()
+            .prefix(".native-selection-")
+            .tempdir_in(&runtime)
+            .map_err(io_error)?;
+        let token = candidate
+            .path()
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or(Error::IncompatibleStore)?;
+        let owner = format!("{}.{boot}.{token}", std::process::id());
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(candidate.path().join(&owner))
+            .map_err(io_error)?;
+        let directory = TrialRestoreDirectories::open_directory(candidate.path())?;
+        for attempt in 0..2 {
+            match fs::rename(candidate.path(), &path) {
+                Ok(()) => {
+                    return Ok(Self {
+                        path,
+                        directory,
+                        owner,
+                    });
+                }
+                Err(error)
+                    if matches!(error.raw_os_error(), Some(libc::EEXIST | libc::ENOTEMPTY)) =>
+                {
+                    if attempt > 0 {
+                        return Err(Error::WriterBusy);
+                    }
+                    Self::clear_dead_owner(&path, boot)?;
+                }
+                Err(error) => return Err(io_error(error)),
+            }
+        }
+        Err(Error::WriterBusy)
+    }
+
+    fn clear_dead_owner(path: &Path, boot: u64) -> Result<()> {
+        let directory = TrialRestoreDirectories::open_directory(path)?;
+        let pinned = TrialRestoreDirectories::pinned(&directory);
+        let mut entries = fs::read_dir(&pinned).map_err(io_error)?;
+        if let Some(entry) = entries.next() {
+            let entry = entry.map_err(io_error)?;
+            if entries.next().is_some() || !entry.file_type().map_err(io_error)?.is_file() {
+                return Err(Error::IncompatibleStore);
+            }
+            let name = entry.file_name();
+            let name = name.to_str().ok_or(Error::IncompatibleStore)?;
+            let mut parts = name.splitn(3, '.');
+            let pid = parts
+                .next()
+                .and_then(|part| part.parse::<u32>().ok())
+                .filter(|pid| *pid > 0)
+                .ok_or(Error::IncompatibleStore)?;
+            let other_boot = parts
+                .next()
+                .and_then(|part| part.parse::<u64>().ok())
+                .ok_or(Error::IncompatibleStore)?;
+            if parts.next().is_none_or(str::is_empty) {
+                return Err(Error::IncompatibleStore);
+            }
+            if boot.abs_diff(other_boot) <= 60 {
+                match fs::metadata(format!("/proc/{pid}")) {
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    _ => return Err(Error::WriterBusy),
+                }
+            }
+            match fs::remove_file(pinned.join(name)) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(io_error(error)),
+            }
+        }
+        // Rename may replace an empty directory. Leave any new holder intact.
+        Ok(())
+    }
+
+    fn verify(&self) -> Result<()> {
+        let held = self.directory.metadata().map_err(io_error)?;
+        let named = fs::symlink_metadata(&self.path).map_err(io_error)?;
+        let owner = TrialRestoreDirectories::pinned(&self.directory).join(&self.owner);
+        if !named.is_dir()
+            || named.dev() != held.dev()
+            || named.ino() != held.ino()
+            || !fs::symlink_metadata(owner).map_err(io_error)?.is_file()
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    }
+}
+
+impl Drop for SelectionLock {
+    fn drop(&mut self) {
+        let owner = TrialRestoreDirectories::pinned(&self.directory).join(&self.owner);
+        if fs::remove_file(owner).is_ok() {
+            let _ = fs::remove_dir(&self.path);
+        }
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn native_selection_lock_fences_a_live_owner_and_recovers_an_earlier_boot() {
+    let fixture = tempfile::tempdir().unwrap();
+    let runtime = TrialRestoreDirectories::open_directory(fixture.path()).unwrap();
+    let selected = fixture.path().join("service-state.json.selection-lock");
+    let held = SelectionLock::acquire(&runtime).unwrap();
+    assert!(matches!(
+        SelectionLock::acquire(&runtime),
+        Err(Error::WriterBusy)
+    ));
+    held.verify().unwrap();
+    drop(held);
+    assert!(!selected.exists());
+
+    fs::create_dir(&selected).unwrap();
+    fs::File::create_new(selected.join(format!("{}.0.previous-boot", std::process::id()))).unwrap();
+    let recovered = SelectionLock::acquire(&runtime).unwrap();
+    recovered.verify().unwrap();
+    assert_eq!(fs::read_dir(&selected).unwrap().count(), 1);
+    drop(recovered);
+    assert_eq!(fs::read_dir(fixture.path()).unwrap().count(), 0);
 }
 
 pub(super) async fn verify(

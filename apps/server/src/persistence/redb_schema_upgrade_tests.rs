@@ -592,6 +592,12 @@ async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
     use std::fs;
 
     const UPDATE: &str = "aa212c2b-63d4-4b28-97e4-1c1d6dc6d281";
+    let hash = |bytes: &[u8]| -> String {
+        Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    };
     for (unsupported, bind_runtime) in [(false, false), (true, false), (false, true)] {
         let (fixture, store, catalog) = fixture_88().await;
         if unsupported {
@@ -657,8 +663,8 @@ async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
                 update_id: UPDATE.into(),
                 from_version: "1.2.3".into(),
                 target_version: "1.2.4".into(),
-                target_entry_sha256: format!("{:x}", Sha256::digest(b"fixture runtime")),
-                target_helper_sha256: format!("{:x}", Sha256::digest(b"fixture helper")),
+                target_entry_sha256: hash(b"fixture runtime"),
+                target_helper_sha256: hash(b"fixture helper"),
                 target_schema_sha256: target_schema_sha256.clone(),
             })
         } else {
