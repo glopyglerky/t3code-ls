@@ -21,7 +21,7 @@ export function DioxusAssistantText({ text, sequence, updatedAt, streaming, chil
       if (!row) return;
       window.clearTimeout(deadline);
       setCommitted(row.dataset.supported === "true" ? {
-        text: row.textContent ?? "",
+        text: row.dataset.sourceText ?? "",
         sequence: row.dataset.snapshotSequence ?? "",
         updatedAt: row.dataset.messageUpdatedAt ?? "",
         streaming: row.dataset.streaming === "true",

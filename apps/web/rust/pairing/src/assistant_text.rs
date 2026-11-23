@@ -38,6 +38,54 @@ fn plain_paragraph(text: &str) -> bool {
             .all(|part| part.is_empty() || part.starts_with(' '))
 }
 
+// Accepted grammar, not a general Markdown parser. A span opens at a word
+// boundary and contains only plain paragraph text. No nesting or escapes.
+// The full rendered text must still pass the old plain-paragraph guard, so
+// splitting a URL/list marker across spans cannot bypass retained behavior.
+#[derive(Clone, Copy)]
+enum InlineKind { Text, Strong, Emphasis }
+
+fn inline_paragraph(text: &str) -> Option<Vec<(InlineKind, &str)>> {
+    if text.len() > 4096 { return None; }
+    if plain_paragraph(text) { return Some(vec![(InlineKind::Text, text)]); }
+    // The retained direction algorithm handles mixed scripts. Qualify those
+    // separately rather than substituting browser dir=auto for its majority rule.
+    if !text.chars().all(|c| c.is_ascii() || ('\u{4e00}'..='\u{9fff}').contains(&c)) {
+        return None;
+    }
+    let mut parts = Vec::new();
+    let mut rest = text;
+    let mut flattened = String::new();
+    let mut spans = 0;
+    while let Some(at) = rest.find('*') {
+        let before = &rest[..at];
+        if at > 0 && !before.ends_with(' ') { return None; }
+        if !before.is_empty() {
+            flattened.push_str(before);
+            parts.push((InlineKind::Text, before));
+        }
+        let opening = &rest[at..];
+        let (delimiter, kind) = if opening.starts_with("**") {
+            ("**", InlineKind::Strong)
+        } else { ("*", InlineKind::Emphasis) };
+        let body = &opening[delimiter.len()..];
+        let close = body.find('*')?;
+        let value = &body[..close];
+        let ending = &body[close..];
+        if !ending.starts_with(delimiter) || !plain_paragraph(value) { return None; }
+        rest = &ending[delimiter.len()..];
+        if rest.chars().next().is_some_and(|c| !matches!(c, ' ' | '.' | ',' | '!' | '?')) { return None; }
+        spans += 1;
+        if spans > 32 { return None; }
+        flattened.push_str(value);
+        parts.push((kind, value));
+    }
+    flattened.push_str(rest);
+    if !plain_paragraph(&flattened) { return None; }
+    if !rest.is_empty() { parts.push((InlineKind::Text, rest)); }
+    Some(parts)
+}
+
 struct Model {
     current: RefCell<Presentation>,
     update: Cell<Option<Callback<Presentation>>>,
@@ -110,17 +158,34 @@ fn assistant_text(model: Rc<Model>) -> Element {
     let update = use_callback(move |next| presentation.set(next));
     use_hook(move || model.update.set(Some(update)));
     let current = presentation.read();
-    let supported = plain_paragraph(&current.text);
+    let parts = inline_paragraph(&current.text);
+    let supported = parts.is_some();
+    let source_stamp = if supported { current.text.as_str() } else { "" };
+    let formatted = supported && current.text.contains('*');
+    let direction = (formatted && current.text.chars().any(char::is_alphabetic)).then_some("ltr");
     rsx! {
         div {
             class: "chat-markdown w-full min-w-0 [overflow-wrap:anywhere] [word-break:break-word] text-sm leading-relaxed text-foreground/[calc(90%+var(--appearance-contrast-boost)/10)]",
             "data-assistant-text-renderer": "dioxus-wasm",
             "data-supported": "{supported}",
+            // Visible text omits delimiters. A source stamp binds this commit
+            // to the exact input without interpreting source markup as HTML.
+            "data-source-text": "{source_stamp}",
             // This is the applied thread sequence, not an invented item revision.
             "data-snapshot-sequence": "{current.sequence}",
             "data-message-updated-at": "{current.updated_at}",
             "data-streaming": "{current.streaming}",
-            if supported { p { "{current.text}" } }
+            if let Some(parts) = parts {
+                p { dir: direction,
+                    for (kind, value) in parts {
+                        match kind {
+                            InlineKind::Text => rsx! { "{value}" },
+                            InlineKind::Strong => rsx! { strong { "{value}" } },
+                            InlineKind::Emphasis => rsx! { em { "{value}" } },
+                        }
+                    }
+                }
+            }
         }
     }
 }
