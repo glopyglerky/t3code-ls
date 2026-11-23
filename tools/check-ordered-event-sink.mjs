@@ -106,7 +106,14 @@ try {
     } while (!result.prepared);
     prepared.set(operation, result);
   }
+  // Ordinary local mode opens the writable omdb file even when the request
+  // refuses. Finish that control before freezing the read-only fixture seed.
+  Assert.equal(frames([selection(true)], "local")[0].ok, false);
+  await Assert.rejects(FS.stat(directory), { code: "ENOENT" });
   const seedHash = hash(await FS.readFile(fixture.databasePath));
+  const assertSeed = async (phase) => {
+    Assert.equal(hash(await FS.readFile(fixture.databasePath)), seedHash, `Seed changed during ${phase}`);
+  };
   // Refuse unknown profiles before creating any candidate or admitting a writer.
   const badDirectory = Path.join(fixture.root, "unknown");
   const unknown = frames([
@@ -115,9 +122,9 @@ try {
   ]);
   Assert.ok(unknown.every((response) => response.ok === false));
   await Assert.rejects(FS.stat(badDirectory), { code: "ENOENT" });
-  Assert.equal(frames([selection(true)], "local")[0].ok, false);
-  await Assert.rejects(FS.stat(directory), { code: "ENOENT" });
+  await assertSeed("unknown-profile refusal");
   Assert.equal(frames([selection(true)])[0].ok, true);
+  await assertSeed("candidate schema staging");
   Assert.equal(frames([selection(true)])[0].ok, false, "Initialization cannot reuse a profile");
   Assert.equal(frames([{ ...selection(), profile: alternateProfile }])[0].ok, false);
   Assert.equal(frames([selection(), { operation: "application_bootstrap" }])[1].ok, false);
@@ -153,7 +160,7 @@ try {
     Assert.deepEqual(yield* snapshot, first.state);
   }));
   await run(({ snapshot }) => snapshot.pipe(Effect.tap((state) => Effect.sync(() => Assert.deepEqual(state, first.state)))));
-  Assert.equal(hash(await FS.readFile(fixture.databasePath)), seedHash, "Seed must remain unchanged");
+  await assertSeed("EventSink commit, rollback and reopen");
   for (const operation of ["application_begin", "application_receipts_insert", "application_events_append",
     "application_projections_apply_many", "application_outbox_enqueue", "application_receipts_upsert", "application_commit"]) {
     Assert.ok(transcript.some((frame) => frame.operation === operation), operation);
