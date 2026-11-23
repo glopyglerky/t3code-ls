@@ -11,6 +11,7 @@ on:
       - "candidate/t3code-ls-t14-windows-arm64-cli-*"
       - "candidate/t3code-ls-t05-packaged-preparation-*"
       - "candidate/t3code-ls-t06-gix-packaged-*"
+      - "candidate/t3code-ls-t08-claude-package-refusal-*"
       - "candidate/t3code-ls-t10-packaged-guest-*"
       - "candidate/t3code-ls-t02-bundled-native-integrated-*"
       - "candidate/t3code-ls-t05-launcher-promotion-*"
@@ -57,6 +58,9 @@ jobs:
           if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t06-gix-packaged-* ||
                 "$GITHUB_REF_NAME" == candidate/t3code-ls-t02-bundled-native-integrated-* ]]; then
             export T3_CODE_LS_BUNDLE_GIT_WORKSPACE=1
+          fi
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t08-claude-package-refusal-* ]]; then
+            export T3_CODE_LS_BUNDLE_CLAUDE_STDIO=1
           fi
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
             build --locked --release --manifest-path native/resource-monitor/Cargo.toml
@@ -178,6 +182,32 @@ jobs:
             ip link set dev lo up
             exec runuser -u "$1" -- "$2" apps/server/scripts/verify-packaged-git-workspace.ts "$3" "$4"
           ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/cli-proof/git-workspace" "$entry"
+      - name: Verify packaged Claude MCP option refusal and native reopen
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t08-claude-package-refusal-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CARGO_HOME="$RUNNER_TEMP/cli-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/cli-target"
+          scratch=$(mktemp -d "$RUNNER_TEMP/claude-archive.XXXXXX")
+          trap 'rm -rf -- "$scratch"' EXIT
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN"             test --locked -p t3-code-ls-core --no-run --test claude_stdio_host             --message-format=json > "$scratch/fixture.ndjson"
+          fixture=$(jq -ers '[.[] | select(.reason == "compiler-artifact" and
+            .target.name == "claude_stdio_host" and .executable != null) | .executable] |
+            if length == 1 then .[0] else error("Missing unique Claude fixture executable") end'             "$scratch/fixture.ndjson")
+          test -x "$fixture"
+          version=$(node -p 'require("./apps/server/package.json").version')
+          tar -xzf "$RUNNER_TEMP/cli-archive/t3-$version-linux-x64.tar.gz" -C "$scratch"
+          entry="$scratch/t3-$version-linux-x64/t3"
+          test -x "$entry"
+          test -x /usr/bin/strace
+          proof="$RUNNER_TEMP/cli-proof/claude-options-refusal"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- "$2" apps/server/scripts/verify-packaged-claude-stdio.ts "$3" "$4" "$5"
+          ' _ "$(id -un)" "$(command -v node)" "$proof" "$entry" "$fixture"
+          jq -e '.status == "passed" and .conversationQualified == false and .observed.reopened and
+            .observed.controlledOpenRefusedMcpOptions and (.observed.helperOrProviderExecuted | not)' "$proof/proof.json"
       - name: Install Chromium for the HTTPS browser guest fixture
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t10-packaged-guest-browser-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
         run: node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
