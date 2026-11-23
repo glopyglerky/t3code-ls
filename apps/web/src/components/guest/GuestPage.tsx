@@ -27,6 +27,7 @@ import { createQuestionHistoryProjector } from "@t3tools/client-runtime/state/th
 import { ArrowUpIcon, PaperclipIcon, XIcon } from "lucide-react";
 import {
   useEffect,
+  useEffectEvent,
   useReducer,
   useRef,
   useState,
@@ -53,6 +54,7 @@ import { getDisplayModelName, getTriggerDisplayModelName } from "../chat/provide
 import { ScrollToEndButton } from "../chat/TimelineOverlays";
 import type { TimelineRow } from "../chat/timelineRowContext";
 import { useTimelineFollow } from "../chat/useTimelineFollow";
+import { DioxusGuestNameForm } from "./DioxusGuestNameForm";
 import { GuestHtmlRender } from "./GuestHtmlRender";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -348,7 +350,7 @@ function Notice({ title, detail }: { readonly title: string; readonly detail?: s
   );
 }
 
-function NameForm({
+export function NameForm({
   credential,
   onJoined,
 }: {
@@ -358,18 +360,35 @@ function NameForm({
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    const trimmed = name.trim();
-    if (trimmed === "" || submitting) return;
+  const [standard, setStandard] = useState(false);
+  const pending = useRef(false);
+  const generation = useRef(0);
+  const joined = useEffectEvent(onJoined);
+  useEffect(() => {
+    generation.current++;
+    return () => { generation.current++; };
+  }, [credential]);
+  const submitName = async (value: string) => {
+    const trimmed = value.trim();
+    if (trimmed === "" || pending.current) return;
+    const current = generation.current;
+    pending.current = true;
+    setName(value);
     setSubmitting(true);
     const failure = await postGuest("redeem", { credential, name: trimmed });
+    if (generation.current !== current) return;
+    pending.current = false;
     setSubmitting(false);
-    if (failure === null) onJoined();
+    if (failure === null) joined();
     else setError(failure);
   };
+  const submit = (event: FormEvent) => { event.preventDefault(); void submitName(name); };
+  if (import.meta.env.VITE_T3_CODE_LS_GUEST_NAME_RENDERER === "dioxus" && !standard) {
+    return <DioxusGuestNameForm name={name} pending={submitting} error={error}
+      submit={(value) => { void submitName(value); }} useStandard={() => setStandard(true)} />;
+  }
   return (
-    <form className="m-auto flex w-full max-w-xs flex-col gap-3 p-6" onSubmit={submit}>
+    <form data-guest-name-renderer="retained" className="m-auto flex w-full max-w-xs flex-col gap-3 p-6" onSubmit={submit}>
       <h1 className="text-base font-medium">Join a shared thread</h1>
       <label className="flex flex-col gap-1.5 text-sm" htmlFor="guest-name">
         Your name
