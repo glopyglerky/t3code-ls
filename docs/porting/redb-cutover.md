@@ -102,8 +102,15 @@ The packaged browser comparison at `dd37e7056c2811beee0ef4ecf5fc41c423038481`
 reconstructed the same Unicode dialogue and ordered updates in both profiles.
 The closed-profile key/value counter found 57 event rows and zero suffix
 witnesses in each. That short fixture established the accounting path.
-The extended fixture requires a retained suffix witness in the compact profile
-before reporting its raw bytes. [Short packaged fixture](https://github.com/glopyglerky/t3code-ls/actions/runs/45242130177)
+[Short packaged fixture](https://github.com/glopyglerky/t3code-ls/actions/runs/45242130177)
+
+The extended packaged fixture at `634cd36467751958d112ad34602bb7fd5a5657a4`
+replayed the same three reconstructed assistant updates in both fresh profiles.
+The full profile retained 460,392 bytes in event rows, indexes and metadata. The
+compact profile retained 457,219 bytes across the same groups, including a single
+362-byte revision witness. These are key and value lengths from the closed stores
+for one matched fixture pair. Write amplification, repeatability and comparison
+with stock remain unmeasured. [Extended packaged fixture](https://github.com/glopyglerky/t3code-ls/actions/runs/45244869431)
 
 Source rollback can reopen baseline and imported profiles with the prior helper.
 An opted-in profile needs a helper that understands its layout. Rolling it back
