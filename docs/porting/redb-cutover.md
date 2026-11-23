@@ -86,6 +86,16 @@ Suffix rows and their head and dependency records share the existing application
 transaction. Pruning a base makes its immediate dependent a full checkpoint in
 that same transaction. A surviving descendant then resolves through the
 re-anchored row. Missing or inconsistent predecessor data fails closed on read.
+
+The [native event layout comparison](https://github.com/glopyglerky/t3code-ls/actions/runs/45165969935)
+reopened and compacted five matched pairs on Linux x64 with omdb Immediate
+durability. Each layout committed 128 streaming updates and one completion per
+run. Both produced the same ordered logical payload. The full-event layout used
+12,434,377 bytes of keys and values, and the append layout used 2,554,870 bytes,
+including the indexes and revision witnesses. After exclusive compaction the
+database files were 19,664,896 and 4,984,832 bytes respectively. The workload
+isolates event storage. Application projections, client traffic, provider work,
+and existing-profile activation require their own evidence.
 Projection, search and snapshot readers use their existing sources.
 
 Source rollback can reopen baseline and imported profiles with the prior helper.
