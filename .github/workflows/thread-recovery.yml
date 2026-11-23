@@ -153,17 +153,18 @@ jobs:
 
   mobile-outbox-ios:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
-    runs-on: macos-26
+    runs-on: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-') && 'macos-26-intel' || 'macos-26' }}
     timeout-minutes: 75
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
+      BUILD_HOST_ARCH: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-') && 'x86_64' || 'arm64' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - name: Build device and simulator libraries and link a Swift caller
         run: |
-          test "$(uname -m)" = arm64
+          test "$(uname -m)" = "$BUILD_HOST_ARCH"
           xcodebuild -version | grep -Fx "Build version 17E202"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-target"
           export IPHONEOS_DEPLOYMENT_TARGET=18.0
@@ -239,7 +240,7 @@ jobs:
           trap 'kill "$progress_pid" 2>/dev/null || true; wait "$progress_pid" 2>/dev/null || true' EXIT
           xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Debug \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath "$derived" \
-            CODE_SIGNING_ALLOWED=NO ENABLE_DEBUG_DYLIB=NO ARCHS=arm64 -jobs 2 build \
+            CODE_SIGNING_ALLOWED=NO ENABLE_DEBUG_DYLIB=NO ONLY_ACTIVE_ARCH=NO ARCHS=arm64 -jobs 2 build \
             > "$evidence/xcodebuild.log" 2>&1 || {
               grep -n -m 12 -B 12 -A 24 -E 'error:|fatal error:|Error Domain=|command not found|No such file or directory|failed with' \
                 "$evidence/xcodebuild.log" || true
@@ -256,6 +257,8 @@ jobs:
           binary="${applications[0]}/$executable"
           file "$binary" > "$evidence/application-type.txt"
           grep -F 'arm64' "$evidence/application-type.txt"
+          xcrun lipo -archs "$binary" > "$evidence/application-architectures.txt"
+          grep -Fx arm64 "$evidence/application-architectures.txt"
           xcrun nm -gU "$binary" > "$RUNNER_TEMP/outbox-ios-symbols.txt"
           grep -F ' _t3_outbox_delivery_v1' "$RUNNER_TEMP/outbox-ios-symbols.txt" > "$evidence/outbox-symbol.txt"
           shasum -a 256 "$binary" apps/mobile/ios/Podfile.lock \
