@@ -298,8 +298,9 @@ export async function verifyGuestRedeem({
       Assert.deepEqual(newReceipts.map((row) => cellValue(row.status)).sort(), ["accepted", "rejected"]);
       Assert.ok(newReceipts.every((row) => cellValue(row.command_type) === redeemCommand));
       const accepted = newReceipts.find((row) => cellValue(row.status) === "accepted");
-      Assert.equal(accepted?.command_id, update.command_id);
-      Assert.equal(accepted?.result_sequence, update.sequence);
+      Assert.ok(accepted);
+      Assert.deepEqual(accepted.command_id, update.command_id);
+      Assert.deepEqual(accepted.result_sequence, update.sequence);
       Assert.deepEqual(after.projects, before.projects);
       Assert.deepEqual(after.outbox, before.outbox);
       Assert.equal(after.threads.length, 1);
