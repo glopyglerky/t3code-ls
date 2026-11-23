@@ -2,7 +2,9 @@ name: Workspace file editing
 
 on:
   push:
-    branches: ["candidate/t3code-ls-t06-file-revisions-*"]
+    branches:
+      - "candidate/t3code-ls-t06-file-revisions-*"
+      - "candidate/t3code-ls-t06-repository-paths-*"
 
 permissions:
   contents: read
@@ -27,9 +29,15 @@ jobs:
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
       - name: Exercise the workspace owner and editor save coordination
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-')
         run: |
           pnpm exec vp test run --maxWorkers 2 \
             apps/server/src/workspace/WorkspaceFileSystem.test.ts \
             apps/web/src/components/files/fileSaveCoordinator.test.ts \
             apps/web/src/components/files/fileSaveSessions.test.ts \
             apps/web/src/components/files/projectFilesQueryState.test.ts
+      - name: Exercise repository paths and linked worktrees through Git
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t06-repository-paths-')
+        run: |
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 \
+            src/vcs/GitVcsDriver.test.ts src/vcs/GitVcsDriverCore.test.ts
