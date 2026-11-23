@@ -137,7 +137,7 @@ describe("thread outbox", () => {
       decodeQueuedThreadMessage(JSON.parse(JSON.stringify(encodeQueuedThreadMessage(message)))),
     ).toEqual(message);
   });
-  it.each(["read", "json", "schema"] as const)(
+  it.each(["read", "json", "schema", "identity"] as const)(
     "recovers usable messages without permitting cleanup after a record %s failure",
     async (failure) => {
       onTestFinished(() => outboxFiles.clear());
@@ -150,14 +150,13 @@ describe("thread outbox", () => {
         messageId: "message-2",
         createdAt: "2026-06-08T10:00:02.000Z",
       });
-      outboxFiles.set(
-        "message-2.json",
-        failure === "read"
-          ? new Error("storage unavailable")
-          : failure === "json"
-            ? "{"
-            : JSON.stringify({ ...second, schemaVersion: 999 }),
-      );
+      const malformedRecord = {
+        read: new Error("storage unavailable"),
+        json: "{",
+        schema: JSON.stringify({ ...second, schemaVersion: 999 }),
+        identity: JSON.stringify({ ...encodeQueuedThreadMessage(second), messageId: first.messageId }),
+      }[failure];
+      outboxFiles.set("message-2.json", malformedRecord);
       outboxFiles.set("message-1.json", JSON.stringify(encodeQueuedThreadMessage(first)));
       const unreadable = outboxFiles.get("message-2.json");
 
