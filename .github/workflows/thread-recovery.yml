@@ -30,10 +30,18 @@ jobs:
         with:
           node-version: "26.12.1"
       - name: Install the locked client runtime dependencies
-        if: "!startsWith(github.ref_name, 'candidate/t3code-ls-t03-layout-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-')"
+        if: "(!startsWith(github.ref_name, 'candidate/t3code-ls-t03-layout-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-')) || startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-staged-')"
         run: |
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
+      - name: Check staged startup before server layer construction
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-staged-')
+        working-directory: apps/server
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm exec vp test run --maxWorkers 2 \
+            src/serverRuntimeStartup.test.ts src/serverRuntimeStartup.autoPull.test.ts
       - name: Exercise thread replay and recovery
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t03-text-revision-')
         run: |
