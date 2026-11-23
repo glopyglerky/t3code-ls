@@ -20,7 +20,7 @@ import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 import { chromium, type Browser, type Page } from "playwright";
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
-import { inspectNativeReplay } from "./hybrid-client-database.ts";
+import { inspectNativeMessageUpdates, inspectNativeReplay } from "./hybrid-client-database.ts";
 import {
   assertReplayTurnLinks,
   replayTurnIdentity,
@@ -436,7 +436,9 @@ async function verifyInterruptedShowcase(page: Page, expected: InterruptedShowca
 
 async function terminalMarker(page: Page, prefix: "fixture-pty" | "fixture-reattach") {
   const input = page.getByRole("textbox", { name: "Terminal input" });
-  if (!(await input.isVisible())) await page.keyboard.press("Control+j");
+  const drawer = page.getByRole("button", { name: "Toggle terminal drawer" });
+  await drawer.waitFor({ state: "visible" });
+  if ((await drawer.getAttribute("aria-pressed")) !== "true") await drawer.click();
   await input.waitFor({ state: "visible" });
   await page.waitForFunction(() => {
     const element = document.querySelector<HTMLTextAreaElement>(
@@ -466,6 +468,7 @@ async function terminalMarker(page: Page, prefix: "fixture-pty" | "fixture-reatt
   await input.press("Enter");
   // The echoed format string contains no PID. Only rendered shell output matches.
   const [, pid] = await selectedText(new RegExp(`${prefix}:(\\d+) 世界`, "u"));
+  Assert.ok(pid);
   return pid;
 }
 
@@ -720,9 +723,11 @@ async function exercise(implementation: Implementation): Promise<void> {
       frames: number;
       rustDecoder: boolean;
       messageUpdates: Array<{ sequence: number; length: number; streaming: boolean }>;
+      storedUpdates: ReturnType<typeof inspectNativeMessageUpdates>;
     } | null,
     terminalReattach: null as { sameShell: boolean; unicodeOutput: boolean } | null,
     terminalFailure: null as string | null,
+    terminalInitialOutput: false,
     completedSnapshots: [] as Array<
       Awaited<ReturnType<typeof assertCompleted>> & { checkpoint: string }
     >,
@@ -964,6 +969,8 @@ async function exercise(implementation: Implementation): Promise<void> {
           origin: new URL(page.url()).origin,
         });
         const shell = await terminalMarker(page, "fixture-pty");
+        proof.terminalInitialOutput = true;
+        saveProof();
         await page.reload({ waitUntil: "domcontentloaded" });
         await assertCompleted(page, threadId, turnIdentity);
         const reattached = await terminalMarker(page, "fixture-reattach");
@@ -1007,6 +1014,11 @@ async function exercise(implementation: Implementation): Promise<void> {
         frames: messageAppendFrames - framesBefore,
         rustDecoder,
         messageUpdates: wireMessages.get(appendThread) ?? [],
+        storedUpdates: inspectNativeMessageUpdates(
+          nativeExecutable("db"),
+          stateDirectory,
+          appendThread,
+        ),
       };
       saveProof();
       Assert.ok(proof.messageAppends.requests > 0, "The client must negotiate text appends");
