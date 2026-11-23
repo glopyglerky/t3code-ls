@@ -446,11 +446,20 @@ try {
   Assert.equal(history.providerThreads.length, 1);
   Assert.equal(history.providerThreads[0]?.appThreadId, threadId);
   Assert.equal(history.providerThreads[0]?.nativeThreadRef.nativeId, sessionId);
-  Assert.deepEqual(history.messages.map(({ role, text, runId }) => ({ role, text, runId })), [
+  const expectedMessages = [
     { role: "user", text: prompt, runId: null },
     { role: "assistant", text: response, runId: null },
-  ]);
-  Assert.deepEqual(history.turnItems.map(({ type, text, runId }) => ({ type, text, runId })), [
+  ];
+  const messageContent = ({ role, text, runId }: (typeof history.messages)[number]) =>
+    ({ role, text, runId });
+  Assert.deepEqual(history.events.filter(({ event_type }) => event_type === "message.updated")
+    .map(({ payload_json }) => messageContent(JSON.parse(payload_json))), expectedMessages);
+  // A generic table scan orders encoded physical keys. The import IDs and turn
+  // ordinals provide the logical order for these two independent row checks.
+  Assert.deepEqual(history.messages.toSorted((a, b) => a.id.localeCompare(b.id)).map(messageContent),
+    expectedMessages);
+  Assert.deepEqual(history.turnItems.toSorted((a, b) => a.ordinal - b.ordinal)
+    .map(({ type, text, runId }) => ({ type, text, runId })), [
     { type: "user_message", text: prompt, runId: null },
     { type: "assistant_message", text: response, runId: null },
   ]);
