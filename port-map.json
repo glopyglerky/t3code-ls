@@ -2344,6 +2344,7 @@
         "apps/desktop/rust/Cargo.lock",
         "apps/desktop/rust/README.md",
         "apps/server/scripts/dev-replay/showcase_transcript.ndjson",
+        "tools/check-gpui-history.py",
         ".github/workflows/gpui-showcase.yml"
       ],
       "platform_routes": [
@@ -2360,14 +2361,12 @@
         "apps/server/scripts/verify-gpui-thread-snapshot.ts",
         "apps/server/scripts/verify-gpui-thread-submit.ts",
         "tools/check-gpui-showcase.py",
-        "tools/check-gpui-history.py",
         "apps/server/scripts/verify-gpui-thread-history.ts"
       ],
       "hosted_acceptance": {
         "apps/server/scripts/verify-gpui-thread-snapshot.ts": ".github/workflows/gpui-showcase.yml",
         "apps/server/scripts/verify-gpui-thread-submit.ts": ".github/workflows/gpui-showcase.yml",
         "tools/check-gpui-showcase.py": ".github/workflows/gpui-showcase.yml",
-        "tools/check-gpui-history.py": ".github/workflows/gpui-showcase.yml",
         "apps/server/scripts/verify-gpui-thread-history.ts": ".github/workflows/gpui-showcase.yml"
       },
       "retired_paths": [],
