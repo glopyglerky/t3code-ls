@@ -1036,6 +1036,100 @@ pub(super) async fn record_forward_catalog(home: PathBuf, update_id: String) -> 
     Ok(reused)
 }
 
+/// Observe a synthetic first-readiness callback while all existing owners are held.
+/// The permanent catalog fence remains intact. A real launcher handoff must still
+/// transfer these owners to the selected runtime and fence every serving request.
+#[cfg(test)]
+pub(super) async fn probe_forward_activation(
+    home: PathBuf,
+    update_id: String,
+    probe: impl FnOnce(&super::FixtureForwardActivationWitness) -> Result<()>,
+) -> Result<super::FixtureForwardActivationWitness> {
+    use crate::{application::ForwardServiceActivation, backend::ExclusiveTrialFile};
+
+    let directories = TrialRestoreDirectories::open(&home)?;
+    let receipt = TrialRestoreDirectories::pinned(&directories.state)
+        .join(format!(".statev2-trial-{update_id}.receipt-v1.json"));
+    let receipt_bytes = read_trial_file(&receipt)?.ok_or(Error::IncompatibleStore)?;
+    let saved: IsolatedTrialVerification =
+        serde_json::from_slice(&receipt_bytes).map_err(|_| Error::IncompatibleStore)?;
+    validate_observation(&saved)?;
+    validate_isolated_trial_request(&home, &update_id, &saved.request)?;
+    validate_isolated_trial_preparation(&saved.request, &saved.preparation)?;
+    if saved.sealed_publication.as_ref().map(|record| record.phase)
+        != Some(SealedPromotionPhase::ForwardCommitted)
+        || serde_json::to_vec(&saved).map_err(|_| Error::IncompatibleStore)? != receipt_bytes
+    {
+        return Err(Error::IncompatibleStore);
+    }
+    let lease =
+        TrialLease::open_for(home, &saved.request, Some(SealedMove::PublishIntended)).await?;
+    directories.verify(&lease.home)?;
+    let state = TrialRestoreDirectories::pinned(&lease.directories.state);
+    let candidate = ExclusiveTrialFile::acquire(state.join("statev2.omdb"), MAX_TRIAL_FILE_BYTES)?;
+    let activation = lease
+        .verify_promotion_runtimes(&saved)
+        .await?
+        .ok_or(Error::IncompatibleStore)?;
+    let selected = forward_selection_bytes(&lease.home, activation, &receipt_bytes)?;
+    let selection =
+        TrialRestoreDirectories::pinned(&lease.directories.runtime).join("service-state.json");
+    let marker = ForwardServiceActivation {
+        update_id: update_id.clone(),
+        forward_selection_sha256: trial_document_sha256(&selected),
+    };
+    let marker_file = state.join(format!(".statev2-forward-{update_id}.json"));
+    let marker_bytes = serde_json::to_vec(&marker).map_err(|_| Error::IncompatibleStore)?;
+    let verify = || {
+        lease.verify_inputs()?;
+        lease.verify_published_layout(&update_id)?;
+        if trial_file_identity(&candidate.verified_file()?)?
+            != (saved.preparation.database.clone(), 1)
+            || read_trial_file(&receipt)?.as_deref() != Some(receipt_bytes.as_slice())
+            || read_trial_file(&selection)?.as_deref() != Some(selected.as_slice())
+            || read_trial_file(&marker_file)?.as_deref() != Some(marker_bytes.as_slice())
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    };
+    verify()?;
+    // No recovery or writable open here. Only the existing forward owner can
+    // recover an interrupted seal replacement before this probe is admissible.
+    let store = Store {
+        db: candidate.snapshot().await?,
+    };
+    store.verify_bootstrap_schema().await?;
+    let transactions = ApplicationTransactions::new(store.clone());
+    if !transactions
+        .verify_forward_catalog(activation, &marker, &saved.preparation.snapshot)
+        .await?
+    {
+        return Err(Error::IncompatibleStore);
+    }
+    let witness = super::FixtureForwardActivationWitness {
+        activation: activation.clone(),
+        database: saved.preparation.database.clone(),
+        receipt_sha256: trial_document_sha256(&receipt_bytes),
+        selection_sha256: marker.forward_selection_sha256.clone(),
+    };
+    super::tests::interrupt_trial_publication("forward-readiness-before-probe");
+    probe(&witness)?;
+    super::tests::interrupt_trial_publication("forward-readiness-after-probe");
+    lease.verify_promotion_runtimes(&saved).await?;
+    verify()?;
+    if !transactions
+        .verify_forward_catalog(activation, &marker, &saved.preparation.snapshot)
+        .await?
+    {
+        return Err(Error::IncompatibleStore);
+    }
+    drop(transactions);
+    store.shutdown().await?;
+    verify()?;
+    Ok(witness)
+}
+
 #[cfg(test)]
 fn persist_forward_selection(
     runtime: &fs::File,

@@ -370,6 +370,28 @@ pub(crate) async fn record_fixture_forward_catalog(
         .map_err(|_| Error::UnknownCommit)?
 }
 
+// This is a process-fixture observation, never a serving or launcher permit.
+#[cfg(all(test, target_os = "linux"))]
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct FixtureForwardActivationWitness {
+    pub(crate) activation: PreparedServiceActivation,
+    pub(crate) database: TrialFileIdentity,
+    pub(crate) receipt_sha256: String,
+    pub(crate) selection_sha256: String,
+}
+
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) async fn probe_fixture_forward_activation(
+    home: PathBuf,
+    update_id: String,
+    probe: impl FnOnce(&FixtureForwardActivationWitness) -> Result<()>,
+) -> Result<FixtureForwardActivationWitness> {
+    if !home.is_absolute() || !valid_update_id(&update_id) {
+        return Err(Error::IncompatibleStore);
+    }
+    isolated::probe_forward_activation(home, update_id, probe).await
+}
+
 fn validate_isolated_trial_request(
     home: &Path,
     update_id: &str,
