@@ -73,6 +73,10 @@ jobs:
             cp tools/diagnostics/t16-strict-control.rs "$scratch/probe/tools/src/bin/t16-strict-control.rs"
             cp tools/diagnostics/t16-strict-control.rs "$evidence/probe-strict-control.rs"
           fi
+          if [[ "$PLAIN_STRICT_PROOF" == true ]]; then
+            cp tools/diagnostics/t16-cursor-diagnostic.rs "$scratch/probe/tools/src/bin/t16-cursor-diagnostic.rs"
+            cp tools/diagnostics/t16-cursor-diagnostic.rs "$evidence/probe-cursor-diagnostic.rs"
+          fi
           cp tools/diagnostics/t16-readiness.rs "$evidence/probe-readiness.rs"
           git -C "$scratch/probe" diff --binary > "$evidence/probe-overlay.patch"
           sha256sum "$evidence/probe-overlay.patch" > "$evidence/probe-overlay.sha256"
@@ -176,6 +180,13 @@ jobs:
             "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked -p t3code-ls-tools --bin t16-strict-control
             "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --release --locked -p t3code-ls-tools --bin t16-strict-control
             sha256sum "$CARGO_TARGET_DIR/release/t16-strict-control" > "$evidence/strict-verifier.sha256"
+          fi
+          if [[ "$PLAIN_STRICT_PROOF" == true ]]; then
+            "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked -p t3code-ls-tools --bin t16-cursor-diagnostic
+            "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --release --locked -p t3code-ls-tools --bin t16-cursor-diagnostic
+            sha256sum "$CARGO_TARGET_DIR/release/t16-cursor-diagnostic" > "$evidence/cursor-diagnostic.sha256"
+            command -v sqlite3 > /dev/null
+            sqlite3 --version > "$evidence/cursor-sqlite-version.txt"
           fi
           install -m 755 "$CARGO_TARGET_DIR/release/t16-checked-open" "$DIAGNOSTIC_WORK/bin/t16-checked-open"
           (cd "$CARGO_TARGET_DIR/release" && sha256sum t3code-ls-tools t16-checked-open) > "$evidence/probes.sha256"
@@ -716,6 +727,13 @@ jobs:
                   and .migration_evidence.source == (if $variant == "native" then "stopped-native-catalog" else "live-sqlite-descriptors" end)
                   and (any(.resources.server.processes[]; .role == "native-database-helper") == ($variant == "native")))
                 | [$round,$position,$variant,.descriptor_micros,.html_micros] | @tsv' "$sample" >> "$evidence/plain-reopen.tsv"
+              # Separate untimed control. Probe has stopped browser and server.
+              # Retain original strict matcher and all fixture/output gates below.
+              if [[ "$round" == 1 ]]; then
+                "$CARGO_TARGET_DIR/release/t16-cursor-diagnostic" "$mode" \
+                  "$root/apps/server/dist/bin.mjs" "$trial" "$sample" \
+                  > "$evidence/plain-cursor-diagnostic-$round-$variant.json"
+              fi
               test ! -e "$trial/checked-open-trace"
               test ! -e "$trial/checked-open-phases.log"
               (
