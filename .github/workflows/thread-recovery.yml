@@ -639,8 +639,11 @@ jobs:
             sha256sum "$helper" > "$proof/ordered-helper.sha256"
             sudo -n unshare --net -- bash -euc '
               ip link set dev lo up
-              exec runuser -u "$1" -- env TMPDIR="$2" "$3" tools/check-ordered-event-sink.mjs "$4" "$5"
-            ' _ "$(id -un)" "$TMPDIR" "$(command -v node)" "$helper" "$proof/ordered-event-sink.json"
+              for engine in direct-redb fjall; do
+                runuser -u "$1" -- env TMPDIR="$2" "$3" tools/check-ordered-event-sink.mjs \
+                  "$4" "$5/ordered-event-sink-$engine.json" "$engine"
+              done
+            ' _ "$(id -un)" "$TMPDIR" "$(command -v node)" "$helper" "$proof"
           fi
           "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked --release \
             -p t3-code-ls-storage --lib application_events::tests \

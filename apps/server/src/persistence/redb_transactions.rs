@@ -466,16 +466,25 @@ impl ApplicationTransactions {
         initialize: bool,
     ) -> Result<()> {
         use redb_bench_compare::ordered::{Database, Engine};
-        const PROFILE: &str = "t04-direct-redb-efaf649-v1";
-        const MARKER: &[u8] = b"t3-t04-isolated/1/direct-redb/efaf649fb270ce70257e53862295cc10e4bddab0/t3-application-keyspace-v1";
         // Validate before touching either the candidate path or session state.
-        if profile != PROFILE
-            || !directory.is_absolute()
-            || !self.sessions.is_empty()
-            || self.ordered_fixture.is_some()
-        {
+        if !directory.is_absolute() || !self.sessions.is_empty() || self.ordered_fixture.is_some() {
             return Err(invalid("ordered fixture selection rejected"));
         }
+        let (engine, name, marker): (Engine, &str, &[u8]) = match profile {
+            "t04-direct-redb-efaf649-v1" => (
+                Engine::DirectRedb,
+                "state.redb",
+                b"t3-t04-isolated/1/direct-redb/efaf649fb270ce70257e53862295cc10e4bddab0/t3-application-keyspace-v1",
+            ),
+            "t04-fjall-efaf649-v1" => (
+                Engine::Fjall,
+                "state.fjall",
+                b"t3-t04-isolated/1/fjall/efaf649fb270ce70257e53862295cc10e4bddab0/t3-application-keyspace-v1",
+            ),
+            _ => return Err(invalid("ordered fixture selection rejected")),
+        };
+        let path = directory.join(name);
+        let profile_file = directory.join("profile");
         let marker_key = store_key("ordered-fixture/identity");
         let database = if initialize {
             let mut source = self.store.db.begin_read_only().await?;
@@ -513,31 +522,35 @@ impl ApplicationTransactions {
             // Exclusive directory creation protects existing files/profiles.
             std::fs::create_dir(directory)
                 .map_err(|_| invalid("ordered fixture directory must be new"))?;
-            let database = Database::open(Engine::DirectRedb, &directory.join("state.redb"))?;
+            let database = Database::open(engine, &path)?;
             database.write(|tx| {
                 for (key, value) in &rows {
                     tx.put(key, value)?;
                 }
-                tx.put(&marker_key, MARKER)?;
+                tx.put(&marker_key, marker)?;
                 Ok::<_, redb_bench_compare::ordered::Error>(())
             })?;
             // An interrupted initialization stays unselectable; no automatic retry.
-            std::fs::write(directory.join("profile"), MARKER)
+            std::fs::write(&profile_file, marker)
                 .map_err(|_| invalid("ordered fixture marker write failed"))?;
             database
         } else {
             let metadata = std::fs::symlink_metadata(directory)
                 .map_err(|_| invalid("ordered fixture directory missing"))?;
             if !metadata.is_dir()
-                || std::fs::read(directory.join("profile")).ok().as_deref() != Some(MARKER)
-                || !std::fs::symlink_metadata(directory.join("state.redb"))
-                    .is_ok_and(|metadata| metadata.file_type().is_file())
+                || !std::fs::symlink_metadata(&profile_file)
+                    .is_ok_and(|metadata| metadata.is_file())
+                || std::fs::read(&profile_file).ok().as_deref() != Some(marker)
+                || !std::fs::symlink_metadata(&path).is_ok_and(|metadata| match engine {
+                    Engine::DirectRedb => metadata.is_file(),
+                    _ => metadata.is_dir(),
+                })
             {
                 return Err(Error::IncompatibleStore);
             }
-            Database::open(Engine::DirectRedb, &directory.join("state.redb"))?
+            Database::open(engine, &path)?
         };
-        if database.snapshot()?.get(&marker_key)?.as_deref() != Some(MARKER) {
+        if database.snapshot()?.get(&marker_key)?.as_deref() != Some(marker) {
             return Err(Error::IncompatibleStore);
         }
         // Validate the copied catalog and generation before admitting sessions.

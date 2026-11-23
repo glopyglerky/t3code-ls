@@ -19,11 +19,14 @@ import { nativeRequest, withNative, hash, normalized } from "./redb-domain-fixtu
 import { fixedTime, fixedDateTime, sampleEvents, makeEvent } from "./redb-event-sink-fixtures.mjs";
 import { at } from "./check-outbox-runtime.mjs";
 
-const [executable, proofPath] = process.argv.slice(2);
+const [executable, proofPath, engine = "direct-redb", ...extra] = process.argv.slice(2);
 Assert.ok(executable && Path.isAbsolute(executable));
+Assert.equal(extra.length, 0);
+Assert.ok(["direct-redb", "fjall"].includes(engine));
 const fixture = await createFixture();
 const directory = Path.join(fixture.root, "ordered");
-const profile = "t04-direct-redb-efaf649-v1";
+const profile = `t04-${engine}-efaf649-v1`;
+const alternateProfile = engine === "direct-redb" ? "t04-fjall-efaf649-v1" : "t04-direct-redb-efaf649-v1";
 const selection = (initialize = false) => ({
   operation: "application_ordered_fixture_select", profile, directory, initialize,
 });
@@ -111,6 +114,7 @@ try {
   await Assert.rejects(FS.stat(directory), { code: "ENOENT" });
   Assert.equal(frames([selection(true)])[0].ok, true);
   Assert.equal(frames([selection(true)])[0].ok, false, "Initialization cannot reuse a profile");
+  Assert.equal(frames([{ ...selection(), profile: alternateProfile }])[0].ok, false);
   Assert.equal(frames([selection(), { operation: "application_bootstrap" }])[1].ok, false);
   const first = await run(({ sink, snapshot }) => at(fixedTime, Effect.gen(function* () {
     const committed = yield* sink.commitCommand(command);
@@ -152,7 +156,7 @@ try {
   const receipt = {
     kind: "t04-ordered-event-sink", profile,
     orderedDependency: "efaf649fb270ce70257e53862295cc10e4bddab0",
-    checks: ["unknown-profile-no-session", "ordinary-mode-refusal", "exclusive-initialization",
+    checks: ["unknown-profile-no-session", "ordinary-mode-refusal", "exclusive-initialization", "different-engine-refusal",
       "unscoped-operation-refusal", "EventSink-atomic-commit", "exact-JSON-replay-after-reopen",
       "failed-staging-no-commit-after-reopen", "seed-unchanged"],
     stateSha256: hash(JSON.stringify(first.state)), frames: transcript.map((frame) => frame.operation),
