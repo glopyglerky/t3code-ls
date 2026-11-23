@@ -27,6 +27,7 @@ import { chromium, type Browser, type Locator, type Page, type Response as Brows
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
 import { verifyBundledVoiceDraft } from "./hybrid-client-voice.ts";
 import { inspectNativeMessageUpdates, inspectNativeReplay } from "./hybrid-client-database.ts";
+import { stagePreviewFixtureBrowser, verifyPreviewLifetime } from "./hybrid-client-preview.ts";
 import {
   assertReplayTurnLinks,
   replayTurnIdentity,
@@ -56,6 +57,8 @@ const replayPrompt = "Replay: showcase";
 const parallelTurnsProof = process.env.T3_CODE_LS_PARALLEL_TURNS_PROOF === "true";
 const replayMarker = "This turn is a replay.";
 const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
+const previewLifetimeProof = process.env.T3_CODE_LS_PREVIEW_LIFETIME_PROOF === "true";
+Assert.ok(!previewLifetimeProof || bundledClient, "Preview lifetime requires the packaged application");
 const spliceNegotiationProof = process.env.T3_CODE_LS_SPLICE_NEGOTIATION_PROOF === "true";
 const splitPtyProof = process.env.T3_CODE_LS_SPLIT_PTY_PROOF === "true";
 const pairingProof = process.env.T3_CODE_LS_PAIRING_PROOF;
@@ -236,6 +239,10 @@ async function startApplication(
     FORCE_COLOR: "0",
     NO_COLOR: "1",
   });
+  if (previewLifetimeProof && process.env.T3CODE_SERVER_BROWSER_SANDBOX === "0") {
+    // Only the loopback-isolated synthetic preview case selects this host workaround.
+    env.T3CODE_SERVER_BROWSER_SANDBOX = "0";
+  }
   if (implementation === "native") {
     if (bundledPtyProof) env.T3_CODE_LS_BUNDLED_PTY_HOST = "1";
     else if (nativePtyHost !== undefined) env.T3_CODE_LS_PTY_HOST_EXECUTABLE = nativePtyHost;
@@ -1994,6 +2001,8 @@ async function exercise(implementation: Implementation): Promise<void> {
   const workspace = NodePath.join(runRoot, implementation, "hybrid-fixture");
   const stateDirectory = NodePath.join(runRoot, implementation, "state");
   Assert.ok(!durableTextProof || (bundledClient && implementation === "native"));
+  Assert.ok(!previewLifetimeProof || implementation === "native");
+  const previewBrowser = previewLifetimeProof ? stagePreviewFixtureBrowser(stateDirectory) : null;
   if (bundledClient) {
     const settingsDirectory = NodePath.join(stateDirectory, "userdata");
     NodeFS.mkdirSync(settingsDirectory, { recursive: true });
@@ -2055,6 +2064,8 @@ async function exercise(implementation: Implementation): Promise<void> {
     textRevisionProfile: null as ReturnType<typeof textRevisionIdentity> | null,
     pdfLinks: null as Awaited<ReturnType<typeof verifyLinkedPdf>> | null,
     htmlInteraction: null as Awaited<ReturnType<typeof verifyInteractiveHtml>> | null,
+    previewBrowser,
+    previewLifetime: null as Awaited<ReturnType<typeof verifyPreviewLifetime>> | null,
     pdfExternalOnly: pdfExternalOnlyProof,
     scope: pdfExternalOnlyProof
       ? "Linux packaged native application; authenticated local project and replay thread; signed PDF internal jumps and explicit loopback external links; no terminal qualification"
@@ -2390,6 +2401,11 @@ async function exercise(implementation: Implementation): Promise<void> {
       proof.htmlInteraction = await verifyInteractiveHtml(page, threadId);
       completed("Interacted with the real HTML publisher's page and scoped frame lifecycle");
     }
+    if (previewLifetimeProof) {
+      starting("navigate and reconnect the real server-browser preview");
+      proof.previewLifetime = await verifyPreviewLifetime(page, threadId, NodePath.join(directory, "preview.png"));
+      completed("Interacted with the streamed preview and verified hidden and closed viewer lifetimes");
+    }
     starting("stop with a streamed reply and pending approval");
     proof.interrupted = await interruptShowcase(page);
     Assert.notEqual(proof.interrupted.threadId, threadId);
@@ -2724,6 +2740,9 @@ async function exercise(implementation: Implementation): Promise<void> {
     await activeApplication?.stop();
     activeApplication = undefined;
     await context.close();
+    if (previewLifetimeProof) {
+      NodeFS.rmSync(NodePath.join(stateDirectory, "tools", "chrome-headless-shell"), { recursive: true, force: true });
+    }
   }
 }
 
