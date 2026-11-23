@@ -3,15 +3,17 @@ import {
   type ProviderApprovalOption,
   type RuntimeRequestId,
 } from "@t3tools/contracts";
-import { memo } from "react";
+import { memo, useState } from "react";
 import { EllipsisIcon, TriangleAlertIcon } from "lucide-react";
 import { Button, InlineButton } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { DioxusApprovalAction } from "./DioxusApprovalAction";
 import { composerFloatingLayerProps } from "./composerEventScope";
 
 interface ComposerPendingApprovalActionsProps {
   presentation?: "composer" | "inline";
+  dioxusCommandApproval?: boolean;
   requestId: RuntimeRequestId;
   isResponding: boolean;
   canRespond: boolean;
@@ -32,6 +34,7 @@ const DEFAULT_APPROVAL_OPTIONS = [
 
 export const ComposerPendingApprovalActions = memo(function ComposerPendingApprovalActions({
   presentation = "composer",
+  dioxusCommandApproval = false,
   requestId,
   isResponding,
   canRespond,
@@ -39,6 +42,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
   options = DEFAULT_APPROVAL_OPTIONS,
   onRespondToApproval,
 }: ComposerPendingApprovalActionsProps) {
+  const [useStandard, setUseStandard] = useState(false);
   const primaryOptions = options.filter(
     (option) => option.decision === "decline" || option.decision === "accept",
   );
@@ -85,6 +89,24 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
               {content}
             </Button>
           );
+        if (dioxusCommandApproval && option.decision === "accept" && !option.warning) {
+          return (
+            <DioxusApprovalAction
+              key={`${requestId}:${option.decision}`}
+              className="inline-flex cursor-pointer items-center rounded px-1 text-xs focus-visible:ring-2 disabled:opacity-64"
+              label={option.label}
+              disabled={buttonProps.disabled}
+              useStandard={useStandard}
+              onUseStandard={() => setUseStandard(true)}
+              standardButton={button}
+              onAction={async () => {
+                if (!disabled && !isResponding && canRespond) {
+                  return onRespondToApproval(requestId, option.decision);
+                }
+              }}
+            />
+          );
+        }
         return option.warning ? (
           <Tooltip key={option.decision}>
             <TooltipTrigger render={button} />

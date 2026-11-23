@@ -215,6 +215,33 @@ export function inspectNativeMessageUpdates(executable: string, stateDirectory: 
   });
 }
 
+export function inspectNativeApprovalReceipt(
+  executable: string,
+  stateDirectory: string,
+  commandId: string,
+  threadId: string,
+  snapshotSequence: number,
+) {
+  const databasePath = Path.join(stateDirectory, "userdata", "statev2.omdb");
+  const responses = readNativeResponses(executable, databasePath, [
+    { operation: "application_begin", transaction_id: transactionId, mode: "read" },
+    { operation: "application_receipts_get", transaction_id: transactionId, command_id: commandId },
+    { operation: "application_commit", transaction_id: transactionId },
+  ]);
+  Assert.equal(responses.length, 3);
+  for (const response of responses) Assert.equal(response.ok, true, JSON.stringify(response.error));
+  const receipt = object(responses[1].result, "Expected the exact native approval receipt");
+  Assert.equal(receipt.command_id, commandId);
+  Assert.equal(receipt.aggregate_kind, "thread");
+  Assert.equal(receipt.aggregate_id, threadId);
+  Assert.equal(receipt.command_type, "runtime-request.respond");
+  Assert.equal(receipt.status, "accepted");
+  const sequence = receipt.result_sequence;
+  Assert.ok(typeof sequence === "number" && Number.isSafeInteger(sequence) && sequence > 0);
+  Assert.ok(sequence <= snapshotSequence, "Approval receipt must precede the reopened snapshot");
+  return { commandId, threadId, sequence, engine: "omdb" as const };
+}
+
 export function inspectNativeReplay(input: {
   readonly executable: string;
   readonly stateDirectory: string;

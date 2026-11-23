@@ -25,6 +25,12 @@ export interface ThreadFindMount extends DioxusMount {
 
 interface OnboardingBindings {
   default(): Promise<unknown>;
+  mount_approval_action(
+    root: HTMLSpanElement,
+    className: string,
+    label: string,
+    disabled: boolean,
+  ): ComposerSubmitMount;
   mount_composer_submit(
     root: HTMLSpanElement,
     className: string,

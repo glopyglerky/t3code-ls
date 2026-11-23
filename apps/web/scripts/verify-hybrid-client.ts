@@ -34,9 +34,14 @@ import {
 } from "playwright";
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
 import { SOCKET_FRAME_PARTS_QUERY_PARAM } from "@t3tools/shared/socketFrameParts";
+import { verifyApprovalAction } from "./hybrid-client-approval-action.ts";
 import { verifyGuestNameForm } from "./hybrid-client-guest-name.ts";
 import { verifyBundledVoiceDraft } from "./hybrid-client-voice.ts";
-import { inspectNativeMessageUpdates, inspectNativeReplay } from "./hybrid-client-database.ts";
+import {
+  inspectNativeApprovalReceipt,
+  inspectNativeMessageUpdates,
+  inspectNativeReplay,
+} from "./hybrid-client-database.ts";
 import { stagePreviewFixtureBrowser, verifyPreviewLifetime } from "./hybrid-client-preview.ts";
 import {
   installTerminalWireObserver,
@@ -1534,6 +1539,12 @@ async function startCapturedApproval(page: Page) {
   const button = page
     .getByRole("group", { name: "Command approval", exact: true })
     .getByRole("button", { name: "Approve", exact: true });
+  if (process.env.T3_CODE_LS_APPROVAL_PROOF === "dioxus-fallback") {
+    const fallback = page.getByRole("group", { name: "Command approval", exact: true })
+      .getByRole("button", { name: "Use standard approval button", exact: true });
+    await fallback.click();
+    Assert.ok(await button.evaluate((node) => document.activeElement === node));
+  }
   await button.waitFor({ state: "visible" });
   const pending = await readThreadSnapshot(page, threadId);
   const identity = replayTurnIdentity(pending, capturedApproval.model);
@@ -1551,6 +1562,16 @@ async function startCapturedApproval(page: Page) {
 }
 
 async function acceptCapturedApproval(page: Page) {
+  if (process.env.T3_CODE_LS_APPROVAL_PROOF) {
+    Assert.ok(bundledClient, "Approval proof requires the packaged browser");
+    Assert.equal(process.env.VITE_T3_CODE_LS_APPROVAL_RENDERER, "dioxus");
+    return verifyApprovalAction(page, {
+      start: () => startCapturedApproval(page),
+      complete: (threadId, identity) => assertCompleted(page, threadId, identity, capturedApproval.reply),
+      snapshot: (threadId) => readThreadSnapshot(page, threadId),
+      source: capturedApproval.path,
+    });
+  }
   const { threadId, identity, requestId, button, sha256 } = await startCapturedApproval(page);
   await button.click();
   const completed = await assertCompleted(page, threadId, identity, capturedApproval.reply);
@@ -2277,6 +2298,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     turnIdentity: null as ReplayTurnIdentity | null,
     interrupted: null as InterruptedShowcase | null,
     capturedApproval: null as Awaited<ReturnType<typeof acceptCapturedApproval>> | null,
+    approvalReceipt: null as ReturnType<typeof inspectNativeApprovalReceipt> | null,
     cancelledQuestion: null as Awaited<ReturnType<typeof cancelCapturedQuestion>> | null,
     historyFind: null as {
       query: string;
@@ -2842,6 +2864,23 @@ async function exercise(implementation: Implementation): Promise<void> {
     starting("recorded ACP permission request");
     proof.capturedApproval = await acceptCapturedApproval(page);
     completed("Approved the recorded ACP permission request and received its expected reply");
+    if (process.env.T3_CODE_LS_APPROVAL_PROOF) {
+      Assert.equal(implementation, "native");
+      const approval = proof.capturedApproval;
+      Assert.ok("approvalAction" in approval && approval.approvalAction);
+      const [decision] = approval.approvalAction.decisions;
+      Assert.ok(decision);
+      proof.approvalReceipt = inspectNativeApprovalReceipt(
+        nativeExecutable("db"),
+        stateDirectory,
+        decision.commandId,
+        decision.threadId,
+        approval.snapshotSequence,
+      );
+      completed("Verified the exact accepted approval receipt in native storage after reopen");
+      proof.status = "passed";
+      return;
+    }
     if (bundledClient && implementation === "native") {
       starting("recorded ACP question cancellation");
       proof.cancelledQuestion = await cancelCapturedQuestion(page);
