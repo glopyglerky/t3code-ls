@@ -4,6 +4,10 @@ mod backend;
 #[cfg(all(test, feature = "ordered-engine-fixture"))]
 mod ordered_engine_fixture;
 
+#[cfg(target_os = "linux")]
+#[path = "../../../apps/server/src/persistence/redb_forward_child_readiness.rs"]
+pub mod forward_child_readiness;
+
 #[path = "../../../apps/server/src/persistence/redb_transactions.rs"]
 pub mod application;
 #[path = "../../../apps/server/src/persistence/redb_auth_rows.rs"]

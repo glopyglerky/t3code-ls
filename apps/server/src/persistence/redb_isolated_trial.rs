@@ -6,9 +6,9 @@ use super::{
     IsolatedTrialPreparation, IsolatedTrialPublication, IsolatedTrialRequest,
     IsolatedTrialSelection, IsolatedTrialVerification, MAX_TRIAL_FILE_BYTES, TrialBackupReceipt,
     TrialFileIdentity, TrialRestoreDirectories, TrialSnapshot, checked_generation, io_error,
-    read_trial_file, read_trial_receipt, trial_executable_digest, trial_file_digest,
-    trial_file_identity, validate_isolated_trial_preparation, validate_isolated_trial_request,
-    verify_restore_snapshot, write_trial_receipt,
+    read_trial_file, read_trial_receipt, trial_document_sha256, trial_executable_digest,
+    trial_file_digest, trial_file_identity, validate_isolated_trial_preparation,
+    validate_isolated_trial_request, verify_restore_snapshot, write_trial_receipt,
 };
 use crate::application::{
     ApplicationTransactions, PreparedServiceActivation, exact_service_version,
@@ -81,13 +81,6 @@ fn disposable_file_exists(path: &Path) -> Result<bool> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(io_error(error)),
     }
-}
-
-fn trial_document_sha256(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 fn preserved_path(state: &Path, update_id: &str) -> PathBuf {

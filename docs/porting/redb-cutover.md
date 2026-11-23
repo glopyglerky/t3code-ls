@@ -625,6 +625,13 @@ sequences 59 and 60 in order, and the reopened omdb retained the new window.
 J04 performance remains open.
 [Packaged history check](https://github.com/glopyglerky/t3code-ls/actions/runs/45228499323)
 
+The isolated EventSink fixture also committed and reopened the same synthetic
+application state on direct redb and Fjall. Both engines returned the same
+state hash, replayed the original receipt, rolled back failed staging, and
+preserved the original omdb seed byte for byte. Normal server selection still
+uses the qualified omdb path. Engine performance and migration remain open.
+[Ordered engine check](https://github.com/glopyglerky/t3code-ls/actions/runs/45234079536)
+
 ## T05 offline publication under the serving fence
 
 `trial-publish-intended-sealed HOME UPDATE_ID` requires the candidate's durable
@@ -684,6 +691,12 @@ Missing, independently reopened, foreign and stale inputs were refused. The
 parent preserved the marked database and original forward decision after a
 deliberately failing child. The parent held home and selection ownership
 throughout. [Child lease proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45227883095)
+
+The staged Linux helper checked the exact installed image, receipt, marked
+database and inherited lease before emitting readiness. It refused changed
+identity, hash and lease inputs. The parent retained authority and restarted
+the check after a forced readiness write failure.
+[Staged helper readiness](https://github.com/glopyglerky/t3code-ls/actions/runs/45235858575)
 
 Promotion to the target runtime, catalog unsealing and ordinary native update
 admission still require production recovery proof.

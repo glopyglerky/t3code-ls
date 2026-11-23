@@ -694,13 +694,21 @@ fn trial_file_identity(file: &fs::File) -> Result<(TrialFileIdentity, u64)> {
     ))
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn trial_document_sha256(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 #[cfg(unix)]
-fn trial_file_digest(file: &fs::File) -> Result<String> {
+pub(crate) fn trial_file_digest(file: &fs::File) -> Result<String> {
     bounded_trial_digest(file, MAX_TRIAL_FILE_BYTES)
 }
 
 #[cfg(unix)]
-fn trial_executable_digest(file: &fs::File) -> Result<String> {
+pub(crate) fn trial_executable_digest(file: &fs::File) -> Result<String> {
     // The SEA includes Node and the application. Its bound is independent of
     // the database snapshot and native helper bounds.
     bounded_trial_digest(file, MAX_TRIAL_EXECUTABLE_BYTES)
