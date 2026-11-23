@@ -71,7 +71,8 @@ export async function verifyBundledVoiceDraft(page: Page) {
   const voiceUrl = (url: URL) => url.pathname.startsWith("/api/voice/");
   const transcribeUrl = `${origin}/api/voice/transcribe`;
   const transcript = "a recorded fixture phrase";
-  const release = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<boolean>();
+  const responseServed = Promise.withResolvers<boolean>();
   const unexpectedWrites: string[] = [];
   let transcriptionRequests = 0;
   let statusRequests = 0;
@@ -85,8 +86,15 @@ export async function verifyBundledVoiceDraft(page: Page) {
         return;
       }
       transcriptionRequests += 1;
-      await release.promise;
-      await route.fulfill({ json: { text: transcript } });
+      const complete = await release.promise;
+      try {
+        if (complete) await route.fulfill({ json: { text: transcript } });
+        else await route.abort();
+        responseServed.resolve(complete);
+      } catch {
+        // Playwright may have already canceled the route during failed fixture cleanup.
+        responseServed.resolve(false);
+      }
       return;
     }
     if (url.pathname === "/api/voice/status") {
@@ -120,7 +128,8 @@ export async function verifyBundledVoiceDraft(page: Page) {
 
     await page.evaluate(observeCaptureFailure);
     const editor = page.getByTestId("composer-editor");
-    await editor.fill("🚀 draft");
+    const draft = "🚀 draft";
+    await editor.fill(draft);
     await editor.press("End");
     const recording = page.getByRole("status", { name: "Recording", exact: true });
     await start.click();
@@ -133,12 +142,16 @@ export async function verifyBundledVoiceDraft(page: Page) {
     Assert.ok(encoded, "The selected environment should receive binary PCM");
     const { pcm } = decodeSpeechPcmRequest(encoded);
     Assert.ok(pcm.length > 0 && pcm.length % 4 === 0, "Expected complete float32 PCM samples");
-    await page.getByRole("status", { name: "Transcribing…", exact: true }).waitFor({ state: "visible" });
-    const edited = "Updated 🚀 draft";
-    await editor.fill(edited);
-    const expected = `${edited} ${transcript}`;
-    release.resolve();
-    await editor.getByText(expected, { exact: true }).waitFor({ state: "visible" });
+    await page.getByRole("status", { name: "Transcribing…", exact: true })
+      .waitFor({ state: "visible", timeout: 10_000 });
+    Assert.equal(await editor.evaluate((element) => (element as HTMLElement).isContentEditable), false);
+    Assert.equal(await editor.innerText(), draft);
+    release.resolve(true);
+    Assert.equal(await responseServed.promise, true, "The transcription response must reach the client");
+    const expected = `${draft} ${transcript}`;
+    await editor.filter({ hasText: expected }).waitFor({ state: "visible", timeout: 10_000 });
+    Assert.equal(await editor.innerText(), expected);
+    Assert.equal(await editor.evaluate((element) => (element as HTMLElement).isContentEditable), true);
     Assert.equal(page.url(), draftRoute);
     const rustSelection = await page.evaluate(
       () => performance.getEntriesByName("t3-voice-rust-draft-selection").length === 1,
@@ -159,13 +172,13 @@ export async function verifyBundledVoiceDraft(page: Page) {
       speechResponse: "deterministic HTTP fixture",
       pcmBytes: pcm.length,
       rustSelection,
-      concurrentDraftPreserved: true,
+      draftPreserved: true,
       cancellationPreservedDraft: true,
       remainedUnsent: true,
       transcriptionRequests,
     };
   } finally {
-    release.resolve();
+    release.resolve(false);
     await page.unroute(voiceUrl, serveSpeechFixture);
   }
 }
