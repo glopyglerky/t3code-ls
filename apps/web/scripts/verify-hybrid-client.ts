@@ -680,7 +680,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     capturedApproval: null as Awaited<ReturnType<typeof acceptCapturedApproval>> | null,
     cancelledQuestion: null as Awaited<ReturnType<typeof cancelCapturedQuestion>> | null,
     historyFind: null as { query: string; count: string; draftPreserved: boolean } | null,
-    messageAppends: null as { frames: number; rustDecoder: boolean } | null,
+    messageAppends: null as { requests: number; frames: number; rustDecoder: boolean } | null,
     completedSnapshots: [] as Array<
       Awaited<ReturnType<typeof assertCompleted>> & { checkpoint: string }
     >,
@@ -723,6 +723,7 @@ async function exercise(implementation: Implementation): Promise<void> {
   let page = await context.newPage();
   let threadFindRequests = 0;
   let messageAppendFrames = 0;
+  let messageAppendRequests = 0;
   function observePage(current: Page): void {
     current.setDefaultTimeout(timeoutMs);
     current.setDefaultNavigationTimeout(timeoutMs);
@@ -734,9 +735,11 @@ async function exercise(implementation: Implementation): Promise<void> {
     });
     current.on("websocket", (socket) => {
       socket.on("framesent", ({ payload }) => {
-        if (payload.toString().includes('"orchestration.searchThreadStream"')) {
+        const json = payload.toString();
+        if (json.includes('"orchestration.searchThreadStream"')) {
           threadFindRequests += 1;
         }
+        if (json.includes('"messageTextAppends":1')) messageAppendRequests += 1;
       });
       socket.on("framereceived", ({ payload }) => {
         if (payload.toString().includes('"kind":"message-text-append"')) {
@@ -806,11 +809,24 @@ async function exercise(implementation: Implementation): Promise<void> {
     completed("Received the completed replay turn on the original thread route");
     if (expectsRustComposer && implementation === "native" && bundledClient) {
       starting("negotiated Rust text appends");
+      const framesBefore = messageAppendFrames;
+      const requestsBefore = messageAppendRequests;
+      const appendThread = await submitReplay(page, "Text appends", "Replay: text appends");
+      const reply = "日本語 and a 🐟 complete the sequence. The bounded text fixture is complete.";
+      await page.getByText(reply, { exact: false }).last().waitFor({ state: "visible" });
+      const appended = await readThreadSnapshot(page, appendThread);
+      await assertCompleted(page, appendThread, replayTurnIdentity(appended, "text-appends"), reply);
       const rustDecoder = await page.evaluate(
         () => performance.getEntriesByName("t3-thread-rust-text-append").length === 1,
       );
-      proof.messageAppends = { frames: messageAppendFrames, rustDecoder };
-      Assert.ok(messageAppendFrames > 0, "The thread subscription must receive an append");
+      proof.messageAppends = {
+        requests: messageAppendRequests - requestsBefore,
+        frames: messageAppendFrames - framesBefore,
+        rustDecoder,
+      };
+      saveProof();
+      Assert.ok(proof.messageAppends.requests > 0, "The client must negotiate text appends");
+      Assert.ok(proof.messageAppends.frames > 0, "The thread subscription must receive an append");
       Assert.ok(rustDecoder, "The Rust binding must apply a received append");
       completed("Applied negotiated WebSocket text appends in the Rust browser reducer");
     }
