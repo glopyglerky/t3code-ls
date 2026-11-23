@@ -1108,13 +1108,37 @@ export class Launcher {
         !sameSealedPendingState(await this.#readState(), state) || this.#stopRequested) {
         throw new Error("The isolated candidate changed during preparation.");
       }
-      return {
+      const witness: IsolatedCandidateWitness = {
         protocol: 1, status: "prepared-isolated", updateId: pending.id,
         targetVersion: pending.targetVersion,
         entrySha256: String(activation.target_entry_sha256),
         helperSha256: helper.sha256,
         verificationSha256: NodeCrypto.createHash("sha256").update(input).digest("hex"),
       };
+      const observationInput = JSON.stringify({ verification_json: input, witness }) + "\n";
+      if (Buffer.byteLength(observationInput) > 4096) {
+        throw new Error("The native preparation observation exceeds its bound.");
+      }
+      const recorded = await new Promise<string>((resolve, reject) => {
+        const child = NodeChildProcess.execFile(
+          selected.executable, ["trial-record-prepared", this.#baseDir, pending.id],
+          { env: {}, encoding: "utf8", timeout: 65_000, maxBuffer: 8192, killSignal: "SIGKILL" },
+          (error, output, stderr) => error === null && stderr === ""
+            ? resolve(output) : reject(error ?? new Error("The native receipt wrote a diagnostic.")),
+        );
+        child.stdin?.on("error", reject);
+        child.stdin?.end(observationInput);
+      });
+      const receipt: unknown = JSON.parse(recorded);
+      if (!isRecord(receipt) || !hasKeys(receipt, ["ok", "result"]) || receipt.ok !== true ||
+        !isRecord(receipt.result) || !hasKeys(receipt.result, ["witness", "reused"]) ||
+        typeof receipt.result.reused !== "boolean" ||
+        !NodeUtil.isDeepStrictEqual(receipt.result.witness, witness) ||
+        !sameSealedPendingState(await this.#readState(), state) || this.#stopRequested) {
+        throw new Error("The native preparation observation was not durably verified.");
+      }
+      return witness;
+
     } finally {
       this.#preparing = false;
     }

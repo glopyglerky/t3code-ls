@@ -432,3 +432,40 @@ verifies migration/source preservation and older-server exclusion. The browser
 flow additionally checks its native database and absence of new application
 SQLite files. These are integration assertions, not a claim that every platform
 or a not-yet-qualified commit has passed.
+
+
+### Stopped candidate preparation observation
+
+The explicit `Launcher.prepareIsolatedCandidate` path calls the installed candidate's
+`__service-prepare-isolated` entry, then asks its verified native helper to record
+that observation with `trial-record-prepared`. The existing trial receipt gains an
+optional typed `candidate_observation` field. It retains the exact bounded input
+and its SHA-256, update and target identities, and installed entry and helper
+hashes. The native owner rechecks the pending protocol-5 selection, original
+checkpoint, stopped source, sealed trial and installed artifacts under the existing
+home, database and selection leases before atomically replacing and syncing the
+receipt. An identical retry revalidates without rewriting it. A different or
+corrupt observation refuses without changing the receipt.
+
+This observation does not activate the catalog, publish the prepared database,
+change runtime selection or start the foreground server. Query and preflight stay
+read-only. Preparation and inspection revalidate the observation after restart.
+The updated helper can restore a sealed trial with this extended receipt even if
+the failed candidate helper has disappeared. Older strict receipt decoders refuse
+the additional field, and ordinary old readers still refuse the sealed catalog.
+No user-facing native update admission follows from the observation.
+
+The Linux `isolated_trial_upgrades_88_without_changing_the_stopped_source` fixture
+covers interruption before receipt replacement and after its directory sync,
+identical retry, stale input, receipt corruption, changed helper refusal, retained
+reader refusal with unchanged database bytes, and rollback with the extended
+receipt. The packaged launcher fixture records through the actual installed SEA,
+retries with a fresh launcher, rejects a corrupt observation, then runs its existing
+sealed publication and rollback checks. These added native cases require hosted
+qualification. The local source checks and eight runnable launcher process tests
+passed, while Linux and compiled-artifact cases were skipped on macOS.
+
+Source lineage remains MIT T3 Code at stock
+`28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`. This increment uses the existing native
+trial receipt and tempfile atomic publication mechanism. Method SHA-256 is
+`5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.

@@ -30,10 +30,11 @@ use t3_code_ls_storage::application_runtime_state::RuntimeStateOperation;
 use t3_code_ls_storage::application_scheduled::{ScheduledRead, ScheduledWrite};
 use t3_code_ls_storage::application_search::ThreadSearchQuery;
 use t3_code_ls_storage::application_storage::{
-    IsolatedTrialRequest, IsolatedTrialVerification, TrialRestorePublicationRequest,
-    TrialRestoreRequest, backup_service_trial, inspect_isolated_service_trial_selection,
-    prepare_isolated_service_trial, prepare_service_trial_restore, publish_isolated_service_trial,
-    publish_service_trial_restore, rollback_isolated_service_trial,
+    CandidatePreparationObservation, IsolatedTrialRequest, IsolatedTrialVerification,
+    TrialRestorePublicationRequest, TrialRestoreRequest, backup_service_trial,
+    inspect_isolated_service_trial_selection, prepare_isolated_service_trial,
+    prepare_service_trial_restore, publish_isolated_service_trial, publish_service_trial_restore,
+    record_isolated_candidate_preparation, rollback_isolated_service_trial,
     service_trial_capabilities, verify_isolated_service_trial,
 };
 use t3_code_ls_storage::application_thread_find::ThreadFindQuery;
@@ -1615,6 +1616,23 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 },
             )
         }
+        [mode, home, update_id] if mode == "trial-record-prepared" => Some(
+            match read_trial_request::<CandidatePreparationObservation>(
+                "invalid candidate observation",
+            )? {
+                Ok(observation) => match record_isolated_candidate_preparation(
+                    home.into(),
+                    update_id.clone(),
+                    observation,
+                )
+                .await
+                {
+                    Ok(result) => json!({"ok": true, "result": result}),
+                    Err(error) => error_response(&error),
+                },
+                Err(error) => error_response(&error),
+            },
+        ),
         [mode, home, update_id] if mode == "trial-verify-isolated" => Some(
             match read_trial_request::<IsolatedTrialVerification>(
                 "invalid isolated trial verification",
@@ -1680,7 +1698,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         [mode, path] if mode == "exclusive-local" => Store::open_exclusive(path).await,
         _ => {
             return Err(Error::Invalid(
-                "usage: t3-code-ls-db initialize-local PATH | local PATH | read-only-local PATH | current-read-local PATH | exclusive-local PATH | owner-lock PATH | trial-backup HOME UPDATE_ID CATALOG_SHA256 | trial-prepare-isolated HOME UPDATE_ID < REQUEST_JSON | trial-verify-isolated HOME UPDATE_ID < RECEIPT_JSON | trial-inspect-selection HOME UPDATE_ID FROM_VERSION TARGET_VERSION | trial-publish-sealed HOME UPDATE_ID | trial-rollback-sealed HOME UPDATE_ID | trial-prepare-restore HOME UPDATE_ID < REQUEST_JSON | trial-publish-restore-offline HOME UPDATE_ID < WITNESSED_REQUEST_JSON".into(),
+                "usage: t3-code-ls-db initialize-local PATH | local PATH | read-only-local PATH | current-read-local PATH | exclusive-local PATH | owner-lock PATH | trial-backup HOME UPDATE_ID CATALOG_SHA256 | trial-prepare-isolated HOME UPDATE_ID < REQUEST_JSON | trial-record-prepared HOME UPDATE_ID < OBSERVATION_JSON | trial-verify-isolated HOME UPDATE_ID < RECEIPT_JSON | trial-inspect-selection HOME UPDATE_ID FROM_VERSION TARGET_VERSION | trial-publish-sealed HOME UPDATE_ID | trial-rollback-sealed HOME UPDATE_ID | trial-prepare-restore HOME UPDATE_ID < REQUEST_JSON | trial-publish-restore-offline HOME UPDATE_ID < WITNESSED_REQUEST_JSON".into(),
             )
             .into());
         }

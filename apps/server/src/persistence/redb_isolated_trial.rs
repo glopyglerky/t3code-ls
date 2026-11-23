@@ -1,3 +1,4 @@
+use super::CandidatePreparationObservation;
 use super::{
     IsolatedTrialPreparation, IsolatedTrialPublication, IsolatedTrialRequest,
     IsolatedTrialSelection, IsolatedTrialVerification, MAX_TRIAL_FILE_BYTES, TrialBackupReceipt,
@@ -14,7 +15,9 @@ use crate::application_server_ownership::OwnerLock;
 use crate::backend::{Backend, path_identity};
 use crate::{Error, Result, Store};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::fs;
+use std::io::Write;
 use std::io::{self, BufRead, BufReader, Read};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
@@ -472,6 +475,13 @@ pub(super) async fn verify(
     preparation: IsolatedTrialPreparation,
 ) -> Result<()> {
     let lease = TrialLease::open(home, &request).await?;
+    let receipt = lease.trial.with_extension("receipt-v1.json");
+    let saved = read_trial_receipt::<IsolatedTrialVerification>(&receipt)?
+        .ok_or(Error::IncompatibleStore)?;
+    validate_observation(&saved)?;
+    if saved.request != request || saved.preparation != preparation {
+        return Err(Error::IncompatibleStore);
+    }
     lease.verify_candidate(&request, &preparation).await
 }
 
@@ -485,6 +495,7 @@ pub(super) async fn move_sealed(
         .join(format!(".statev2-trial-{update_id}.receipt-v1.json"));
     let saved = read_trial_receipt::<IsolatedTrialVerification>(&receipt)?
         .ok_or(Error::IncompatibleStore)?;
+    validate_observation(&saved)?;
     let activation = saved
         .request
         .activation
@@ -715,6 +726,7 @@ pub(super) async fn inspect_selection(
         .join(format!(".statev2-trial-{update_id}.receipt-v1.json"));
     let saved = read_trial_receipt::<IsolatedTrialVerification>(&receipt)?
         .ok_or(Error::IncompatibleStore)?;
+    validate_observation(&saved)?;
     validate_isolated_trial_request(&home, &update_id, &saved.request)?;
     validate_isolated_trial_preparation(&saved.request, &saved.preparation)?;
     let lease = TrialLease::open(home.clone(), &saved.request).await?;
@@ -749,6 +761,7 @@ pub(super) async fn prepare(
     let trial = &lease.trial;
     let receipt = trial.with_extension("receipt-v1.json");
     if let Some(saved) = read_trial_receipt::<IsolatedTrialVerification>(&receipt)? {
+        validate_observation(&saved)?;
         if saved.request != request {
             return Err(Error::IncompatibleStore);
         }
@@ -837,6 +850,7 @@ pub(super) async fn prepare(
     let verification = IsolatedTrialVerification {
         request,
         preparation,
+        candidate_observation: None,
     };
     write_trial_receipt(
         &receipt,
@@ -845,4 +859,106 @@ pub(super) async fn prepare(
     )?;
     lease.sync_publication()?;
     Ok(verification.preparation)
+}
+
+// The observation proves the exact stopped-candidate check. It grants no activation.
+pub(super) fn validate_observation(saved: &IsolatedTrialVerification) -> Result<()> {
+    let Some(observation) = &saved.candidate_observation else {
+        return Ok(());
+    };
+    if observation.verification_json.len() > 4096 {
+        return Err(Error::IncompatibleStore);
+    }
+    let input: IsolatedTrialVerification = serde_json::from_str(&observation.verification_json)
+        .map_err(|_| Error::IncompatibleStore)?;
+    let activation = saved
+        .request
+        .activation
+        .as_ref()
+        .ok_or(Error::IncompatibleStore)?;
+    let witness = &observation.witness;
+    let digest = format!(
+        "{:x}",
+        Sha256::digest(observation.verification_json.as_bytes())
+    );
+    if input.candidate_observation.is_some()
+        || input.request != saved.request
+        || input.preparation != saved.preparation
+        || witness.protocol != 1
+        || witness.status != "prepared-isolated"
+        || witness.update_id != activation.update_id
+        || witness.target_version != activation.target_version
+        || witness.entry_sha256 != activation.target_entry_sha256
+        || witness.helper_sha256 != activation.target_helper_sha256
+        || witness.verification_sha256 != digest
+    {
+        return Err(Error::IncompatibleStore);
+    }
+    Ok(())
+}
+
+pub(super) async fn record_observation(
+    home: PathBuf,
+    update_id: String,
+    observation: CandidatePreparationObservation,
+) -> Result<serde_json::Value> {
+    let mut proposed: IsolatedTrialVerification =
+        serde_json::from_str(&observation.verification_json)
+            .map_err(|_| Error::IncompatibleStore)?;
+    if proposed.candidate_observation.is_some() {
+        return Err(Error::IncompatibleStore);
+    }
+    validate_isolated_trial_request(&home, &update_id, &proposed.request)?;
+    validate_isolated_trial_preparation(&proposed.request, &proposed.preparation)?;
+    proposed.candidate_observation = Some(observation);
+    validate_observation(&proposed)?;
+    let lease = TrialLease::open(home, &proposed.request).await?;
+    let receipt = lease.trial.with_extension("receipt-v1.json");
+    let saved = read_trial_receipt::<IsolatedTrialVerification>(&receipt)?
+        .ok_or(Error::IncompatibleStore)?;
+    validate_observation(&saved)?;
+    if saved.request != proposed.request
+        || saved.preparation != proposed.preparation
+        || (saved.candidate_observation.is_some() && saved != proposed)
+    {
+        return Err(Error::IncompatibleStore);
+    }
+    lease
+        .verify_candidate(&proposed.request, &proposed.preparation)
+        .await?;
+    let reused = saved.candidate_observation.is_some();
+    if !reused {
+        let bytes = serde_json::to_vec(&proposed).map_err(|_| Error::IncompatibleStore)?;
+        if bytes.len() > 8192 {
+            return Err(Error::IncompatibleStore);
+        }
+        let directory = TrialRestoreDirectories::pinned(&lease.directories.state);
+        let mut stage = tempfile::NamedTempFile::new_in(directory).map_err(io_error)?;
+        stage.write_all(&bytes).map_err(io_error)?;
+        #[cfg(test)]
+        super::tests::interrupt_trial_publication("candidate-observation-written");
+        stage.as_file().sync_all().map_err(io_error)?;
+        lease.verify_inputs()?;
+        lease.verify_activation(&proposed.request)?;
+        if read_trial_receipt::<IsolatedTrialVerification>(&receipt)?.as_ref() != Some(&saved) {
+            return Err(Error::IncompatibleStore);
+        }
+        stage
+            .persist(&receipt)
+            .map_err(|error| io_error(error.error))?;
+    }
+    lease.sync_publication()?;
+    #[cfg(test)]
+    if !reused {
+        super::tests::interrupt_trial_publication("candidate-observation-durable");
+    }
+    if read_trial_receipt::<IsolatedTrialVerification>(&receipt)?.as_ref() != Some(&proposed) {
+        return Err(Error::IncompatibleStore);
+    }
+    lease
+        .verify_candidate(&proposed.request, &proposed.preparation)
+        .await?;
+    Ok(
+        serde_json::json!({"witness": proposed.candidate_observation.unwrap().witness, "reused": reused}),
+    )
 }
