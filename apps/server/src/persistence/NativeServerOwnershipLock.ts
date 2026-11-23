@@ -10,6 +10,7 @@ const Acquired = Schema.Struct({
   replaced_during_acquire: Schema.Boolean,
 });
 const Owned = Schema.Struct({ owned: Schema.Boolean });
+const StartupChecked = Schema.Struct({ checked: Schema.Literal(true) });
 const Activated = Schema.Struct({ activated: Schema.Literal(true) });
 const error = (cause: NativeDatabase.NativeDatabaseError) =>
   new OwnershipLockError({
@@ -29,6 +30,10 @@ export const make = Effect.fn("NativeServerOwnershipLock.make")(function* (execu
       const acquired = yield* database.request({ operation: "owner_acquire" }, Acquired);
       return {
         replacedDuringAcquire: !acquired.owned || acquired.replaced_during_acquire,
+        checkStartup: database.request({ operation: "owner_check_startup" }, StartupChecked).pipe(
+          Effect.asVoid,
+          Effect.mapError(error),
+        ),
         activateNative: database
           .request({ operation: "owner_activate" }, Activated)
           .pipe(Effect.asVoid, Effect.mapError(error)),

@@ -14,6 +14,7 @@ export class ServerOwnershipLock extends Context.Service<
       {
         readonly replacedDuringAcquire: boolean;
         readonly verify: Effect.Effect<boolean, OwnershipLockError>;
+        readonly checkStartup?: Effect.Effect<void, OwnershipLockError>;
         readonly activateNative?: Effect.Effect<void, OwnershipLockError>;
       },
       OwnershipLockError,

@@ -227,6 +227,15 @@ export const acquireServerOwnershipWithLock = Effect.fn("acquireServerOwnership"
     return yield* new OlderBootServiceError({ baseDir: olderServiceHome });
   }
 
+  // Check the native catalog after legacy owner exclusion and before any
+  // server layer can bind listeners, run startup effects or publish readiness.
+  // This cannot admit a prepared/forward store or clear its permanent fence.
+  if (lock.checkStartup !== undefined) {
+    yield* lock.checkStartup.pipe(
+      Effect.mapError((cause) => new ServerOwnershipError({ stateDir, cause })),
+    );
+  }
+
   const lostSignal = yield* Deferred.make<never, ServerOwnershipError>();
   yield* Effect.gen(function* () {
     let lost = lock.replacedDuringAcquire;
