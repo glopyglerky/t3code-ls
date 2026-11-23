@@ -1658,6 +1658,18 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     #[cfg(target_os = "linux")]
     if let [mode, home, encoded] = args.as_slice() {
+        if mode == "forward-owner" {
+            if t3_code_ls_storage::application_storage::run_forward_owner(
+                PathBuf::from(home),
+                encoded.clone(),
+            )
+            .await
+            .is_err()
+            {
+                std::process::exit(78);
+            }
+            return Ok(());
+        }
         if mode == "trial-commit-inherited-forward" {
             if t3_code_ls_storage::forward_child_readiness::commit(Path::new(home), encoded)
                 .await

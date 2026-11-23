@@ -35,6 +35,14 @@ fn verify_image(file: &File, expected: &str) -> Result<()> {
     Ok(())
 }
 
+/// Require the actual executing helper to have the selected immutable identity.
+pub(crate) fn verify_running_image(expected: &str) -> Result<()> {
+    verify_image(
+        &File::open("/proc/self/exe").map_err(|_| Error::IncompatibleStore)?,
+        expected,
+    )
+}
+
 /// Fixture-only staging. The copy is private until seals and the exact expected
 /// digest have been checked. No descriptor, path or digest transfers authority.
 #[cfg(test)]

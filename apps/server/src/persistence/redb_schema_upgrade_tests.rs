@@ -3474,6 +3474,7 @@ async fn forward_packaged_writer_case(home: &std::path::Path, lose_output: bool)
             .unwrap()
     );
     assert_eq!(capture_forward_file(&live).unwrap(), marked);
+    forward_owner_protocol_cases(home);
     forward_server_startup_refused(home);
     println!(
         "T05 installed sealed helper committed exact catalog; lost output {lose_output}, reconciled without replay"
@@ -3532,4 +3533,102 @@ fn forward_server_startup_refused(home: &std::path::Path) {
     .unwrap();
     owner.verify_native().unwrap();
     println!("T05 native startup owner refused selected forward catalog; receipts unchanged");
+}
+
+#[cfg(target_os = "linux")]
+fn forward_owner_protocol_cases(home: &std::path::Path) {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::fd::AsRawFd;
+    use std::process::{Command, Stdio};
+    let state = home.join("userdata");
+    let helper = home.join("runtime/versions/1.2.4/native-bin/t3-code-ls-db");
+    let selection = home.join("runtime/service-state.json");
+    let paths = [
+        state.join("statev2.omdb"),
+        state.join("server-owner.sqlite"),
+        state.join(format!(".statev2-trial-{ISOLATED_UPDATE}.receipt-v1.json")),
+        state.join(format!(".statev2-forward-{ISOLATED_UPDATE}.json")),
+        selection.clone(),
+    ];
+    let before = paths.each_ref().map(|path| capture_forward_file(path));
+    let digest =
+        crate::application_storage::trial_executable_digest(&std::fs::File::open(&helper).unwrap())
+            .unwrap();
+    // Matching installed bytes without immutable executing-image seals refuse.
+    let refused = Command::new(&helper)
+        .arg("forward-owner")
+        .arg(home)
+        .arg(ISOLATED_UPDATE)
+        .env_clear()
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(78));
+    assert!(refused.stdout.is_empty());
+    let image = crate::forward_child_readiness::stage_image(&helper, &digest).unwrap();
+    let image_path = format!("/proc/{}/fd/{}", std::process::id(), image.as_raw_fd());
+    let launch = || {
+        Command::new(&image_path)
+            .arg("forward-owner")
+            .arg(home)
+            .arg(ISOLATED_UPDATE)
+            .env_clear()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+    // A live ordinary owner cannot be displaced by the proof checker.
+    let owner = crate::application_server_ownership::OwnerLock::acquire_existing_native(
+        &state.join("server-owner.sqlite"),
+    )
+    .unwrap();
+    let refused = launch().wait_with_output().unwrap();
+    assert_eq!(refused.status.code(), Some(78));
+    assert!(refused.stdout.is_empty());
+    drop(owner);
+    for replace_selection in [true, false] {
+        let mut child = launch();
+        let mut input = child.stdin.take().unwrap();
+        let mut output = BufReader::new(child.stdout.take().unwrap());
+        let request = b"{\"operation\":\"forward_owner_check\"}\n";
+        input.write_all(request).unwrap();
+        input.flush().unwrap();
+        let mut line = String::new();
+        output.read_line(&mut line).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&line).unwrap(),
+            json!({"ok":true,"result":{"checked":true,"serving":false}})
+        );
+        assert!(matches!(
+            crate::application_server_ownership::OwnerLock::acquire_existing_native(
+                &state.join("server-owner.sqlite")
+            ),
+            Err(Error::WriterBusy)
+        ));
+        if replace_selection {
+            let selected = std::fs::read(&selection).unwrap();
+            std::fs::write(&selection, b"foreign selection").unwrap();
+            input.write_all(request).unwrap();
+            input.flush().unwrap();
+            drop(input);
+            let result = child.wait_with_output().unwrap();
+            assert_eq!(result.status.code(), Some(78));
+            line.clear();
+            assert_eq!(output.read_line(&mut line).unwrap(), 0);
+            std::fs::write(&selection, selected).unwrap();
+        } else {
+            // EOF releases ownership; recovery reacquires the same exact proof.
+            drop(input);
+            assert!(child.wait_with_output().unwrap().status.success());
+        }
+        assert_eq!(
+            paths.each_ref().map(|path| capture_forward_file(path)),
+            before
+        );
+    }
+    println!(
+        "T05 forward owner: immutable image, live-owner refusal, continuing selection checks, EOF release and reacquisition; never serving"
+    );
 }
