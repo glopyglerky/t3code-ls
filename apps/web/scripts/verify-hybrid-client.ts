@@ -17,7 +17,9 @@ import {
   DEFAULT_TERMINAL_ID,
   ORCHESTRATION_PROTOCOL_HEADER,
   ORCHESTRATION_PROTOCOL_VERSION_TEXT,
+  ORCHESTRATION_V2_WS_METHODS,
   OrchestrationV2ThreadDetailSnapshot,
+  PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   type TerminalAttachStreamEvent,
   type TerminalSessionSnapshot,
 } from "@t3tools/contracts";
@@ -37,6 +39,16 @@ import {
 
 type Implementation = "upstream" | "native";
 type PairingRenderer = "retained" | "dioxus" | "dioxus-fallback";
+type ComposerSubmitRequest = {
+  method: string;
+  commandId: string;
+  threadId: string;
+  messageId: string;
+};
+type ComposerSubmitProof = {
+  renderer: "dioxus" | "dioxus-fallback";
+  requests: ComposerSubmitRequest[];
+};
 type OwnedApplication = {
   pid: number;
   pairingUrl: string;
@@ -66,6 +78,8 @@ const pairingProof = process.env.T3_CODE_LS_PAIRING_PROOF;
 const guestNameProof = process.env.T3_CODE_LS_GUEST_NAME_PROOF;
 Assert.ok(guestNameProof === undefined || (bundledClient && ["retained", "dioxus", "dioxus-fallback"].includes(guestNameProof)), "Guest name proof requires an explicit packaged renderer");
 const dioxusFindProof = process.env.T3_CODE_LS_DIOXUS_FIND_PROOF;
+const composerSubmitRenderer = process.env.T3_CODE_LS_COMPOSER_SUBMIT_PROOF;
+const composerSubmitWasmPath = "/pairing-wasm/local_pairing_bg.wasm";
 const expectsDioxusFind = process.env.VITE_T3_CODE_LS_THREAD_FIND_RENDERER === "dioxus";
 const bundledPtyProof = process.env.T3_CODE_LS_BUNDLED_PTY_PROOF === "true";
 const ptyRestartProof = process.env.T3_CODE_LS_PTY_RESTART_PROOF === "true";
@@ -90,6 +104,7 @@ Assert.ok(!pdfExternalOnlyProof || [
   parallelTurnsProof, spliceNegotiationProof, splitPtyProof, bundledPtyProof, ptyRestartProof,
   multiTabDraftProof, draftStorageProof, fileEditorProof, durableTextProof, voiceDraftProof,
   htmlInteractionProof, pairingProof !== undefined, dioxusFindProof !== undefined,
+  composerSubmitRenderer !== undefined,
 ].every((enabled) => !enabled), "PDF-only qualification cannot replace another selected proof scope");
 Assert.ok(!htmlInteractionProof || bundledClient, "Interactive HTML must exercise the packaged browser route");
 const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
@@ -138,6 +153,12 @@ Assert.ok(
 if (pairingProof !== undefined && (!bundledClient || !isPairingRenderer(pairingProof))) {
   throw new Error("The pairing proof requires the bundled client and renderer retained or dioxus.");
 }
+Assert.ok(
+  composerSubmitRenderer === undefined ||
+    (bundledClient && mode === "native" &&
+      (composerSubmitRenderer === "dioxus" || composerSubmitRenderer === "dioxus-fallback")),
+  "The Send button proof requires the bundled native application and an explicit renderer",
+);
 
 function isPairingRenderer(value: string): value is PairingRenderer {
   return value === "retained" || value === "dioxus" || value === "dioxus-fallback";
@@ -693,6 +714,7 @@ async function submitReplay(
   modelLabel = "Showcase",
   prompt = replayPrompt,
   projectName?: string,
+  composerSubmit?: ComposerSubmitProof,
 ): Promise<string> {
   await page.getByRole("button", {
     name: projectName === undefined ? "New thread in hybrid-fixture" : "New thread",
@@ -721,13 +743,55 @@ async function submitReplay(
   await search.waitFor({ state: "hidden" });
 
   const editor = page.getByTestId("composer-editor");
+  const submit = composerSubmit
+    ? await verifyComposerSubmitRefusal(page, editor, composerSubmit)
+    : page.getByRole("button", { name: "Submit message", exact: true });
   await editor.click();
   await editor.fill(prompt);
-  await page.getByRole("button", { name: "Submit message", exact: true }).click();
+  await submit.click();
   await page.waitForURL((url) => /^\/(?!draft\/)[^/]+\/[^/]+$/u.test(url.pathname));
   const thread = new URL(page.url()).pathname.split("/").at(-1);
   Assert.ok(thread, "The composer must navigate to the submitted thread");
   return decodeURIComponent(thread);
+}
+
+async function verifyComposerSubmitRefusal(
+  page: Page,
+  editor: Locator,
+  proof: ComposerSubmitProof,
+): Promise<Locator> {
+  const footer = page.locator('[data-chat-composer-footer="true"]:visible');
+  const native = footer.locator('button[data-composer-submit-renderer="dioxus-wasm"]');
+  const buttons = footer.locator('button[type="submit"]');
+  if (proof.renderer === "dioxus-fallback") {
+    await footer.getByRole("button", { name: "Use standard Send button", exact: true }).click();
+    Assert.equal(proof.requests.length, 0, "Selecting the standard control must never submit");
+    Assert.equal(await native.count(), 0);
+  } else {
+    await native.waitFor({ state: "visible" });
+  }
+  const submit = footer.getByRole("button", { name: "Submit message", exact: true });
+  await submit.waitFor({ state: "visible" });
+  Assert.equal(await buttons.count(), 1);
+  Assert.ok(await submit.isDisabled(), "An empty draft must disable Send");
+  Assert.ok(await submit.evaluate((button) => (button as HTMLButtonElement).form?.contains(button)));
+  await submit.evaluate((button) => (button as HTMLButtonElement).click());
+  Assert.equal(proof.requests.length, 0, "The disabled action must never submit");
+
+  const draftUrl = page.url();
+  const draft = "x".repeat(PROVIDER_SEND_TURN_MAX_INPUT_CHARS + 1);
+  await editor.fill(draft);
+  await submit.and(footer.locator("button:enabled")).waitFor({ state: "visible" });
+  const validation = page.locator('[data-chat-composer-validation="prompt-length"]');
+  await validation.waitFor({ state: "hidden" });
+  await submit.press("Enter");
+  await validation.filter({ hasText: /Prompt is 1 character over the /u })
+    .waitFor({ state: "visible" });
+  Assert.equal(await editor.textContent(), draft, "Local refusal must preserve the whole draft");
+  Assert.equal(page.url(), draftUrl, "Local refusal must preserve the draft route");
+  Assert.ok(await submit.evaluate((button) => document.activeElement === button));
+  Assert.equal(proof.requests.length, 0, "Local refusal must never dispatch a turn");
+  return submit;
 }
 
 async function pendingShowcase(
@@ -2127,13 +2191,20 @@ async function exercise(implementation: Implementation): Promise<void> {
     implementation,
     client: bundledClient ? "built" : "development",
     composer: "unverified",
+    composerSubmit: null as (ComposerSubmitProof & {
+      wasmSha256: string | null;
+      refusedWasmRequests: number;
+      localRefusalPreservedDraft: true;
+    }) | null,
     textRevisionProfile: null as ReturnType<typeof textRevisionIdentity> | null,
     pdfLinks: null as Awaited<ReturnType<typeof verifyLinkedPdf>> | null,
     htmlInteraction: null as Awaited<ReturnType<typeof verifyInteractiveHtml>> | null,
     previewBrowser,
     previewLifetime: null as Awaited<ReturnType<typeof verifyPreviewLifetime>> | null,
     pdfExternalOnly: pdfExternalOnlyProof,
-    scope: pdfExternalOnlyProof
+    scope: composerSubmitRenderer
+      ? "Linux packaged native application; authenticated ordinary Send, local refusal, and one controlled replay turn"
+      : pdfExternalOnlyProof
       ? "Linux packaged native application; authenticated local project and replay thread; signed PDF internal jumps and explicit loopback external links; no terminal qualification"
       : ptyContentionProof
         ? "Linux x64 bundled PTY; foreground burst, browser reattach, and a separate recorded ACP approval"
@@ -2238,6 +2309,12 @@ async function exercise(implementation: Implementation): Promise<void> {
   };
   let context = await browser!.newContext(contextOptions);
   let page = await context.newPage();
+  const composerSubmit: ComposerSubmitProof | undefined =
+    composerSubmitRenderer === "dioxus" || composerSubmitRenderer === "dioxus-fallback"
+      ? { renderer: composerSubmitRenderer, requests: [] }
+      : undefined;
+  let composerWasm: BrowserResponse | undefined;
+  let refusedComposerWasmRequests = 0;
   let threadFindRequests = 0;
   let messageAppendFrames = 0;
   let messageAppendRequests = 0;
@@ -2263,6 +2340,24 @@ async function exercise(implementation: Implementation): Promise<void> {
     current.on("websocket", (socket) => {
       socket.on("framesent", ({ payload }) => {
         const json = payload.toString();
+        if (composerSubmit && (
+          json.includes(ORCHESTRATION_V2_WS_METHODS.launchThread) ||
+          json.includes(ORCHESTRATION_V2_WS_METHODS.dispatchCommand)
+        )) {
+          const request = JSON.parse(json);
+          const input = request.payload;
+          if (
+            (request.tag === ORCHESTRATION_V2_WS_METHODS.launchThread && input?.initialMessage) ||
+            (request.tag === ORCHESTRATION_V2_WS_METHODS.dispatchCommand && input?.type === "message.dispatch")
+          ) {
+            composerSubmit.requests.push({
+              method: request.tag,
+              commandId: input.commandId,
+              threadId: input.threadId,
+              messageId: input.initialMessage?.messageId ?? input.messageId,
+            });
+          }
+        }
         if (json.includes('"orchestration.searchThreadStream"')) {
           threadFindRequests += 1;
         }
@@ -2351,6 +2446,16 @@ async function exercise(implementation: Implementation): Promise<void> {
   observePage(page);
 
   try {
+    if (composerSubmit?.renderer === "dioxus") {
+      page.on("response", (response) => {
+        if (new URL(response.url()).pathname === composerSubmitWasmPath) composerWasm = response;
+      });
+    } else if (composerSubmit?.renderer === "dioxus-fallback") {
+      await page.route(`**${composerSubmitWasmPath}`, (route) => {
+        refusedComposerWasmRequests += 1;
+        return route.abort("blockedbyclient");
+      });
+    }
     if (durableTextProof) {
       starting("initialize the opted-in assistant text layout");
       proof.textRevisionProfile = textRevisionIdentity(stateDirectory, true);
@@ -2396,7 +2501,7 @@ async function exercise(implementation: Implementation): Promise<void> {
       completed("Kept the newer draft from the first tab and the model selected in the second");
     }
     starting("normal composer submission and controlled approval");
-    const threadId = await submitReplay(page);
+    const threadId = await submitReplay(page, undefined, undefined, undefined, composerSubmit);
     proof.threadId = threadId;
     const usedRustComposer = await page.evaluate(
       () => performance.getEntriesByName("t3-composer-rust-offsets").length === 1,
@@ -2427,6 +2532,35 @@ async function exercise(implementation: Implementation): Promise<void> {
     proof.threadUrl = page.url();
     inspectPersistence("initial");
     completed("Received the completed replay turn on the original thread route");
+    if (composerSubmit) {
+      Assert.equal(composerSubmit.requests.length, 1, "Send must emit exactly one turn request");
+      const [request] = composerSubmit.requests;
+      Assert.ok(request?.commandId);
+      Assert.equal(request.method, ORCHESTRATION_V2_WS_METHODS.launchThread);
+      Assert.equal(request.threadId, threadId);
+      const messages = pending.projection.messages.filter((message) => message.role === "user");
+      Assert.equal(messages.length, 1);
+      Assert.equal(messages[0]?.id, request.messageId);
+      let wasmSha256: string | null = null;
+      if (composerSubmit.renderer === "dioxus") {
+        Assert.ok(composerWasm?.ok(), "Send must load the bundled Wasm");
+        wasmSha256 = NodeCrypto.createHash("sha256").update(await composerWasm.body()).digest("hex");
+        const bundledWasm = NodePath.join(repoRoot, "apps/web/dist", composerSubmitWasmPath.slice(1));
+        Assert.equal(wasmSha256, NodeCrypto.createHash("sha256")
+          .update(NodeFS.readFileSync(bundledWasm)).digest("hex"));
+      } else {
+        Assert.equal(refusedComposerWasmRequests, 1, "The explicit fallback must follow a blocked Wasm load");
+      }
+      proof.composerSubmit = {
+        ...composerSubmit,
+        wasmSha256,
+        refusedWasmRequests: refusedComposerWasmRequests,
+        localRefusalPreservedDraft: true,
+      };
+      completed("Verified the Send button, local refusal, and exactly one authenticated turn");
+      proof.status = "passed";
+      return;
+    }
     if (ptyContentionProof) {
       Assert.ok(nativePtyHost !== undefined);
       starting("run a foreground terminal burst during an independent replay turn");

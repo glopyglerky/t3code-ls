@@ -2,6 +2,10 @@ export interface DioxusMount {
   free(): void;
 }
 
+export interface ComposerSubmitMount extends DioxusMount {
+  update(className: string, label: string, disabled: boolean): void;
+}
+
 export interface WelcomeMount extends DioxusMount {
   update(agentReady: boolean, isImporting: boolean, selectedCount: number, newCount: number): void;
 }
@@ -21,6 +25,12 @@ export interface ThreadFindMount extends DioxusMount {
 
 interface OnboardingBindings {
   default(): Promise<unknown>;
+  mount_composer_submit(
+    root: HTMLSpanElement,
+    className: string,
+    label: string,
+    disabled: boolean,
+  ): ComposerSubmitMount;
   mount_pairing_form(
     root: HTMLDivElement,
     token: string,

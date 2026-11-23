@@ -3734,6 +3734,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     canResume={showResumeAction}
                     preserveComposerFocusOnPointerDown={isMobileViewport}
                     isEditingQueuedMessage={isEditingQueuedMessage}
+                    useDioxusSubmit={
+                      import.meta.env.VITE_T3_CODE_LS_COMPOSER_SUBMIT_RENDERER === "dioxus" &&
+                      !isComposerApprovalState &&
+                      speechInput.state.phase === "idle"
+                    }
                     onSubmitMessage={handleSubmitMessageStable}
                     onResume={onResume}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
