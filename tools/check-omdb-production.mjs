@@ -357,6 +357,7 @@ try {
       "crates/core/src/guest_share_wire.rs",
       "tools/check-omdb-production.mjs",
       "tools/omdb-guest-redeem-fixture.ts",
+      "tools/omdb-guest-state.ts",
       "tools/redb-event-sink-fixtures.mjs",
       "packages/shared/src/applicationDatabase.ts",
       "apps/web/scripts/hybrid-client-database.ts",

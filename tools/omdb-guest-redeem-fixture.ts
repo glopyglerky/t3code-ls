@@ -40,7 +40,7 @@ import * as EventSink from "../apps/server/src/orchestration-v2/EventSink.ts";
 import * as ProjectionStore from "../apps/server/src/orchestration-v2/ProjectionStore.ts";
 import * as Runtime from "../apps/server/src/orchestration-v2/selectedRuntimeLayer.ts";
 import * as Omdb from "../apps/server/src/persistence/Omdb.ts";
-import { RedbClient, type RowPage } from "../apps/server/src/persistence/RedbClient.ts";
+import { RedbClient } from "../apps/server/src/persistence/RedbClient.ts";
 import * as Selected from "../apps/server/src/persistence/SelectedPersistence.ts";
 import * as ManagedPolicy from "../apps/server/src/policy/ManagedPolicy.ts";
 import * as ProviderInstances from "../apps/server/src/provider/ProviderInstanceRegistry.ts";
@@ -49,29 +49,20 @@ import * as Settings from "../apps/server/src/serverSettings.ts";
 import * as Analytics from "../apps/server/src/telemetry/AnalyticsService.ts";
 import * as VcsDriverRegistry from "../apps/server/src/vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../apps/server/src/vcs/VcsProcess.ts";
+import {
+  assertRedeemCommit,
+  assertRedeemReplay,
+  guestStatePageLimit,
+  guestStateTables,
+} from "./omdb-guest-state.ts";
 
 const host = "env.t3.test";
-const redeemCommand = "thread.guest-share.redeem";
 const encodeRedeem = Schema.encodeSync(Schema.fromJsonString(GuestRedeemRequest));
 const decodeRefusal = Schema.decodeUnknownEffect(Schema.Struct({ reason: Schema.String }));
 
-function cellValue(cell: Schema.Json | undefined) {
-  return cell !== null && typeof cell === "object" && "value" in cell ? cell.value : undefined;
-}
-
-function appendedRows(
-  before: RowPage["rows"],
-  after: RowPage["rows"],
-  id: string,
-) {
-  const oldIds = new Set(before.map(({ row }) => cellValue(row[id])));
-  Assert.deepEqual(after.filter(({ row }) => oldIds.has(cellValue(row[id]))), before);
-  return after.filter(({ row }) => !oldIds.has(cellValue(row[id]))).map(({ row }) => row);
-}
-
 function snapshot(client: RedbClient["Service"]) {
   const rows = (table: string) =>
-    client.scan(table, { limit: 32 }).pipe(
+    client.scan(table, { limit: guestStatePageLimit }).pipe(
       Effect.map((page) => {
         Assert.equal(page.next, null, `fixture table exceeds its bound: ${table}`);
         return page.rows;
@@ -80,11 +71,11 @@ function snapshot(client: RedbClient["Service"]) {
 
   return client.withReadTransaction(Effect.gen(function* () {
     return {
-      events: yield* rows("orchestration_events"),
-      projects: yield* rows("projection_projects"),
-      threads: yield* rows("orchestration_v2_projection_threads"),
-      receipts: yield* rows("orchestration_command_receipts"),
-      outbox: yield* rows("orchestration_v2_effect_outbox"),
+      events: yield* rows(guestStateTables.events),
+      projects: yield* rows(guestStateTables.projects),
+      threads: yield* rows(guestStateTables.threads),
+      receipts: yield* rows(guestStateTables.receipts),
+      outbox: yield* rows(guestStateTables.outbox),
     };
   }));
 }
@@ -288,22 +279,7 @@ export async function verifyGuestRedeem({
       Assert.ok(/;\s*Path=\/api\/guest(?:;|$)/iu.test(cookie));
 
       const after = yield* snapshot(client);
-      const [update, ...extraEvents] = appendedRows(before.events, after.events, "event_id");
-      Assert.equal(after.events.length, before.events.length + 1);
-      Assert.ok(update && extraEvents.length === 0);
-      Assert.equal(cellValue(update.event_type), "thread.guest-share-updated");
-      Assert.equal(cellValue(update.stream_id), threadId);
-      const newReceipts = appendedRows(before.receipts, after.receipts, "command_id");
-      Assert.equal(after.receipts.length, before.receipts.length + 2);
-      Assert.deepEqual(newReceipts.map((row) => cellValue(row.status)).sort(), ["accepted", "rejected"]);
-      Assert.ok(newReceipts.every((row) => cellValue(row.command_type) === redeemCommand));
-      const accepted = newReceipts.find((row) => cellValue(row.status) === "accepted");
-      Assert.ok(accepted);
-      Assert.deepEqual(accepted.command_id, update.command_id);
-      Assert.deepEqual(accepted.result_sequence, update.sequence);
-      Assert.deepEqual(after.projects, before.projects);
-      Assert.deepEqual(after.outbox, before.outbox);
-      Assert.equal(after.threads.length, 1);
+      assertRedeemCommit(before, after, threadId);
       const stored = (yield* projections.getThread(threadId)).guestShare;
       Assert.equal(stored?.id, share.id);
       Assert.equal(stored?.guestName, winner.name);
@@ -326,15 +302,7 @@ export async function verifyGuestRedeem({
     Assert.equal((yield* session(first.shareId, first.sessionCookie)).status, 204);
     yield* assertRefusal(yield* redeem(first.credential, "Replay after reopen"), 409, "used");
     const afterReplay = yield* snapshot(client);
-    Assert.deepEqual(afterReplay.events, first.after.events);
-    Assert.deepEqual(afterReplay.threads, first.after.threads);
-    Assert.deepEqual(afterReplay.projects, first.after.projects);
-    Assert.deepEqual(afterReplay.outbox, first.after.outbox);
-    const replayReceipts = appendedRows(first.after.receipts, afterReplay.receipts, "command_id");
-    Assert.equal(afterReplay.receipts.length, first.after.receipts.length + 1);
-    Assert.equal(replayReceipts.length, 1);
-    Assert.equal(cellValue(replayReceipts[0]?.command_type), redeemCommand);
-    Assert.equal(cellValue(replayReceipts[0]?.status), "rejected");
+    assertRedeemReplay(first.after, afterReplay);
     const replacement = yield* guest.create({ threadId });
     Assert.notEqual(replacement.share.id, first.shareId);
     const afterRevocation = yield* snapshot(client);
