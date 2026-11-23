@@ -246,6 +246,33 @@ function serviceScenario(kind) {
       body: new TextEncoder().encode(JSON.stringify({ group: "same", value })),
       relayDeliveryId: delivery,
     });
+    if (kind === "native") {
+      const rows = yield* NativeScheduledRows.make;
+      const incomplete = "legacy-claim-without-admission";
+      yield* rows.write(
+        { kind: "claim_relay", relay_delivery_id: incomplete, task_id: hook.id, seen_at: at },
+        Rows.AnyRows,
+      );
+      const priorLaunches = launches.length;
+      const results = yield* Effect.all(
+        [request(incomplete, "retained"), request(incomplete, "retained")].map((delivery) =>
+          service.triggerWebhook(delivery),
+        ),
+        { concurrency: "unbounded" },
+      );
+      for (const reply of results) {
+        Assert.deepEqual(reply, {
+          _tag: "unresolved",
+          deliveryId: `delivery:relay:${incomplete}`,
+        });
+      }
+      Assert.equal(launches.length, priorLaunches);
+      const claim = yield* rows.write(
+        { kind: "claim_relay", relay_delivery_id: incomplete, task_id: hook.id, seen_at: at },
+        Rows.AnyRows,
+      );
+      Assert.deepEqual(claim, [], "An unresolved retry must preserve the original claim");
+    }
     result.accepted = yield* service.triggerWebhook(request("first", "one"));
     result.coalesced = yield* service.triggerWebhook(request("second", "two"));
     result.duplicate = yield* service.triggerWebhook(request("second", "two"));
@@ -418,6 +445,9 @@ try {
   );
   checks.push(
     "Real webhook path preserves relay claims, replay dedupe, coalescing, request replacement, dispatch, log detail, token rotation and deletion",
+  );
+  checks.push(
+    "Concurrent native retries of a claim without durable admission stay unresolved, retain the claim and launch no work",
   );
   const sqlRows = await withSqlite(sqlitePath, (sql) =>
     Effect.gen(function* () {

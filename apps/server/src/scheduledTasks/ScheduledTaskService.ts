@@ -34,6 +34,7 @@ import * as Digest from "effect/crypto/Digest";
 import * as Mac from "effect/crypto/Mac";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Duration from "effect/Duration";
@@ -106,6 +107,9 @@ const WEBHOOK_DELIVERY_LOG_PROMPT_LIMIT = 64 * 1024;
 const WEBHOOK_MAX_QUEUED_PER_TASK = 20;
 // Enforce the relay's per-task/minute limit here too; tunnel hostnames are public.
 const WEBHOOK_RATE_LIMIT_PER_MINUTE = 60;
+const RELAY_CLAIM_RETENTION_HOURS = 48;
+// User replay keys are hex digests, so the relay receipt has its own namespace.
+const relayReceiptKey = (id: string) => `relay-admission:${id}`;
 const LEGACY_DELIVERY_OUTCOMES: ReadonlySet<string> = new Set([
   "accepted",
   "dispatch_failed",
@@ -171,6 +175,7 @@ export type WebhookDeliveryOutcome =
   | "filtered"
   | "not_found"
   | "blocked_by_policy"
+  | "unresolved"
   | "error";
 
 export type WebhookTriggerResult =
@@ -187,7 +192,11 @@ export type WebhookTriggerResult =
       readonly _tag: "rate_limited";
       readonly outcome: "rate_limited" | "queue_full";
     }
-  | { readonly _tag: "expired" };
+  | { readonly _tag: "expired" }
+  | {
+      readonly _tag: "unresolved";
+      readonly deliveryId: ScheduledTaskWebhookDeliveryId;
+    };
 
 const webhookFilters = (filters: ReadonlyArray<ScheduledTaskWebhookFilter> | undefined) =>
   filters?.length ? { filters } : {};
@@ -525,6 +534,9 @@ export const layerWithRows = Layer.effect(
     );
     // Include creation time so late deliveries cannot decrement a recreated task's count.
     const webhookQueued = yield* Ref.make<ReadonlyMap<string, number>>(new Map());
+    const immediateRelayHandoffs = yield* Ref.make<ReadonlyMap<string, Deferred.Deferred<boolean>>>(
+      new Map(),
+    );
     const webhookRateWindows = yield* Ref.make<ReadonlyMap<ScheduledTaskId, RateWindow>>(new Map());
     const webhookRejectedRateWindows = yield* Ref.make<ReadonlyMap<ScheduledTaskId, RateWindow>>(
       new Map(),
@@ -832,6 +844,28 @@ export const layerWithRows = Layer.effect(
       if (updated.length > 0) yield* notifyChanged;
     });
 
+    const recordRelayReceipt = (
+      taskId: ScheduledTaskId,
+      relayId: string,
+      ownerId: string,
+      now: DateTime.DateTime,
+    ) =>
+      store
+        .write(
+          {
+            kind: "claim_replay",
+            task_id: taskId,
+            replay_key: relayReceiptKey(relayId),
+            delivery_id: ownerId,
+            now: DateTime.toEpochMillis(now),
+            expires_at: DateTime.toEpochMillis(
+              DateTime.add(now, { hours: RELAY_CLAIM_RETENTION_HOURS }),
+            ),
+          },
+          AnyRows,
+        )
+        .pipe(Effect.mapError(dedupeError));
+
     const runTask = Effect.fn("ScheduledTaskService.runTask")(function* (
       task: ScheduledTask,
       trigger: "scheduled" | "manual" | "webhook",
@@ -839,6 +873,7 @@ export const layerWithRows = Layer.effect(
         readonly deliveryId: string;
         readonly prompt: string;
         readonly dispatched: Ref.Ref<boolean>;
+        readonly immediateRelayId?: string;
       },
     ) {
       // Read before reserving: nothing between the reservation and its release may fail.
@@ -1067,8 +1102,16 @@ export const layerWithRows = Layer.effect(
               { kind: "pending", delivery_id: webhook.deliveryId, first: false },
               PendingRows,
             );
-            if (pending.length === 0) written = yield* completion;
-            else {
+            if (pending.length === 0) {
+              written = yield* completion;
+              if (runSucceeded && webhook.immediateRelayId !== undefined)
+                yield* recordRelayReceipt(
+                  active.id,
+                  webhook.immediateRelayId,
+                  webhook.deliveryId,
+                  startedAt,
+                );
+            } else {
               const counted = yield* store.write(
                 {
                   kind: "patch_pending",
@@ -1935,6 +1978,7 @@ export const layerWithRows = Layer.effect(
       task: ScheduledTask,
       deliveryId: string,
       prompt: string,
+      immediateRelayId?: string,
     ) {
       const runOutcome = (outcome: "started" | "skipped" | "failed") =>
         Effect.all([
@@ -1942,7 +1986,12 @@ export const layerWithRows = Layer.effect(
           Metrics.increment(Metrics.webhookRunsTotal, { outcome }),
         ]);
       const dispatched = yield* Ref.make(false);
-      return yield* runTask(task, "webhook", { deliveryId, prompt, dispatched }).pipe(
+      return yield* runTask(task, "webhook", {
+        deliveryId,
+        prompt,
+        dispatched,
+        ...(immediateRelayId === undefined ? {} : { immediateRelayId }),
+      }).pipe(
         Effect.flatMap(({ dispatchFailed }) =>
           dispatchFailed
             ? runOutcome("failed").pipe(
@@ -2094,29 +2143,49 @@ export const layerWithRows = Layer.effect(
               )}`
           : `delivery:relay:${request.relayDeliveryId}`,
       );
-      // Claimed in its own table, kept longer than the relay holds a request,
-      // because the delivery log is trimmed. A rate-limited delivery stays
-      // held on the relay, so it must give up its claim or the next pass
-      // would treat it as already delivered.
-      let claimAcquired = false;
+      const relayId = request.relayDeliveryId;
+      const receipt = (ownerId: string = deliveryId) =>
+        relayId === undefined ? Effect.void : recordRelayReceipt(task.id, relayId, ownerId, now);
       const releaseClaim = <A>(result: A) =>
-        !claimAcquired || request.relayDeliveryId === undefined
+        relayId === undefined
           ? Effect.succeed(result)
           : store
-              .write({ kind: "delete_relay", relay_delivery_id: request.relayDeliveryId }, AnyRows)
-              .pipe(Effect.ignore, Effect.as(result));
-      // From the claim until the run is forked nothing may interrupt: a
-      // request dropped in between (the relay hangs up after its timeout)
-      // would leave a claimed delivery that never runs, or a queue slot that
-      // is never released.
-      return yield* Effect.uninterruptible(
-        Effect.gen(function* () {
-          if (request.relayDeliveryId !== undefined) {
+              .write({ kind: "delete_relay", relay_delivery_id: relayId }, AnyRows)
+              .pipe(Effect.mapError(dedupeError), Effect.as(result));
+      const queueKey = `${task.id}\u0000${task.createdAt}`;
+      let queueReserved = false;
+      const release = Effect.suspend(() => {
+        if (!queueReserved) return Effect.void;
+        queueReserved = false;
+        return Ref.update(webhookQueued, (counts) => {
+          const next = new Map(counts);
+          const count = (next.get(queueKey) ?? 1) - 1;
+          if (count <= 0) next.delete(queueKey);
+          else next.set(queueKey, count);
+          return next;
+        });
+      });
+      const handoffKey = `${task.id}\u0000${deliveryId}`;
+      let handoff: Deferred.Deferred<boolean> | undefined;
+      const clearHandoff = Effect.suspend(() =>
+        handoff === undefined
+          ? Effect.void
+          : Ref.update(immediateRelayHandoffs, (handoffs) => {
+              if (handoffs.get(handoffKey) !== handoff) return handoffs;
+              const next = new Map(handoffs);
+              next.delete(handoffKey);
+              return next;
+            }),
+      );
+
+      const admitDelivery = Effect.fnUntraced(
+        function* () {
+          if (relayId !== undefined) {
             const claimed = yield* store
               .write(
                 {
                   kind: "claim_relay",
-                  relay_delivery_id: request.relayDeliveryId,
+                  relay_delivery_id: relayId,
                   task_id: task.id,
                   seen_at: iso(now),
                 },
@@ -2128,16 +2197,35 @@ export const layerWithRows = Layer.effect(
                 ),
               );
             if (claimed.length === 0) {
-              yield* observe("duplicate");
-              return { _tag: "accepted" as const, deliveryId, outcome: "duplicate" as const };
+              const receipts = yield* store
+                .read(
+                  {
+                    kind: "has_replay",
+                    task_id: task.id,
+                    replay_key: relayReceiptKey(relayId),
+                    now: DateTime.toEpochMillis(now),
+                  },
+                  AnyRows,
+                )
+                .pipe(Effect.mapError(dedupeError));
+              if (receipts.length > 0) {
+                yield* observe("duplicate");
+                return { _tag: "accepted" as const, deliveryId, outcome: "duplicate" as const };
+              }
+              return {
+                _tag: "claimed" as const,
+                handoff: (yield* Ref.get(immediateRelayHandoffs)).get(handoffKey),
+              };
             }
-            claimAcquired = true;
             yield* store
               .write(
-                { kind: "prune_relays", before: iso(DateTime.subtract(now, { hours: 48 })) },
+                {
+                  kind: "prune_relays",
+                  before: iso(DateTime.subtract(now, { hours: RELAY_CLAIM_RETENTION_HOURS })),
+                },
                 AnyRows,
               )
-              .pipe(Effect.ignore);
+              .pipe(Effect.mapError(dedupeError));
           }
           const log = (
             outcome: ScheduledTaskWebhookDeliveryOutcome,
@@ -2176,6 +2264,7 @@ export const layerWithRows = Layer.effect(
           }
           if (!task.enabled) {
             yield* log("disabled");
+            yield* receipt();
             yield* observe("disabled");
             return { _tag: "disabled" as const };
           }
@@ -2191,6 +2280,7 @@ export const layerWithRows = Layer.effect(
               }).pipe(Effect.provideService(Mac.Mac, mac)));
             if (!verified) {
               yield* log("rejected_signature");
+              yield* receipt();
               yield* observe("rejected_signature");
               return { _tag: "rejected_signature" as const };
             }
@@ -2202,6 +2292,7 @@ export const layerWithRows = Layer.effect(
               maxAgeMinutes * 60_000
           ) {
             yield* log("expired", { signatureVerified: signature !== null });
+            yield* receipt();
             yield* observe("expired");
             return { _tag: "expired" as const };
           }
@@ -2246,7 +2337,6 @@ export const layerWithRows = Layer.effect(
           const reserve = takeRateSlot(task.id, DateTime.toEpochMillis(now)).pipe(
             Effect.flatMap((slot) => (slot === "allowed" ? Effect.void : Effect.fail(slot))),
           );
-          const queueKey = `${task.id}\u0000${task.createdAt}`;
           const checkCapacity = Effect.gen(function* () {
             const [row] = yield* store.read({ kind: "pending_count", task_id: task.id }, CountRows);
             if (
@@ -2284,7 +2374,10 @@ export const layerWithRows = Layer.effect(
                       reserve,
                       takeDedupeLogSlot(task.id, DateTime.toEpochMillis(now)),
                       checkCapacity,
-                      (ownerId) => replaceDeliveryRequest(ownerId, request),
+                      (ownerId) =>
+                        replaceDeliveryRequest(ownerId, request).pipe(
+                          Effect.andThen(receipt(ownerId)),
+                        ),
                     ).pipe(Effect.provideService(ScheduledRows, store));
                     if (
                       outcome === "pending" ||
@@ -2316,7 +2409,7 @@ export const layerWithRows = Layer.effect(
             yield* observe(outcome);
             if (deduped === "duplicate")
               return yield* releaseClaim({ _tag: "accepted", deliveryId, outcome } as const);
-            claimAcquired = false;
+            if (deduped === "pending") yield* receipt();
             return { _tag: "accepted", deliveryId, outcome } as const;
           }
           const frameId = yield* random.randomBytes(6).pipe(
@@ -2344,18 +2437,6 @@ export const layerWithRows = Layer.effect(
           // Bound the deliveries one task holds, so steady traffic to a stuck
           // task cannot pile up parked fibers.
           yield* refundRejectionSlot;
-          let queueReserved = false;
-          const release = Effect.suspend(() => {
-            if (!queueReserved) return Effect.void;
-            queueReserved = false;
-            return Ref.update(webhookQueued, (counts) => {
-              const next = new Map(counts);
-              const count = (next.get(queueKey) ?? 1) - 1;
-              if (count <= 0) next.delete(queueKey);
-              else next.set(queueKey, count);
-              return next;
-            });
-          });
           // Serialize immediate reservations with persisted window admission.
           const reserveImmediate = Effect.gen(function* () {
             yield* checkCapacity;
@@ -2404,25 +2485,55 @@ export const layerWithRows = Layer.effect(
               outcome: "duplicate",
             } as const);
           }
-          yield* observe("accepted");
+          if (relayId !== undefined) {
+            handoff = yield* Deferred.make<boolean>();
+            const current = handoff;
+            yield* Ref.update(immediateRelayHandoffs, (handoffs) =>
+              new Map(handoffs).set(handoffKey, current),
+            );
+          }
+          return { _tag: "start_immediate" as const, prompt: rendered.prompt };
+        },
+        (effect) =>
+          relayId === undefined
+            ? effect
+            : transactions.withTransaction(effect).pipe(
+                Effect.mapError((cause) =>
+                  isScheduledTaskError(cause) ? cause : dedupeError(cause),
+                ),
+              ),
+      );
+      return yield* Effect.uninterruptible(
+        Effect.gen(function* () {
+          // The transaction settles the claim and admission before a retry can observe either.
+          // Wait for an immediate handoff outside the transaction so its worker can write.
+          const admission = yield* admitDelivery();
+          if (admission._tag === "claimed") {
+            if (admission.handoff !== undefined && (yield* Deferred.await(admission.handoff))) {
+              yield* observe("duplicate");
+              return { _tag: "accepted" as const, deliveryId, outcome: "duplicate" as const };
+            }
+            yield* observe("unresolved");
+            return { _tag: "unresolved" as const, deliveryId };
+          }
+          if (admission._tag !== "start_immediate") return admission;
           const permit = yield* webhookPermit(task.id);
-          yield* runWebhookDelivery(task, deliveryId, rendered.prompt).pipe(
+          yield* runWebhookDelivery(task, deliveryId, admission.prompt, relayId).pipe(
             permit.withPermits(1),
-            Effect.ensuring(release),
+            Effect.ensuring(Effect.andThen(release, clearHandoff)),
             Effect.forkIn(serviceScope),
           );
-          // Dispatch owns the accepted delivery now; retries must keep its claim.
-          claimAcquired = false;
+          if (handoff !== undefined) yield* Deferred.succeed(handoff, true);
+          yield* observe("accepted");
           return { _tag: "accepted" as const, deliveryId, outcome: "accepted" as const };
         }).pipe(
           Effect.onError(() =>
-            Effect.all([
-              releaseClaim(undefined),
-              (request.relayDeliveryId === undefined || claimAcquired
-                ? releaseReplay(deliveryId)
-                : Effect.void
-              ).pipe(Effect.ignore),
-            ]),
+            Effect.gen(function* () {
+              if (handoff !== undefined) yield* Deferred.succeed(handoff, false);
+              yield* clearHandoff;
+              yield* release;
+              if (relayId === undefined) yield* releaseReplay(deliveryId).pipe(Effect.ignore);
+            }),
           ),
         ),
       );
