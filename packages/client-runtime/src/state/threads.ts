@@ -541,8 +541,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       );
     }
     if (sequence === appliedSequence) return;
-    yield* SubscriptionRef.set(lastSequence, sequence);
-    if (fresh.length === 0) return;
+    if (fresh.length === 0) {
+      yield* SubscriptionRef.set(lastSequence, sequence);
+      return;
+    }
 
     const waiting = yield* Ref.get(awaitingCompletion);
     // Apply against the latest projection/history in one update so a concurrent
@@ -621,6 +623,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         return [result, result._tag === "noop" ? current : { ...current, sequence }];
       },
     );
+    yield* SubscriptionRef.set(lastSequence, sequence);
 
     if (result._tag === "delete") {
       yield* setDeleted();
@@ -1137,7 +1140,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
           ),
         ),
       ),
-      // A defect while applying items ends the stream; resubscribe for a fresh snapshot.
+      // A defect while applying items ends the stream. Resume from the last applied sequence.
       Effect.catchCause((cause) =>
         Cause.hasInterrupts(cause)
           ? Effect.interrupt
