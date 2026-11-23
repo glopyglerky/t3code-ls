@@ -68,6 +68,17 @@ interface SealedPendingState {
 
 type LauncherDurableState = ServiceState | SealedPendingState;
 
+export interface IsolatedCandidateWitness {
+  readonly protocol: 1;
+  readonly status: "prepared-isolated";
+  readonly updateId: string;
+  readonly targetVersion: string;
+  readonly entrySha256: string;
+  readonly helperSha256: string;
+  readonly verificationSha256: string;
+}
+
+
 function sameSealedPendingState(left: LauncherDurableState, right: SealedPendingState): boolean {
   return left.protocol === 5 && left.activeVersion === right.activeVersion &&
     left.update.id === right.update.id && left.update.fromVersion === right.update.fromVersion &&
@@ -974,6 +985,8 @@ export class Launcher {
   readonly #baseDir: string;
   readonly #statePath: string;
   #state: LauncherDurableState;
+  #started = false;
+  #preparing = false;
   #child: ManagedChild | null = null;
   #timer: NodeJS.Timeout | undefined;
   #transitions: Promise<void> = Promise.resolve();
@@ -1019,7 +1032,99 @@ export class Launcher {
     this.#state = state;
   }
 
+  /** Inspect a stopped candidate before this launcher starts any server.
+   * This observation does not publish a database or admit an update. */
+  async prepareIsolatedCandidate(verification: unknown): Promise<IsolatedCandidateWitness> {
+    if (this.#started || this.#preparing || this.#stopRequested || this.#child !== null ||
+      this.#environment.T3_CODE_LS_SEALED_TRIAL_RECOVERY !== "1" ||
+      process.platform !== "linux" || process.arch !== "x64" ||
+      this.#environment.T3_CODE_LS_DB_EXECUTABLE !== undefined ||
+      this.#state.protocol !== 5) {
+      throw new Error("Isolated candidate preparation requires a stopped native trial launcher.");
+    }
+    this.#preparing = true;
+    try {
+      const state = this.#state;
+      const pending = state.update;
+      if (!sameSealedPendingState(await this.#readState(), state)) {
+        throw new Error("The isolated candidate selection changed.");
+      }
+      const request = isRecord(verification) ? verification.request : undefined;
+      const preparation = isRecord(verification) ? verification.preparation : undefined;
+      const activation = isRecord(request) ? request.activation : undefined;
+      if (!isRecord(verification) || !hasKeys(verification, ["request", "preparation"]) ||
+        !isRecord(request) || request.update_id !== pending.id || !isRecord(preparation) ||
+        !isRecord(activation) || !hasKeys(activation, [
+          "update_id", "from_version", "target_version", "target_entry_sha256",
+          "target_helper_sha256", "target_schema_sha256",
+        ]) || activation.update_id !== pending.id ||
+        activation.from_version !== pending.fromVersion ||
+        activation.target_version !== pending.targetVersion ||
+        ![activation.target_entry_sha256, activation.target_helper_sha256, activation.target_schema_sha256]
+          .every((digest) => typeof digest === "string" && /^[0-9a-f]{64}$/u.test(digest))) {
+        throw new Error("The isolated preparation does not match the selected update.");
+      }
+      const input = JSON.stringify(verification);
+      if (Buffer.byteLength(input) > 65_536) throw new Error("Isolated preparation input exceeds its bound.");
+      if (!(await runtimeExists(this.#baseDir, pending.targetVersion))) {
+        throw new Error("The isolated candidate runtime is unavailable.");
+      }
+      const { entryPath } = runtimePaths(this.#baseDir, pending.targetVersion);
+      const selected = installedApplicationDatabase(entryPath, {});
+      if (selected.kind !== "omdb") throw new Error("The isolated candidate does not select native storage.");
+      const helper = await readBundledNativeTrialHelper(entryPath, selected.executable);
+      if (helper === null || helper.sha256 !== activation.target_helper_sha256 ||
+        helper.targetSchemaSha256 !== activation.target_schema_sha256) {
+        throw new Error("The isolated candidate helper does not match the selected update.");
+      }
+      const entryBefore = await NodeFSP.lstat(entryPath, { bigint: true });
+      if (!entryBefore.isFile() || entryBefore.nlink !== 1n ||
+        await NodeFSP.realpath(entryPath) !== entryPath) {
+        throw new Error("The isolated candidate executable is redirected.");
+      }
+      const stdout = await new Promise<string>((resolve, reject) => {
+        const child = NodeChildProcess.execFile(
+          entryPath, ["__service-prepare-isolated", this.#baseDir, pending.id],
+          { env: {}, encoding: "utf8", timeout: 65_000, maxBuffer: 8192, killSignal: "SIGKILL" },
+          (error, output, stderr) => error === null && stderr === ""
+            ? resolve(output) : reject(error ?? new Error("The isolated candidate wrote a diagnostic.")),
+        );
+        child.stdin?.on("error", reject);
+        child.stdin?.end(input + "\n");
+      });
+      const response: unknown = JSON.parse(stdout);
+      if (!isRecord(response) || !hasKeys(response, ["protocol", "status", "updateId", "preparation"]) ||
+        response.protocol !== 1 || response.status !== "prepared-isolated" ||
+        response.updateId !== pending.id || !NodeUtil.isDeepStrictEqual(response.preparation, preparation)) {
+        throw new Error("The isolated candidate returned a mismatched preparation witness.");
+      }
+      const rechecked = await readBundledNativeTrialHelper(entryPath, selected.executable);
+      const entryAfter = await NodeFSP.lstat(entryPath, { bigint: true });
+      if (rechecked === null || rechecked.sha256 !== helper.sha256 ||
+        rechecked.targetSchemaSha256 !== helper.targetSchemaSha256 ||
+        !entryAfter.isFile() || entryAfter.nlink !== 1n ||
+        entryBefore.dev !== entryAfter.dev || entryBefore.ino !== entryAfter.ino ||
+        entryBefore.size !== entryAfter.size || entryBefore.ctimeNs !== entryAfter.ctimeNs ||
+        !sameSealedPendingState(await this.#readState(), state) || this.#stopRequested) {
+        throw new Error("The isolated candidate changed during preparation.");
+      }
+      return {
+        protocol: 1, status: "prepared-isolated", updateId: pending.id,
+        targetVersion: pending.targetVersion,
+        entrySha256: String(activation.target_entry_sha256),
+        helperSha256: helper.sha256,
+        verificationSha256: NodeCrypto.createHash("sha256").update(input).digest("hex"),
+      };
+    } finally {
+      this.#preparing = false;
+    }
+  }
+
   async run(): Promise<void> {
+    if (this.#preparing || this.#started) {
+      throw new Error("The service launcher is already running or preparing a candidate.");
+    }
+    this.#started = true;
     const onSigterm = () => void this.stop("SIGTERM");
     const onSigint = () => void this.stop("SIGINT");
     process.once("SIGTERM", onSigterm);
