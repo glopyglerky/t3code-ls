@@ -376,7 +376,7 @@ jobs:
               .chatPendingAfterReattach and .chatCompletedBeforeForegroundExit and .chat.reopened and
               .chat.exactReply == "Created the requested probe file.")' "$proof/native/proof.json"
       - name: Exercise one live inherited-history view in the bundled native application
-        if: env.FORK_HISTORY_PROOF == 'true'
+        if: env.FORK_HISTORY_PROOF == 'true' || env.INTEGRATED_NATIVE == 'true'
         run: |
           proof="$RUNNER_TEMP/built-composer-proof/fork-history"
           mkdir -p apps/server/dist/client
