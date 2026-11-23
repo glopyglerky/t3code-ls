@@ -160,3 +160,46 @@ Local checks cover syntax, patch hygiene and a dependency-free test of the exact
 fixture path normalizer against slash, case and extended-path spellings and a
 different target. This is not a Windows executable test or a product build. The
 hosted lifecycle and detached-removal result remain pending.
+
+## Isolated receipt target follow-up
+
+Exact run `45182822417`, at
+`a40bca62e7800ac5722eed70068508314a430842`, narrowed the failure to
+`receiptNamesSameLauncher: false`. Exit status, empty stderr, reported path,
+generated shim structure and executable identity, readable receipt and exactly
+one receipt all passed. Proof artifact `14822347922` binds that exact source.
+Both literal shim and reported-path comparisons passed;
+the literal receipt comparison did not. No target path was retained, so these
+results still do not identify whether the cause is receipt formatting,
+canonicalization or an actual wrong target.
+
+The production CLI provides `NodeServices.layer`. Pinned
+`@effect/platform-node` and `@effect/platform-node-shared` 4.1.2 source archives
+were read and verified against their lockfile SHA-512 values. The path layer wraps
+the platform's `node:path`. On Windows, Effect's `realPath` uses Node's native
+realpath implementation. The fixture's previous probe uses default synchronous
+realpath. This source distinction motivates checking both implementations; it
+does not establish which failed in the hosted run.
+
+`WINDOWS_MANAGED_RECEIPT_CHECKS` adds safe booleans for basename, whitespace/BOM,
+control characters, absolute/namespace/UNC/URL and slash forms, drive agreement,
+normalized equality, Effect/Node path resolution agreement, default and native
+canonical resolution, regular-file status and device/inode identity. A cleaned
+candidate is probed only for diagnosis; whitespace or BOM is not silently accepted.
+The required receipt equality and the real install/uninstall ownership checks
+remain unchanged.
+
+The only possible path fragment is `fixtureSuffix`. It is emitted only after
+native canonical resolution establishes that the target is inside the owned home,
+and every segment belongs to a small allowlist of fixture layout literals and the
+validated public version. Otherwise it is null. Full captured paths, command
+streams, tokens and session contents are never emitted by these diagnostics.
+No product path, receipt, retention or removal policy changed in this follow-up.
+The exact receipt defect or fixture assumption remains pending the next hosted
+observations; no native or Windows product build ran locally. Fetched package
+source stayed in memory and no dependency installation or retained cache was made.
+
+The exact suffix-disclosure code was checked with dependency-free synthetic paths:
+known owned launcher/runtime layouts were accepted, while another home, an unknown
+filename/version and unresolved input returned null. This checks disclosure
+filtering only and grants no Windows install or lifecycle qualification.
