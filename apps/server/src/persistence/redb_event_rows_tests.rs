@@ -729,6 +729,10 @@ struct LayoutFootprint {
     key_value_sha256: String,
 }
 
+fn layout_digest_hex(digest: &[u8]) -> String {
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
 async fn layout_footprint(store: &Store) -> LayoutFootprint {
     use sha2::{Digest, Sha256};
     let mut tx = store.db.begin_read_only().await.unwrap();
@@ -793,7 +797,7 @@ async fn layout_footprint(store: &Store) -> LayoutFootprint {
         start.push(0);
     }
     tx.rollback().await.unwrap();
-    result.key_value_sha256 = format!("{:x}", digest.finalize());
+    result.key_value_sha256 = layout_digest_hex(&digest.finalize());
     result
 }
 
@@ -1053,11 +1057,11 @@ async fn assistant_text_revisions_compare_event_owner_storage_bytes() {
         "workload_commits_per_run": events.len(),
         "maximum_payload_bytes": events.iter().map(|event| event.payload_json.len()).max().unwrap(),
         "platform": { "os": std::env::consts::OS, "architecture": std::env::consts::ARCH },
-        "test_executable_sha256": format!("{:x}", executable_digest.finalize()),
-        "codec_source_sha256": format!("{:x}", Sha256::digest(include_bytes!("redb_event_text_revisions.rs"))),
-        "workload_source_sha256": format!("{:x}", Sha256::digest(include_bytes!("redb_event_rows_tests.rs"))),
+        "test_executable_sha256": layout_digest_hex(&executable_digest.finalize()),
+        "codec_source_sha256": layout_digest_hex(&Sha256::digest(include_bytes!("redb_event_text_revisions.rs"))),
+        "workload_source_sha256": layout_digest_hex(&Sha256::digest(include_bytes!("redb_event_rows_tests.rs"))),
         "logical_payload_bytes": events.iter().map(|e| e.payload_json.len() as u64).sum::<u64>(),
-        "logical_payload_sha256": format!("{:x}", logical_digest.finalize()),
+        "logical_payload_sha256": layout_digest_hex(&logical_digest.finalize()),
         "durability": "same pinned omdb Immediate profile for both layouts",
         "method": "five paired runs with first layout reversed each pair; actual backend keys and values; closed file lengths and exclusive offline compaction",
         "key_value_bytes": { "full_event": summary("full_event", "key_value_bytes"), "assistant_text_revisions_v1": summary("assistant_text_revisions_v1", "key_value_bytes") },
