@@ -90,12 +90,18 @@ export type VoiceInputControllerDependencies = {
     | undefined;
   readonly onPostProcessingError?: (error: unknown) => void;
   readonly readDraft: () => VoiceDraftSnapshot | null;
+  readonly mapDraftSelection?: VoiceDraftSelectionMapper | undefined;
   readonly commitDraft: (
     text: string,
     selection: { readonly start: number; readonly end: number },
   ) => void;
   readonly onStateChange: (state: VoiceInputState) => void;
 };
+
+export type VoiceDraftSelectionMapper = (
+  captured: VoiceDraftSnapshot,
+  currentText: string,
+) => VoiceDraftSnapshot["selection"] | undefined;
 
 type TranscriptCommitResult =
   | {
@@ -110,6 +116,12 @@ const WORD_SPACELESS_LANGUAGES = new Set(["ja", "zh", "yue", "th", "lo", "km", "
 
 const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff;
 const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff;
+
+const isUtf16Boundary = (text: string, position: number) =>
+  Number.isSafeInteger(position) &&
+  position >= 0 &&
+  position <= text.length &&
+  !(isHighSurrogate(text.charCodeAt(position - 1)) && isLowSurrogate(text.charCodeAt(position)));
 
 // Where `position` in `before` lands in `text`, placed after anything inserted at it.
 function mapPosition(before: string, text: string, position: number, suffixFirst: boolean) {
@@ -137,6 +149,7 @@ export function resolveTranscriptCommit(
   current: VoiceDraftSnapshot | null,
   transcript: string,
   locale: string,
+  mapDraftSelection?: VoiceDraftSelectionMapper,
 ): TranscriptCommitResult {
   if (!current || current.ownerKey !== captured.ownerKey) {
     return { kind: "stale" };
@@ -148,16 +161,30 @@ export function resolveTranscriptCommit(
   }
 
   const { text } = current;
+  const { start: capturedStart, end: capturedEnd } = captured.selection;
+  if (
+    capturedEnd < capturedStart ||
+    !isUtf16Boundary(captured.text, capturedStart) ||
+    !isUtf16Boundary(captured.text, capturedEnd)
+  ) {
+    return { kind: "stale" };
+  }
   // An edit made while recording (a citation, a paste) is never replaced. The edit's position is
   // ambiguous over repeated text, so insert after the selection under both extreme alignments.
-  const unchanged = text === captured.text;
-  const end = unchanged
-    ? captured.selection.end
-    : Math.max(
-        mapPosition(captured.text, text, captured.selection.end, false),
-        mapPosition(captured.text, text, captured.selection.end, true),
-      );
-  const start = unchanged ? captured.selection.start : end;
+  let selection: VoiceDraftSnapshot["selection"] | undefined;
+  if (mapDraftSelection) {
+    selection = mapDraftSelection(captured, text);
+  } else if (text === captured.text) {
+    selection = captured.selection;
+  } else {
+    const end = Math.max(
+      mapPosition(captured.text, text, capturedEnd, false),
+      mapPosition(captured.text, text, capturedEnd, true),
+    );
+    selection = { start: end, end };
+  }
+  if (!selection) return { kind: "stale" };
+  const { start, end } = selection;
   const isEmptySelection = start === end;
   const language = locale.split(/[-_]/)[0]!.toLowerCase();
   let insertion = replacement;
@@ -595,6 +622,7 @@ export class VoiceInputController {
         this.dependencies.readDraft(),
         transcript,
         transcription.locale,
+        this.dependencies.mapDraftSelection,
       );
       if (result.kind === "stale") {
         this.setError(

@@ -1,6 +1,28 @@
 use t3_code_ls_client_text::text_revision::{
-    Applied, ApplyError, TextChange, TextEdit, TextRevision, Utf16Offset,
+    Applied, ApplyError, TextChange, TextEdit, TextRevision, Utf16Offset, voice_draft_selection,
 };
+
+#[test]
+fn rebases_voice_draft_selection_without_displacing_concurrent_text() {
+    let map = |captured, current, start, end| {
+        voice_draft_selection(captured, current, Utf16Offset(start), Utf16Offset(end))
+            .map(|(start, end)| (start.0, end.0))
+    };
+    assert_eq!(map("A🐟B", "A🐟B", 1, 3), Some((1, 3)));
+    assert_eq!(map("A🐟B", "A🐟B", 2, 2), None);
+    assert_eq!(map("abc", "abc", 3, 1), None);
+    assert_eq!(map("abc", "abc", 3, 4), None);
+    assert_eq!(map("A🐟B", "A🦀B", 1, 1), Some((3, 3)));
+    assert_eq!(map("你好 🐟", "你好 🦀 世界", 5, 5), Some((8, 8)));
+    assert_eq!(
+        map("hello world", "hello hello world", 0, 5),
+        Some((11, 11))
+    );
+    assert_eq!(
+        map("hello world", "hello [cite]world", 6, 11),
+        Some((17, 17))
+    );
+}
 
 fn change(base_revision: u64, sequence: u64, edit: TextEdit<'_>) -> TextChange<'_> {
     TextChange {

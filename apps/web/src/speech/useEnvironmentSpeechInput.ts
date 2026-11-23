@@ -30,6 +30,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { useStableCallback } from "~/hooks/useStableCallback";
 import { toastManager } from "../components/ui/toast";
+import { nativeVoiceDraftSelection } from "../composer-native-offsets";
 import {
   useClientSettings,
   useClientSettingsHydrated,
@@ -326,6 +327,7 @@ export function useEnvironmentSpeechInput(input: HookInput) {
           description: "The original transcript was added.",
         }),
       readDraft,
+      mapDraftSelection: nativeVoiceDraftSelection(),
       commitDraft: (text, selection) => {
         if (latestRef.current.input.disabled) return;
         latestRef.current.input.commitDraft(text, selection);
