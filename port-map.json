@@ -2334,11 +2334,21 @@
         {
           "path": "apps/marketing/src/pages/[...locale]/download.astro",
           "blob": "1bf425a6d015166dbf36f58fe6e24b24ba4207da"
+        },
+        {
+          "path": "apps/marketing/src/pages/[...locale]/index.astro",
+          "blob": "5ae384218058796ad90372e1920a8144a8e0ba7b"
+        },
+        {
+          "path": "apps/marketing/src/lib/releases.ts",
+          "blob": "7dc63bdaed8597556f20b9f2cbf3954ddc1efd97"
         }
       ],
       "rust_paths": ["tools/src/download_catalog.rs"],
       "adapter_paths": [
         "apps/marketing/src/pages/[...locale]/download.astro",
+        "apps/marketing/src/pages/[...locale]/index.astro",
+        "apps/marketing/src/lib/releases.ts",
         ".github/workflows/marketing-download-proof.yml"
       ],
       "platform_routes": [
@@ -2350,12 +2360,16 @@
           "acceptance_evidence": {}
         }
       ],
-      "acceptance_tests": ["apps/marketing/scripts/verify-download-links.mjs"],
+      "acceptance_tests": [
+        "apps/marketing/scripts/verify-download-links.mjs",
+        "apps/marketing/scripts/release-refresh.test.ts"
+      ],
       "hosted_acceptance": {
-        "apps/marketing/scripts/verify-download-links.mjs": ".github/workflows/marketing-download-proof.yml"
+        "apps/marketing/scripts/verify-download-links.mjs": ".github/workflows/marketing-download-proof.yml",
+        "apps/marketing/scripts/release-refresh.test.ts": ".github/workflows/marketing-download-proof.yml"
       },
       "retired_paths": [],
-      "notes": "T14 static download links from a bounded Rust release catalog. The Astro build uses the optional generated snapshot for localized HTML and retains the release index fallback. The progressive live release refresh remains in the browser. Hosted release publication and platform installation require separate evidence.",
+      "notes": "T14 static download links from a bounded Rust release catalog. The Astro build uses the optional generated snapshot for localized HTML and retains the release index fallback. Localized home actions link to the platform list before browser enhancement. Live release refresh validates release and asset identities and works when session storage refuses access or writes. Hosted release publication and platform installation require separate evidence.",
       "rust_crates": ["tools"]
     }
   ],
