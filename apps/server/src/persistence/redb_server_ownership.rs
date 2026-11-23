@@ -42,7 +42,14 @@ impl OwnerLock {
             std::fs::create_dir_all(parent)
                 .map_err(|_| Error::Database("ownership directory unavailable".into()))?;
         }
-        let before = same_file::Handle::from_path(path).ok();
+        let identity_at_path = || {
+            if create {
+                same_file::Handle::from_path(path).map_err(|_| Error::IncompatibleStore)
+            } else {
+                crate::backend::path_identity(path)
+            }
+        };
+        let before = identity_at_path().ok();
         let mut options = OpenOptions::new();
         options
             .read(true)
@@ -79,7 +86,7 @@ impl OwnerLock {
         {
             return Err(Error::WriterBusy);
         }
-        let current = same_file::Handle::from_path(path).map_err(|_| Error::IncompatibleStore)?;
+        let current = identity_at_path()?;
         let replaced_during_acquire =
             current != identity || before.as_ref().is_some_and(|before| *before != identity);
         Ok(Self {
