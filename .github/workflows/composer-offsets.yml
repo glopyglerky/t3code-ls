@@ -142,7 +142,7 @@ jobs:
           pnpm --filter @t3tools/task-cache test src/Cleanup.test.ts src/Cache.test.ts \
             src/NativeClients.test.ts src/Savings.test.ts
       - name: Exercise restart recovery and persisted continuation effects
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t09-relay-')
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t09-relay-')
         env:
           T3_CODE_LS_IMPLEMENTATION: upstream
         run: |
