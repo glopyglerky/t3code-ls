@@ -5,7 +5,7 @@ import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
 import * as OS from "node:os";
 import * as Path from "node:path";
-import { WS_METHODS } from "@t3tools/contracts";
+import { ProjectId, WS_METHODS } from "@t3tools/contracts";
 import { authenticatePackagedServer, reservePort, startPackagedServer } from "./packaged-server-fixture.ts";
 
 const root = FS.realpathSync(Path.resolve(import.meta.dirname, "../../.."));
@@ -118,11 +118,18 @@ try {
   const fixtureIdentity = ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid"];
   git(workspace, "init", "--quiet", "--initial-branch=main");
   FS.writeFileSync(Path.join(workspace, "README"), "Synthetic packaged Git workspace\n");
-  git(workspace, "add", "README");
+  const reviewPath = "review 雪\tname.txt";
+  const originalReviewText = "\ufeffalpha\nunchanged\nold tail";
+  const dirtyReviewText = "\ufeffalpha\nunchanged\nnew tail";
+  FS.writeFileSync(Path.join(workspace, reviewPath), originalReviewText);
+  FS.writeFileSync(Path.join(workspace, "binary.dat"), Buffer.from([65, 0, 66]));
+  git(workspace, "add", ".");
   git(workspace, ...fixtureIdentity, "commit", "--quiet", "-m", "Fixture");
   git(workspace, "branch", "作業/修正");
   git(workspace, "worktree", "add", "--quiet", "-b", "linked-branch", linked);
   FS.writeFileSync(Path.join(linked, "README"), "Dirty linked checkout\n");
+  FS.writeFileSync(Path.join(linked, reviewPath), dirtyReviewText);
+  const reviewBase = git(linked, "rev-parse", "HEAD");
   FS.mkdirSync(bare);
   git(bare, "init", "--quiet", "--bare", "--initial-branch=main");
   for (const checkout of [configuredWorktree, symlinkedWorktree]) {
@@ -137,6 +144,7 @@ try {
   const phases: unknown[] = [];
   const observations: unknown[] = [];
   const linkedStatusByMode = new Map<string, unknown>();
+  const reviewByMode = new Map<string, unknown>();
   report.phases = phases;
   report.observations = observations;
   for (const mode of ["native", "config", "included", "upstream", "hash-refusal", "manifest-refusal"] as const) {
@@ -174,6 +182,10 @@ try {
     }
     await active.ready;
     const client = await authenticatePackagedServer(active, abort.signal);
+    if (mode === "native" || mode === "upstream") {
+      await client.createProject({ projectId: ProjectId.make("fixture-git-review"),
+        title: "Synthetic Git review", workspaceRoot: linked });
+    }
     const locations = mode === "native"
       ? [{ label: "root", cwd: workspace }, { label: "nested", cwd: nested },
         { label: "linked", cwd: linked }, { label: "bare", cwd: bare },
@@ -188,10 +200,32 @@ try {
         const status = await client.rpc((rpc) => rpc[WS_METHODS.vcsRefreshStatus]({ cwd }));
         Assert.equal(status.refName, "linked-branch");
         Assert.equal(status.hasWorkingTreeChanges, true);
-        Assert.equal(git(cwd, "status", "--porcelain"), "M README", "The linked fixture stays dirty");
+        Assert.match(git(cwd, "status", "--porcelain"), /M README/u, "The linked fixture stays dirty");
         linkedStatusByMode.set(mode, status);
         if (mode === "upstream") Assert.deepEqual(status, linkedStatusByMode.get("native"));
         report.linkedStatus = Object.fromEntries(linkedStatusByMode);
+        const previewInput = { cwd, baseRef: reviewBase, sourceKind: "working-tree" as const };
+        const preview = await client.rpc((rpc) => rpc[WS_METHODS.reviewGetDiffPreview](previewInput));
+        const metadata = await client.rpc((rpc) => rpc[WS_METHODS.reviewGetDiffPreview]({ ...previewInput, metadataOnly: true }));
+        const contentsInput = { cwd, sourceKind: "working-tree" as const, changeType: "change" as const,
+          baseRef: reviewBase, headRef: null, oldPath: reviewPath, newPath: reviewPath };
+        const contents = await client.rpc((rpc) => rpc[WS_METHODS.reviewGetDiffFileContents](contentsInput));
+        Assert.deepEqual(contents, { oldContents: originalReviewText, newContents: dirtyReviewText });
+        // The independent Git oracle supplies the complete hunk bytes. Metadata
+        // and hashes must also agree with the retained authenticated route below.
+        const oraclePatch = ChildProcess.execFileSync("/usr/bin/git", ["-c", "diff.relative=false",
+          "-c", "diff.suppressBlankEmpty=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv",
+          "--submodule=short", "--find-renames", "--minimal", "--patch", "--src-prefix=a/", "--dst-prefix=b/", reviewBase, "--"],
+          { cwd, env: baseEnv, encoding: "utf8", timeout: 10_000 });
+        const working = preview.sources.find((source) => source.kind === "working-tree");
+        Assert.ok(working);
+        Assert.equal(working.diff, oraclePatch);
+        await Assert.rejects(client.rpc((rpc) => rpc[WS_METHODS.reviewGetDiffFileContents]({ ...contentsInput,
+          oldPath: "binary.dat", newPath: "binary.dat" })));
+        const observedReview = { sources: preview.sources, metadata: metadata.sources, contents };
+        reviewByMode.set(mode, observedReview);
+        if (mode === "upstream") Assert.deepEqual(observedReview, reviewByMode.get("native"));
+        report.review = Object.fromEntries(reviewByMode);
       }
       // Match stock's normal application admission, before GitVcsDriverCore.
       // A valid bare Git database is not a supported application work tree.
@@ -246,6 +280,13 @@ try {
             usesRetainedDiscovery, `${mode}:${label}: retained ${argument}`);
         }
       }
+      Assert.ok(nativeCalls.some((call) => call.cwd === linked && call.line.includes('"review-blob"')),
+        "Authenticated expansion must execute the packaged native blob read");
+      Assert.ok(!calls.some((call) => call.cwd === linked && call.line.includes('"show", "--end-of-options"') &&
+        call.line.includes("review ")),
+        "Admitted text expansion must avoid retained Git show");
+      Assert.ok(calls.some((call) => call.cwd === linked && call.line.includes('"show", "--end-of-options"') &&
+        call.line.includes("binary.dat")), "Binary expansion must retain Git diagnostics");
       Assert.ok(nativeCalls.some((call) => call.cwd === linked && call.line.includes('"branch-head"')),
         "Authenticated status refresh must execute the native branch read");
       Assert.ok(!calls.some((call) => call.cwd === linked && call.line.includes('"--symbolic-full-name", "HEAD"')),

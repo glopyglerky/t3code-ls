@@ -203,7 +203,7 @@ const decodeGixRepositoryPaths = Schema.decodeUnknownOption(Schema.fromJsonStrin
 const decodeGixRefPresence = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.NullOr(Schema.Boolean)),
 );
-const decodeGixBranchHead = Schema.decodeUnknownOption(
+const decodeGixString = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.NullOr(Schema.String)),
 );
 const decodeGixBranchNames = Schema.decodeUnknownOption(
@@ -2118,7 +2118,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
 
   const readStatusDetailsRemote = Effect.fn("readStatusDetailsRemote")(function* (cwd: string) {
     const native = yield* runGix(cwd, ["branch-head", cwd]);
-    let branch = native === null ? null : Option.getOrNull(decodeGixBranchHead(native));
+    let branch = native === null ? null : Option.getOrNull(decodeGixString(native));
     if (branch !== null) branch = branchNameFromHeadRef(branch);
     if (branch === null) {
       const branchResult = yield* executeGitWithStableDiagnostics(
@@ -4009,6 +4009,22 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     revision: string,
     relativePath: string,
   ) {
+    // Keep revision resolution and all errors with Git. This read never mutates
+    // the index and cannot supply working-tree content from another checkout.
+    if (
+      environment.GIT_REPLACE_REF_BASE === undefined &&
+      environment.GIT_OBJECT_DIRECTORY === undefined &&
+      environment.GIT_ALTERNATE_OBJECT_DIRECTORIES === undefined &&
+      /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(revision)
+    ) {
+      const raw = yield* runGix(
+        input.cwd,
+        ["review-blob", input.cwd, revision, relativePath],
+        REVIEW_DIFF_FILE_MAX_OUTPUT_BYTES * 6 + 2,
+      );
+      const contents = raw === null ? null : Option.getOrNull(decodeGixString(raw));
+      if (contents !== null && !contents.includes("\0")) return contents;
+    }
     const result = yield* executeGit(
       "GitVcsDriver.getReviewDiffFileContents.revision",
       input.cwd,

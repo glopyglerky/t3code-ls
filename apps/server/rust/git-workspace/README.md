@@ -103,3 +103,37 @@ mode must show Core fallback without helper execution. Registry probes and Core
 discovery are counted separately. A per-location checkpoint and saved oracle/RPC
 fields identify the first mismatch even when the run stops before a phase ends.
 The corrected hosted execution remains required.
+
+
+### Candidate committed review contents
+
+`review-blob ABSOLUTE_DIRECTORY FULL_COMMIT PATH` reads a regular blob from a
+full commit ID through the pinned Gitoxide object and tree APIs. The existing
+`review.getDiffFileContents` owner selects it only through the optional native
+helper route. Working-tree files, authorization, repository admission, commit
+validation, patch formatting, metadata and error messages retain their owners.
+The candidate does not render hunks or parse revision expressions.
+
+Only UTF-8 text without NUL, at most 1 MiB, is admitted. Literal slash-separated
+paths preserve Unicode and tabs; empty, dot and parent components fall back.
+Missing objects, non-regular entries, replacement refs including packed refs,
+includes, unsupported paths and helper failures return null and select Git.
+A custom `GIT_REPLACE_REF_BASE` bypasses this candidate. The existing process
+runner owns interruption, the two-second deadline and output bounds. JSON output
+allows six bytes per input byte plus quotes. There is no mutation retry.
+
+The packaged proof exercises the authenticated review route in a registered dirty
+linked workspace with a Unicode/tab name, BOM and missing final newline. It
+compares complete patch bytes to Git and metadata, hashes and expanded text to
+the retained authenticated route. Binary expansion must execute Git and fail.
+This is authored evidence only until the root qualification owner executes it.
+Cancellation, replacement refs, SHA-256 repositories and other platforms remain
+explicit qualification obligations. No speedup or full J41/J43/J44 is claimed.
+
+Source mechanisms studied at `dd39fb66e3b1551c9fe849043e39b357a9799ca1`:
+[`Commit::tree`](https://github.com/GitoxideLabs/gitoxide/blob/dd39fb66e3b1551c9fe849043e39b357a9799ca1/gix/src/object/commit.rs),
+[`Tree::lookup_entry`](https://github.com/GitoxideLabs/gitoxide/blob/dd39fb66e3b1551c9fe849043e39b357a9799ca1/gix/src/object/tree/mod.rs),
+[object/header lookup](https://github.com/GitoxideLabs/gitoxide/blob/dd39fb66e3b1551c9fe849043e39b357a9799ca1/gix/src/repository/object.rs)
+and the existing reference iterator. No source was imported. The fork remains
+MIT; Gitoxide retains MIT OR Apache-2.0 licensing. Hosted `std` filesystem and
+process adapters remain, and no portable/no_std qualification follows.

@@ -134,6 +134,51 @@ fn branch_head(cwd: &Path) -> Option<String> {
     (header.kind() == gix::objs::Kind::Commit).then(|| name.to_owned())
 }
 
+// Git continues to own revision expressions, replacement objects and diagnostics.
+fn review_blob(cwd: &Path, revision: &str, path: &str) -> Option<String> {
+    const MAX_BYTES: u64 = 1024 * 1024;
+    if !matches!(revision.len(), 40 | 64)
+        || !revision.bytes().all(|b| b.is_ascii_hexdigit())
+        || path.split('/').any(|part| matches!(part, "" | "." | ".."))
+    {
+        return None;
+    }
+    let (_, repo) = open_repository(cwd)?;
+    let refs = repo.references().ok()?;
+    // Include packed refs and refuse iterator failures as well as replacements.
+    for reference in refs.all().ok()? {
+        if reference
+            .ok()?
+            .name()
+            .as_bstr()
+            .starts_with(b"refs/replace/")
+        {
+            return None;
+        }
+    }
+    let id = gix::hash::ObjectId::from_hex(revision.as_bytes()).ok()?;
+    if id.kind() != repo.object_hash() {
+        return None;
+    }
+    let tree = repo.find_commit(id).ok()?.tree().ok()?;
+    let entry = tree.lookup_entry(path.split('/')).ok()??;
+    if !matches!(
+        entry.mode().kind(),
+        gix::objs::tree::EntryKind::Blob | gix::objs::tree::EntryKind::BlobExecutable
+    ) {
+        return None;
+    }
+    let header = repo.try_find_header(entry.object_id()).ok()??;
+    if header.kind() != gix::objs::Kind::Blob || header.size() > MAX_BYTES {
+        return None;
+    }
+    let blob = repo.find_blob(entry.object_id()).ok()?;
+    if blob.data.len() as u64 > MAX_BYTES || blob.data.contains(&0) {
+        return None;
+    }
+    std::str::from_utf8(&blob.data).ok().map(str::to_owned)
+}
+
 fn reply(value: impl Serialize) -> ExitCode {
     match serde_json::to_writer(std::io::stdout().lock(), &value) {
         Ok(()) => ExitCode::SUCCESS,
@@ -145,6 +190,12 @@ fn main() -> ExitCode {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
     match args.as_slice() {
         [cwd] => reply(discover(Path::new(cwd))),
+        [operation, cwd, revision, path] if operation == "review-blob" => reply(
+            revision
+                .to_str()
+                .zip(path.to_str())
+                .and_then(|(revision, path)| review_blob(Path::new(cwd), revision, path)),
+        ),
         [operation, cwd] if operation == "branch-head" => reply(branch_head(Path::new(cwd))),
         [operation, cwd] if operation == "local-branch-names" => {
             reply(local_branch_names(Path::new(cwd)))
@@ -159,7 +210,7 @@ fn main() -> ExitCode {
         ),
         _ => {
             eprintln!(
-                "Usage: t3-code-ls-git-workspace [has-remote-ref|has-local-ref|local-branch-names|branch-head] ABSOLUTE_DIRECTORY [REF]"
+                "Usage: t3-code-ls-git-workspace [has-remote-ref|has-local-ref|local-branch-names|branch-head] ABSOLUTE_DIRECTORY [REF] | review-blob ABSOLUTE_DIRECTORY FULL_COMMIT PATH"
             );
             ExitCode::from(2)
         }
