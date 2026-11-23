@@ -15,12 +15,13 @@ jobs:
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
       STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
       COMPOSED_J06: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') }}
-      CANDIDATE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') && 'd3217d6c0176faad753f8ce2525cc2552fe502d7' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '7216183e0c013c7f5d7e9975d8aee7beda42b880' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '08eadccbff571219466f7bc35e982730295f15d8' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
-      CANDIDATE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') && '0bf400e6b6884ce602e9cb1cd094abe437e1c62f' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '675636c7feb22a55179fa726af94e5cfa49212b8' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '38ff3e9ac680e4defe3d06fcfb3e79d0b94b841c' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '78647c8e507b6b677fa6f1585839bd8bdc12bc55' || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
+      LAUNCH_RECEIPT_COMPARISON: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') }}
+      CANDIDATE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && '951537f189353748fa6bdb3f936fd716b9c86d18' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') && 'd3217d6c0176faad753f8ce2525cc2552fe502d7' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '7216183e0c013c7f5d7e9975d8aee7beda42b880' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '08eadccbff571219466f7bc35e982730295f15d8' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
+      CANDIDATE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && 'bf42c79d73bc46a39c6c41e71084bfd140fc7c7f' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') && '0bf400e6b6884ce602e9cb1cd094abe437e1c62f' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '675636c7feb22a55179fa726af94e5cfa49212b8' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '38ff3e9ac680e4defe3d06fcfb3e79d0b94b841c' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '78647c8e507b6b677fa6f1585839bd8bdc12bc55' || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
       CATALOG_COMMIT: 2bb6ae9e57559bde6cff0feeddcff8ddf02de009
       CATALOG_TREE: 55e2c8aba6fc06642b06a8d60861c7bdaf3c67f9
-      ROOT_RELEASE_COMMIT: a7ca741bd4c4d508fef316e164fb1ae897301965
-      ROOT_RELEASE_TREE: 3458897fed59a6a500ed14edecc0e17f0d41707b
+      ROOT_RELEASE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && '143ee1ffe940cf519b1d55bc988beaa441f82599' || 'a7ca741bd4c4d508fef316e164fb1ae897301965' }}
+      ROOT_RELEASE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && 'af6df769479d59648c84be59a5d9b651f257e108' || '3458897fed59a6a500ed14edecc0e17f0d41707b' }}
       WASM_BINDGEN_VERSION: "0.2.130"
       WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
       VP_REMOTE_CACHE: "off"
@@ -37,7 +38,7 @@ jobs:
       COMPARE_SINGLE_READS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') }}
       COMPARE_INDEPENDENT_READS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') }}
       COMPARE_INDEPENDENT_LOOKUPS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') }}
-      COMPARE_ROOT_RELEASE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-') }}
+      COMPARE_ROOT_RELEASE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -77,6 +78,13 @@ jobs:
             git -C candidate worktree add --detach "$GITHUB_WORKSPACE/root-release" "$ROOT_RELEASE_COMMIT"
             git -C candidate diff --exit-code "$CANDIDATE_COMMIT" "$ROOT_RELEASE_COMMIT" -- \
               Cargo.lock pnpm-lock.yaml toolchain.lock.json database.lock.json ':(glob)**/*.rs' ':(glob)**/Cargo.toml'
+            if [[ "$LAUNCH_RECEIPT_COMPARISON" == true ]]; then
+              test "$(git -C root-release rev-parse HEAD)" = "$ROOT_RELEASE_COMMIT"
+              git -C candidate diff --name-only "$CANDIDATE_COMMIT" "$ROOT_RELEASE_COMMIT" \
+                > "$RUNNER_TEMP/launch-receipt-source-diff"
+              printf '%s\n' apps/server/src/orchestration-v2/ThreadLaunchService{.test,}.ts \
+                | diff - "$RUNNER_TEMP/launch-receipt-source-diff"
+            fi
           fi
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
       - name: Build the optimized stock bundle
@@ -138,8 +146,13 @@ jobs:
         working-directory: root-release
         run: |
           pnpm install --frozen-lockfile
-          cp -a ../candidate/apps/web/public/client-text-wasm apps/web/public/client-text-wasm
-          VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust pnpm --dir apps/web run build
+          if [[ "$LAUNCH_RECEIPT_COMPARISON" == true ]]; then
+            cp -a ../candidate/apps/web/dist apps/web/dist
+            diff -qr ../candidate/apps/web/dist apps/web/dist
+          else
+            cp -a ../candidate/apps/web/public/client-text-wasm apps/web/public/client-text-wasm
+            VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust pnpm --dir apps/web run build
+          fi
           T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$GITHUB_WORKSPACE/candidate/bin" \
             pnpm --dir apps/server run build:bundle
           diff -qr ../candidate/apps/server/dist/native-bin apps/server/dist/native-bin
@@ -183,6 +196,12 @@ jobs:
           fi
           if [[ "$COMPARE_SINGLE_READS" == true || "$COMPARE_INDEPENDENT_READS" == true ]]; then pairs=8; fi
           if [[ "$COMPARE_ROOT_RELEASE" == true ]]; then bundles+=(root-release); pairs=8; fi
+          orders=(
+            'stock candidate root-release' 'stock root-release candidate'
+            'candidate stock root-release' 'candidate root-release stock'
+            'root-release stock candidate' 'root-release candidate stock'
+          )
+          if [[ "$LAUNCH_RECEIPT_COMPARISON" == true ]]; then pairs="${#orders[@]}"; fi
           for profile in "${bundles[@]}"; do
             (
               cd "$profile"
@@ -202,8 +221,9 @@ jobs:
             --arg image "${ImageOS:-unknown}/${ImageVersion:-unknown}" --arg kernel "$(uname -r)" \
             --arg cpu "$(LC_ALL=C lscpu | sed -n 's/^Model name:[[:space:]]*//p')" --argjson trace "$TRACE_CONVERSATION" \
             --argjson composedJ06 "$COMPOSED_J06" \
+            --argjson launchReceiptComparison "$LAUNCH_RECEIPT_COMPARISON" \
             --arg systemLoad "$(uptime)" --argjson cpus "$(nproc)" \
-            '{attribution:$attribution,composedJ06:$composedJ06,acceptBoundary:(if $composedJ06 then "browser launch acknowledgement upper bound; observer overhead included" else null end),stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},catalog:(if $compareCatalog then {commit:$catalog,tree:$catalogTree,durability:"omdb Immediate"} else null end),rootRelease:(if $compareRootRelease then {commit:$rootRelease,tree:$rootReleaseTree,durability:"omdb Immediate"} else null end),singleProjectionReads:$compareSingleReads,independentReads:$compareIndependentReads,independentLookups:$compareIndependentLookups,forkSqliteControl:$trace,providerTrace:($trace or $attribution),probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
+            '{attribution:$attribution,composedJ06:$composedJ06,launchReceiptComparison:$launchReceiptComparison,acceptBoundary:(if $composedJ06 then "browser launch acknowledgement upper bound; observer overhead included" else null end),stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},catalog:(if $compareCatalog then {commit:$catalog,tree:$catalogTree,durability:"omdb Immediate"} else null end),rootRelease:(if $compareRootRelease then {commit:$rootRelease,tree:$rootReleaseTree,durability:"omdb Immediate"} else null end),singleProjectionReads:$compareSingleReads,independentReads:$compareIndependentReads,independentLookups:$compareIndependentLookups,forkSqliteControl:$trace,providerTrace:($trace or $attribution),probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
             > "$evidence/inputs.json"
           printf 'pair\tposition\tprofile\tfirst_visible_ms\tterminal_ms\tmax_frame_gap_ms\n' > "$evidence/trials.tsv"
           if [[ "$COMPOSED_J06" == true ]]; then
@@ -218,6 +238,9 @@ jobs:
             if [[ "$COMPARE_INDEPENDENT_READS" == true ]]; then profiles+=(independent-reads); fi
             if [[ "$COMPARE_INDEPENDENT_LOOKUPS" == true ]]; then profiles+=(independent-lookups); fi
             if [[ "$COMPARE_ROOT_RELEASE" == true ]]; then profiles+=(root-release); fi
+            if [[ "$LAUNCH_RECEIPT_COMPARISON" == true ]]; then
+              read -r -a profiles <<< "${orders[pair - 1]}"
+            fi
             for ((position=0; position<${#profiles[@]}; position++)); do
               index="$position"
               if [[ "$TRACE_CONVERSATION" == true ]]; then index="$(((position + pair - 1) % ${#profiles[@]}))"; fi
@@ -264,12 +287,12 @@ jobs:
               fi
               rm -r "$RUNNER_TEMP/conversation-trial-$trial"
             done
-            if [[ "$COMPOSED_J06" == true ]]; then
-              diff <(jq -c '.browser.conversation.stored_work' "$evidence/sample-$pair-stock.json") \
-                <(jq -c '.browser.conversation.stored_work' "$evidence/sample-$pair-candidate.json")
-            fi
             for profile in "${profiles[@]}"; do
               if [[ "$profile" == stock ]]; then continue; fi
+              if [[ "$COMPOSED_J06" == true ]]; then
+                diff <(jq -c '.browser.conversation.stored_work' "$evidence/sample-$pair-stock.json") \
+                  <(jq -c '.browser.conversation.stored_work' "$evidence/sample-$pair-$profile.json")
+              fi
               diff <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-stock.json") \
                 <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-$profile.json")
             done
