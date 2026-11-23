@@ -14,7 +14,6 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import {
-  DEFAULT_TERMINAL_ID,
   ORCHESTRATION_PROTOCOL_HEADER,
   ORCHESTRATION_PROTOCOL_VERSION_TEXT,
   ORCHESTRATION_V2_WS_METHODS,
@@ -1967,11 +1966,30 @@ async function verifyTerminalContention(
     "",
   ].join("\n"), { mode: 0o600, flag: "wx" });
 
-  const origin = new URL(page.url()).origin;
+  const route = new URL(page.url());
+  const [environmentId, routeThreadId] = route.pathname.slice(1).split("/").map(decodeURIComponent);
+  Assert.ok(environmentId && routeThreadId === threadId, "Select a scoped thread before opening its terminal");
+  const origin = route.origin;
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin });
+  await page.bringToFront();
+  await terminalInput(page);
+  const selected = await page.waitForFunction((key) => {
+    const raw = localStorage.getItem("t3code:terminal-state:v1");
+    if (raw === null) return false;
+    const state = JSON.parse(raw).state?.terminalUiStateByThreadKey?.[key];
+    return state?.terminalOpen === true && state.terminalIds?.length === 1 &&
+      typeof state.activeTerminalId === "string" && state.activeTerminalId.length > 0 &&
+      state.terminalIds[0] === state.activeTerminalId
+      ? state.activeTerminalId
+      : false;
+  }, `${environmentId}:${threadId}`, { timeout: 10_000 });
+  const terminalId: unknown = await selected.jsonValue();
+  await selected.dispose();
+  Assert.ok(typeof terminalId === "string" && terminalId.length > 0);
   await page.addInitScript(installTerminalWireObserver, {
     origin,
     threadId,
-    terminalId: DEFAULT_TERMINAL_ID,
+    terminalId,
     attachTag: WS_METHODS.terminalAttach,
     observeTag: WS_METHODS.terminalObserve,
     framePartsParam: SOCKET_FRAME_PARTS_QUERY_PARAM,
@@ -2039,9 +2057,6 @@ async function verifyTerminalContention(
   page.on("websocket", observeSocket);
   try {
     await page.reload({ waitUntil: "domcontentloaded" });
-    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
-      origin: new URL(page.url()).origin,
-    });
     await page.bringToFront();
     const shell = await terminalMarker(page, "fixture-pty");
     const sha256 = assertBundledPtyIdentity(executable);
