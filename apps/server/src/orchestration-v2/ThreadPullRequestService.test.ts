@@ -204,18 +204,25 @@ describe("ThreadPullRequestServiceV2 reads", () => {
         }) as unknown as OrchestrationV2DomainEvent;
       const domainEvents = yield* Queue.unbounded<OrchestrationV2DomainEvent>();
       const notified = yield* Queue.unbounded<void>();
+      const snapshotRead = yield* Deferred.make<void>();
+      let projectReads = 0;
       const dependencies = Layer.mergeAll(
         Layer.mock(Orchestrator.OrchestratorV2)({
           streamDomainEvents: Stream.fromQueue(domainEvents),
           getPullRequestSnapshot: () =>
-            Effect.succeed({
+            Deferred.succeed(snapshotRead, undefined).pipe(Effect.as({
               schemaVersion: 2,
               snapshotSequence: 1,
               threads: [],
               archivedThreads: [],
-            }),
+            })),
         }),
-        Layer.mock(ProjectStore.ProjectStoreV2)({ listShells: () => Effect.succeed([]) }),
+        Layer.mock(ProjectStore.ProjectStoreV2)({
+          listShells: () => Effect.sync(() => {
+            projectReads += 1;
+            return [];
+          }),
+        }),
         Layer.mock(GitManager.GitManager)({}),
         Layer.mock(PullRequestService.PullRequestService)({
           notifyLinkedThreadsChanged: Queue.offer(notified, undefined).pipe(Effect.asVoid),
@@ -235,6 +242,9 @@ describe("ThreadPullRequestServiceV2 reads", () => {
       yield* Effect.gen(function* () {
         const service = yield* ThreadPullRequestService.make;
         yield* service.start();
+        yield* Deferred.await(snapshotRead);
+        yield* service.drain;
+        expect(projectReads).toBe(0);
 
         yield* Queue.offerAll(domainEvents, [linked("a"), linked("b"), activity("a", 1)]);
         yield* Queue.takeN(notified, 3);

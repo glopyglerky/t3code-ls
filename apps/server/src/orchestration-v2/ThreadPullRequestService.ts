@@ -144,10 +144,7 @@ export const make = Effect.gen(function* () {
   const synchronize = Effect.fn("ThreadPullRequestServiceV2.synchronize")(function* (
     request: RefreshRequest,
   ) {
-    const [threadSnapshot, projectShells] = yield* Effect.all([
-      readThreadSnapshot(request),
-      projectStore.listShells(),
-    ]);
+    const threadSnapshot = yield* readThreadSnapshot(request);
     // Subagent children refresh after their own runs; sweeping them costs a lookup each per minute.
     const snapshotThreads =
       request.threadId === null
@@ -155,7 +152,6 @@ export const make = Effect.gen(function* () {
             (thread) => thread.lineage.relationshipToParent !== "subagent",
           )
         : threadSnapshot.threads;
-    const projects = new Map(projectShells.map((project) => [project.id, project]));
     if (request.backfill) {
       for (const thread of snapshotThreads) {
         if (
@@ -184,6 +180,9 @@ export const make = Effect.gen(function* () {
     const groups = Map.groupBy(threads, (thread) =>
       JSON.stringify([thread.projectId, thread.worktreePath, thread.branch]),
     );
+    if (groups.size === 0) return;
+    const projectShells = yield* projectStore.listShells();
+    const projects = new Map(projectShells.map((project) => [project.id, project]));
 
     yield* Effect.forEach(
       groups.values(),
