@@ -12,7 +12,13 @@ import { AsyncResult, type Atom } from "effect/reactivity";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { QueuedThreadMessage } from "./thread-outbox-model";
 
+type TestConnections = ReadonlyArray<{
+  environmentId: string;
+  connectionState: "connected" | "disconnected";
+}>;
+
 const state = vi.hoisted(() => ({
+  connections: null as unknown as Atom.Writable<TestConnections>,
   draftText: "Keep this draft separate",
   cleanups: [] as Array<() => void>,
   delivery: null as {
@@ -72,11 +78,8 @@ vi.mock("./projects", async () => {
 });
 vi.mock("./workspace", async () => {
   const { Atom } = await import("effect/reactivity");
-  return {
-    workspaceConnections: {
-      environmentsAtom: Atom.make([{ environmentId: "secondary", connectionState: "connected" }]),
-    },
-  };
+  state.connections = Atom.make<TestConnections>([{ environmentId: "secondary", connectionState: "connected" }]);
+  return { workspaceConnections: { environmentsAtom: state.connections } };
 });
 vi.mock("./server", async () => {
   const { Atom } = await import("effect/reactivity");
@@ -162,7 +165,6 @@ vi.mock("./use-composer-drafts", async () => {
 
 import { appAtomRegistry } from "./atom-registry";
 import { environmentSession } from "./session";
-import { workspaceConnections } from "./workspace";
 import { threadOutboxRetryDelayMs } from "./thread-outbox-model";
 import { dispatchingQueuedMessageIdAtom, editingQueuedMessageIdsAtom } from "./use-thread-outbox";
 import { createThreadOutboxDelivery } from "./threadOutboxDelivery";
@@ -213,9 +215,9 @@ beforeEach(() => {
   setOperateGrant("primary", true);
   setOperateGrant("secondary", false);
   state.remove.mockReset().mockResolvedValue(undefined);
-  appAtomRegistry.set(workspaceConnections.environmentsAtom, [
+  appAtomRegistry.set(state.connections, [
     { environmentId: "secondary", connectionState: "connected" },
-  ] as never);
+  ]);
   state.draftText = "Keep this draft separate";
   state.config.shellThreadFamilies = false;
   state.modelUnavailable.mockReset().mockReturnValue(false);
@@ -563,9 +565,9 @@ describe("compaction before a queued send", () => {
 // uploads and disk are test doubles; this is not an authenticated Android proof.
 describe("outbox reconnect convergence control", () => {
   const setConnected = (connected: boolean) => {
-    appAtomRegistry.set(workspaceConnections.environmentsAtom, [
+    appAtomRegistry.set(state.connections, [
       { environmentId: "secondary", connectionState: connected ? "connected" : "disconnected" },
-    ] as never);
+    ]);
   };
 
   function nextSettlement() {

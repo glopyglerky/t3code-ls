@@ -62,7 +62,7 @@ describe("offline pull request cache", () => {
 
   it.effect("restores saved records and clears them with the environment", () =>
     Effect.gen(function* () {
-      yield* Effect.promise(sqliteDatabase);
+      yield* Effect.promise(() => sqliteDatabase());
       const database = yield* MobileDatabase.make;
       yield* database.saveCache(environmentId, "pull-request", "v1:list", 1, '{"entries":[]}');
       yield* database.saveCache(otherEnvironment, "pull-request", "v1:list", 1, "other");
