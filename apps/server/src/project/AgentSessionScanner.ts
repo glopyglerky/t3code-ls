@@ -1,6 +1,6 @@
 import * as NodeOS from "node:os";
 import * as NodeSqlite from "node:sqlite";
-
+import * as NodeZlib from "node:zlib";
 import {
   AgentSessionImportSource,
   AgentSessionScanError,
@@ -14,6 +14,7 @@ import {
   type AgentSessionScanResult,
   type ProviderInstanceConfig,
 } from "@t3tools/contracts";
+import * as NodeStream from "@effect/platform-node/NodeStream";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -22,6 +23,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Pull from "effect/Pull";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
@@ -86,6 +88,45 @@ const MAX_IMPORT_HISTORY_BYTES = 32 * 1024 * 1024;
 const MAX_IMPORT_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_IMPORT_TRANSCRIPTS = 100;
 const MAX_IMPORT_RECORDS = 100_000;
+const isCompressedRollout = (filePath: string) => filePath.endsWith(".jsonl.zst");
+
+// Feed the transform through the same descriptor checked by the caller.
+const openTranscriptReader = Effect.fn("AgentSessionScanner.openTranscriptReader")(function* (
+  file: FileSystem.File,
+  filePath: string,
+  inputBytes: number,
+  reserveInput: (bytes: number) => number = (bytes) => bytes,
+) {
+  if (!isCompressedRollout(filePath)) return (size: number) => file.readAlloc(size);
+  const input = Stream.unfold(0, Effect.fnUntraced(function* (offset: number) {
+    if (offset === inputBytes) return;
+    const size = reserveInput(Math.min(TRANSCRIPT_PREFIX_BYTES, inputBytes - offset));
+    if (size === 0) {
+      return yield* new TranscriptParseError({ filePath, cause: "Compressed input budget exhausted" });
+    }
+    const bytes = yield* file.readAlloc(size);
+    if (Option.isNone(bytes)) {
+      return yield* new TranscriptParseError({ filePath, cause: "Compressed file ended before its recorded size" });
+    }
+    return [bytes.value, offset + bytes.value.byteLength] as const;
+  }));
+  const pull = yield* Stream.toPull(input.pipe(NodeStream.pipeThroughSimple(() =>
+    NodeZlib.createZstdDecompress({ chunkSize: TRANSCRIPT_PREFIX_BYTES }),
+  )));
+  let pending: ReadonlyArray<Uint8Array> = [];
+  let done = false;
+  return Effect.fnUntraced(function* (size: number) {
+    while (pending.length === 0 && !done) {
+      const chunk = yield* pull.pipe(Pull.catchDone(() => Effect.undefined));
+      if (chunk === undefined) done = true;
+      else pending = chunk;
+    }
+    const [chunk, ...rest] = pending;
+    if (chunk === undefined) return Option.none<Uint8Array>();
+    pending = chunk.byteLength > size ? [chunk.subarray(size), ...rest] : rest;
+    return Option.some(chunk.subarray(0, size));
+  });
+});
 
 /**
  * open() of a file under macOS privacy protection waits on a consent prompt
@@ -177,7 +218,7 @@ const decodeCodexHistoryBase = Schema.decodeUnknownOption(
 );
 // Original rollouts end in their thread ID, rewound ones in `<thread ID>_<rollout ID>`.
 const CODEX_ROLLOUT_ID_PATTERN =
-  /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}))?\.jsonl$/i;
+  /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}))?\.jsonl(?:\.zst)?$/i;
 // Codex records a chat's project only here; moving a chat leaves its rollout cwd unchanged.
 const CODEX_STATE_DATABASE = "state_5.sqlite";
 const decodeCodexSessionIndexEntry = Schema.decodeUnknownOption(
@@ -1041,7 +1082,19 @@ export const make = Effect.gen(function* () {
             let remaining = "";
             let bytesRead = 0;
             let recordsRead = 0;
-            const maxBytes = Math.min(MAX_TRANSCRIPT_SCAN_BYTES, transcript.identity.size);
+            const compressed = isCompressedRollout(transcript.filePath);
+            const inputBytes = Math.min(MAX_TRANSCRIPT_SCAN_BYTES, transcript.identity.size);
+            const maxBytes = compressed ? MAX_TRANSCRIPT_SCAN_BYTES : inputBytes;
+            const read = yield* openTranscriptReader(file, transcript.filePath, inputBytes, (size) => {
+              if (budget.operationsRemaining === 0 || budget.bytesRemaining === 0) {
+                budget.truncated = true;
+                return 0;
+              }
+              budget.operationsRemaining -= 1;
+              const reserved = Math.min(size, budget.bytesRemaining);
+              budget.bytesRemaining -= reserved;
+              return reserved;
+            });
             const reserveRecord = () => {
               if (
                 recordsRead === MAX_METADATA_RECORDS_PER_TRANSCRIPT ||
@@ -1073,7 +1126,7 @@ export const make = Effect.gen(function* () {
               );
               budget.operationsRemaining -= 1;
               budget.bytesRemaining -= readSize;
-              const next = yield* file.readAlloc(readSize);
+              const next = yield* read(readSize);
               if (Option.isNone(next)) {
                 return readLastRecord();
               }
@@ -1090,7 +1143,7 @@ export const make = Effect.gen(function* () {
               }
             }
 
-            if (bytesRead < transcript.identity.size) {
+            if (compressed || bytesRead < transcript.identity.size) {
               budget.truncated = true;
               return null;
             }
@@ -1106,9 +1159,17 @@ export const make = Effect.gen(function* () {
     expected: ReturnType<typeof transcriptIdentity>,
     source: AgentSessionSource,
     prefix?: { readonly endByteOffset: number; readonly historyBytes: number },
+    expanded?: { readonly available: number; readonly debit: (bytes: number) => void },
   ) {
-    const readBytes = prefix?.endByteOffset ?? expected.size;
-    if (readBytes > expected.size || readBytes > MAX_IMPORTED_TRANSCRIPT_BYTES) return null;
+    const compressed = isCompressedRollout(filePath);
+    const capacity = compressed ? expanded?.available ?? 0 : expected.size;
+    const readBytes = prefix?.endByteOffset ?? Math.min(capacity, MAX_IMPORTED_TRANSCRIPT_BYTES);
+    if (
+      readBytes > capacity ||
+      readBytes > MAX_IMPORTED_TRANSCRIPT_BYTES ||
+      (compressed && (capacity === 0 || expected.size > MAX_IMPORTED_TRANSCRIPT_BYTES))
+    ) return null;
+    const verifyEnd = compressed && prefix === undefined;
 
     return yield* Effect.scoped(
       fileSystem.open(filePath, { flag: "r" }).pipe(
@@ -1117,6 +1178,7 @@ export const make = Effect.gen(function* () {
             if (!sameTranscriptIdentity(expected, transcriptIdentity(filePath, yield* file.stat))) {
               return null;
             }
+            const read = yield* openTranscriptReader(file, filePath, expected.size);
             const records: Array<DecodedTranscriptRecord> = [];
             const claudeHistory = createClaudeHistoryWindow();
             let cwd = Option.none<string>();
@@ -1176,15 +1238,18 @@ export const make = Effect.gen(function* () {
               return true;
             };
 
-            while (bytesRead < readBytes) {
-              const next = yield* file.readAlloc(
-                Math.min(TRANSCRIPT_PREFIX_BYTES, readBytes - bytesRead),
+            while (bytesRead < readBytes || verifyEnd) {
+              const next = yield* read(
+                Math.min(TRANSCRIPT_PREFIX_BYTES, readBytes - bytesRead + Number(verifyEnd)),
               );
               if (Option.isNone(next)) {
+                if (verifyEnd) break;
                 return null;
               }
 
+              if (compressed) expanded?.debit(Math.min(next.value.byteLength, readBytes - bytesRead));
               bytesRead += next.value.byteLength;
+              if (bytesRead > readBytes) return null;
               const withinBudget = yield* Effect.try({
                 try: () => {
                   let start = 0;
@@ -1398,7 +1463,8 @@ export const make = Effect.gen(function* () {
             }
             const directory = path.join(sessionsDir, year, month, day);
             for (const entry of (yield* readDirectory(directory)).toSorted().toReversed()) {
-              if (!entry.startsWith("rollout-") || !entry.endsWith(".jsonl")) continue;
+              if (!entry.startsWith("rollout-") ||
+                (!entry.endsWith(".jsonl") && !isCompressedRollout(entry))) continue;
               if (operationsRemaining <= 0) {
                 truncated = true;
                 break;
@@ -1905,6 +1971,13 @@ export const make = Effect.gen(function* () {
     const importedSessions = new Set<string>();
     const codexThreadNamesByHome = new Map<string, ReadonlyMap<string, string>>();
     let bytesRemaining = MAX_IMPORT_BYTES;
+    // Reserve the encoded input by file size and charge decoded bytes as the parser consumes them.
+    const expandedBudget = () => ({
+      available: bytesRemaining,
+      debit: (bytes: number) => {
+        bytesRemaining -= bytes;
+      },
+    });
     let transcriptsRemaining = MAX_IMPORT_TRANSCRIPTS;
     const codexRolloutPaths = new Map<ProviderInstanceId, ReadonlyMap<string, string>>();
     const codexRolloutPath = (providerInstanceId: ProviderInstanceId, rolloutId: string) => {
@@ -1942,12 +2015,17 @@ export const make = Effect.gen(function* () {
         visited.add(base.thread_id);
         const stats = yield* statOption(filePath);
         if (Option.isNone(stats) || stats.value.type !== "File") return null;
-        bytesRemaining -= base.end_byte_offset;
+        const identity = transcriptIdentity(filePath, stats.value);
+        const compressed = isCompressedRollout(filePath);
+        const diskBytes = compressed ? identity.size : base.end_byte_offset;
+        if (diskBytes > bytesRemaining) return null;
+        bytesRemaining -= diskBytes;
         const inherited = yield* readTranscript(
           filePath,
-          transcriptIdentity(filePath, stats.value),
+          identity,
           "codex",
           { endByteOffset: base.end_byte_offset, historyBytes },
+          compressed ? expandedBudget() : undefined,
         );
         if (inherited === null) return null;
         historyBytes = inherited.historyBytes;
@@ -1993,7 +2071,13 @@ export const make = Effect.gen(function* () {
           }
           transcriptsRemaining -= 1;
           bytesRemaining -= identity.size;
-          const snapshot = yield* readTranscript(transcript.filePath, identity, candidate.source);
+          const snapshot = yield* readTranscript(
+            transcript.filePath,
+            identity,
+            candidate.source,
+            undefined,
+            isCompressedRollout(transcript.filePath) ? expandedBudget() : undefined,
+          );
           if (snapshot === null) {
             return Option.some<AgentSessionRecentThread>({ _tag: "Skipped" });
           }
