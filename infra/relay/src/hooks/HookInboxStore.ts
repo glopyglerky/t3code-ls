@@ -250,11 +250,18 @@ export const deliverDue = Effect.fn("HookInboxStore.deliverDue")(function* <R>(
       ORDER BY seq LIMIT ${ROWS_READ_PER_PAGE}
     `;
   let batch = yield* readPage(0, new Set());
-  if (batch.length === 0 || target === null) {
-    if (target === null) yield* sql`DELETE FROM held_hooks`;
-    else yield* resetFailures;
+  if (batch.length === 0) {
+    if (target !== null) yield* resetFailures;
     yield* Effect.annotateCurrentSpan({ "relay.inbox.expired": expired.length });
     return null;
+  }
+  if (target === null) {
+    // A row from an interrupted older admission can still be routed by a wake.
+    yield* Effect.annotateCurrentSpan({
+      "relay.inbox.expired": expired.length,
+      "relay.inbox.run_result": "unrouted",
+    });
+    return startedAt + HOOK_INBOX_TTL_MS + 1;
   }
 
   let failures = target.failures;
@@ -297,7 +304,7 @@ export const deliverDue = Effect.fn("HookInboxStore.deliverDue")(function* <R>(
       }
       const headers = decodeHeaders(row.headers);
       if (Option.isNone(headers)) {
-        yield* sql`DELETE FROM held_hooks WHERE id = ${row.id}`;
+        yield* sql`DELETE FROM held_hooks WHERE seq = ${row.seq}`;
         unreadable += 1;
         continue;
       }
@@ -331,7 +338,7 @@ export const deliverDue = Effect.fn("HookInboxStore.deliverDue")(function* <R>(
         busyHooks.add(row.hook_key);
         continue;
       }
-      yield* sql`DELETE FROM held_hooks WHERE id = ${row.id}`;
+      yield* sql`DELETE FROM held_hooks WHERE seq = ${row.seq}`;
       delivered += 1;
       const receivedAtMs = DateTime.toEpochMillis(DateTime.makeUnsafe(row.received_at));
       longestWaitMs = Math.max(longestWaitMs, startedAt - receivedAtMs);
