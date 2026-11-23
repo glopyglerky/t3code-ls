@@ -31,8 +31,8 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
             if conversation && (trace.len() <= 1 || (trace.len() == 2 && trace[1] == "server-spans")) => (
             node, bundle, trial, Some((driver, chrome)),
             match mode.to_str() {
-                Some("stock" | "stock-j06") => None,
-                Some("native-j06" | "native" | "native-single-reads" | "native-independent-reads" | "native-independent-lookups") => Some("native"),
+                Some("stock" | "stock-j06" | "stock-j06-attribution") => None,
+                Some("native-j06-attribution" | "native-j06" | "native" | "native-single-reads" | "native-independent-reads" | "native-independent-lookups") => Some("native"),
                 Some("fork-sqlite") => Some("upstream"),
                 _ => return Err("unknown conversation profile".into()),
             },
@@ -41,7 +41,7 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
                 Ok::<_, std::io::Error>((fs::canonicalize(wrapper)?, trace.len() == 2))
             }).transpose()?,
         ),
-        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|stock-j06|native-j06|native|native-single-reads|native-independent-reads|native-independent-lookups|fork-sqlite [TRACE_WRAPPER [server-spans]]".into()),
+        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|stock-j06|native-j06|stock-j06-attribution|native-j06-attribution|native|native-single-reads|native-independent-reads|native-independent-lookups|fork-sqlite [TRACE_WRAPPER [server-spans]]".into()),
         _ => return Err("usage: t3code-ls-tools probe-startup NODE BUNDLE NEW_TRIAL_DIRECTORY [CHROMEDRIVER CHROME [fork-sqlite]]".into()),
     };
     let node = fs::canonicalize(node)?;
@@ -49,7 +49,14 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
         .get(6)
         .and_then(|mode| mode.to_str())
         .filter(|_| conversation);
-    let scoped_j06 = matches!(profile, Some("stock-j06" | "native-j06"));
+    let attribution = matches!(
+        profile,
+        Some("stock-j06-attribution" | "native-j06-attribution")
+    );
+    if attribution && !trace.as_ref().is_some_and(|(_, spans)| *spans) {
+        return Err("J06 attribution requires the shared trace wrapper and server-spans".into());
+    }
+    let scoped_j06 = attribution || matches!(profile, Some("stock-j06" | "native-j06"));
     let single_projection_reads = matches!(
         profile,
         Some("native-single-reads" | "native-independent-lookups")
@@ -159,7 +166,8 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
             .attach(&link, start, conversation)
             .and_then(|mut result| {
                 if conversation {
-                    result["conversation"] = browser.conversation(&workspace, scoped_j06)?;
+                    result["conversation"] =
+                        browser.conversation(&workspace, scoped_j06, attribution)?;
                 }
                 Ok(result)
             });
@@ -195,12 +203,20 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
             .as_ref()
             .and_then(|proof| proof["conversation"]["timing"]["submitEpochMillis"].as_f64())
             .ok_or("missing browser submit timestamp")?;
-        let end = provider_trace
-            .as_ref()
-            .and_then(|entries| entries.iter().find(|entry| entry["phase"] == "prompt"))
-            .and_then(|entry| entry["millis"].as_f64())
-            .ok_or("missing provider prompt timestamp")?;
-        Some(read_server_spans(&server_trace, start, end)?)
+        let end = if attribution {
+            start
+                + browser
+                    .as_ref()
+                    .and_then(|proof| proof["conversation"]["timing"]["terminalMillis"].as_f64())
+                    .ok_or("missing terminal timestamp")?
+        } else {
+            provider_trace
+                .as_ref()
+                .and_then(|entries| entries.iter().find(|entry| entry["phase"] == "prompt"))
+                .and_then(|entry| entry["millis"].as_f64())
+                .ok_or("missing provider prompt timestamp")?
+        };
+        Some(read_server_spans(&server_trace, start, end, attribution)?)
     } else {
         None
     };
@@ -216,6 +232,7 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
             "schema_version": 1,
             "profile": profile,
             "scoped_j06": scoped_j06,
+            "attribution": attribution,
             "accept_observer": if scoped_j06 { "browser-websocket-launch-ack-upper-bound" } else { "none" },
             "single_projection_reads": single_projection_reads,
             "independent_reads": independent_reads,
@@ -231,7 +248,12 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
     Ok(())
 }
 
-fn read_server_spans(path: &Path, submit: f64, prompt: f64) -> Result<Vec<Value>> {
+fn read_server_spans(
+    path: &Path,
+    submit: f64,
+    prompt: f64,
+    attribution: bool,
+) -> Result<Vec<Value>> {
     let trace = fs::File::open(path)?;
     if trace.metadata()?.len() > 10 * 1024 * 1024 || prompt <= submit {
         return Err("invalid server trace size or phase boundaries".into());
@@ -253,16 +275,18 @@ fn read_server_spans(path: &Path, submit: f64, prompt: f64) -> Result<Vec<Value>
         };
         let start = start / 1_000_000.0;
         let end = end / 1_000_000.0;
-        if start < submit
-            || end < start
-            || end > prompt
+        if (if attribution {
+            end < submit || start > prompt
+        } else {
+            start < submit || end > prompt
+        }) || end < start
             || !name
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
         {
             continue;
         }
-        spans.push(json!({ "name": name, "start_ms": start - submit, "duration_ms": end - start }));
+        spans.push(json!({ "name": name, "start_ms": start - submit, "duration_ms": end - start, "end_ms": end - submit }));
     }
     if spans.is_empty() {
         return Err("no closed server spans between submit and prompt".into());

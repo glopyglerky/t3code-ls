@@ -1,7 +1,8 @@
 // Diagnostic observer. Arrival of a matching success is an upper bound on commit.
 // This sends no RPCs, changes no payloads and reads only the disposable fixture.
-const [expectedPrompt] = arguments;
+const [expectedPrompt, attribution = false] = arguments;
 const state = { result: null, error: null, requests: 0 };
+if (attribution) state.attribution = { sendEpochMillis: null, firstTextWireEpochMillis: null };
 window.fixtureConversationAccept = state;
 const original = WebSocket.prototype.send;
 const sockets = new Map();
@@ -19,6 +20,7 @@ function observe(socket, data) {
         frame.payload?.initialMessage?.text !== expectedPrompt) continue;
     if (state.requests++ !== 0) { state.error = "duplicate fixture launch"; continue; }
     const command = frame.payload;
+    if (attribution) state.attribution.sendEpochMillis = epoch();
     if (!command.commandId || !command.threadId || !command.initialMessage.messageId ||
         command.projectId !== "conversation-fixture" ||
         command.modelSelection?.instanceId !== "devReplay" ||
@@ -36,6 +38,19 @@ function observe(socket, data) {
       let responses;
       try { responses = messages(text); } catch { return; }
       for (const response of responses) {
+        if (attribution && response._tag === "Chunk" && state.attribution.firstTextWireEpochMillis === null) {
+          for (const item of response.values ?? []) {
+            const event = item.kind === "event" ? item.event : null;
+            const message = event?.threadId === command.threadId &&
+              (event.type === "message.updated" || event.type === "turn-item.updated") ? event.payload : null;
+            const messages = item.kind === "snapshot" && item.projection?.thread?.id === command.threadId
+              ? item.projection.messages ?? [] : message ? [message] : [];
+            if (messages.some(message => (message.role === "assistant" || message.type === "assistant_message") &&
+                typeof message.text === "string" && message.text.includes("I'll track the"))) {
+              state.attribution.firstTextWireEpochMillis = arrived;
+            }
+          }
+        }
         if (response._tag !== "Exit" || String(response.requestId) !== String(frame.id)) continue;
         if (state.result || state.error) { state.error = "duplicate launch exit"; return; }
         const value = response.exit?.value;

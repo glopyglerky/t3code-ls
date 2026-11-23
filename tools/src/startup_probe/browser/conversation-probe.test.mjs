@@ -74,4 +74,45 @@ for(const [name,mutate] of [
 assert.equal((await snapshot(projection,401)).valid,false);checks++;
 assert.equal((await snapshot(projection,200,'/env/other')).valid,false);checks++;
 for(const mode of ['missing','wrong-thread']) {assert.equal((await snapshot(projection,200,'/env/thread-fixture',mode)).valid,false);checks++;console.log('PASS rejects detail '+mode);}
+
+
+// Opt-in diagnostic boundaries must not affect acknowledgement validity.
+function diagnosticObserver(enabled=true) {
+ class Socket {
+  listeners=new Set();sent=[];
+  send(data){this.sent.push(data);}
+  addEventListener(_,fn){this.listeners.add(fn);}
+  removeEventListener(_,fn){this.listeners.delete(fn);}
+  receive(data){for(const fn of this.listeners) fn({data:typeof data==='string'?data:JSON.stringify(data)});}
+ }
+ let now=10;
+ const context={WebSocket:Socket,window:{},performance:{timeOrigin:1000,now:()=>now}};
+ vm.runInNewContext('(function(){'+accept+'}).apply(null, '+JSON.stringify([prompt,enabled])+')',context);
+ return {socket:new Socket(),state:context.window.fixtureConversationAccept,tick:()=>now+=10};
+}
+const textEvent=(thread=command.threadId,text="I'll track the")=>({_tag:'Chunk',requestId:'subscription',values:[{kind:'event',sequence:8,event:{threadId:thread,type:'message.updated',payload:{role:'assistant',text}}}]});
+okCase('diagnostic matches thread text before ack without sending extra RPCs',()=>{
+ const {socket,state,tick}=diagnosticObserver();socket.send(JSON.stringify(request));
+ assert.equal(state.attribution.sendEpochMillis,1010);tick();
+ socket.receive(textEvent('other'));socket.receive(textEvent(command.threadId,'unrelated'));
+ assert.equal(state.attribution.firstTextWireEpochMillis,null);
+ const text=JSON.stringify(textEvent());socket.receive('\u001e'+text.slice(0,18));tick();socket.receive(text.slice(18));
+ assert.equal(state.attribution.firstTextWireEpochMillis,1030);tick();socket.receive(textEvent());socket.receive(success);
+ assert.equal(state.attribution.firstTextWireEpochMillis,1030);assert.equal(state.result.ackEpochMillis,1040);
+ assert.equal(socket.sent.length,1);state.stop();assert.equal(socket.listeners.size,0);
+});
+okCase('diagnostic missing wire text remains unknown with a valid ack',()=>{
+ const {socket,state}=diagnosticObserver();socket.send(JSON.stringify(request));socket.receive(success);
+ assert.equal(state.attribution.firstTextWireEpochMillis,null);assert.equal(state.result.sequence,7);
+});
+okCase('ordinary observer emits no attribution fields',()=>{
+ const {socket,state}=diagnosticObserver(false);socket.send(JSON.stringify(request));socket.receive(textEvent());socket.receive(success);
+ assert.equal('attribution' in state,false);assert.equal(state.result.sequence,7);
+});
+okCase('diagnostic recognizes a same-thread uncompressed snapshot',()=>{
+ const {socket,state}=diagnosticObserver();socket.send(JSON.stringify(request));
+ socket.receive({_tag:'Chunk',values:[{kind:'snapshot',projection:{thread:{id:command.threadId},messages:[{role:'assistant',text:"I'll track the"}]}}]});
+ assert.equal(state.attribution.firstTextWireEpochMillis,1010);
+});
+
 console.log(`Passed ${checks} synthetic checks; no browser, provider, network or installed profile used.`);

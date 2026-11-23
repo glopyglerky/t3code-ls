@@ -13,6 +13,8 @@ const inputs = createInterface({ input: process.stdin, crlfDelay: Infinity });
 const outputs = createInterface({ input: child.stdout, crlfDelay: Infinity });
 let prompt;
 let first = false;
+let assistantText = "";
+let prefix = false;
 
 await Promise.all([
   (async () => {
@@ -39,6 +41,16 @@ await Promise.all([
           frame.params?.update?.sessionUpdate === "agent_message_chunk") {
           mark("first_chunk");
           first = true;
+        }
+        if (frame.method === "session/update" && frame.params?.update?.sessionUpdate === "agent_message_chunk") {
+          const content = frame.params.update.content;
+          if (content?.type === "text" && typeof content.text === "string") {
+            assistantText = (assistantText + content.text).slice(-128);
+            if (!prefix && assistantText.includes("I'll track the")) {
+              mark("visible_prefix");
+              prefix = true;
+            }
+          }
         }
         if (frame.method === undefined && frame.id === prompt) mark("prompt_result");
       }

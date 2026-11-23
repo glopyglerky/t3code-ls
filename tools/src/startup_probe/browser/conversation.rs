@@ -10,6 +10,7 @@ impl Browser {
         &self,
         workspace: &Path,
         scoped_j06: bool,
+        attribution: bool,
     ) -> Result<Value> {
         let status = self.command(
             "POST",
@@ -69,7 +70,10 @@ impl Browser {
             PROMPT,
         )?;
         if scoped_j06 {
-            self.script_with_args(include_str!("conversation-accept.js"), json!([PROMPT]))?;
+            self.script_with_args(
+                include_str!("conversation-accept.js"),
+                json!([PROMPT, attribution]),
+            )?;
         }
         self.script(include_str!("conversation-timing.js"))?;
         self.click_when(

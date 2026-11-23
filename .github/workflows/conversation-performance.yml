@@ -31,6 +31,7 @@ jobs:
       CARGO_INCREMENTAL: "0"
       GIT_TERMINAL_PROMPT: "0"
       TRACE_CONVERSATION: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-diagnose-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-catalog-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-') }}
+      J06_ATTRIBUTION: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-') }}
       TRACE_SERVER_SPANS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-diagnose-server-') }}
       COMPARE_CATALOG: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-catalog-') }}
       COMPARE_SINGLE_READS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') }}
@@ -166,11 +167,11 @@ jobs:
           sha256sum "$probe" "$replay" "stock/$transcript" > "$evidence/fixture.sha256"
           trace=()
           pairs=8
-          if [[ "$TRACE_CONVERSATION" == true ]]; then
+          if [[ "$TRACE_CONVERSATION" == true || "$J06_ATTRIBUTION" == true ]]; then
             trace=("$PWD/measurement/tools/src/startup_probe/browser/conversation-provider-trace.mjs")
             sha256sum "${trace[0]}" >> "$evidence/fixture.sha256"
             pairs=6
-            if [[ "$TRACE_SERVER_SPANS" == true ]]; then
+            if [[ "$TRACE_SERVER_SPANS" == true || "$J06_ATTRIBUTION" == true ]]; then
               trace+=(server-spans)
               pairs=3
             fi
@@ -196,13 +197,13 @@ jobs:
             --argjson compareIndependentLookups "$COMPARE_INDEPENDENT_LOOKUPS" \
             --argjson compareIndependentReads "$COMPARE_INDEPENDENT_READS" \
             --arg rootRelease "$ROOT_RELEASE_COMMIT" --arg rootReleaseTree "$ROOT_RELEASE_TREE" --argjson compareRootRelease "$COMPARE_ROOT_RELEASE" \
-            --arg probe "$(git -C measurement rev-parse HEAD)" --arg node "$(node --version)" \
+            --argjson attribution "$J06_ATTRIBUTION" --arg probe "$(git -C measurement rev-parse HEAD)" --arg node "$(node --version)" \
             --arg chrome "$("$chrome" --version)" --arg driver "$("$driver" --version)" \
             --arg image "${ImageOS:-unknown}/${ImageVersion:-unknown}" --arg kernel "$(uname -r)" \
             --arg cpu "$(LC_ALL=C lscpu | sed -n 's/^Model name:[[:space:]]*//p')" --argjson trace "$TRACE_CONVERSATION" \
             --argjson composedJ06 "$COMPOSED_J06" \
             --arg systemLoad "$(uptime)" --argjson cpus "$(nproc)" \
-            '{composedJ06:$composedJ06,acceptBoundary:(if $composedJ06 then "browser launch acknowledgement upper bound; observer overhead included" else null end),stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},catalog:(if $compareCatalog then {commit:$catalog,tree:$catalogTree,durability:"omdb Immediate"} else null end),rootRelease:(if $compareRootRelease then {commit:$rootRelease,tree:$rootReleaseTree,durability:"omdb Immediate"} else null end),singleProjectionReads:$compareSingleReads,independentReads:$compareIndependentReads,independentLookups:$compareIndependentLookups,forkSqliteControl:$trace,providerTrace:$trace,probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
+            '{attribution:$attribution,composedJ06:$composedJ06,acceptBoundary:(if $composedJ06 then "browser launch acknowledgement upper bound; observer overhead included" else null end),stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},catalog:(if $compareCatalog then {commit:$catalog,tree:$catalogTree,durability:"omdb Immediate"} else null end),rootRelease:(if $compareRootRelease then {commit:$rootRelease,tree:$rootReleaseTree,durability:"omdb Immediate"} else null end),singleProjectionReads:$compareSingleReads,independentReads:$compareIndependentReads,independentLookups:$compareIndependentLookups,forkSqliteControl:$trace,providerTrace:($trace or $attribution),probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
             > "$evidence/inputs.json"
           printf 'pair\tposition\tprofile\tfirst_visible_ms\tterminal_ms\tmax_frame_gap_ms\n' > "$evidence/trials.tsv"
           if [[ "$COMPOSED_J06" == true ]]; then
@@ -232,6 +233,7 @@ jobs:
               if [[ "$profile" == independent-lookups ]]; then mode=native-independent-lookups; bundle_profile=candidate; fi
               if [[ "$COMPOSED_J06" == true ]]; then
                 if [[ "$profile" == stock ]]; then mode=stock-j06; else mode=native-j06; fi
+                if [[ "$J06_ATTRIBUTION" == true ]]; then mode="$mode-attribution"; fi
               fi
               sudo -n unshare --net -- bash -euc '
                 ip link set dev lo up
