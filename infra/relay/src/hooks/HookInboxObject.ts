@@ -84,13 +84,14 @@ export const layer = HookInboxObject.make(
 
       // SQLite-backed Durable Objects include direct SQL and alarm operations in
       // this storage transaction. Keep external delivery outside this boundary.
-      const commitStorage = <A>(effect: Effect.Effect<A>) =>
-        Effect.gen(function* () {
-          const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
-          return yield* Effect.promise((signal) =>
-            state.raw.storage.transaction(() => runPromise(effect, { signal })),
-          );
-        });
+      const commitStorage = Effect.fn("HookInboxObject.commitStorage")(function* <A>(
+        effect: Call<A>,
+      ) {
+        const runPromise = Effect.runPromiseWith(yield* Effect.context<Alchemy.RuntimeContext>());
+        return yield* Effect.promise((signal) =>
+          state.raw.storage.transaction(() => runPromise(effect, { signal })),
+        );
+      });
 
       const scheduleBy = Effect.fn("HookInboxObject.scheduleBy")(function* (at: number) {
         const current = yield* state.storage.getAlarm();
@@ -100,8 +101,8 @@ export const layer = HookInboxObject.make(
       // withInboxSpan supplies each method's root span; avoid a second wrapper span.
       return {
         hold: Effect.fnUntraced(
-          (hook: HookInboxStore.HeldHook, baseUrl: string) =>
-            commitStorage(
+          function* (hook: HookInboxStore.HeldHook, baseUrl: string) {
+            return yield* commitStorage(
               Effect.gen(function* () {
                 const dueAt = yield* run(HookInboxStore.hold(hook, baseUrl));
                 yield* Effect.annotateCurrentSpan({ "relay.inbox.stored": dueAt !== null });
@@ -109,26 +110,29 @@ export const layer = HookInboxObject.make(
                 yield* scheduleBy(dueAt);
                 return true;
               }),
-            ),
+            );
+          },
           withInboxSpan("relay.inbox.hold", inboxId),
         ),
         wake: Effect.fnUntraced(
-          (baseUrl: string) =>
-            commitStorage(
+          function* (baseUrl: string) {
+            return yield* commitStorage(
               Effect.gen(function* () {
                 const pending = yield* run(HookInboxStore.wake(baseUrl));
                 yield* Effect.annotateCurrentSpan({ "relay.inbox.pending": pending });
                 if (pending) yield* state.storage.setAlarm(yield* Clock.currentTimeMillis);
                 return pending;
               }),
-            ),
+            );
+          },
           withInboxSpan("relay.inbox.wake", inboxId),
         ),
         clear: Effect.fnUntraced(
-          () =>
-            commitStorage(
+          function* () {
+            yield* commitStorage(
               run(HookInboxStore.clear).pipe(Effect.andThen(state.storage.deleteAlarm())),
-            ),
+            );
+          },
           withInboxSpan("relay.inbox.clear", inboxId),
         ),
         alarm: () =>
