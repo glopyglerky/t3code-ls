@@ -2067,6 +2067,11 @@
       "adapter_paths": [
         "infra/task-cache/src/Savings.ts",
         "infra/task-cache/src/SavingsFold.ts",
+        "infra/task-cache/src/SavingsRuntime.ts",
+        "infra/task-cache/src/SavingsRuntime.native.ts",
+        "infra/task-cache/src/SavingsBuild.ts",
+        "infra/task-cache/src/worker.ts",
+        "infra/task-cache/src/SavingsWorker.fixture.ts",
         ".github/workflows/thread-recovery.yml"
       ],
       "platform_routes": [
@@ -2078,12 +2083,16 @@
           "acceptance_evidence": {}
         }
       ],
-      "acceptance_tests": ["infra/task-cache/scripts/verify-savings-native.ts"],
+      "acceptance_tests": [
+        "infra/task-cache/scripts/verify-savings-native.ts",
+        "infra/task-cache/scripts/verify-savings-worker.ts"
+      ],
       "hosted_acceptance": {
-        "infra/task-cache/scripts/verify-savings-native.ts": ".github/workflows/thread-recovery.yml"
+        "infra/task-cache/scripts/verify-savings-native.ts": ".github/workflows/thread-recovery.yml",
+        "infra/task-cache/scripts/verify-savings-worker.ts": ".github/workflows/thread-recovery.yml"
       },
       "retired_paths": [],
-      "notes": "T15/J32 savings policy with a no_std allocation-free fold, Wasm binding and the existing Savings service. D1 owns atomic receipt deduplication and totals publication. The deployed worker uses its retained fold. Wasm packaging, Cloudflare execution and performance remain unqualified.",
+      "notes": "T15/J32 savings policy with a no_std allocation-free fold, Wasm binding and the existing Savings service. D1 owns atomic receipt deduplication and totals publication. A verified Alchemy build can select the native fold. The bundled fixture exercises equivalent telemetry with the synthetic D1 adapter. The default build uses the retained fold. Cloudflare execution and performance remain unqualified.",
       "rust_crates": ["infra/task-cache/rust", "infra/task-cache/rust/web"]
     },
     {

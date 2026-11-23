@@ -10,6 +10,7 @@ on:
       - "candidate/t3code-ls-t12-outbox-native-*"
       - "candidate/t3code-ls-t12-outbox-package-*"
       - "candidate/t3code-ls-t15-task-cache-*"
+      - "candidate/t3code-ls-t02-bundled-native-integrated-*"
       - "candidate/t3code-ls-acceptance-types-*"
       - "candidate/t3code-ls-t16-independent-reads-*"
 
@@ -24,6 +25,7 @@ jobs:
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
+      SAVINGS_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t15-task-cache-savings-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') }}
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       VP_REMOTE_CACHE: "off"
       VP_REMOTE_CACHE_URL: ""
@@ -56,10 +58,10 @@ jobs:
           pnpm --filter @t3tools/task-cache test src/Cleanup.test.ts src/Cache.test.ts \
             src/NativeClients.test.ts src/Savings.test.ts
       - name: Install the pinned compiler for native savings
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-task-cache-savings-')
+        if: env.SAVINGS_PROOF == 'true'
         run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/savings-toolchain"
       - name: Compare native savings and atomic D1 receipt accounting
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-task-cache-savings-')
+        if: env.SAVINGS_PROOF == 'true'
         env:
           WASM_BINDGEN_VERSION: "0.2.130"
           WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
@@ -85,6 +87,18 @@ jobs:
           sha256sum "$RUNNER_TEMP/savings-wasm/savings_bg.wasm"
           pnpm --filter @t3tools/task-cache typecheck
           node infra/task-cache/scripts/verify-savings-native.ts "$RUNNER_TEMP/savings-wasm/savings.js"
+          "$RUNNER_TEMP/wasm-bindgen" --target web --out-name savings \
+            --out-dir "$RUNNER_TEMP/savings-worker-wasm" \
+            "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/t3_code_ls_task_cache_accounting_web.wasm"
+          node infra/task-cache/scripts/verify-savings-worker.ts "$RUNNER_TEMP/savings-worker-wasm" \
+            "$RUNNER_TEMP/savings-worker-proof"
+      - name: Retain native savings packaging evidence
+        if: always() && env.SAVINGS_PROOF == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: savings-worker-evidence
+          path: ${{ runner.temp }}/savings-worker-proof/proof.json
+          if-no-files-found: ignore
       - name: Check installed helper identity before starting native trials
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-')
         run: node --test tools/service-launcher-trial.test.mjs
