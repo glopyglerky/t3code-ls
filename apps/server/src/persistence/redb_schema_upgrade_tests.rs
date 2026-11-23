@@ -596,7 +596,21 @@ async fn isolated_trial_publish_interrupt_fixture() {
             .is_some_and(|name| name.to_string_lossy().starts_with("t3-redb-test-"))
     );
     let boundary = std::env::var("T3_TEST_INTERRUPT_TRIAL_PUBLICATION").unwrap();
-    if boundary.starts_with("promotion-intent-") {
+    if let Ok(action) = std::env::var("T3_TEST_INTENDED_MOVE") {
+        if action == "publish" {
+            crate::application_storage::publish_intended_isolated_service_trial(
+                home,
+                ISOLATED_UPDATE.into(),
+            )
+            .await
+            .unwrap();
+        } else {
+            assert_eq!(action, "rollback");
+            rollback_isolated_service_trial(home, ISOLATED_UPDATE.into())
+                .await
+                .unwrap();
+        }
+    } else if boundary.starts_with("promotion-intent-") {
         let intent =
             serde_json::from_slice(&std::fs::read(home.join("promotion-intent.json")).unwrap())
                 .unwrap();
@@ -1307,6 +1321,33 @@ async fn exact_88_history_is_required_and_read_only_future_or_damaged_histories_
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn service_promotion_intent_is_durable_exact_and_keeps_publication_fenced() {
+    promotion_intent_fixture(None).await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn service_intended_sealed_publication_recovers_without_activation() {
+    for case in [
+        ("sealed-phase-publishing-written", false),
+        ("sealed-phase-publishing-durable", true),
+        ("intended-preserved", true),
+        ("intended-renamed", false),
+        ("sealed-phase-published-durable", false),
+    ] {
+        println!("T05 checking sealed publication interruption at {}", case.0);
+        promotion_intent_fixture(Some(case)).await;
+        println!(
+            "T05 recovered sealed publication interruption at {}",
+            case.0
+        );
+    }
+    println!(
+        "T05 intended sealed publication recovered exact phases and rollback without selecting or serving"
+    );
+}
+
+#[cfg(target_os = "linux")]
+async fn promotion_intent_fixture(publication_case: Option<(&str, bool)>) {
     use crate::application::PreparedServiceActivation;
     use crate::application_bootstrap::bootstrap_schema_sha256;
     use crate::application_server_ownership::OwnerLock;
@@ -1515,6 +1556,140 @@ async fn service_promotion_intent_is_durable_exact_and_keeps_publication_fenced(
         assert_eq!(frame["ok"], true);
         assert_eq!(frame["result"]["reused"], true);
         assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+    }
+    if let Some((boundary, cancel_before_rename)) = publication_case {
+        use crate::application_storage::{
+            publish_intended_isolated_service_trial, rollback_isolated_service_trial,
+        };
+        use std::os::unix::fs::MetadataExt;
+        let original = state.join(format!(".statev2-source-{UPDATE}.omdb"));
+        let failed = state.join(format!(".statev2-failed-sealed-{UPDATE}.omdb"));
+        let source_inode = fs::metadata(&live).unwrap().ino();
+        let interrupt_move = |action: &str, boundary: &str| {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .arg("isolated_trial_publish_interrupt_fixture")
+                .env("T3_TEST_ISOLATED_TRIAL_HOME", &home)
+                .env("T3_TEST_INTENDED_MOVE", action)
+                .env("T3_TEST_INTERRUPT_TRIAL_PUBLICATION", boundary)
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(73),
+                "{} {}",
+                boundary,
+                String::from_utf8_lossy(&output.stdout)
+            );
+        };
+        interrupt_move("publish", boundary);
+        assert_eq!(fs::read(&selection).unwrap(), selection_bytes);
+        assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);
+        assert!(matches!(
+            publish_isolated_service_trial(home.clone(), UPDATE.into()).await,
+            Err(Error::IncompatibleStore)
+        ));
+        let phase_receipt = fs::read(&receipt).unwrap();
+        if boundary != "sealed-phase-publishing-written" {
+            let mut alternate_selection = selection_bytes.clone();
+            alternate_selection.push(b'\n');
+            fs::write(&selection, &alternate_selection).unwrap();
+            assert!(matches!(
+                publish_intended_isolated_service_trial(home.clone(), UPDATE.into()).await,
+                Err(Error::IncompatibleStore)
+            ));
+            assert_eq!(fs::read(&receipt).unwrap(), phase_receipt);
+            fs::write(&selection, &selection_bytes).unwrap();
+        }
+        if boundary != "sealed-phase-publishing-written" {
+            let mut corrupted: Value = serde_json::from_slice(&phase_receipt).unwrap();
+            corrupted["sealed_publication"]["version"] = json!(2);
+            fs::write(&receipt, serde_json::to_vec(&corrupted).unwrap()).unwrap();
+            assert!(matches!(
+                publish_intended_isolated_service_trial(home.clone(), UPDATE.into()).await,
+                Err(Error::IncompatibleStore)
+            ));
+            fs::write(&receipt, &phase_receipt).unwrap();
+        }
+        for path in [&source_entry, &source_helper, &target_helper] {
+            let bytes = fs::read(path).unwrap();
+            fs::write(path, b"changed installed package").unwrap();
+            assert!(
+                publish_intended_isolated_service_trial(home.clone(), UPDATE.into())
+                    .await
+                    .is_err()
+            );
+            assert_eq!(fs::read(&receipt).unwrap(), phase_receipt);
+            fs::write(path, bytes).unwrap();
+        }
+        if cancel_before_rename {
+            interrupt_move("rollback", "sealed-phase-rolling-back-durable");
+            if boundary == "intended-preserved" {
+                interrupt_move("rollback", "intended-rollback-unlinked");
+            }
+            interrupt_move("rollback", "sealed-phase-rolled-back-durable");
+        } else {
+            let publication = publish_intended_isolated_service_trial(home.clone(), UPDATE.into())
+                .await
+                .unwrap();
+            assert_eq!(publication.database, prepared.database);
+            assert_eq!(fs::metadata(&live).unwrap().ino(), trial_identity.ino());
+            assert_eq!(fs::read(&live).unwrap(), trial_bytes);
+            assert_eq!(fs::read(&original).unwrap(), source_bytes);
+            assert_eq!(fs::metadata(&original).unwrap().ino(), source_inode);
+            let sealed = Store::open_read_only(&live).await.unwrap();
+            assert!(matches!(
+                ApplicationTransactions::new(sealed.clone()).schema().await,
+                Err(Error::IncompatibleStore)
+            ));
+            sealed.shutdown().await.unwrap();
+            assert!(
+                publish_intended_isolated_service_trial(home.clone(), UPDATE.into())
+                    .await
+                    .unwrap()
+                    .reused
+            );
+            if let Some(executable) = std::env::var_os("T3_TEST_PROMOTION_HELPER") {
+                let output = std::process::Command::new(executable)
+                    .arg("trial-publish-intended-sealed")
+                    .arg(&home)
+                    .arg(UPDATE)
+                    .env_clear()
+                    .output()
+                    .unwrap();
+                assert!(output.status.success());
+                let frame: Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(frame["ok"], true);
+                assert_eq!(frame["result"]["reused"], true);
+                assert!(output.stderr.is_empty());
+            }
+            interrupt_move("rollback", "isolated-rollback-preserved");
+            interrupt_move("rollback", "isolated-rollback-renamed");
+            interrupt_move("rollback", "sealed-phase-rolled-back-durable");
+            assert_eq!(fs::read(&failed).unwrap(), trial_bytes);
+            assert_eq!(fs::metadata(&failed).unwrap().ino(), trial_identity.ino());
+        }
+        assert!(
+            rollback_isolated_service_trial(home.clone(), UPDATE.into())
+                .await
+                .unwrap()
+                .reused
+        );
+        assert_eq!(fs::read(&live).unwrap(), source_bytes);
+        assert_eq!(fs::metadata(&live).unwrap().ino(), source_inode);
+        assert_eq!(fs::metadata(&live).unwrap().nlink(), 1);
+        assert_eq!(fs::read(&selection).unwrap(), selection_bytes);
+        assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);
+        let terminal: Value = serde_json::from_slice(&fs::read(&receipt).unwrap()).unwrap();
+        assert_eq!(terminal["sealed_publication"]["phase"], "rolled_back");
+        assert!(matches!(
+            publish_intended_isolated_service_trial(home.clone(), UPDATE.into()).await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert!(matches!(
+            publish_isolated_service_trial(home.clone(), UPDATE.into()).await,
+            Err(Error::IncompatibleStore)
+        ));
+        return;
     }
     record_isolated_candidate_preparation(home.clone(), UPDATE.into(), observation)
         .await

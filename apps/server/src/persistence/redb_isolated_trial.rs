@@ -1,4 +1,7 @@
-use super::{CandidatePreparationObservation, NativePromotionIntent};
+use super::{
+    CandidatePreparationObservation, NativePromotionIntent, SealedPromotionPhase,
+    SealedPromotionPublication,
+};
 use super::{
     IsolatedTrialPreparation, IsolatedTrialPublication, IsolatedTrialRequest,
     IsolatedTrialSelection, IsolatedTrialVerification, MAX_TRIAL_FILE_BYTES, TrialBackupReceipt,
@@ -86,6 +89,7 @@ fn preserved_path(state: &Path, update_id: &str) -> PathBuf {
 #[derive(Clone, Copy)]
 pub(super) enum SealedMove {
     Publish,
+    PublishIntended,
     Rollback,
 }
 
@@ -136,8 +140,24 @@ impl TrialLease {
         let preserved = preserved_path(&state, &request.update_id);
         let canonical = state.join("statev2.omdb");
         let (source, source_links) = match movement {
-            Some(SealedMove::Publish) if !disposable_file_exists(&trial)? => (preserved, 1),
-            Some(SealedMove::Publish) if super::trial_entry_exists(&preserved)? => (canonical, 2),
+            Some(SealedMove::Publish | SealedMove::PublishIntended)
+                if !disposable_file_exists(&trial)? =>
+            {
+                (preserved, 1)
+            }
+            Some(SealedMove::Publish | SealedMove::PublishIntended)
+                if super::trial_entry_exists(&preserved)? =>
+            {
+                (canonical, 2)
+            }
+            Some(SealedMove::Rollback) if disposable_file_exists(&trial)? => {
+                let links = if super::trial_entry_exists(&preserved)? {
+                    2
+                } else {
+                    1
+                };
+                (canonical, links)
+            }
             Some(SealedMove::Rollback) if super::trial_entry_exists(&preserved)? => (preserved, 1),
             _ => (canonical, 1),
         };
@@ -354,14 +374,69 @@ impl TrialLease {
                 return Err(Error::IncompatibleStore);
             }
         }
-        verify_intent_helper(&source, &intent.source_helper_schema_sha256).await?;
-        verify_intent_helper(&target, &activation.target_schema_sha256).await?;
+        verify_intent_helper(
+            &source,
+            &intent.source_helper_schema_sha256,
+            saved.sealed_publication.is_some(),
+        )
+        .await?;
+        verify_intent_helper(
+            &target,
+            &activation.target_schema_sha256,
+            saved.sealed_publication.is_some(),
+        )
+        .await?;
         self.verify_installed_runtime(
             &activation.from_version,
             &intent.source_entry_sha256,
             &intent.source_helper_sha256,
         )?;
         self.verify_activation(&saved.request)
+    }
+
+    fn selection_digest(&self) -> Result<String> {
+        let path =
+            TrialRestoreDirectories::pinned(&self.directories.runtime).join("service-state.json");
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        let file = crate::backend::open_regular_file(&path, &mut options)?;
+        let metadata = file.metadata().map_err(io_error)?;
+        if metadata.len() > 8192 || metadata.nlink() != 1 {
+            return Err(Error::IncompatibleStore);
+        }
+        let mut bytes = Vec::new();
+        file.take(8193).read_to_end(&mut bytes).map_err(io_error)?;
+        if bytes.len() > 8192 {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(Sha256::digest(&bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect())
+    }
+
+    fn verify_sealed_binding(&self, saved: &IsolatedTrialVerification) -> Result<()> {
+        let Some(publication) = &saved.sealed_publication else {
+            return Ok(());
+        };
+        if self.selection_digest()? != publication.selection_sha256 {
+            return Err(Error::IncompatibleStore);
+        }
+        let activation = saved
+            .request
+            .activation
+            .as_ref()
+            .ok_or(Error::IncompatibleStore)?;
+        let intent = saved
+            .promotion_intent
+            .as_ref()
+            .ok_or(Error::IncompatibleStore)?;
+        self.verify_installed_runtime(
+            &activation.from_version,
+            &intent.source_entry_sha256,
+            &intent.source_helper_sha256,
+        )?;
+        self.verify_installed_target(activation)
     }
 
     fn sync_publication(&self) -> Result<()> {
@@ -533,6 +608,84 @@ pub(super) async fn verify(
     lease.verify_promotion_bindings(&saved).await
 }
 
+async fn record_sealed_phase(
+    lease: &TrialLease,
+    receipt: &Path,
+    saved: &mut IsolatedTrialVerification,
+    phase: SealedPromotionPhase,
+) -> Result<()> {
+    let mut proposed = saved.clone();
+    let selection_sha256 = lease.selection_digest()?;
+    if let Some(publication) = &proposed.sealed_publication {
+        if publication.selection_sha256 != selection_sha256 {
+            return Err(Error::IncompatibleStore);
+        }
+        if publication.phase == phase {
+            return Ok(());
+        }
+        if !matches!(
+            (publication.phase, phase),
+            (
+                SealedPromotionPhase::Publishing,
+                SealedPromotionPhase::Published | SealedPromotionPhase::RollingBack
+            ) | (
+                SealedPromotionPhase::Published,
+                SealedPromotionPhase::RollingBack
+            ) | (
+                SealedPromotionPhase::RollingBack,
+                SealedPromotionPhase::RolledBack
+            )
+        ) {
+            return Err(Error::IncompatibleStore);
+        }
+    } else if phase != SealedPromotionPhase::Publishing {
+        return Err(Error::IncompatibleStore);
+    }
+    proposed.sealed_publication = Some(SealedPromotionPublication {
+        version: 1,
+        selection_sha256,
+        phase,
+    });
+    validate_observation(&proposed)?;
+    lease.verify_promotion_bindings(&proposed).await?;
+    lease.verify_sealed_binding(&proposed)?;
+    let bytes = serde_json::to_vec(&proposed).map_err(|_| Error::IncompatibleStore)?;
+    if bytes.len() > 8192 {
+        return Err(Error::IncompatibleStore);
+    }
+    let mut stage =
+        tempfile::NamedTempFile::new_in(TrialRestoreDirectories::pinned(&lease.directories.state))
+            .map_err(io_error)?;
+    stage.write_all(&bytes).map_err(io_error)?;
+    stage.as_file().sync_all().map_err(io_error)?;
+    lease.verify_ownership()?;
+    lease.checkpoint.verify()?;
+    lease.verify_sealed_binding(&proposed)?;
+    if read_trial_receipt::<IsolatedTrialVerification>(receipt)?.as_ref() != Some(&*saved) {
+        return Err(Error::IncompatibleStore);
+    }
+    #[cfg(test)]
+    if phase == SealedPromotionPhase::Publishing {
+        super::tests::interrupt_trial_publication("sealed-phase-publishing-written");
+    }
+    stage
+        .persist(receipt)
+        .map_err(|error| io_error(error.error))?;
+    lease.sync_publication()?;
+    if read_trial_receipt::<IsolatedTrialVerification>(receipt)?.as_ref() != Some(&proposed) {
+        return Err(Error::UnknownCommit);
+    }
+    *saved = proposed;
+    #[cfg(test)]
+    super::tests::interrupt_trial_publication(match phase {
+        SealedPromotionPhase::Publishing => "sealed-phase-publishing-durable",
+        SealedPromotionPhase::Published => "sealed-phase-published-durable",
+        SealedPromotionPhase::RollingBack => "sealed-phase-rolling-back-durable",
+        SealedPromotionPhase::RolledBack => "sealed-phase-rolled-back-durable",
+    });
+    Ok(())
+}
+
 pub(super) async fn move_sealed(
     home: PathBuf,
     update_id: String,
@@ -541,18 +694,33 @@ pub(super) async fn move_sealed(
     let directories = TrialRestoreDirectories::open(&home)?;
     let receipt = TrialRestoreDirectories::pinned(&directories.state)
         .join(format!(".statev2-trial-{update_id}.receipt-v1.json"));
-    let saved = read_trial_receipt::<IsolatedTrialVerification>(&receipt)?
+    let mut saved = read_trial_receipt::<IsolatedTrialVerification>(&receipt)?
         .ok_or(Error::IncompatibleStore)?;
     validate_observation(&saved)?;
     if matches!(movement, SealedMove::Publish) && saved.promotion_intent.is_some() {
         // An intent must not enter the legacy database-only publication path.
         return Err(Error::IncompatibleStore);
     }
+    if matches!(movement, SealedMove::PublishIntended) {
+        if saved.promotion_intent.is_none()
+            || saved.sealed_publication.as_ref().is_some_and(|p| {
+                matches!(
+                    p.phase,
+                    SealedPromotionPhase::RollingBack | SealedPromotionPhase::RolledBack
+                )
+            })
+        {
+            return Err(Error::IncompatibleStore);
+        }
+    } else if saved.promotion_intent.is_some() && saved.sealed_publication.is_none() {
+        return Err(Error::IncompatibleStore);
+    }
     let activation = saved
         .request
         .activation
         .as_ref()
-        .ok_or(Error::IncompatibleStore)?;
+        .ok_or(Error::IncompatibleStore)?
+        .clone();
     validate_isolated_trial_request(&home, &update_id, &saved.request)?;
     validate_isolated_trial_preparation(&saved.request, &saved.preparation)?;
     let lease = TrialLease::open_for(home.clone(), &saved.request, Some(movement)).await?;
@@ -560,12 +728,77 @@ pub(super) async fn move_sealed(
     let state = TrialRestoreDirectories::pinned(&lease.directories.state);
     let canonical = state.join("statev2.omdb");
     let original = preserved_path(&state, &update_id);
+    lease.verify_promotion_bindings(&saved).await?;
+    lease.verify_sealed_binding(&saved)?;
+    // Roll back an interrupted publication that has not replaced the canonical name.
+    // Keep the sealed candidate and remove only our verified extra source link.
+    if matches!(movement, SealedMove::Rollback)
+        && saved.sealed_publication.is_some()
+        && disposable_file_exists(&lease.trial)?
+    {
+        if saved.sealed_publication.as_ref().unwrap().phase == SealedPromotionPhase::Published {
+            return Err(Error::IncompatibleStore);
+        }
+        let candidate = lease
+            .open_candidate(
+                lease.trial.clone(),
+                &saved.request,
+                &saved.preparation,
+                1,
+                false,
+            )
+            .await?;
+        lease.live.verify_at(&canonical, lease.source_links)?;
+        lease.verify_inputs()?;
+        let reused =
+            saved.sealed_publication.as_ref().unwrap().phase == SealedPromotionPhase::RolledBack;
+        if !reused {
+            record_sealed_phase(
+                &lease,
+                &receipt,
+                &mut saved,
+                SealedPromotionPhase::RollingBack,
+            )
+            .await?;
+        }
+        if super::trial_entry_exists(&original)? {
+            lease.live.verify_at(&canonical, 2)?;
+            lease.live.verify_at(&original, 2)?;
+            fs::remove_file(&original).map_err(|_| Error::UnknownCommit)?;
+            lease.sync_publication()?;
+            #[cfg(test)]
+            super::tests::interrupt_trial_publication("intended-rollback-unlinked");
+        }
+        lease.live.verify_at(&canonical, 1)?;
+        candidate.verify()?;
+        record_sealed_phase(
+            &lease,
+            &receipt,
+            &mut saved,
+            SealedPromotionPhase::RolledBack,
+        )
+        .await?;
+        return Ok(IsolatedTrialPublication {
+            activation,
+            database: lease.live.identity.clone(),
+            preserved_database: candidate.identity.clone(),
+            reused,
+        });
+    }
     let (incoming_path, retained_path, _after_preserve, _after_rename) = match movement {
-        SealedMove::Publish => (
+        SealedMove::Publish | SealedMove::PublishIntended => (
             lease.trial.clone(),
             original,
-            "isolated-preserved",
-            "isolated-renamed",
+            if matches!(movement, SealedMove::PublishIntended) {
+                "intended-preserved"
+            } else {
+                "isolated-preserved"
+            },
+            if matches!(movement, SealedMove::PublishIntended) {
+                "intended-renamed"
+            } else {
+                "isolated-renamed"
+            },
         ),
         SealedMove::Rollback => {
             if super::trial_entry_exists(&lease.trial)? {
@@ -584,8 +817,8 @@ pub(super) async fn move_sealed(
     let retained_exists = super::trial_entry_exists(&retained_path)?;
     let outgoing_links = if !reused && retained_exists { 2 } else { 1 };
     let (candidate_path, candidate_links) = match movement {
-        SealedMove::Publish if reused => (canonical.clone(), 1),
-        SealedMove::Publish => (incoming_path.clone(), 1),
+        SealedMove::Publish | SealedMove::PublishIntended if reused => (canonical.clone(), 1),
+        SealedMove::Publish | SealedMove::PublishIntended => (incoming_path.clone(), 1),
         SealedMove::Rollback if reused => (retained_path.clone(), 1),
         SealedMove::Rollback => (canonical.clone(), outgoing_links),
     };
@@ -595,17 +828,48 @@ pub(super) async fn move_sealed(
             &saved.request,
             &saved.preparation,
             candidate_links,
-            matches!(movement, SealedMove::Publish),
+            matches!(movement, SealedMove::Publish | SealedMove::PublishIntended),
         )
         .await?;
     let (outgoing, incoming) = match movement {
-        SealedMove::Publish => (&lease.live, &candidate),
+        SealedMove::Publish | SealedMove::PublishIntended => (&lease.live, &candidate),
         SealedMove::Rollback => (&candidate, &lease.live),
     };
+    if matches!(movement, SealedMove::PublishIntended) {
+        let phase = saved.sealed_publication.as_ref().map(|p| p.phase);
+        if phase == Some(SealedPromotionPhase::Published) && !reused {
+            return Err(Error::IncompatibleStore);
+        }
+        if phase.is_none() {
+            record_sealed_phase(
+                &lease,
+                &receipt,
+                &mut saved,
+                SealedPromotionPhase::Publishing,
+            )
+            .await?;
+        }
+    } else if saved.sealed_publication.is_some() {
+        let phase = saved.sealed_publication.as_ref().unwrap().phase;
+        if phase == SealedPromotionPhase::RolledBack && !reused {
+            return Err(Error::IncompatibleStore);
+        }
+        if phase != SealedPromotionPhase::RolledBack {
+            record_sealed_phase(
+                &lease,
+                &receipt,
+                &mut saved,
+                SealedPromotionPhase::RollingBack,
+            )
+            .await?;
+        }
+    }
     let verify_binding = || {
         lease.verify_ownership()?;
         match movement {
-            SealedMove::Publish => lease.verify_activation(&saved.request)?,
+            SealedMove::Publish | SealedMove::PublishIntended => {
+                lease.verify_activation(&saved.request)?
+            }
             SealedMove::Rollback => {
                 lease.pending_selection(
                     &update_id,
@@ -615,6 +879,7 @@ pub(super) async fn move_sealed(
                 )?;
             }
         }
+        lease.verify_sealed_binding(&saved)?;
         lease.checkpoint.verify()?;
         if read_trial_receipt::<IsolatedTrialVerification>(&receipt)?.as_ref() != Some(&saved) {
             return Err(Error::IncompatibleStore);
@@ -659,6 +924,14 @@ pub(super) async fn move_sealed(
         .map_err(|_| Error::UnknownCommit)?;
     if disposable_file_exists(&incoming_path).map_err(|_| Error::UnknownCommit)? {
         return Err(Error::UnknownCommit);
+    }
+    if saved.sealed_publication.is_some() {
+        let phase = if matches!(movement, SealedMove::Rollback) {
+            SealedPromotionPhase::RolledBack
+        } else {
+            SealedPromotionPhase::Published
+        };
+        record_sealed_phase(&lease, &receipt, &mut saved, phase).await?;
     }
     Ok(IsolatedTrialPublication {
         activation: activation.clone(),
@@ -906,6 +1179,7 @@ pub(super) async fn prepare(
         preparation,
         candidate_observation: None,
         promotion_intent: None,
+        sealed_publication: None,
     };
     write_trial_receipt(
         &receipt,
@@ -919,7 +1193,7 @@ pub(super) async fn prepare(
 // The observation proves the exact stopped-candidate check. It grants no activation.
 pub(super) fn validate_observation(saved: &IsolatedTrialVerification) -> Result<()> {
     let Some(observation) = &saved.candidate_observation else {
-        return if saved.promotion_intent.is_none() {
+        return if saved.promotion_intent.is_none() && saved.sealed_publication.is_none() {
             Ok(())
         } else {
             Err(Error::IncompatibleStore)
@@ -942,6 +1216,7 @@ pub(super) fn validate_observation(saved: &IsolatedTrialVerification) -> Result<
         .collect();
     if input.candidate_observation.is_some()
         || input.promotion_intent.is_some()
+        || input.sealed_publication.is_some()
         || input.request != saved.request
         || input.preparation != saved.preparation
         || witness.protocol != 1
@@ -969,6 +1244,14 @@ pub(super) fn validate_observation(saved: &IsolatedTrialVerification) -> Result<
             return Err(Error::IncompatibleStore);
         }
     }
+    if let Some(publication) = &saved.sealed_publication {
+        if saved.promotion_intent.is_none()
+            || publication.version != 1
+            || !super::valid_digest(&publication.selection_sha256)
+        {
+            return Err(Error::IncompatibleStore);
+        }
+    }
     Ok(())
 }
 
@@ -980,7 +1263,10 @@ pub(super) async fn record_observation(
     let mut proposed: IsolatedTrialVerification =
         serde_json::from_str(&observation.verification_json)
             .map_err(|_| Error::IncompatibleStore)?;
-    if proposed.candidate_observation.is_some() || proposed.promotion_intent.is_some() {
+    if proposed.candidate_observation.is_some()
+        || proposed.promotion_intent.is_some()
+        || proposed.sealed_publication.is_some()
+    {
         return Err(Error::IncompatibleStore);
     }
     validate_isolated_trial_request(&home, &update_id, &proposed.request)?;
@@ -993,6 +1279,7 @@ pub(super) async fn record_observation(
         .ok_or(Error::IncompatibleStore)?;
     validate_observation(&saved)?;
     proposed.promotion_intent = saved.promotion_intent.clone();
+    proposed.sealed_publication = saved.sealed_publication.clone();
     if saved.request != proposed.request
         || saved.preparation != proposed.preparation
         || (saved.candidate_observation.is_some() && saved != proposed)
@@ -1042,7 +1329,7 @@ pub(super) async fn record_observation(
 
 // The capability command is read-only. Bound both pipes and execution time before
 // extending a receipt that an older rollback helper would refuse to parse.
-async fn verify_intent_helper(path: &Path, schema: &str) -> Result<()> {
+async fn verify_intent_helper(path: &Path, schema: &str, publication: bool) -> Result<()> {
     use std::process::Stdio;
     use tokio::io::AsyncReadExt;
     let mut child = tokio::process::Command::new(path)
@@ -1073,6 +1360,7 @@ async fn verify_intent_helper(path: &Path, schema: &str) -> Result<()> {
             || frame["result"]["engineRevision"] != crate::application::OMDB_REVISION
             || frame["result"]["sealedTrialRollback"] != 1
             || frame["result"]["promotionIntent"] != 1
+            || (publication && frame["result"]["sealedIntentPublication"] != 1)
             || frame["result"]["targetSchemaSha256"] != schema
         {
             return Err(Error::IncompatibleStore);

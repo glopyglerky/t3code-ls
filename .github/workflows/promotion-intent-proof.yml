@@ -2,7 +2,7 @@ name: Native promotion intent recovery
 
 on:
   push:
-    branches: ["candidate/t3code-ls-t05-promotion-intent-*", "candidate/t3code-ls-t05-launcher-promotion-*"]
+    branches: ["candidate/t3code-ls-t05-promotion-intent-*", "candidate/t3code-ls-t05-launcher-promotion-*", "candidate/t3code-ls-t05-sealed-intent-*"]
   workflow_dispatch:
 
 permissions:
@@ -57,6 +57,12 @@ jobs:
           assert "T05 promotion intent uses the pinned built Rust helper" in log
           assert "T05 promotion intent durable retry preserved source, checkpoint, stage and selection without publication" in log
           PY
+          timeout -k 5s 480s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            test --locked -j 2 -p t3-code-ls-storage --lib \
+            application_bootstrap::upgrade::tests::service_intended_sealed_publication_recovers_without_activation \
+            -- --exact --nocapture 2>&1 | tee "$RUNNER_TEMP/promotion-proof/sealed-publication.log"
+          grep -F "T05 intended sealed publication recovered exact phases and rollback without selecting or serving" \
+            "$RUNNER_TEMP/promotion-proof/sealed-publication.log"
           timeout -k 5s 180s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
             test --locked -j 2 -p t3-code-ls-storage --lib isolated_trial \
             -- --nocapture 2>&1 | tee "$RUNNER_TEMP/promotion-proof/existing-trial.log"

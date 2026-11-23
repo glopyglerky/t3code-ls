@@ -608,3 +608,23 @@ revision with the same child replay watermark. [Baseline](https://github.com/glo
 
 Live propagation into an already-open child subscription and full J04 history
 performance remain open.
+
+## T05 offline publication under the serving fence
+
+`trial-publish-intended-sealed HOME UPDATE_ID` requires the candidate's durable
+preparation observation, matching installed packages and a promotion intent.
+Both native helpers must advertise `sealedIntentPublication: 1`. The helper
+records publication and rollback phases in the existing receipt while holding
+the selection, home and database leases. Each retry checks the exact pending
+selection bytes, installed identities, and retained database inodes.
+
+The interruption fixture verified recovery before and after the canonical
+rename, as well as the removal of the extra source link before publication.
+After rename, rollback restores the original source inode and preserves the
+failed sealed database. The exact helper rejected changed packages, forged
+receipt phases and changed selection bytes. [Native interruption proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45173732320)
+
+The command is available for stopped Linux x64 profiles with a verified trial.
+The restart fixture uses synthetic runtime entry bytes. Launcher selection
+handoff, catalog unsealing and ordinary native update admission still require
+their production recovery proof.

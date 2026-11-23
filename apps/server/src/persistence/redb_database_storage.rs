@@ -118,6 +118,26 @@ pub struct IsolatedTrialVerification {
     pub candidate_observation: Option<CandidatePreparationObservation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub promotion_intent: Option<NativePromotionIntent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sealed_publication: Option<SealedPromotionPublication>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SealedPromotionPhase {
+    Publishing,
+    Published,
+    RollingBack,
+    RolledBack,
+}
+
+/// Durable physical transition only; this never selects or unseals a runtime.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SealedPromotionPublication {
+    pub version: u32,
+    pub selection_sha256: String,
+    pub phase: SealedPromotionPhase,
 }
 
 /// A recorded decision to pursue promotion, never authority to serve the stage.
@@ -224,6 +244,26 @@ pub async fn publish_isolated_service_trial(
     ))
 }
 
+/// Explicitly publish an intended candidate while keeping its catalog sealed.
+pub async fn publish_intended_isolated_service_trial(
+    home: PathBuf,
+    update_id: String,
+) -> Result<IsolatedTrialPublication> {
+    if !home.is_absolute() || !valid_update_id(&update_id) {
+        return Err(Error::Invalid("invalid intended trial publication".into()));
+    }
+    #[cfg(target_os = "linux")]
+    return tokio::spawn(isolated::move_sealed(
+        home,
+        update_id,
+        isolated::SealedMove::PublishIntended,
+    ))
+    .await
+    .map_err(|_| Error::UnknownCommit)?;
+    #[cfg(not(target_os = "linux"))]
+    Err(Error::IncompatibleStore)
+}
+
 /// Restore the original inode while the canonical store still matches the sealed trial.
 pub async fn rollback_isolated_service_trial(
     home: PathBuf,
@@ -278,6 +318,7 @@ pub fn service_trial_capabilities() -> Result<serde_json::Value> {
             "targetSchemaSha256": crate::application_bootstrap::bootstrap_schema_sha256(),
             "sealedTrialRollback": 1,
             "promotionIntent": 1,
+            "sealedIntentPublication": 1,
         }))
     }
     #[cfg(not(target_os = "linux"))]
