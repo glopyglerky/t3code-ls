@@ -50,6 +50,7 @@ const spawnHook = vi.hoisted(() => ({
 }));
 
 const failRm = vi.hoisted(() => ({ path: undefined as string | undefined }));
+const sqliteFixture = (payload: string) => `SQLite format 3\0${payload}`;
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof NodeFSP>();
@@ -768,7 +769,7 @@ process.exit(0);
         const databasePath = path.join(root, "userdata", "state.sqlite");
         const startsPath = path.join(root, "starts.log");
         yield* fs.makeDirectory(path.dirname(ownerPath), { recursive: true });
-        yield* fs.writeFileString(databasePath, "before update");
+        yield* fs.writeFileString(databasePath, sqliteFixture("before update"));
         for (const version of ["1.0.0", "1.1.0"]) {
           yield* writeFakeRuntime(
             fs,
@@ -781,7 +782,7 @@ process.exit(0);
               "const context = JSON.parse(process.env.T3_SERVICE_LAUNCHER_CONTEXT);",
               `require("node:fs").appendFileSync(${JSON.stringify(startsPath)}, context.childVersion + "\\n");`,
               'if (context.update?.status === "pending") {',
-              `  require("node:fs").writeFileSync(${JSON.stringify(databasePath)}, "migrated by failed trial");`,
+              `  require("node:fs").writeFileSync(${JSON.stringify(databasePath)}, ${JSON.stringify(sqliteFixture("migrated by failed trial"))});`,
               "  process.exit(1);",
               "}",
               'process.send("active");',
@@ -837,7 +838,8 @@ process.exit(0);
         assert.strictEqual(idle.update?.status, "pending");
         assert.isFalse(yield* fs.exists(path.join(root, "runtime", "db-backup", "update-1")));
 
-        yield* fs.writeFileString(databasePath, "written by the other owner");
+        const otherOwnerWrites = sqliteFixture("written by the other owner");
+        yield* fs.writeFileString(databasePath, otherOwnerWrites);
         otherOwner.close();
         yield* Effect.promise(() => active.promise);
         yield* Effect.promise(() => launcher.stop("SIGTERM"));
@@ -847,7 +849,7 @@ process.exit(0);
         assert.strictEqual(state.activeVersion, "1.0.0");
         assert.strictEqual(state.update?.status, "rolled-back");
         assert.strictEqual(yield* fs.readFileString(startsPath), "1.1.0\n1.0.0\n");
-        assert.strictEqual(yield* fs.readFileString(databasePath), "written by the other owner");
+        assert.strictEqual(yield* fs.readFileString(databasePath), otherOwnerWrites);
       }),
   );
 
@@ -860,7 +862,7 @@ process.exit(0);
       const ownerPath = path.join(root, "userdata", "server-owner.sqlite");
       const databasePath = path.join(root, "userdata", "state.sqlite");
       yield* fs.makeDirectory(path.dirname(ownerPath), { recursive: true });
-      yield* fs.writeFileString(databasePath, "before update");
+      yield* fs.writeFileString(databasePath, sqliteFixture("before update"));
       yield* writeFakeRuntime(
         fs,
         path,
@@ -955,7 +957,7 @@ process.exit(0);
       const databasePath = path.join(root, "userdata", "state.sqlite");
       const activatedPath = path.join(root, "activated");
       yield* fs.makeDirectory(path.dirname(databasePath), { recursive: true });
-      yield* fs.writeFileString(databasePath, "before trial");
+      yield* fs.writeFileString(databasePath, sqliteFixture("before trial"));
       const unit = yield* fakeServiceUnit(fs, path, root, "1.0.0", render);
       if (missingUnit) yield* fs.remove(unit.path);
       const childSource = `
@@ -1114,7 +1116,7 @@ if (context.update?.status === "pending") {
       vi.stubEnv("T3CODE_TEST_SERVICE_TOKEN", "inherited");
       yield* Effect.addFinalizer(() => Effect.sync(() => vi.unstubAllEnvs()));
       yield* fs.makeDirectory(path.dirname(databasePath), { recursive: true });
-      yield* fs.writeFileString(databasePath, "before trial");
+      yield* fs.writeFileString(databasePath, sqliteFixture("before trial"));
       const encodedDatabasePath = JSON.stringify(databasePath);
       const childSource = `
 import { appendFileSync, writeFileSync } from "node:fs";
@@ -1202,7 +1204,7 @@ if (context.update?.status === "pending") {
         const databaseFile =
           kind === "file" ? databasePath : path.join(root, "data", "original.sqlite");
         const linkTarget = kind === "dangling symlink" ? "../original.sqlite" : databaseFile;
-        const original = "database before migration";
+        const original = sqliteFixture("database before migration");
         yield* fs.makeDirectory(path.dirname(databaseFile), { recursive: true });
         if (kind === "dangling symlink") {
           yield* fs.makeDirectory(path.join(root, "data", "sub"));
@@ -1217,7 +1219,7 @@ if (context.update?.status === "pending") {
 import { realpathSync, unlinkSync, writeFileSync } from "node:fs";
 const context = JSON.parse(process.env.T3_SERVICE_LAUNCHER_CONTEXT);
 if (context.update?.status === "pending") {
-  writeFileSync(context.update.dbPath, "database after migration");
+  writeFileSync(context.update.dbPath, ${JSON.stringify(sqliteFixture("database after migration"))});
   writeFileSync(context.update.dbPath + "-wal", "trial wal");
   writeFileSync(context.update.dbPath + "-shm", "trial shm");
   ${kind === "dangling symlink" ? "unlinkSync(realpathSync(context.update.dbPath));" : ""}
@@ -1398,7 +1400,7 @@ if (context.update?.status === "pending") {
       const replyPath = path.join(root, "rejection.txt");
       const trialMarker = path.join(root, "trial-started");
       yield* fs.makeDirectory(path.dirname(databasePath), { recursive: true });
-      yield* fs.writeFileString(databasePath, "database");
+      yield* fs.writeFileString(databasePath, sqliteFixture("database"));
       const encoded = JSON.stringify({ databasePath, replyPath, trialMarker });
       const childSource = `
 import { writeFileSync } from "node:fs";
@@ -1494,7 +1496,7 @@ if (context.update?.status === "pending") {
       const databasePath = path.join(root, "userdata", "state.sqlite");
       const reportPath = path.join(root, "stopped-with-marker");
       yield* fs.makeDirectory(path.dirname(databasePath), { recursive: true });
-      yield* fs.writeFileString(databasePath, "database");
+      yield* fs.writeFileString(databasePath, sqliteFixture("database"));
       const encoded = JSON.stringify({
         databasePath,
         reportPath,
@@ -1594,7 +1596,7 @@ process.send({ type: "request-update", targetVersion: "1.1.0", dbPath: paths.dat
       const statePath = path.join(root, "runtime", "service-state.json");
       const databasePath = path.join(root, "userdata", "state.sqlite");
       yield* fs.makeDirectory(path.dirname(databasePath), { recursive: true });
-      yield* fs.writeFileString(databasePath, "database");
+      yield* fs.writeFileString(databasePath, sqliteFixture("database"));
       const encoded = JSON.stringify({ databasePath });
       const childSource = `
 const paths = ${encoded};

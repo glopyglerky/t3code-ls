@@ -7,6 +7,7 @@ import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
+import { installedApplicationDatabase } from "@t3tools/shared/applicationDatabase";
 import { acquireServiceSelectionLock } from "./cloud/serviceSelectionLock.ts";
 
 import type {
@@ -257,12 +258,38 @@ async function serviceLogPath(
 
 const DB_FILE_SUFFIXES = ["", "-wal", "-shm"] as const;
 const RESTORE_MARKER = ".restore-pending";
+const SQLITE_HEADER = Buffer.from("SQLite format 3\0");
+const NATIVE_OWNER_MARKER = Buffer.from("t3code-omdb-owner-v1\n");
 
-const databaseBackupDir = (baseDir: string, updateId: string) =>
-  NodePath.join(baseDir, "runtime", "db-backup", updateId);
+const databaseBackupDir = (baseDir: string, updateId: string) => {
+  if (!/^[A-Za-z0-9_-]+$/.test(updateId)) throw new Error("Invalid database backup update ID.");
+  return NodePath.join(baseDir, "runtime", "db-backup", updateId);
+};
 
 const databaseBackupFile = (backupDir: string, suffix: (typeof DB_FILE_SUFFIXES)[number]) =>
   NodePath.join(backupDir, suffix === "" ? "database" : `database${suffix}`);
+
+async function filePrefix(filePath: string, length: number): Promise<Buffer | undefined> {
+  const file = await NodeFSP.open(filePath, NodeFS.constants.O_RDONLY | NodeFS.constants.O_NONBLOCK)
+    .catch((cause: NodeJS.ErrnoException) => {
+      if (cause.code === "ENOENT") return undefined;
+      throw cause;
+    });
+  if (file === undefined) return undefined;
+  try {
+    if (!(await file.stat()).isFile()) throw new Error("Expected a regular file.");
+    const prefix = Buffer.alloc(length);
+    const { bytesRead } = await file.read(prefix, 0, length, 0);
+    return prefix.subarray(0, bytesRead);
+  } finally {
+    await file.close();
+  }
+}
+
+// SQLite also accepts an empty file as an uninitialized database.
+const isSqlitePrefix = (prefix: Buffer | undefined) =>
+  prefix !== undefined &&
+  (prefix.length === 0 || prefix.subarray(0, SQLITE_HEADER.length).equals(SQLITE_HEADER));
 
 async function pathExists(target: string): Promise<boolean> {
   try {
@@ -1041,7 +1068,85 @@ export class Launcher {
     await this.#startTrial(update);
   }
 
+  async #databaseTrialBlocker(
+    update: Pick<PendingServiceUpdate, "dbPath" | "fromVersion" | "targetVersion">,
+    existingBackup?: { readonly directory: string; readonly restoring: boolean },
+  ): Promise<string | undefined> {
+    try {
+      if (!NodePath.isAbsolute(update.dbPath)) return "The database path is not absolute.";
+      const stateDir = NodePath.join(this.#baseDir, "userdata");
+      const marker = await filePrefix(
+        NodePath.join(stateDir, "server-owner.sqlite"),
+        NATIVE_OWNER_MARKER.length + 1,
+      );
+      if (marker !== undefined && !marker.equals(NATIVE_OWNER_MARKER) && !isSqlitePrefix(marker)) {
+        return "The database ownership marker could not be verified.";
+      }
+
+      const selection = async (version: string) => {
+        const { entryPath } = runtimePaths(this.#baseDir, version);
+        const entry = await NodeFSP.lstat(entryPath).catch((cause: NodeJS.ErrnoException) => {
+          if (cause.code === "ENOENT") return undefined;
+          throw cause;
+        });
+        if (entry === undefined) return undefined;
+        if (!entry.isFile() && !entry.isSymbolicLink()) throw new Error("Invalid runtime entry.");
+        return installedApplicationDatabase(entryPath, this.#environment);
+      };
+      const [active, target] = await Promise.all([
+        selection(update.fromVersion),
+        selection(update.targetVersion),
+      ]);
+      const nativeOwned = marker?.equals(NATIVE_OWNER_MARKER) === true;
+      if (nativeOwned || active?.kind === "omdb" || target?.kind === "omdb") {
+        const source = NodePath.join(stateDir, "statev2.omdb");
+        if (
+          nativeOwned &&
+          active?.kind === "omdb" &&
+          target?.kind === "omdb" &&
+          NodePath.resolve(update.dbPath) === NodePath.resolve(source) &&
+          (await filePrefix(source, 1))?.length === 1
+        ) {
+          return "The native database trial requires exact compatible helpers, a durable checkpoint and a trusted preactivation witness or isolated database generation.";
+        }
+        return "The native database ownership, existing source and selected runtimes do not establish a compatible service trial.";
+      }
+
+      const live = await filePrefix(update.dbPath, SQLITE_HEADER.length);
+      let sqliteBackup = false;
+      if (existingBackup !== undefined && (await pathExists(existingBackup.directory))) {
+        const backupPath = databaseBackupFile(existingBackup.directory, "");
+        sqliteBackup = isSqlitePrefix(await filePrefix(backupPath, SQLITE_HEADER.length));
+        if (!sqliteBackup) return "The SQLite backup format could not be verified.";
+      }
+      // A stopped restore may leave a missing file or a partial header at its original path.
+      const interruptedCopy =
+        (live === undefined || SQLITE_HEADER.subarray(0, live.length).equals(live)) &&
+        existingBackup?.restoring &&
+        sqliteBackup;
+      if (!isSqlitePrefix(live) && !interruptedCopy) {
+        return "The SQLite database format could not be verified.";
+      }
+      return undefined;
+    } catch {
+      return "The database source or selected runtime could not be verified.";
+    }
+  }
+
+  async #verifyPendingTrial(pending: PendingServiceUpdate, restoring = false): Promise<void> {
+    const blocker = await this.#databaseTrialBlocker(pending, {
+      directory: databaseBackupDir(this.#baseDir, pending.id),
+      restoring,
+    });
+    if (blocker !== undefined) {
+      throw new Error(
+        `${blocker} Service update ${pending.id} requires recovery. The pending selection and database files were preserved.`,
+      );
+    }
+  }
+
   async #startTrial(pending: PendingServiceUpdate): Promise<void> {
+    await this.#verifyPendingTrial(pending);
     try {
       await backupDatabaseOnce(this.#baseDir, pending);
     } catch {
@@ -1154,6 +1259,16 @@ export class Launcher {
       await reject("The requested target runtime is missing or incomplete.");
       return;
     }
+    const trialBlocker = await this.#databaseTrialBlocker({
+      dbPath: message.dbPath,
+      fromVersion: child.version,
+      targetVersion: message.targetVersion,
+    });
+    if (!child.process.connected) return;
+    if (trialBlocker !== undefined) {
+      await reject(`${trialBlocker} The active server remains running.`);
+      return;
+    }
     // Failed checks must refuse updates rather than stop the server with unknown backup capacity.
     const backupBlocker = await databaseBackupBlocker(
       this.#baseDir,
@@ -1193,6 +1308,14 @@ export class Launcher {
       return;
     }
     this.#timer = undefined;
+    const blocker = await this.#databaseTrialBlocker(pending);
+    if (blocker !== undefined) {
+      await this.#selectState({
+        ...this.#state,
+        update: terminalUpdate({ pending, status: "failed", reason: blocker }),
+      });
+      return;
+    }
     // Anything thrown outside its own fallback still leaves the offline backup to run.
     const finishOnlineBackup = await startOnlineDatabaseBackup(
       this.#baseDir,
@@ -1222,6 +1345,7 @@ export class Launcher {
       throw new Error("Trial child reported prepared for an unexpected update.");
     }
     this.#clearTimer();
+    await this.#verifyPendingTrial(pending);
     const committed = terminalUpdate({ pending, status: "committed" });
     const next: ServiceState = {
       ...this.#state,
@@ -1328,6 +1452,7 @@ export class Launcher {
     this.#clearTimer();
     const pending = this.#state.update;
     if (pending?.status === "pending") {
+      await this.#verifyPendingTrial(pending);
       const discarded = await discardDatabaseBackup(this.#baseDir, pending.id).then(
         () => true,
         () => false,
@@ -1382,6 +1507,7 @@ export class Launcher {
       this.#child = null;
       await this.#terminate(child.process);
     }
+    await this.#verifyPendingTrial(pending, true);
     await restoreDatabaseBackup(this.#baseDir, pending);
     const outcome = terminalUpdate({ pending, status, reason });
     const next: ServiceState = {
