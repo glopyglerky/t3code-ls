@@ -434,6 +434,36 @@ async function verifyInterruptedShowcase(page: Page, expected: InterruptedShowca
   Assert.equal(message?.streaming, false);
 }
 
+async function terminalMarker(page: Page, prefix: "fixture-pty" | "fixture-reattach") {
+  const input = page.getByRole("textbox", { name: "Terminal input" });
+  if (!(await input.isVisible())) await page.keyboard.press("Control+j");
+  await input.waitFor({ state: "visible" });
+  await page.waitForFunction(() => {
+    const element = document.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Terminal input"]',
+    );
+    return element !== null && !element.readOnly;
+  });
+  await page.evaluate(() => navigator.clipboard.writeText(""));
+  await input.focus();
+  await page.keyboard.insertText(`printf '${prefix}:%s %s\\n' "$$" '世界'`);
+  await input.press("Enter");
+
+  // Copy Ghostty's selected rendered cells. The echoed printf command contains
+  // a format string, so only the actual shell output can match the PID.
+  const marker = new RegExp(`${prefix}:(\\d+) 世界`, "u");
+  const deadline = Date.now() + timeoutMs;
+  do {
+    await input.press("Control+Shift+a");
+    await input.press("Control+Shift+c");
+    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+    const pid = clipboard.match(marker)?.[1];
+    if (pid !== undefined) return pid;
+    await page.waitForTimeout(100);
+  } while (Date.now() < deadline);
+  throw new Error(`Expected a rendered shell marker for ${prefix}`);
+}
+
 function summarizeSnapshot(snapshot: OrchestrationV2ThreadDetailSnapshot) {
   const projection = snapshot.projection;
   return {
@@ -680,7 +710,13 @@ async function exercise(implementation: Implementation): Promise<void> {
     capturedApproval: null as Awaited<ReturnType<typeof acceptCapturedApproval>> | null,
     cancelledQuestion: null as Awaited<ReturnType<typeof cancelCapturedQuestion>> | null,
     historyFind: null as { query: string; count: string; draftPreserved: boolean } | null,
-    messageAppends: null as { requests: number; frames: number; rustDecoder: boolean } | null,
+    messageAppends: null as {
+      requests: number;
+      frames: number;
+      rustDecoder: boolean;
+      messageUpdates: Array<{ sequence: number; length: number; streaming: boolean }>;
+    } | null,
+    terminalReattach: null as { sameShell: boolean; unicodeOutput: boolean } | null,
     completedSnapshots: [] as Array<
       Awaited<ReturnType<typeof assertCompleted>> & { checkpoint: string }
     >,
@@ -724,6 +760,7 @@ async function exercise(implementation: Implementation): Promise<void> {
   let threadFindRequests = 0;
   let messageAppendFrames = 0;
   let messageAppendRequests = 0;
+  const wireMessages = new Map<string, Array<{ sequence: number; length: number; streaming: boolean }>>();
   function observePage(current: Page): void {
     current.setDefaultTimeout(timeoutMs);
     current.setDefaultNavigationTimeout(timeoutMs);
@@ -742,8 +779,39 @@ async function exercise(implementation: Implementation): Promise<void> {
         if (json.includes('"messageTextAppends":1')) messageAppendRequests += 1;
       });
       socket.on("framereceived", ({ payload }) => {
-        if (payload.toString().includes('"kind":"message-text-append"')) {
+        const json = payload.toString();
+        if (json.includes('"kind":"message-text-append"')) {
           messageAppendFrames += 1;
+        }
+        if (!json.includes('"message.updated"')) return;
+        let envelope: {
+          values?: Array<{
+            sequence?: number;
+            event?: { type?: string; payload?: { threadId?: string; text?: string; streaming?: boolean } };
+          }>;
+        };
+        try {
+          envelope = JSON.parse(json) as typeof envelope;
+        } catch {
+          return;
+        }
+        for (const frame of envelope.values ?? []) {
+          const message = frame.event?.payload;
+          if (
+            frame.event?.type !== "message.updated" ||
+            message?.threadId === undefined ||
+            message.text === undefined ||
+            frame.sequence === undefined
+          ) continue;
+          const messages = wireMessages.get(message.threadId) ?? [];
+          if (messages.length < 64) {
+            messages.push({
+              sequence: frame.sequence,
+              length: message.text.length,
+              streaming: message.streaming === true,
+            });
+            wireMessages.set(message.threadId, messages);
+          }
         }
       });
     });
@@ -823,6 +891,7 @@ async function exercise(implementation: Implementation): Promise<void> {
         requests: messageAppendRequests - requestsBefore,
         frames: messageAppendFrames - framesBefore,
         rustDecoder,
+        messageUpdates: wireMessages.get(appendThread) ?? [],
       };
       saveProof();
       Assert.ok(proof.messageAppends.requests > 0, "The client must negotiate text appends");
@@ -906,6 +975,19 @@ async function exercise(implementation: Implementation): Promise<void> {
       Assert.equal(await editor.innerText(), draft);
       proof.historyFind = { query, count: "1/1", draftPreserved: true };
       completed("Found and highlighted the previous reply after restart while retaining the draft");
+    }
+    if (bundledClient && implementation === "native") {
+      starting("interactive terminal reconnect");
+      await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+        origin: new URL(page.url()).origin,
+      });
+      const shell = await terminalMarker(page, "fixture-pty");
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await assertCompleted(page, threadId, turnIdentity);
+      const reattached = await terminalMarker(page, "fixture-reattach");
+      Assert.equal(reattached, shell, "A browser reload must reattach to the same PTY shell");
+      proof.terminalReattach = { sameShell: true, unicodeOutput: true };
+      completed("Reattached to the same PTY and copied its rendered Unicode output after reload");
     }
     await page.goto(proof.interrupted.threadUrl, { waitUntil: "domcontentloaded" });
     await verifyInterruptedShowcase(page, proof.interrupted);
