@@ -214,25 +214,37 @@ try {
     const published = [];
     yield* sink.observeCommittedThreadEvents(new Map([[command.threadId, (event) => published.push(event.id)]]));
     const state = yield* snapshot;
-    const events = state.orchestration_events.filter(({ row }) => row.command_id === unknownCommand.commandId);
-    const effects = state.orchestration_v2_effect_outbox.filter(({ row }) => row.command_id === unknownCommand.commandId);
-    const receipts = state.orchestration_command_receipts.filter(({ row }) => row.command_id === unknownCommand.commandId);
+    const textCell = (value) => ({ type: "text", value });
+    const belongsToCommand = ({ row }) => row.command_id.type === "text"
+      && row.command_id.value === unknownCommand.commandId;
+    const events = state.orchestration_events.filter(belongsToCommand);
+    const effects = state.orchestration_v2_effect_outbox.filter(belongsToCommand);
+    const receipts = state.orchestration_command_receipts.filter(belongsToCommand);
     Assert.equal(events.length, 1);
-    Assert.equal(events[0].row.event_id, unknownCommand.events[0].id);
+    Assert.deepEqual(events[0].row.event_id, textCell(unknownCommand.events[0].id));
     Assert.equal(effects.length, 1);
-    Assert.equal(effects[0].row.id, unknownCommand.effects[0].id);
+    Assert.deepEqual(effects[0].row.effect_id, textCell(unknownCommand.effects[0].id));
     Assert.equal(receipts.length, 1);
     for (const table of snapshotTables.slice(0, 3)) Assert.equal(state[table].length, first.state[table].length + 1);
+    const sequence = Number(events[0].row.sequence.value);
+    Assert.ok(Number.isSafeInteger(sequence) && sequence > 0);
+    const sequenceCell = { type: "integer", value: String(sequence) };
+    Assert.deepEqual(events[0].row.sequence, sequenceCell);
     const expectedReceipt = {
       command_id: unknownCommand.commandId, aggregate_kind: "thread", aggregate_id: command.threadId,
       command_type: command.commandType, accepted_at: fixedTime,
-      result_sequence: events[0].row.sequence, status: "accepted", error: null,
+      result_sequence: sequence, status: "accepted", error: null,
     };
-    Assert.deepEqual(receipts[0].row, expectedReceipt);
+    Assert.deepEqual(receipts[0].row, {
+      command_id: textCell(expectedReceipt.command_id), aggregate_kind: textCell("thread"),
+      aggregate_id: textCell(command.threadId), command_type: textCell(command.commandType),
+      accepted_at: textCell(fixedTime), result_sequence: sequenceCell,
+      status: textCell("accepted"), error: { type: "null" },
+    });
     const lookup = yield* client.request("application_receipts_get", {
       command_id: unknownCommand.commandId,
     }, Schema.Unknown);
-    Assert.equal(JSON.stringify(lookup), JSON.stringify(receipts[0].row));
+    Assert.deepEqual(lookup, expectedReceipt);
     const replayStart = transcript.length;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const replay = yield* sink.commitCommand({ ...unknownCommand, events: [], effects: [] });
