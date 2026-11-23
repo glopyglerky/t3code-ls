@@ -43,6 +43,7 @@ const startupTimeoutMs = 180_000;
 const replayPrompt = "Replay: showcase";
 const replayMarker = "This turn is a replay.";
 const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
+const pdfLinkProof = process.env.T3_CODE_LS_PDF_LINK_PROOF === "true";
 const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
 const capturedApproval = {
   path: "apps/server/src/orchestration-v2/testkit/fixtures/tool_call_read_only_on_request/registry_transcript.ndjson",
@@ -638,6 +639,66 @@ async function cancelCapturedQuestion(page: Page) {
   return { ...identity, threadId, requestId, source: capturedQuestion.path, sha256 };
 }
 
+const linkedPdfName = "fixture-links.pdf";
+
+function linkedPdf(): string {
+  const page = (contents: number, annotations = "") =>
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents ${contents} 0 R ${annotations} >>`;
+  const stream = (text: string) => {
+    const command = `BT /F1 24 Tf 30 700 Td (${text}) Tj ET`;
+    return `<< /Length ${command.length} >>\nstream\n${command}\nendstream`;
+  };
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Count 2 /Kids [3 0 R 5 0 R] >>",
+    page(
+      4,
+      "/Annots [<< /Type /Annot /Subtype /Link /Rect [30 690 220 730] /Border [0 0 0] /Dest [5 0 R /XYZ 0 792 0] >>]",
+    ),
+    stream("See page 2"),
+    page(6),
+    stream("Fixture PDF destination"),
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+  ];
+  let source = "%PDF-1.4\n";
+  const offsets = objects.map((object, index) => {
+    const offset = source.length;
+    source += `${index + 1} 0 obj\n${object}\nendobj\n`;
+    return `${String(offset).padStart(10, "0")} 00000 n \n`;
+  });
+  const xref = source.length;
+  return `${source}xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.join("")}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+}
+
+async function verifyLinkedPdf(page: Page) {
+  const panel = page.getByRole("button", { name: "Toggle right panel", exact: true });
+  if ((await panel.getAttribute("aria-pressed")) !== "true") await panel.click();
+  await page.locator('[aria-label="Open a surface"]').getByRole("button", { name: /^Files/u }).click();
+  const [response] = await Promise.all([
+    page.waitForResponse((response) => {
+      const url = new URL(response.url());
+      return (
+        url.origin === new URL(page.url()).origin &&
+        /^\/api\/assets\/[^/]+\/fixture-links\.pdf$/u.test(url.pathname)
+      );
+    }),
+    page.locator(`[role="treeitem"][data-item-path="${linkedPdfName}"]`).click(),
+  ]);
+  Assert.ok(response.ok(), `Signed fixture PDF returned HTTP ${response.status()}`);
+  const reader = page.getByRole("region", { name: linkedPdfName, exact: true });
+  await page.getByText("1 / 2 pages", { exact: true }).waitFor({ state: "visible" });
+  const destination = reader.getByRole("link", { name: "Page 2", exact: true });
+  await destination.waitFor({ state: "visible" });
+  await reader.getByText("See page 2", { exact: true }).click({ force: true });
+  const targetPage = page.getByText("2 / 2 pages", { exact: true });
+  await targetPage.waitFor({ state: "visible", timeout: 8_000 });
+  await reader.getByText("Fixture PDF destination", { exact: true }).waitFor({ state: "visible" });
+  await page.getByRole("button", { name: "Previous page", exact: true }).click();
+  await destination.press("Enter");
+  await targetPage.waitFor({ state: "visible", timeout: 8_000 });
+  return { signedAssetStatus: response.status(), pointerDestination: 2, keyboardDestination: 2 };
+}
+
 async function exercise(implementation: Implementation): Promise<void> {
   const directory = NodePath.join(proofRoot, implementation);
   NodeFS.mkdirSync(directory, { recursive: true });
@@ -672,6 +733,10 @@ async function exercise(implementation: Implementation): Promise<void> {
   );
   git(["init", "--initial-branch=main"], workspace);
   git(["add", "package.json", "src/math.ts"], workspace);
+  if (pdfLinkProof) {
+    NodeFS.writeFileSync(NodePath.join(workspace, linkedPdfName), linkedPdf());
+    git(["add", linkedPdfName], workspace);
+  }
   git(
     [
       "-c",
@@ -696,6 +761,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     implementation,
     client: bundledClient ? "built" : "development",
     composer: "unverified",
+    pdfLinks: null as Awaited<ReturnType<typeof verifyLinkedPdf>> | null,
     scope:
       "Linux original web client; local project; composer submission; free ACP showcase approval and interruption; reload; same-state server restart",
     startedAt: new Date().toISOString(),
@@ -887,6 +953,12 @@ async function exercise(implementation: Implementation): Promise<void> {
     proof.threadUrl = page.url();
     inspectPersistence("initial");
     completed("Received the completed replay turn on the original thread route");
+    if (pdfLinkProof) {
+      starting("follow a same-document link in the PDF reader opened from Files");
+      proof.pdfLinks = await verifyLinkedPdf(page);
+      completed("Followed a link in the signed PDF with pointer and keyboard input");
+      await page.getByRole("button", { name: "Toggle right panel", exact: true }).click();
+    }
     starting("stop with a streamed reply and pending approval");
     proof.interrupted = await interruptShowcase(page);
     Assert.notEqual(proof.interrupted.threadId, threadId);
