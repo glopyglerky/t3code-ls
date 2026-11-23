@@ -1821,6 +1821,42 @@
       "rust_crates": ["packages/client-runtime/rust", "packages/client-runtime/rust/web"]
     },
     {
+      "id": "local-pairing-form",
+      "state": "candidate",
+      "domain_owner": "apps/web",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/web/src/routes/pair.tsx",
+          "blob": "a71f44e3e2a720e96e2ba38223a2e1b7e4fa95e3"
+        },
+        {
+          "path": "apps/web/src/components/auth/PairingRouteSurface.tsx",
+          "blob": "8bedc8b2e711761ff52b7faafd3d8e09da54ab8f"
+        }
+      ],
+      "rust_paths": ["apps/web/rust/pairing/src/lib.rs"],
+      "adapter_paths": [
+        ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/auth/DioxusPairingForm.tsx",
+        "apps/web/src/components/auth/PairingRouteSurface.tsx",
+        "apps/web/src/vite-env.d.ts"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["browser"],
+          "state": "candidate",
+          "implementation": "dioxus-wasm",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": ["apps/web/scripts/verify-hybrid-client.ts"],
+      "retired_paths": [],
+      "notes": "T01, T11 and J36. VITE_T3_CODE_LS_PAIRING_RENDERER=dioxus selects the local pairing form only. The browser adapter uses Dioxus 0.8.0-alpha.3 release cb27832398e8a3fa30a0fc8d6917c6d8a86fa71a, an ancestor of research pin 0a7242a2a72b08975584bf8ecb05076a5ee0b9c7. Cargo.lock records release artifact checksums. The bundled Chromium proof has yet to run.",
+      "rust_crates": ["apps/web/rust/pairing"]
+    },
+    {
       "id": "conversation-text-revisions",
       "state": "candidate",
       "domain_owner": "packages/client-runtime",
