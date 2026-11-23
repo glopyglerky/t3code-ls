@@ -1575,6 +1575,22 @@ fn read_trial_request<T: DeserializeOwned>(message: &str) -> io::Result<Result<T
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(target_os = "linux")]
+    if let [mode, home, encoded] = args.as_slice() {
+        if mode == "trial-verify-inherited-readiness" {
+            if t3_code_ls_storage::forward_child_readiness::verify(Path::new(home), encoded)
+                .is_err()
+            {
+                std::process::exit(78);
+            }
+            // Emit readiness only after every check. This mode always exits;
+            // it never falls through to the ordinary database protocol.
+            let mut output = io::stdout().lock();
+            writeln!(output, r#"{{"ok":true,"syntheticReadiness":1}}"#)?;
+            output.flush()?;
+            return Ok(());
+        }
+    }
     let trial_response = match args.as_slice() {
         [mode] if mode == "trial-capabilities" => Some(match service_trial_capabilities() {
             Ok(capabilities) => json!({"ok": true, "result": capabilities}),

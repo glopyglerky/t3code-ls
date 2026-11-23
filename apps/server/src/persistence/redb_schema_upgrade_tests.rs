@@ -2335,7 +2335,10 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
                 crate::application_storage::probe_fixture_forward_child(
                     home.to_owned(),
                     ISOLATED_UPDATE.into(),
-                    |witness, candidate| forward_inherited_child_cases(home, witness, candidate),
+                    |witness, candidate| {
+                        forward_inherited_child_cases(home, witness, candidate)?;
+                        forward_packaged_child_cases(home, witness, candidate)
+                    },
                 )
                 .await
                 .unwrap(),
@@ -2852,6 +2855,123 @@ fn forward_inherited_child_cases(
             forward_fixture_sha256(&std::fs::read(home.join("userdata/statev2.omdb")).unwrap()),
             database_hash
         );
+    }
+    Ok(())
+}
+
+// Runs the actual staged package helper, while its parent retains every owner.
+#[cfg(target_os = "linux")]
+fn forward_packaged_child_cases(
+    home: &std::path::Path,
+    witness: &crate::application_storage::FixtureForwardActivationWitness,
+    candidate: &crate::backend::ExclusiveTrialFile,
+) -> crate::Result<()> {
+    use std::os::fd::AsRawFd;
+    use std::process::{Command, Stdio};
+    let helper = home
+        .join("runtime/versions")
+        .join(&witness.activation.target_version)
+        .join("native-bin/t3-code-ls-db");
+    // Pin the originally selected image through spawn and exit. Executing the
+    // parent's proc-fd path avoids re-resolving the installed helper name.
+    let executable = std::fs::File::open(&helper).unwrap();
+    let pinned = format!("/proc/{}/fd/{}", std::process::id(), executable.as_raw_fd());
+    assert_eq!(
+        forward_fixture_sha256(&std::fs::read(&pinned).unwrap()),
+        witness.activation.target_helper_sha256
+    );
+    let database_hash =
+        forward_fixture_sha256(&std::fs::read(home.join("userdata/statev2.omdb")).unwrap());
+    for case in [
+        "valid",
+        "lost",
+        "reopened",
+        "foreign",
+        "stale",
+        "wrong-image",
+        "wrong-database",
+        "output-failure",
+        "parent-retry",
+    ] {
+        let mut request = serde_json::to_value(witness).unwrap();
+        request["database_sha256"] = json!(database_hash);
+        if case == "stale" {
+            request["receipt_sha256"] = json!("0".repeat(64));
+        }
+        if case == "wrong-image" {
+            request["activation"]["target_helper_sha256"] = json!("0".repeat(64));
+        }
+        if case == "wrong-database" {
+            request["database_sha256"] = json!("0".repeat(64));
+        }
+        let input = match case {
+            "lost" => Stdio::null(),
+            "reopened" => {
+                Stdio::from(std::fs::File::open(home.join("userdata/statev2.omdb")).unwrap())
+            }
+            "foreign" => Stdio::from(std::fs::File::open(&helper).unwrap()),
+            _ => Stdio::from(candidate.inherited_file()?),
+        };
+        let output_fd = if case == "output-failure" {
+            Stdio::from(std::fs::File::open("/dev/null").unwrap())
+        } else {
+            Stdio::piped()
+        };
+        let mut child = Command::new(&pinned)
+            .args([
+                "trial-verify-inherited-readiness",
+                home.to_str().unwrap(),
+                &request.to_string(),
+            ])
+            .env_clear()
+            .stdin(input)
+            .stdout(output_fd)
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("packaged readiness child timed out: {case}");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        use std::io::Read;
+        let mut output = Vec::new();
+        if let Some(stdout) = child.stdout.take() {
+            stdout.take(1024).read_to_end(&mut output).unwrap();
+        }
+        let valid = matches!(case, "valid" | "parent-retry");
+        assert_eq!(
+            status.code(),
+            Some(if valid {
+                0
+            } else if case == "output-failure" {
+                1
+            } else {
+                78
+            }),
+            "{case}"
+        );
+        if valid {
+            assert_eq!(
+                serde_json::from_slice::<Value>(&output).unwrap(),
+                json!({"ok": true, "syntheticReadiness": 1})
+            );
+        } else {
+            assert!(output.is_empty(), "refusal emitted readiness: {case}");
+        }
+        candidate.verified_file()?;
+        assert_eq!(
+            forward_fixture_sha256(&std::fs::read(home.join("userdata/statev2.omdb")).unwrap()),
+            database_hash
+        );
+        println!("T05 packaged readiness {case}: {}", status.code().unwrap());
     }
     Ok(())
 }

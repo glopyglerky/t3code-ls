@@ -116,6 +116,15 @@ jobs:
               done
               grep -F 'T05 inherited child child-failure: exit 73' "$proof/forward-catalog.log"
             fi
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-* ]]; then
+              for accepted in valid parent-retry; do
+                grep -F "T05 packaged readiness $accepted: exit 0" "$proof/forward-catalog.log"
+              done
+              for rejected in lost reopened foreign stale wrong-image wrong-database; do
+                grep -F "T05 packaged readiness $rejected: exit 78" "$proof/forward-catalog.log"
+              done
+              grep -F 'T05 packaged readiness output-failure: exit 1' "$proof/forward-catalog.log"
+            fi
             cp "$RUNNER_TEMP/promotion-toolchain/installation-proof.json" "$proof/"
             exit 0
           fi
