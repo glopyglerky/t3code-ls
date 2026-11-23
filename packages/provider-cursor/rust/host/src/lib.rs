@@ -2,7 +2,11 @@
 
 use std::{net::SocketAddr, time::Duration};
 
-use reqwest::{Client, Response, StatusCode, header};
+use http_body_util::{BodyExt, Full};
+use hyper::body::{Bytes, Incoming};
+use hyper::{Request, Response, StatusCode, header};
+use hyper_util::client::legacy::{Client, connect::HttpConnector};
+use hyper_util::rt::TokioExecutor;
 use serde_json::{Value, json};
 use t3_code_ls_cursor_bridge::{SendStream, StreamError, TerminalRun, frame};
 
@@ -10,6 +14,7 @@ const UNARY: &str = "application/json";
 const STREAM: &str = "application/connect+json";
 const FRAME_LIMIT: usize = 1024 * 1024;
 const ENVELOPE_BYTES: usize = 5;
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug)]
 pub enum BridgeError {
@@ -27,7 +32,7 @@ impl From<StreamError> for BridgeError {
 }
 
 pub struct BridgeClient {
-    client: Client,
+    client: Client<HttpConnector, Full<Bytes>>,
     endpoint: SocketAddr,
 }
 
@@ -36,14 +41,12 @@ impl BridgeClient {
         if !endpoint.ip().is_loopback() || endpoint.port() == 0 {
             return Err(BridgeError::InvalidEndpoint);
         }
-        let client = Client::builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .retry(reqwest::retry::never())
-            .connect_timeout(Duration::from_secs(5))
-            .read_timeout(Duration::from_secs(30))
-            .build()
-            .map_err(|_| BridgeError::Transport)?;
+        let mut connector = HttpConnector::new();
+        connector.enforce_http(true);
+        connector.set_connect_timeout(Some(Duration::from_secs(5)));
+        let client = Client::builder(TokioExecutor::new())
+            .retry_canceled_requests(false)
+            .build(connector);
         Ok(Self { client, endpoint })
     }
 
@@ -87,7 +90,7 @@ impl BridgeClient {
         let mut response = self.request("Send", STREAM, wire).await?;
         let mut stream = SendStream::new(agent_id);
         let mut pending = Vec::new();
-        while let Some(bytes) = response.chunk().await.map_err(|_| BridgeError::Transport)? {
+        while let Some(bytes) = response_chunk(response.body_mut()).await? {
             let mut remaining = bytes.as_ref();
             while !remaining.is_empty() {
                 let available = FRAME_LIMIT + ENVELOPE_BYTES - pending.len();
@@ -118,7 +121,7 @@ impl BridgeClient {
     async fn unary(&self, action: &str, message: Value) -> Result<Value, BridgeError> {
         let mut response = self.request(action, UNARY, encode(&message)?).await?;
         let mut body = Vec::new();
-        while let Some(chunk) = response.chunk().await.map_err(|_| BridgeError::Transport)? {
+        while let Some(chunk) = response_chunk(response.body_mut()).await? {
             if chunk.len() > FRAME_LIMIT - body.len() {
                 return Err(BridgeError::TooLarge);
             }
@@ -136,18 +139,18 @@ impl BridgeClient {
         action: &str,
         media_type: &str,
         body: Vec<u8>,
-    ) -> Result<Response, BridgeError> {
-        let response = self
-            .client
-            .post(format!(
-                "http://{}/sdk.v1.SdkAgentService/{action}",
-                self.endpoint
-            ))
-            .header(header::CONTENT_TYPE, media_type)
-            .header("connect-protocol-version", "1")
-            .body(body)
-            .send()
+    ) -> Result<Response<Incoming>, BridgeError> {
+        let request = Request::post(format!(
+            "http://{}/sdk.v1.SdkAgentService/{action}",
+            self.endpoint
+        ))
+        .header(header::CONTENT_TYPE, media_type)
+        .header("connect-protocol-version", "1")
+        .body(Full::new(Bytes::from(body)))
+        .map_err(|_| BridgeError::InvalidEndpoint)?;
+        let response = tokio::time::timeout(READ_TIMEOUT, self.client.request(request))
             .await
+            .map_err(|_| BridgeError::Transport)?
             .map_err(|_| BridgeError::Transport)?;
         let content_type = response.headers().get(header::CONTENT_TYPE);
         if response.status() != StatusCode::OK
@@ -160,6 +163,19 @@ impl BridgeClient {
         }
         Ok(response)
     }
+}
+
+async fn response_chunk(body: &mut Incoming) -> Result<Option<Bytes>, BridgeError> {
+    tokio::time::timeout(READ_TIMEOUT, async {
+        while let Some(frame) = body.frame().await {
+            if let Ok(bytes) = frame.map_err(|_| BridgeError::Transport)?.into_data() {
+                return Ok(Some(bytes));
+            }
+        }
+        Ok(None)
+    })
+    .await
+    .map_err(|_| BridgeError::Transport)?
 }
 
 fn encode(message: &Value) -> Result<Vec<u8>, BridgeError> {
