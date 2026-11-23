@@ -9,6 +9,7 @@ on:
       - "candidate/t3code-ls-t12-outbox-identity-*"
       - "candidate/t3code-ls-t12-outbox-native-*"
       - "candidate/t3code-ls-t12-outbox-package-*"
+      - "candidate/t3code-ls-t16-independent-reads-*"
 
 permissions:
   contents: read
@@ -30,7 +31,7 @@ jobs:
         with:
           node-version: "26.12.1"
       - name: Install the locked client runtime dependencies
-        if: "!startsWith(github.ref_name, 'candidate/t3code-ls-t03-layout-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-')"
+        if: "!startsWith(github.ref_name, 'candidate/t3code-ls-t03-layout-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t16-independent-reads-')"
         run: |
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
@@ -48,6 +49,21 @@ jobs:
       - name: Check installed helper identity before starting native trials
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-')
         run: node --test tools/service-launcher-trial.test.mjs
+      - name: Install the pinned compiler for the independent read helper
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t16-independent-reads-')
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/independent-read-toolchain"
+      - name: Verify native readers while a writer holds its transaction
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t16-independent-reads-')
+        env:
+          T3_CODE_LS_INDEPENDENT_READS: "1"
+        run: |
+          export T3_CODE_LS_TEST_RUNTIME="$RUNNER_TEMP/independent-read-runtime"
+          export CARGO_HOME="$RUNNER_TEMP/independent-read-cargo"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/independent-read-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          node tools/install-server-tests.mjs
+          node tools/check-acceptance.mjs --tests '["tools/check-omdb-production.mjs"]' \
+            --proof-directory "$RUNNER_TEMP/independent-read-proof"
       - name: Install the pinned compiler for the trial helper
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-')
         run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/trial-toolchain"

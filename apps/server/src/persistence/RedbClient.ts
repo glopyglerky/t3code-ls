@@ -184,6 +184,11 @@ export const SingleProjectionReads = Context.Reference<boolean>(
   { defaultValue: () => false },
 );
 
+export const ReadDatabase = Context.Reference<NativeDatabase.NativeDatabase["Service"] | undefined>(
+  "t3/persistence/RedbClient/ReadDatabase",
+  { defaultValue: () => undefined },
+);
+
 export interface PreparationResult {
   readonly prepared: boolean;
   readonly indexed_rows: number;
@@ -255,6 +260,7 @@ function terminal(error: RedbClientError): boolean {
 
 export const make = Effect.gen(function* () {
   const database = yield* NativeDatabase.NativeDatabase;
+  const readDatabase = (yield* ReadDatabase) ?? database;
   const durableRelayWebhooks = yield* DurableRelayWebhooks;
   const singleProjectionReads = yield* SingleProjectionReads;
   const constructionSql = yield* Effect.serviceOption(SqlClient.SqlClient);
@@ -385,7 +391,7 @@ export const make = Effect.gen(function* () {
     }
     const publications: Array<Effect.Effect<void>> = [];
     const operation = Effect.uninterruptibleMask((restore) =>
-      database
+      (mode === "read" ? readDatabase : database)
         .withSession((session) =>
           Effect.gen(function* () {
             if (transactionSequence >= Number.MAX_SAFE_INTEGER)
@@ -658,7 +664,7 @@ export const make = Effect.gen(function* () {
         yield* decodeRequestJson(input).pipe(Effect.mapError(
           (cause) => new NativeDatabase.NativeDatabaseInputError({ stage: "request", cause }),
         ));
-        return yield* database.request({ ...input, operation }, response);
+        return yield* readDatabase.request({ ...input, operation }, response);
       }
       return yield* inTransaction(
         (transaction) =>
