@@ -152,7 +152,7 @@ jobs:
               fs.writeFileSync(file, JSON.stringify({ ...manifest, version }, null, 2) + "\n");
             ' "$manifest" "$candidate_version"
             if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t02-bundled-native-integrated-* ]]; then
-              export T3_CODE_LS_BUNDLE_GIT_WORKSPACE=1
+              export T3_CODE_LS_BUNDLE_GIT_WORKSPACE=1 T3_CODE_LS_BUNDLE_CLAUDE_STDIO=1
             fi
             pnpm exec node apps/server/scripts/cli.ts build-exe --verbose
             pnpm exec node scripts/build-cli-archive.ts --platform linux --arch x64 \
