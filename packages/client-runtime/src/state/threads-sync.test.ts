@@ -6,6 +6,7 @@ import {
   NodeId,
   ORCHESTRATION_V2_WS_METHODS,
   RuntimeRequestId,
+  RunId,
   ThreadId,
   TurnItemId,
   type OrchestrationV2ThreadDetailSnapshot,
@@ -122,6 +123,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   readonly httpSnapshots?: readonly ThreadSnapshotLoadResult[];
   /** The test sends the completion marker itself instead of the fake server sending it first. */
   readonly completionMarker?: boolean;
+  readonly fullSubscribeSnapshot?: () => Extract<OrchestrationV2ThreadStreamItem, { kind: "snapshot" }>;
   readonly resumeCache?: NonNullable<Parameters<typeof makeEnvironmentThreadState>[1]>;
   readonly loadCached?: ReturnType<Persistence.EnvironmentCacheStore["Service"]["loadThread"]>;
   readonly saveThread?: Persistence.EnvironmentCacheStore["Service"]["saveThread"];
@@ -175,9 +177,14 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
           Effect.andThen(Ref.set(lastAcceptCompactTurnItems, input.acceptCompactTurnItems)),
           Effect.andThen(SubscriptionRef.update(subscriptionCount, (count) => count + 1)),
           Effect.as(
-            options?.completionMarker === true
-              ? streamFrom(inputs)
-              : Stream.concat(Stream.make(synchronized()), streamFrom(inputs)),
+            Stream.concat(
+              input.afterSequence === undefined && options?.fullSubscribeSnapshot !== undefined
+                ? Stream.make(options.fullSubscribeSnapshot())
+                : Stream.empty,
+              options?.completionMarker === true
+                ? streamFrom(inputs)
+                : Stream.concat(Stream.make(synchronized()), streamFrom(inputs)),
+            ),
           ),
         ),
       ),
@@ -954,6 +961,62 @@ describe("EnvironmentThreads", () => {
       expect(live.sequence).toBe(CACHED_SNAPSHOT_SEQUENCE + 1);
       expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBe(CACHED_SNAPSHOT_SEQUENCE);
       expect(yield* Ref.get(harness.loaderCalls)).toBe(0);
+    }),
+  );
+
+  it.effect.each(["disk", "retained"] as const)(
+    "reloads inherited history from a %s cache without changing the child replay watermark",
+    (cacheKind) => Effect.gen(function* () {
+      const parent = ThreadId.make("parent-only-edit");
+      const itemId = TurnItemId.make("inherited-notice");
+      const projection = (message: string): OrchestrationV2ThreadProjection => ({
+        ...BASE_PROJECTION,
+        thread: {
+          ...BASE_PROJECTION.thread,
+          forkedFrom: { type: "run", threadId: parent, runId: RunId.make("parent-run") },
+        },
+        visibleTurnItems: [{
+          position: 0, visibility: "inherited", sourceThreadId: parent, sourceItemId: itemId,
+          item: {
+            id: itemId, threadId: parent, runId: null, nodeId: null,
+            providerThreadId: null, providerTurnId: null, nativeItemRef: null,
+            parentItemId: null, ordinal: 1, status: "completed", title: null,
+            startedAt: v2Now, completedAt: v2Now, updatedAt: v2Now,
+            type: "system_notice", message,
+          },
+        }],
+      });
+      const cached = projection("Before the parent edit");
+      let authoritative = projection("After the parent edit");
+      const harness = yield* makeHarness({
+        cached,
+        ...(cacheKind === "retained" ? { resumeCache: {
+          owner: undefined,
+          snapshot: {
+            state: { ...EMPTY_ENVIRONMENT_THREAD_STATE, data: Option.some(cached), status: "cached" },
+            sequence: CACHED_SNAPSHOT_SEQUENCE, persisted: true,
+          },
+        } } : {}),
+        // Models the existing server: a child-only resume has no new child
+        // events; an unresumed subscription returns the current bounded view.
+        fullSubscribeSnapshot: () => snapshot(authoritative, CACHED_SNAPSHOT_SEQUENCE),
+      });
+      const opened = yield* awaitThreadState(harness.observed, (state) => state.status === "live");
+      expect(Option.getOrThrow(opened.data).visibleTurnItems).toEqual(authoritative.visibleTurnItems);
+      expect(opened.sequence).toBe(CACHED_SNAPSHOT_SEQUENCE);
+      expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBeUndefined();
+      expect(yield* Ref.get(harness.loaderCalls)).toBe(0);
+
+      authoritative = projection("After another parent-only edit while disconnected");
+      yield* harness.replaceSession;
+      const reconnected = yield* awaitThreadState(harness.observed, (state) => {
+        const item = Option.isSome(state.data) ? state.data.value.visibleTurnItems[0]?.item : undefined;
+        return state.status === "live" && item?.type === "system_notice" &&
+          item.message === "After another parent-only edit while disconnected";
+      });
+      expect(Option.getOrThrow(reconnected.data).visibleTurnItems).toEqual(authoritative.visibleTurnItems);
+      expect(reconnected.sequence).toBe(CACHED_SNAPSHOT_SEQUENCE);
+      expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBeUndefined();
     }),
   );
 

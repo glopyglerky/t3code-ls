@@ -590,3 +590,21 @@ qualification. No build or live profile activation ran on the Mac.
 MIT stock lineage remains
 `28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`. Mandatory method SHA-256 is
 `5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
+
+## T04 inherited history and reconnect
+
+Run forks include mutable ancestor rows outside the child's event stream. The
+shared client requests a bounded snapshot on run-fork reconnect, replacing
+cached history before synchronization. Other threads continue to resume from
+their replay cursors. The on-disk format and public wire schema stay compatible.
+
+The unchanged client retained stale rows in the disk and retained-cache tests.
+The fix passed those tests, the shared replay suite and the native anchored
+window check. The native fixture commits an ancestor update between a held
+reader's window and watermark reads. The held reader sees a coherent old view.
+A fresh read and database reopen see the new inherited row and ancestry
+revision with the same child replay watermark. [Baseline](https://github.com/glopyglerky/t3code-ls/actions/runs/45173713610)
+· [Candidate](https://github.com/glopyglerky/t3code-ls/actions/runs/45173707988)
+
+Live propagation into an already-open child subscription and full J04 history
+performance remain open.

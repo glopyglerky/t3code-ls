@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "candidate/t3code-ls-t03-text-revision-*"
+      - "candidate/t3code-ls-t04-inherited-history-*"
       - "candidate/t3code-ls-t03-layout-*"
       - "candidate/t3code-ls-t05-helper-contract-*"
       - "candidate/t3code-ls-t12-outbox-identity-*"
@@ -27,7 +28,7 @@ jobs:
       !startsWith(github.ref_name, 'candidate/t3code-ls-t15-maintenance-snapshot-') &&
       !startsWith(github.ref_name, 'candidate/t3code-ls-t16-migration-witness-')
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-') && 25 || 10 }}
     env:
       SAVINGS_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t15-task-cache-savings-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') }}
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
@@ -60,12 +61,40 @@ jobs:
           pnpm exec vp test run --maxWorkers 2 \
             src/serverRuntimeStartup.test.ts src/serverRuntimeStartup.autoPull.test.ts
       - name: Exercise thread replay and recovery
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t03-text-revision-')
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t03-text-revision-') || startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
         run: |
           pnpm exec vp test run --maxWorkers 2 \
             packages/client-runtime/src/state/threads-sync.test.ts \
             packages/contracts/src/orchestrationV2.test.ts \
             apps/server/src/orchestration-v2/WireProjection.test.ts
+      - name: Install the pinned compiler for inherited history
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-')
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/history-toolchain"
+      - name: Check anchored inherited windows across an ancestor commit
+        id: anchored-history
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x "$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+          export T3_CODE_LS_TEST_RUNTIME="$RUNNER_TEMP/history-runtime"
+          export CARGO_HOME="$RUNNER_TEMP/history-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/history-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          trap 'rm -rf -- "$CARGO_TARGET_DIR" "$CARGO_HOME" "$T3_CODE_LS_TEST_RUNTIME"' EXIT
+          node tools/install-server-tests.mjs
+          node tools/fetch-migration-sources.mjs
+          node tools/check-acceptance.mjs \
+            --tests '["tools/check-redb-projection-windows.mjs"]' \
+            --proof-directory "$RUNNER_TEMP/history-proof"
+      - name: Retain inherited window evidence
+        if: always() && startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-') && steps.anchored-history.outcome != 'skipped'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: inherited-history-proof
+          path: ${{ runner.temp }}/history-proof
+          if-no-files-found: error
+          retention-days: 7
       - name: Qualify removal when a mobile cleanup owner fails
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-cleanup-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
         run: |

@@ -1102,7 +1102,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         }
 
         const sequence = yield* SubscriptionRef.get(lastSequence);
-        const canResume = Option.isSome(current.data);
+        // A run fork includes mutable ancestor rows absent from its event stream.
+        // Its child replay watermark cannot validate that cached history view.
+        const canResume =
+          Option.isSome(current.data) && current.data.value.thread.forkedFrom?.type !== "run";
         const acceptBoundedSnapshot = yield* Ref.get(acceptsBoundedSocketSnapshots);
         const textVersion = threadMessageTextVersion();
         const serverAppends = Option.exists(config, (value) => value.threadMessageTextAppends === 1);
