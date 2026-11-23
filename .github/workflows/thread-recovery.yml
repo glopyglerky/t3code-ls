@@ -72,3 +72,65 @@ jobs:
           pnpm --dir apps/mobile exec vp test run --project unit --maxWorkers 2 \
             "$GITHUB_WORKSPACE/apps/mobile/src/native/outboxDelivery.test.ts" src/state/thread-outbox.test.ts \
             src/state/threadOutboxDelivery.permissions.test.ts
+
+  mobile-outbox-android:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build and inspect the Android JNI libraries
+        run: |
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-target"
+          rustup toolchain install 1.99.1 --profile minimal \
+            --target aarch64-linux-android,armv7-linux-androideabi
+          ndk="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:?Android NDK unavailable}}"
+          compilers="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$compilers/aarch64-linux-android24-clang"
+          export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$compilers/armv7a-linux-androideabi24-clang"
+          for target in armv7-linux-androideabi aarch64-linux-android; do
+            cargo +1.99.1 rustc --locked --release --target "$target" \
+              -p t3-code-ls-mobile-outbox --crate-type cdylib
+            library="$CARGO_TARGET_DIR/$target/release/libt3_outbox.so"
+            readelf --dyn-syms --wide "$library" > "$RUNNER_TEMP/$target-symbols.txt"
+            grep -F 'Java_expo_modules_t3nativecontrols_T3OutboxDelivery_resolveV1' \
+              "$RUNNER_TEMP/$target-symbols.txt"
+            sha256sum "$library"
+          done
+
+  mobile-outbox-ios:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build device and simulator libraries and link a Swift caller
+        run: |
+          test "$(uname -m)" = arm64
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-target"
+          export IPHONEOS_DEPLOYMENT_TARGET=18.0
+          rustup toolchain install 1.99.1 --profile minimal \
+            --target aarch64-apple-ios,aarch64-apple-ios-sim
+          headers=apps/mobile/modules/t3-native-controls/rust/include
+          for target in aarch64-apple-ios aarch64-apple-ios-sim; do
+            cargo +1.99.1 rustc --locked --release --target "$target" \
+              -p t3-code-ls-mobile-outbox --crate-type staticlib
+            library="$CARGO_TARGET_DIR/$target/release/libt3_outbox.a"
+            nm -gU "$library" > "$RUNNER_TEMP/$target-symbols.txt"
+            grep -F '_t3_outbox_delivery_v1' "$RUNNER_TEMP/$target-symbols.txt"
+            shasum -a 256 "$library"
+          done
+          xcodebuild -create-xcframework \
+            -library "$CARGO_TARGET_DIR/aarch64-apple-ios/release/libt3_outbox.a" -headers "$headers" \
+            -library "$CARGO_TARGET_DIR/aarch64-apple-ios-sim/release/libt3_outbox.a" -headers "$headers" \
+            -output "$RUNNER_TEMP/T3Outbox.xcframework"
+          swift_probe="$RUNNER_TEMP/OutboxProbe.swift"
+          printf 'import T3Outbox\npublic func fixtureAction() -> Int32 { t3_outbox_delivery_v1(62) }\n' > "$swift_probe"
+          xcrun --sdk iphonesimulator swiftc -emit-library -target arm64-apple-ios18.0-simulator \
+            -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" -I "$headers" "$swift_probe" \
+            "$CARGO_TARGET_DIR/aarch64-apple-ios-sim/release/libt3_outbox.a" \
+            -o "$RUNNER_TEMP/libOutboxProbe.dylib"
