@@ -4,7 +4,8 @@ The candidate opens one `hybrid-fixture` workspace in a GPUI window. It reads
 the recorded assistant chunks from the existing [synthetic showcase transcript](../../server/scripts/dev-replay/showcase_transcript.ndjson)
 and applies them through the shared Rust `TextRevision` model. The window
 keeps drafts and results in memory until you close it. The binary has its own
-Cargo workspace and opens only with `--fixture showcase`.
+Cargo workspace. The recorded entry opens with `--fixture showcase`; the scoped
+application read uses `--thread-snapshot` as described below.
 
 ## Build on the hosted Linux x64 runner
 
@@ -67,3 +68,28 @@ Cargo.lock pins the crate checksums. The T3 source remains MIT.
 [Zed license](https://github.com/zed-industries/zed/blob/f126950f9d3b62666f97437ae5d4ccac2272c4db/LICENSE-APACHE),
 [published GPUI platform manifest](https://docs.rs/crate/gpui-pre-platform/0.3.12/source/Cargo.toml),
 [gpui-base source and license](https://docs.rs/crate/gpui-base/0.10.0/source/).
+
+## Read an application thread
+
+The opt-in `--thread-snapshot` entry reads one bounded snapshot from the selected
+Linux loopback server. Pass a JSON object on stdin with `port`, `token`,
+`environmentId` and `threadId`. The token stays out of arguments and logs. The
+adapter first checks the production environment descriptor, then requests
+`/api/orchestration/threads/:threadId/bounded` with bearer authentication and
+orchestration protocol 2. It accepts the exact requested thread and renders its
+messages as a read-only accessible document.
+
+The adapter has a 16 KiB input limit, a 1 MiB response limit, a 16 KiB header
+limit and a five-second deadline per request. It uses plain HTTP on
+`127.0.0.1` for this scoped local connection. Remote connections, TLS, streaming,
+submission, approvals, live navigation and reconnect remain future increments.
+The recorded showcase entry remains independently executable.
+
+The existing hosted GPUI workflow now builds the real selected server, creates a
+disposable native profile, imports a synthetic Codex session through the
+application's normal scan/import RPCs, and opens the native window. Its AT-SPI
+check verifies exact prompt/reply text, the requested thread identity and a
+read-only document. Wrong environment identity, invalid authentication and a
+missing thread each display the bounded read failure. The fixture runs inside a
+loopback-only network namespace and removes its profile after both owned
+processes close. It uses the stock comparison pin already recorded above.

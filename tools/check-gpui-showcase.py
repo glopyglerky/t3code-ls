@@ -1,6 +1,7 @@
 """Exercise the Linux desktop showcase through X11 input and its AT-SPI tree."""
 
 import os
+import json
 import subprocess
 import sys
 import time
@@ -54,7 +55,7 @@ def x11(*args):
 
 def find_window():
     try:
-        return x11("search", "--onlyvisible", "--name", "Showcase fixture").splitlines()[0]
+        return x11("search", "--onlyvisible", "--name", "T3 Code").splitlines()[0]
     except (subprocess.CalledProcessError, IndexError):
         return None
 
@@ -75,6 +76,46 @@ def request_window_close(window):
         server.close()
 
 
+def check_thread_snapshot(executable):
+    connection = json.load(sys.stdin)
+    cases = [
+        ({**connection, "environmentId": "wrong-environment"}, False),
+        ({**connection, "token": "invalid.fixture.token"}, False),
+        ({**connection, "threadId": "missing-fixture-thread"}, False),
+        (connection, True),
+    ]
+    for request, success in cases:
+        application = subprocess.Popen(
+            [executable, "--thread-snapshot"], stdin=subprocess.PIPE, text=True,
+        )
+        try:
+            application.stdin.write(json.dumps(request))
+            application.stdin.close()
+            window = wait_for(find_window, "The GPUI server view did not open", application)
+            x11("windowfocus", "--sync", window)
+            if success:
+                document = find("Server thread snapshot", application)
+                text = document.queryText()
+                body = text.getText(0, text.characterCount)
+                assert "GPUI saved conversation prompt" in body
+                assert "GPUI server reply café 🦀" in body
+                assert connection["threadId"] in body
+                assert not document.getState().contains(pyatspi.STATE_EDITABLE)
+            else:
+                find("Could not read the selected server thread.", application)
+            request_window_close(window)
+            assert application.wait(timeout=10) == 0
+        finally:
+            if application.poll() is None:
+                application.terminate()
+                try:
+                    application.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    application.kill()
+                    application.wait(timeout=3)
+    print("GPUI authenticated snapshot passed AT-SPI content and identity, credential and missing-thread refusal checks")
+
+
 def main():
     executable = sys.argv[1]
     assert os.path.isabs(executable)
@@ -86,6 +127,10 @@ def main():
         ],
         check=True,
     )
+    if sys.argv[2:] == ["--thread-snapshot"]:
+        check_thread_snapshot(executable)
+        return
+    assert len(sys.argv) == 2
     application = subprocess.Popen([executable, "--fixture", "showcase"])
     try:
         window = wait_for(find_window, "The GPUI fixture did not open an X11 window", application)

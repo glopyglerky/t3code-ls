@@ -10,8 +10,11 @@ permissions:
 jobs:
   linux-x64:
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
       CARGO_PROFILE_DEV_DEBUG: "0"
@@ -47,3 +50,23 @@ jobs:
           xvfb-run -a -s '-screen 0 1280x1024x24' dbus-run-session -- \
             /usr/bin/python3 tools/check-gpui-showcase.py \
             "$RUNNER_TEMP/gpui-target/debug/t3-code-ls-desktop-gpui"
+      - name: Build the selected application server for the native snapshot read
+        run: |
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          export CARGO_HOME="$RUNNER_TEMP/gpui-server-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/gpui-server-target"
+          T3_CODE_LS_IMPLEMENTATION=native node tools/build-native.mjs
+          node tools/check-hybrid.mjs --verify-binaries
+          pnpm --dir apps/web run build
+          T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$GITHUB_WORKSPACE/bin" \
+            pnpm --dir apps/server run build:bundle
+          sha256sum apps/server/dist/bin.mjs apps/server/dist/native-bin/manifest.json
+      - name: Read a real native thread through the GPUI window
+        timeout-minutes: 4
+        run: |
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- xvfb-run -a -s "-screen 0 1280x1024x24" dbus-run-session -- \
+              "$2" apps/server/scripts/verify-gpui-thread-snapshot.ts "$3"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/gpui-target/debug/t3-code-ls-desktop-gpui"

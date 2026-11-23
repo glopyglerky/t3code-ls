@@ -1837,13 +1837,15 @@
       ],
       "rust_paths": [
         "apps/desktop/rust/src/main.rs",
-        "apps/desktop/rust/src/replay.rs"
+        "apps/desktop/rust/src/replay.rs",
+        "apps/desktop/rust/src/server_snapshot.rs"
       ],
       "adapter_paths": [
         "apps/desktop/rust/Cargo.toml",
         "apps/desktop/rust/Cargo.lock",
         "apps/desktop/rust/README.md",
-        "apps/server/scripts/dev-replay/showcase_transcript.ndjson"
+        "apps/server/scripts/dev-replay/showcase_transcript.ndjson",
+        ".github/workflows/gpui-showcase.yml"
       ],
       "platform_routes": [
         {
@@ -1854,10 +1856,18 @@
           "acceptance_evidence": {}
         }
       ],
-      "acceptance_tests": ["packages/client-runtime/rust/tests/text_revision.rs"],
+      "acceptance_tests": [
+        "packages/client-runtime/rust/tests/text_revision.rs",
+        "apps/server/scripts/verify-gpui-thread-snapshot.ts",
+        "tools/check-gpui-showcase.py"
+      ],
+      "hosted_acceptance": {
+        "apps/server/scripts/verify-gpui-thread-snapshot.ts": ".github/workflows/gpui-showcase.yml",
+        "tools/check-gpui-showcase.py": ".github/workflows/gpui-showcase.yml"
+      },
       "retired_paths": [],
-      "notes": "T01 and T14. The root Rust workspace checks the shared text owner. The isolated GPUI manifest has its own fixture tests and requires hosted X11, input and assistive-technology checks. The fixture route has no server, provider effects or persistent drafts.",
-      "rust_crates": ["packages/client-runtime/rust"]
+      "notes": "T01 and T14. The root Rust workspace checks the shared text owner. The isolated GPUI manifest has its own fixture tests and requires hosted X11, input and assistive-technology checks. The replay fixture remains in memory. The opt-in native thread reader consumes the selected loopback server's authenticated bounded snapshot and checks environment and thread identity. Live submission, providers, streaming, durable desktop drafts and normal launcher integration remain open.",
+      "rust_crates": ["packages/client-runtime/rust", "apps/desktop/rust"]
     },
     {
       "id": "conversation-text-revisions",

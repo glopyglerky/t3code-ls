@@ -1,4 +1,5 @@
 mod replay;
+mod server_snapshot;
 
 use std::{ffi::OsStr, process::ExitCode};
 
@@ -20,7 +21,8 @@ const TEXTAREA_CONTEXT: &str = "ShowcaseWorkspace > Input";
 const COMPOSER_LABEL: &str = "Message";
 const SUBMIT_LABEL: &str = "Submit message";
 const REPLY_LABEL: &str = "Recorded assistant reply";
-const USAGE: &str = "Usage: t3-code-ls-desktop-gpui --fixture showcase";
+const USAGE: &str =
+    "Usage: t3-code-ls-desktop-gpui --fixture showcase | --thread-snapshot < CONNECTION_JSON";
 const SHORTCUT: &str = if cfg!(target_os = "macos") {
     "Command+Enter"
 } else {
@@ -241,6 +243,80 @@ impl Render for Workspace {
     }
 }
 
+struct ServerThreadView {
+    content: Option<Entity<TextareaState>>,
+}
+
+impl ServerThreadView {
+    fn new(
+        snapshot: Result<server_snapshot::Snapshot, &'static str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let content = snapshot.ok().map(|snapshot| {
+            cx.new(|cx| {
+                let mut state = TextareaState::new(window, cx)
+                    .rows(18)
+                    .default_value(snapshot.text)
+                    .context_menu(false);
+                state.set_accessibility(
+                    InputAccessibility::new(Some(Role::Document))
+                        .with_label(Some(server_snapshot::LABEL.into()))
+                        .with_accessibility_id(Some("server-thread-snapshot".into())),
+                );
+                state.set_readonly(true, cx);
+                state.focus(window, cx);
+                state
+            })
+        });
+        Self { content }
+    }
+}
+
+impl Render for ServerThreadView {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let mut view = div()
+            .id("server-thread-view")
+            .role(Role::Main)
+            .size_full()
+            .bg(rgb(0xf3f5f7))
+            .text_color(rgb(0x16212d))
+            .p_6()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(
+                div()
+                    .role(Role::Heading)
+                    .aria_level(1)
+                    .aria_label("Server conversation")
+                    .text_2xl()
+                    .child("Server conversation"),
+            );
+        if let Some(content) = &self.content {
+            view = view.child(
+                div()
+                    .id("server-thread-document")
+                    .h(px(490.))
+                    .bg(rgb(0xffffff))
+                    .border_2()
+                    .border_color(rgb(0x9ea9b6))
+                    .rounded_md()
+                    .p_2()
+                    .child(Textarea::new(content)),
+            );
+        } else {
+            view = view.child(
+                div()
+                    .role(Role::Status)
+                    .aria_label(server_snapshot::FAILED)
+                    .child(server_snapshot::FAILED),
+            );
+        }
+        view
+    }
+}
+
 fn main() -> ExitCode {
     let mut args = std::env::args_os().skip(1);
     let first = args.next();
@@ -248,17 +324,30 @@ fn main() -> ExitCode {
         println!("{USAGE}");
         return ExitCode::SUCCESS;
     }
-    if first.as_deref() != Some(OsStr::new("--fixture"))
-        || args.next().as_deref() != Some(OsStr::new("showcase"))
-        || args.next().is_some()
-    {
-        eprintln!("{USAGE}");
-        return ExitCode::from(2);
-    }
+    let snapshot =
+        if first.as_deref() == Some(OsStr::new("--thread-snapshot")) && args.next().is_none() {
+            Some(
+                server_snapshot::Connection::read(std::io::stdin().lock())
+                    .and_then(|connection| connection.snapshot()),
+            )
+        } else if first.as_deref() == Some(OsStr::new("--fixture"))
+            && args.next().as_deref() == Some(OsStr::new("showcase"))
+            && args.next().is_none()
+        {
+            None
+        } else {
+            eprintln!("{USAGE}");
+            return ExitCode::from(2);
+        };
 
+    let title = if snapshot.is_some() {
+        "T3 Code · Server conversation"
+    } else {
+        "T3 Code · Showcase fixture"
+    };
     gpui_platform::application()
         .with_quit_mode(QuitMode::LastWindowClosed)
-        .run(|cx: &mut App| {
+        .run(move |cx: &mut App| {
             gpui_base::init(cx);
             // The base textarea uses Tab to indent. In this form it moves focus.
             cx.bind_keys([
@@ -271,14 +360,19 @@ fn main() -> ExitCode {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     window_min_size: Some(size(px(560.), px(480.))),
                     titlebar: Some(gpui::TitlebarOptions {
-                        title: Some("T3 Code · Showcase fixture".into()),
+                        title: Some(title.into()),
                         ..Default::default()
                     }),
                     ..Default::default()
                 },
-                |window, cx| {
-                    let workspace = cx.new(|cx| Workspace::new(window, cx));
-                    cx.new(|cx| Root::new(workspace, window, cx))
+                move |window, cx| {
+                    if let Some(snapshot) = snapshot {
+                        let workspace = cx.new(|cx| ServerThreadView::new(snapshot, window, cx));
+                        cx.new(|cx| Root::new(workspace, window, cx))
+                    } else {
+                        let workspace = cx.new(|cx| Workspace::new(window, cx));
+                        cx.new(|cx| Root::new(workspace, window, cx))
+                    }
                 },
             );
             match result {
