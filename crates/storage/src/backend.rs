@@ -395,7 +395,7 @@ impl Backend {
 }
 
 /// Owns the physical lock independently of redb's read and write handles.
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(target_os = "linux")]
 pub(crate) struct ExclusiveTrialFile {
     inherited: File,
     file: Arc<redb::backends::FileBackend>,
@@ -414,10 +414,12 @@ struct LeasedTrialBackend {
 #[cfg(all(test, target_os = "linux"))]
 type VerifyTrialOpen = Box<dyn FnOnce(&File) -> Result<()> + Send>;
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(target_os = "linux")]
 enum TrialOpen {
     Snapshot,
+    #[cfg(test)]
     RecoveryCopy(PathBuf),
+    #[cfg(test)]
     Writer(VerifyTrialOpen),
 }
 
@@ -591,7 +593,7 @@ impl Backend {
     }
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(target_os = "linux")]
 impl ExclusiveTrialFile {
     pub(crate) fn acquire(path: PathBuf, max_bytes: u64) -> Result<Self> {
         // Keep the identity handle on an independent file description. The
@@ -627,6 +629,7 @@ impl ExclusiveTrialFile {
     }
 
     // Duplicate the locked open file description, never reopen the pathname.
+    #[cfg(test)]
     pub(crate) fn inherited_file(&self) -> Result<File> {
         self.verified_file()?;
         self.inherited.try_clone().map_err(storage_error)
@@ -651,10 +654,12 @@ impl ExclusiveTrialFile {
         self.open_handle(TrialOpen::Snapshot).await
     }
 
+    #[cfg(test)]
     pub(crate) async fn recover_copy(&self, directory: PathBuf) -> Result<Backend> {
         self.open_handle(TrialOpen::RecoveryCopy(directory)).await
     }
 
+    #[cfg(test)]
     pub(crate) async fn open_checked_writer(
         &self,
         verify: impl FnOnce(&File) -> Result<()> + Send + 'static,
@@ -677,13 +682,11 @@ impl ExclusiveTrialFile {
             return Err(Error::IncompatibleStore);
         }
         tokio::task::spawn_blocking(move || {
-            let mut file = lease.verified_file()?;
             let mut options = builder();
             options.set_concurrency_mode(ConcurrencyMode::ExclusiveWriter);
-            let writable = matches!(&mode, TrialOpen::Writer(_));
-            let exclusive = !matches!(&mode, TrialOpen::RecoveryCopy(_));
-            let (reader, writer) = match mode {
+            let (reader, writer, exclusive) = match mode {
                 TrialOpen::Snapshot => {
+                    lease.verified_file()?;
                     let reader = options
                         .open_read_only_with_backend(LeasedTrialBackend {
                             file: lease.file,
@@ -693,9 +696,11 @@ impl ExclusiveTrialFile {
                             redb::DatabaseError::RepairAborted => Error::RecoveryRequired,
                             other => storage_error(other),
                         })?;
-                    (Some(reader), None)
+                    (Some(reader), None, true)
                 }
+                #[cfg(test)]
                 TrialOpen::RecoveryCopy(directory) => {
+                    let mut file = lease.verified_file()?;
                     // Repair may write during open. Inspect an unlinked copy
                     // before admitting those writes on the canonical file.
                     let mut scratch = tempfile::tempfile_in(directory).map_err(storage_error)?;
@@ -709,19 +714,21 @@ impl ExclusiveTrialFile {
                     let database = options
                         .create_with_backend(scratch)
                         .map_err(storage_error)?;
-                    (None, Some(Arc::new(database)))
+                    (None, Some(Arc::new(database)), false)
                 }
+                #[cfg(test)]
                 TrialOpen::Writer(verify) => {
+                    let file = lease.verified_file()?;
                     verify(&file)?;
                     lease.verified_file()?;
                     let database = open_leased_trial_writer(lease.file)?;
-                    (None, Some(Arc::new(database)))
+                    (None, Some(Arc::new(database)), true)
                 }
             };
             let handles = Arc::new(DatabaseHandles {
                 path: lease.path,
                 exclusive,
-                read_only: !writable,
+                read_only: !exclusive || writer.is_none(),
                 identity: Some(lease.identity),
                 reader,
                 writer: Mutex::new(writer),
