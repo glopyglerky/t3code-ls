@@ -20,7 +20,7 @@ use crate::application_rows::{
 use crate::backend::Transaction;
 use crate::{Error, Result, Store, request_digest, store_key};
 
-const THREADS: &str = "orchestration_v2_projection_threads";
+pub(crate) const THREADS: &str = "orchestration_v2_projection_threads";
 const RUNS: &str = "orchestration_v2_projection_runs";
 const ATTEMPTS: &str = "orchestration_v2_projection_run_attempts";
 const NODES: &str = "orchestration_v2_projection_nodes";
@@ -30,7 +30,7 @@ const BINDINGS: &str = "orchestration_v2_projection_provider_session_bindings";
 const PROVIDER_THREADS: &str = "orchestration_v2_projection_provider_threads";
 const TURNS: &str = "orchestration_v2_projection_provider_turns";
 const REQUESTS: &str = "orchestration_v2_projection_runtime_requests";
-const MESSAGES: &str = "orchestration_v2_projection_messages";
+pub(crate) const MESSAGES: &str = "orchestration_v2_projection_messages";
 const PLANS: &str = "orchestration_v2_projection_plans";
 const ITEMS: &str = "orchestration_v2_projection_turn_items";
 const SCOPES: &str = "orchestration_v2_projection_checkpoint_scopes";
