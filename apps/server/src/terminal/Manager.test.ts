@@ -67,6 +67,7 @@ class FakePtyProcess implements PtyAdapter.PtyProcess {
   readonly killSignals: Array<string | undefined> = [];
   readonly pid: number;
   writeFailure: unknown | undefined;
+  writeReceipt: ((data: string) => Promise<PtyAdapter.PtyWriteReceipt>) | undefined;
   resizeFailure: unknown | undefined;
   private readonly dataListeners = new Set<(data: string) => void>();
   private readonly exitListeners = new Set<(event: PtyAdapter.PtyExitEvent) => void>();
@@ -78,11 +79,12 @@ class FakePtyProcess implements PtyAdapter.PtyProcess {
     this.pid = pid;
   }
 
-  write(data: string): void {
+  write(data: string): void | Promise<PtyAdapter.PtyWriteReceipt> {
     if (this.writeFailure !== undefined) {
       throw this.writeFailure;
     }
     this.writes.push(data);
+    return this.writeReceipt?.(data);
   }
 
   resize(cols: number, rows: number): void {
@@ -867,6 +869,54 @@ it.layer(
       expect(first.writes).toEqual(["pwd\n"]);
       expect(second.writes).toEqual(["ls\n"]);
       expect(ptyAdapter.spawnInputs).toHaveLength(2);
+    }),
+  );
+
+  it.effect("waits for the asynchronous PTY receipt before accepting UTF-8 input", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+      yield* manager.open(openInput());
+      const process = ptyAdapter.processes[0]!;
+      const invoked = Promise.withResolvers<void>();
+      let acknowledge: ((receipt: PtyAdapter.PtyWriteReceipt) => void) | undefined;
+      process.writeReceipt = () => new Promise((resolve) => {
+        acknowledge = resolve;
+        invoked.resolve();
+      });
+      const data = "café 🧪\r";
+      const writing = yield* manager.write({ threadId: "thread-1", terminalId: "default", data }).pipe(
+        Effect.forkChild({ startImmediately: true }),
+      );
+      yield* Effect.promise(() => invoked.promise);
+      // The fake records the call before returning its unresolved receipt.
+      expect(process.writes).toEqual([data]);
+      expect(writing.pollUnsafe()).toBeUndefined();
+      expect(acknowledge).toBeDefined();
+      acknowledge!({ acceptedBytes: Buffer.byteLength(data, "utf8") });
+      yield* Fiber.join(writing);
+      expect(process.writes).toEqual([data]);
+    }),
+  );
+
+  it.effect("fails partial or lost PTY receipts without replaying input", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+      yield* manager.open(openInput());
+      const process = ptyAdapter.processes[0]!;
+      const data = "🧪\r";
+      for (const acceptedBytes of [0, 1, data.length, 99, Number.NaN]) {
+        process.writeReceipt = () => Promise.resolve({ acceptedBytes });
+        const error = yield* manager.write({ threadId: "thread-1", terminalId: "default", data }).pipe(Effect.flip);
+        expect(error).toMatchObject({
+          _tag: "TerminalWriteError",
+          terminalPid: process.pid,
+          cause: { reason: "incomplete-input-write", acceptedBytes, expectedBytes: 5 },
+        });
+      }
+      process.writeReceipt = () => Promise.reject(new Error("lost native write acknowledgement"));
+      const lost = yield* manager.write({ threadId: "thread-1", terminalId: "default", data }).pipe(Effect.flip);
+      expect(lost).toMatchObject({ _tag: "TerminalWriteError", terminalPid: process.pid });
+      expect(process.writes).toEqual(Array.from({ length: 6 }, () => data));
     }),
   );
 
