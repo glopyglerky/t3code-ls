@@ -48,7 +48,7 @@ const snapshotTables = ["orchestration_events", "orchestration_command_receipts"
   "orchestration_v2_effect_outbox", "orchestration_v2_projection_threads"];
 const transcript = [];
 const prepared = new Map();
-async function run(use) {
+async function run(use, fault = {}) {
   return withNative(executable, fixture, () => Effect.gen(function* () {
     const ordered = yield* NativeDatabase.make({
       executable, databasePath: fixture.databasePath, mode: "ordered-fixture-local",
@@ -68,7 +68,20 @@ async function run(use) {
             discard: session.discard,
             request: (input, response) => {
               transcript.push(structuredClone(input));
-              return session.request(input, response);
+              return Effect.gen(function* () {
+                const result = yield* session.request(input, response);
+                if (input.operation === "application_commit" && fault.dropCommit) {
+                  // Fixture-owned barrier: the exact helper acknowledged a real
+                  // successful commit before its acknowledgement is withheld.
+                  Assert.deepEqual(result, { committed: true });
+                  fault.dropCommit = false;
+                  fault.acknowledged = structuredClone(input);
+                  yield* session.discard;
+                  fault.discarded = true;
+                  return yield* new NativeDatabase.NativeDatabaseOutcomeUnknown({ stage: "response" });
+                }
+                return result;
+              });
             },
           });
         }).pipe(Effect.ensuring(session.discard)),
@@ -129,7 +142,11 @@ try {
   Assert.equal(frames([{ ...selection(), profile: alternateProfile }])[0].ok, false);
   Assert.equal(frames([selection(), { operation: "application_bootstrap" }])[1].ok, false);
   const first = await run(({ sink, snapshot }) => at(fixedTime, Effect.gen(function* () {
+    const published = [];
+    yield* sink.observeCommittedThreadEvents(new Map([[command.threadId, (event) => published.push(event.id)]]));
     const committed = yield* sink.commitCommand(command);
+    Assert.deepEqual(published, committed.storedEvents.map(({ event }) => event.id));
+    Assert.ok(published.length > 0, "Publication observer positive control");
     Assert.equal(committed.committed, true);
     const state = yield* snapshot;
     for (const table of snapshotTables) Assert.ok(state[table].length > 0, table);
@@ -165,12 +182,94 @@ try {
     "application_projections_apply_many", "application_outbox_enqueue", "application_receipts_upsert", "application_commit"]) {
     Assert.ok(transcript.some((frame) => frame.operation === operation), operation);
   }
+  const unknownCommand = {
+    ...command, commandId: "command:ordered-lost-ack",
+    events: [makeEvent("provider-session.detached", {
+      providerSessionId: "session:main", detachedAt: fixedTime,
+    }, { id: "event:ordered-lost-ack", threadId: command.threadId })],
+    effects: [{ ...command.effects[0], id: "effect:ordered-lost-ack", commandId: "command:ordered-lost-ack" }],
+  };
+  const fault = { dropCommit: true };
+  const unknownStart = transcript.length;
+  const unknownPublished = [];
+  await run(({ sink }) => at(fixedTime, Effect.gen(function* () {
+    yield* sink.observeCommittedThreadEvents(new Map([[command.threadId, (event) => unknownPublished.push(event.id)]]));
+    const failure = yield* sink.commitCommand(unknownCommand).pipe(Effect.catch(Effect.succeed));
+    Assert.equal(failure?._tag, "EventSinkWriteError");
+    Assert.equal(failure.cause?._tag, "NativeDatabaseOutcomeUnknown");
+    Assert.equal(failure.cause.stage, "response");
+    Assert.equal(fault.dropCommit, false);
+    Assert.equal(fault.discarded, true);
+    Assert.deepEqual(unknownPublished, []);
+  })), fault);
+  const unknownFrames = transcript.slice(unknownStart);
+  Assert.equal(unknownFrames.filter((frame) => frame.operation === "application_begin").length, 1);
+  Assert.equal(unknownFrames.filter((frame) => frame.operation === "application_commit").length, 1);
+  Assert.deepEqual(unknownFrames.at(-1), fault.acknowledged);
+  Assert.ok(!unknownFrames.some((frame) => frame.operation === "application_rollback"));
+  await assertSeed("lost acknowledgement after real commit");
+  // A new client/helper selects and reopens the same candidate. Receipt lookup
+  // resolves the original operation; replay must never publish the missed event.
+  const recovered = await run(({ sink, client, snapshot }) => Effect.gen(function* () {
+    const published = [];
+    yield* sink.observeCommittedThreadEvents(new Map([[command.threadId, (event) => published.push(event.id)]]));
+    const state = yield* snapshot;
+    const events = state.orchestration_events.filter(({ row }) => row.command_id === unknownCommand.commandId);
+    const effects = state.orchestration_v2_effect_outbox.filter(({ row }) => row.command_id === unknownCommand.commandId);
+    const receipts = state.orchestration_command_receipts.filter(({ row }) => row.command_id === unknownCommand.commandId);
+    Assert.equal(events.length, 1);
+    Assert.equal(events[0].row.event_id, unknownCommand.events[0].id);
+    Assert.equal(effects.length, 1);
+    Assert.equal(effects[0].row.id, unknownCommand.effects[0].id);
+    Assert.equal(receipts.length, 1);
+    for (const table of snapshotTables.slice(0, 3)) Assert.equal(state[table].length, first.state[table].length + 1);
+    const expectedReceipt = {
+      command_id: unknownCommand.commandId, aggregate_kind: "thread", aggregate_id: command.threadId,
+      command_type: command.commandType, accepted_at: fixedTime,
+      result_sequence: events[0].row.sequence, status: "accepted", error: null,
+    };
+    Assert.deepEqual(receipts[0].row, expectedReceipt);
+    const lookup = yield* client.request("application_receipts_get", {
+      command_id: unknownCommand.commandId,
+    }, Schema.Unknown);
+    Assert.equal(JSON.stringify(lookup), JSON.stringify(receipts[0].row));
+    const replayStart = transcript.length;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const replay = yield* sink.commitCommand({ ...unknownCommand, events: [], effects: [] });
+      Assert.equal(replay.committed, false);
+      Assert.deepEqual(normalized(replay.receipt), normalized({
+        commandId: unknownCommand.commandId, threadId: command.threadId,
+        commandType: command.commandType, acceptedAt: fixedDateTime,
+        resultSequence: expectedReceipt.result_sequence, status: "accepted", error: null,
+      }));
+      Assert.equal(replay.storedEvents.length, 1);
+      Assert.equal(replay.storedEvents[0].event.id, unknownCommand.events[0].id);
+      Assert.deepEqual(normalized(replay.storedEvents[0].event), normalized(unknownCommand.events[0]));
+      Assert.deepEqual(yield* snapshot, state);
+      Assert.deepEqual(published, []);
+    }
+    const replayFrames = transcript.slice(replayStart);
+    Assert.equal(replayFrames.filter((frame) => frame.operation === "application_receipts_get"
+      && frame.command_id === unknownCommand.commandId).length, 2);
+    for (const operation of ["application_events_append", "application_projections_apply_many",
+      "application_outbox_enqueue", "application_receipts_upsert"]) {
+      Assert.ok(!replayFrames.some((frame) => frame.operation === operation), operation);
+    }
+    return state;
+  }));
+  await run(({ snapshot }) => snapshot.pipe(Effect.tap((state) => Effect.sync(() => Assert.deepEqual(state, recovered)))));
+  Assert.deepEqual(unknownPublished, []);
+  await assertSeed("lost-ack receipt recovery and repeated replay after reopen");
   const receipt = {
     kind: "t04-ordered-event-sink", profile,
     orderedDependency: "efaf649fb270ce70257e53862295cc10e4bddab0",
     checks: ["unknown-profile-no-session", "ordinary-mode-refusal", "exclusive-initialization", "different-engine-refusal",
       "unscoped-operation-refusal", "EventSink-atomic-commit", "exact-JSON-replay-after-reopen",
-      "failed-staging-no-commit-after-reopen", "seed-unchanged"],
+      "failed-staging-no-commit-after-reopen", "seed-unchanged",
+      "lost-ack-after-real-commit-outcome-unknown", "lost-ack-session-discarded",
+      "lost-ack-exact-receipt-after-reopen", "lost-ack-one-event-one-effect",
+      "lost-ack-no-duplicate-publication"],
+    recoveredStateSha256: hash(JSON.stringify(recovered)),
     stateSha256: hash(JSON.stringify(first.state)), frames: transcript.map((frame) => frame.operation),
   };
   if (proofPath) await FS.writeFile(proofPath, JSON.stringify(receipt, null, 2) + "\n");

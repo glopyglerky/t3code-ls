@@ -687,7 +687,7 @@ jobs:
           node-version: "26.12.1"
       - name: Install the pinned Linux storage compiler
         run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/ordered-application-toolchain"
-      - name: Reopen and decode a fresh application generation on both engines
+      - name: Reopen application state and resolve lost commit acknowledgements on both engines
         shell: bash
         run: |
           set -euo pipefail
@@ -723,6 +723,8 @@ jobs:
               for engine in direct-redb fjall; do
                 runuser -u "$1" -- env TMPDIR="$2" "$3" tools/check-ordered-event-sink.mjs \
                   "$4" "$5/ordered-event-sink-$engine.json" "$engine"
+                grep -F "lost-ack-exact-receipt-after-reopen" "$5/ordered-event-sink-$engine.json"
+                grep -F "lost-ack-no-duplicate-publication" "$5/ordered-event-sink-$engine.json"
               done
             ' _ "$(id -un)" "$TMPDIR" "$(command -v node)" "$helper" "$proof"
           fi
