@@ -217,14 +217,15 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           node -e 'if(process.platform!=="win32"||process.arch!=="x64"||process.versions.node!=="26.12.1") process.exit(1)'
-          npm.cmd install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          npm.cmd install --prefix "$env:RUNNER_TEMP/cli-windows-pnpm" --ignore-scripts --no-package-lock --no-audit --no-fund "@pnpm/exe.win32-x64@12.14.0"
       - name: Install and verify the frozen smoke harness
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          if ((pnpm.cmd --version) -ne '12.14.0') { throw 'Unexpected pnpm version' }
-          pnpm.cmd install --frozen-lockfile
+          $pnpm = "$env:RUNNER_TEMP/cli-windows-pnpm/node_modules/@pnpm/exe.win32-x64/pnpm.exe"
+          if ((& $pnpm --version) -ne '12.14.0') { throw 'Unexpected pnpm version' }
+          & $pnpm install --frozen-lockfile
           node --input-type=module -e 'await import("@t3tools/contracts"); await import("effect/Effect");'
       - name: Validate and exercise the transferred archive on Windows
         shell: pwsh
@@ -284,9 +285,11 @@ jobs:
           name: cli-windows-amd64-proof
           path: ${{ runner.temp }}/cli-windows-proof/
           retention-days: 14
-      - name: Remove the transferred archive and extraction
+      - name: Remove the transferred archive and pinned pnpm staging
         if: always()
         shell: pwsh
         run: |
-          $owned = Join-Path $env:RUNNER_TEMP 'cli-windows-archive'
-          if (Test-Path $owned) { Remove-Item -Recurse -Force $owned }
+          foreach ($name in @('cli-windows-archive', 'cli-windows-pnpm')) {
+            $owned = Join-Path $env:RUNNER_TEMP $name
+            if (Test-Path $owned) { Remove-Item -Recurse -Force $owned }
+          }
