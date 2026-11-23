@@ -17,7 +17,14 @@ struct Presentation {
     disabled: bool,
 }
 
+#[derive(Clone, Copy)]
+enum Action {
+    Submit,
+    Stop,
+}
+
 struct SubmitModel {
+    action: Action,
     presentation: RefCell<Presentation>,
     update: Cell<Option<Callback<Presentation>>>,
 }
@@ -56,9 +63,30 @@ pub fn mount_composer_submit(
     label: String,
     disabled: bool,
 ) -> Result<ComposerSubmitMount, JsValue> {
+    mount_composer_button(root, class_name, label, disabled, Action::Submit)
+}
+
+#[wasm_bindgen]
+pub fn mount_composer_stop(
+    root: DomElement,
+    class_name: String,
+    label: String,
+    disabled: bool,
+) -> Result<ComposerSubmitMount, JsValue> {
+    mount_composer_button(root, class_name, label, disabled, Action::Stop)
+}
+
+fn mount_composer_button(
+    root: DomElement,
+    class_name: String,
+    label: String,
+    disabled: bool,
+    action: Action,
+) -> Result<ComposerSubmitMount, JsValue> {
     let listeners = AbortController::new()?;
     let (renderer, registration) = AbortHandle::new_pair();
     let model = Rc::new(SubmitModel {
+        action,
         presentation: RefCell::new(Presentation {
             class_name,
             label,
@@ -82,14 +110,20 @@ pub fn mount_composer_submit(
 }
 
 fn composer_submit(model: Rc<SubmitModel>) -> Element {
+    let action = model.action;
     let mut presentation = use_signal(|| model.presentation.borrow().clone());
     let update = use_callback(move |next| presentation.set(next));
     use_hook(move || model.update.set(Some(update)));
     let current = presentation.read();
+    let (button_type, submit_renderer, stop_renderer) = match action {
+        Action::Submit => ("submit", Some("dioxus-wasm"), None),
+        Action::Stop => ("button", None, Some("dioxus-wasm")),
+    };
     rsx! {
         button {
-            r#type: "submit",
-            "data-composer-submit-renderer": "dioxus-wasm",
+            r#type: button_type,
+            "data-composer-submit-renderer": submit_renderer,
+            "data-composer-stop-renderer": stop_renderer,
             class: "{current.class_name}",
             aria_label: "{current.label}",
             disabled: current.disabled,

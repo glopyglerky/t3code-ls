@@ -195,6 +195,7 @@ function permissionRejectedToolCallId(request: LogicalFrame, answer: unknown): s
 }
 
 function runAgent(): void {
+  const holdForInterrupt = process.argv.includes("--hold-for-interrupt");
   const turnsByScenario = new Map<string, ReadonlyArray<ReplayTurn>>();
   const loadTurns = (scenarioId: string) => {
     const cached = turnsByScenario.get(scenarioId);
@@ -291,6 +292,14 @@ function runAgent(): void {
               ? params
               : { ...params, update: { ...params.update, content: { ...content, text: chunk } } },
         });
+      }
+      if (holdForInterrupt && params.update.sessionUpdate === "agent_message_chunk") {
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve(), { once: true }),
+          );
+        }
+        return "cancelled";
       }
     }
   };

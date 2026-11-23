@@ -31,6 +31,7 @@ interface OnboardingBindings {
     label: string,
     disabled: boolean,
   ): ComposerSubmitMount;
+  mount_composer_stop: OnboardingBindings["mount_composer_submit"];
   mount_pairing_form(
     root: HTMLDivElement,
     token: string,
