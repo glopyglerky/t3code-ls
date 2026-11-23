@@ -8,14 +8,16 @@ interface NativeMap {
   prose_mirror_to_flat(position: number): number;
 }
 
+interface NativeMessageText {
+  append(baseSequence: number, sequence: number, suffix: string): string | undefined;
+  free(): void;
+}
+
 interface OffsetModule {
   default(): Promise<unknown>;
   ComposerOffsetMap: { from_words(words: Uint32Array, length: number): NativeMap | undefined };
   ThreadMessageText?: {
-    from_message(sequence: number, text: string, maxBytes: number): {
-      append(baseSequence: number, sequence: number, suffix: string): string | undefined;
-      free(): void;
-    } | undefined;
+    from_message(sequence: number, text: string, maxBytes: number): NativeMessageText | undefined;
   };
 }
 
@@ -23,6 +25,7 @@ const runKinds = { text: 0, token: 2, break: 3, prefix: 4 } satisfies Record<Ric
 const maps = new WeakMap<RichDocMap, NativeMap>();
 let offsetModule: OffsetModule | undefined;
 let recordedUse = false;
+let recordedTextAppend = false;
 
 export async function initializeComposerOffsets(): Promise<void> {
   if (import.meta.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS !== "rust") return;
@@ -35,9 +38,21 @@ export async function initializeComposerOffsets(): Promise<void> {
   offsetModule = module;
   const textBinding = module.ThreadMessageText;
   if (textBinding !== undefined) {
-    installThreadMessageText((sequence, text, maxBytes) =>
-      textBinding.from_message(sequence, text, maxBytes),
-    );
+    installThreadMessageText((sequence, text, maxBytes) => {
+      const base = textBinding.from_message(sequence, text, maxBytes);
+      if (base === undefined) return undefined;
+      return {
+        append(baseSequence, sequence, suffix) {
+          const text = base.append(baseSequence, sequence, suffix);
+          if (text !== undefined && !recordedTextAppend) {
+            performance.mark("t3-thread-rust-text-append");
+            recordedTextAppend = true;
+          }
+          return text;
+        },
+        free: () => base.free(),
+      };
+    });
   }
 }
 
