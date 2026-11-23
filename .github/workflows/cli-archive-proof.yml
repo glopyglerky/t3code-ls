@@ -7,6 +7,7 @@ on:
       - "candidate/t3code-ls-t14-windows-cli-*"
       - "candidate/t3code-ls-t14-windows-shim-oracle-*"
       - "candidate/t3code-ls-t14-macos-cli-*"
+      - "candidate/t3code-ls-t14-linux-arm64-cli-*"
       - "candidate/t3code-ls-t05-packaged-preparation-*"
       - "candidate/t3code-ls-t06-gix-packaged-*"
       - "candidate/t3code-ls-t10-packaged-guest-*"
@@ -21,7 +22,8 @@ jobs:
     if: >-
       !startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-cli-') &&
       !startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-shim-oracle-') &&
-      !startsWith(github.ref_name, 'candidate/t3code-ls-t14-macos-cli-')
+      !startsWith(github.ref_name, 'candidate/t3code-ls-t14-macos-cli-') &&
+      !startsWith(github.ref_name, 'candidate/t3code-ls-t14-linux-arm64-cli-')
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
     timeout-minutes: 25
     env:
@@ -210,6 +212,68 @@ jobs:
         with:
           name: cli-archive-proof
           path: ${{ runner.temp }}/cli-proof/
+          retention-days: 14
+
+  linux-arm64-archive:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t14-linux-arm64-cli-')
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      GIT_TERMINAL_PROMPT: "0"
+      NODE_OPTIONS: --max-old-space-size=4096
+      T3_CODE_LS_IMPLEMENTATION: upstream
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Build and run the ARM64 CLI archive on its target architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = aarch64
+          test "$(node -p '`${process.platform}-${process.arch}`')" = linux-arm64
+          proof="$RUNNER_TEMP/cli-linux-arm64-proof"
+          scratch="$(mktemp -d "$RUNNER_TEMP/cli-linux-arm64.XXXXXX")"
+          trap 'rm -rf -- "$scratch"' EXIT
+          mkdir "$proof" "$scratch/resources"
+          git rev-parse HEAD HEAD^{tree} > "$proof/source.txt"
+          export CARGO_HOME="$scratch/cargo" CARGO_TARGET_DIR="$scratch/target"
+          rustup toolchain install 1.99.1 --profile minimal
+          rustc +1.99.1 --version --verbose > "$proof/compiler.txt"
+          cargo +1.99.1 build --locked --release --manifest-path native/resource-monitor/Cargo.toml
+          install -m 0755 "$CARGO_TARGET_DIR/release/t3-resource-monitor" "$scratch/resources/"
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          pnpm --dir apps/web run build
+          pnpm exec node apps/server/scripts/cli.ts build --verbose
+          pnpm exec node apps/server/scripts/cli.ts build-exe --verbose
+          version="$(node -p 'require("./apps/server/package.json").version')"
+          pnpm exec node scripts/build-cli-archive.ts --platform linux --arch arm64 \
+            --version "$version" --resource-monitor-dir "$scratch/resources" --output-dir "$scratch"
+          stem="t3-$version-linux-arm64"
+          archive="$scratch/$stem.tar.gz"
+          (cd "$scratch" && sha256sum "$stem.tar.gz") > "$proof/archive.sha256"
+          file apps/server/dist-exe/t3 "$scratch/resources/t3-resource-monitor" > "$proof/file.txt"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- "$2" scripts/smoke-cli-archive.ts --archive "$3" \
+              --expect-version "$4" --expect-upstream
+          ' _ "$(id -un)" "$(command -v node)" "$archive" "$version" | tee "$proof/smoke.log"
+      - name: Retain exact archive hashes and smoke results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: cli-linux-arm64-proof
+          path: ${{ runner.temp }}/cli-linux-arm64-proof/
+          if-no-files-found: error
           retention-days: 14
 
   macos-archive:
