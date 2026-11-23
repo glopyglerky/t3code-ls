@@ -2230,7 +2230,7 @@
       ],
       "acceptance_tests": ["packages/client-runtime/rust/tests/text_revision.rs"],
       "retired_paths": [],
-      "notes": "T03 shared text-apply candidate. It defines append, replacement and UTF-16 splice behavior and a bounded retry boundary for one item. Capability negotiation, durable chunk and event representation, cache recovery, and client rendering still need integration.",
+      "notes": "T03 shared text-apply candidate. It defines append, replacement and UTF-16 splice behavior and a bounded retry boundary for one item. Run 45219177672 at e0b650bc70266b9b215e686cd891c830cca7fce9 verified a negotiated Unicode splice rendered by the Rust browser decoder and exact completion after reopen. A stale base was rejected without advancing the selected thread replay watermark. The authoritative message then replayed and completed once. General revision storage, other client platforms and performance remain open.",
       "rust_crates": ["packages/client-runtime/rust"]
     },
     {

@@ -667,6 +667,11 @@ across the original, staged, and renamed retry layouts. The predecessor also
 rejected the marker when reading the catalog.
 [Forward catalog and restore proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45212311659)
 
+The focused writer fixture held the same exclusive lease across engine
+handles. It recovered the exact sealed and marked states after process exit
+and repeated generic restore refusal with both installed helpers.
+[Same-inode writer and restore proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45218639908/attempts/2)
+
 Promotion to the target runtime, catalog unsealing and ordinary native update
 admission still require production recovery proof.
 
@@ -704,3 +709,14 @@ reduction was 155 ms. The Linux x64 run used an unmanaged filesystem cache.
 CPU and RSS samples were contextual. The product engine pin stays unchanged
 while stock comparison and recovery qualification continue.
 [Paired checked-open results](https://github.com/glopyglerky/t3code-ls/actions/runs/45210184960)
+
+A separate run used all six orders of stock, native control and native reuse
+on one Linux x64 runner. The 32 threads and 6,400 messages were identical
+across arms, with unmanaged filesystem cache after import and clean stop.
+Median descriptor readiness was 1,143 ms for stock, 1,486 ms for native
+control and 1,363 ms for native reuse. The median per-round reduction from
+native control was 134 ms (10.0%, range 113–172 ms). Native reuse reached
+the descriptor 228 ms later than stock at the paired median (19.8%, range
+162–270 ms). Stock used SQLite WAL/NORMAL. Both native variants used omdb
+Immediate. CPU, RSS and cached first-paint attribution remain unqualified.
+[Balanced stock and native reopen comparison](https://github.com/glopyglerky/t3code-ls/actions/runs/45218299197)
