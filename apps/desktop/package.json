@@ -7,6 +7,7 @@
   "scripts": {
     "ensure:electron": "node scripts/ensure-electron-runtime.mjs",
     "start": "node scripts/start-electron.mjs",
+    "start:makepad-input": "cargo run --locked --manifest-path makepad-input/Cargo.toml",
     "test": "vp test run --passWithNoTests"
   },
   "dependencies": {

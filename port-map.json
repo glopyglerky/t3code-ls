@@ -1821,6 +1821,44 @@
       "rust_crates": ["packages/client-runtime/rust", "packages/client-runtime/rust/web"]
     },
     {
+      "id": "desktop-makepad-input",
+      "state": "candidate",
+      "domain_owner": "apps/desktop",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/desktop/src/main.ts",
+          "blob": "f241e14587f34d742a7721b46d9be990a0dd2409"
+        },
+        {
+          "path": "apps/web/src/components/ComposerPromptEditorTiptap.tsx",
+          "blob": "5a036e34611ed5a72c7eb463a4a4e819ae1c2863"
+        }
+      ],
+      "rust_paths": [
+        "apps/desktop/makepad-input/src/main.rs",
+        "apps/desktop/makepad-input/src/macos.rs",
+        "packages/client-runtime/rust/src/composer_draft.rs"
+      ],
+      "adapter_paths": [
+        "apps/desktop/package.json",
+        "apps/desktop/makepad-input/README.md"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["darwin-arm64"],
+          "state": "candidate",
+          "implementation": "rust",
+          "compiler_route": "bootstrap-cargo",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": ["apps/desktop/makepad-input/src/macos/proof.rs"],
+      "retired_paths": [],
+      "notes": "T01, J37 and C07. Explicit desktop candidate for plain-text editing, committed IME text, directed selection and local submission. The root workspace and retained clients select their existing routes.",
+      "rust_crates": ["apps/desktop/makepad-input", "packages/client-runtime/rust"]
+    },
+    {
       "id": "conversation-text-revisions",
       "state": "candidate",
       "domain_owner": "packages/client-runtime",

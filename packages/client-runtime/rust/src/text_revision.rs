@@ -10,6 +10,13 @@ const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Utf16Offset(pub u32);
 
+impl Utf16Offset {
+    pub fn from_byte_index(text: &str, index: usize) -> Option<Self> {
+        let prefix = text.get(..index)?;
+        u32::try_from(prefix.encode_utf16().count()).ok().map(Self)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextEdit<'a> {
     Append(&'a str),
