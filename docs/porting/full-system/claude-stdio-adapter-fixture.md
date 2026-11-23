@@ -201,3 +201,56 @@ Retain source/tree, toolchain, package/manifest/fixture hashes, selected instanc
 event-store/reopen assertions and exact failures. Remove owned generated targets,
 dependencies and isolated profiles after preserving concise receipts. This patch
 adds no workflow trigger, publication, installation or live-profile action.
+
+### Packaged refusal and next conversation condition
+
+`apps/server/scripts/verify-packaged-claude-stdio.ts` is an executable refusal
+and reopen gate for an extracted native Linux x64 package containing the optional
+helper. Run it using the same Node runner and loopback-only network namespace as
+`verify-packaged-git-workspace.ts`, with three absolute arguments: a fresh evidence
+directory outside source, the extracted package entry, and the Cargo-reported
+`claude_stdio_host-<hex>` executable. The root build owner supplies the package
+built with `T3_CODE_LS_BUNDLE_CLAUDE_STDIO=1`, pinned compiler and frozen dependencies.
+No new workflow trigger or live-provider run is added.
+
+The gate uses `packaged-server-fixture.ts` for desktop bootstrap authentication
+and typed WebSocket RPC. All ordinary providers are disabled in fresh settings.
+It creates one synthetic provider instance, launches one empty thread, dispatches
+one exact Unicode message and requires a failed run with no assistant response.
+It checks the native manifest and hashes, a names-only controlled-runner refusal
+witness, the native event store's exact user message and single failed terminal
+update, and the unchanged messages/runs after stopping and reopening the same
+isolated store. It checks the stopped store again and refuses any helper or
+provider execution attempt in the owned process trace. Profiles are removed
+in `finally`; concise evidence remains. A failure never retries dispatch.
+
+This is deliberately a refusal gate. `ProviderSessionManager` registers an
+MCP session before the turn; `ClaudeAdapterV2` reads it and
+`claudeMcpQueryOverrides` supplies `mcpServers`. The selector forbids this setting.
+The runner still compares every callback-free option exactly. Its refusal witness
+contains differing option names only, never values, environment or MCP credentials.
+A missing/moved helper or an earlier provider failure cannot produce that witness.
+The bounded baseline options in this gate are intentionally incomplete and are
+not a captured conversation option set. The gate must see `mcpServers` among the
+differences. It cannot pass by silently dropping that setting.
+
+The Rust child now has a separate `packaged-conversation` scenario, selected only
+by that task-owned marker in its isolated cwd. It requires exactly one Unicode
+prompt `Claude 🌱 café é\n  終了 🛠️`, echoes the user, emits one assistant message
+and one foreground result with that same complete text, then requires EOF.
+It creates its process marker exclusively, so duplicate processes fail. The
+existing approval/steer child and recordings retain their contracts.
+
+The direct next condition is an explicitly controlled no-MCP synthetic session
+at the existing session/adapter boundary, preserving MCP for ordinary instances.
+Then capture its actual callback-free options, retain exact equality, and extend
+this harness to require the assistant text and identity plus one completed terminal
+event in projection, native store and reopen, with one helper/child and no second
+prompt. Do not label the refusal gate, the prepared child, or an unrun harness a
+packaged conversation pass. Missing helper, wrong target/hash, symlink and unsupported
+options checks remain required alongside the existing selector and manifest tests.
+
+This increment is source-only until the root build owner records its exact
+candidate, package/helper/fixture hashes, toolchain and observed run receipt.
+T08 and all platform/provider acceptance gates remain open. MIT and stock
+`28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f` provenance are preserved.

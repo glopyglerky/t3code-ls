@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off -- starts the scoped helper with a deterministic child
 import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeReadline from "node:readline";
 import * as NodeUtil from "node:util";
@@ -193,6 +194,11 @@ export function makeControlledClaudeStdioRunner(
               Object.hasOwn(settings, key) !== Object.hasOwn(expected, key) ||
               !NodeUtil.isDeepStrictEqual(Reflect.get(settings, key), Reflect.get(expected, key)),
             );
+            // Bounded synthetic witness, names only. Never retain callback settings,
+            // authenticated MCP headers or the inherited query environment.
+            await NodeFS.writeFile(NodePath.join(directory, "claude-stdio-options-refused.json"),
+              JSON.stringify({ version: 1, type: "options-refused", differing }) + "\n",
+              { flag: "wx", mode: 0o600 });
             throw new Error(`Unsupported Claude fixture options: ${differing.join(", ")}`);
           }
           const started = startHelper(executable, peer, directory);
