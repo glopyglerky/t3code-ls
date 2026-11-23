@@ -2,11 +2,11 @@
 //! The supervising fixture retains home, selection and database ownership.
 use crate::application::PreparedServiceActivation;
 use crate::application_storage::{
-    IsolatedTrialVerification, SealedPromotionPhase, TrialFileIdentity,
+    IsolatedTrialVerification, SealedPromotionPhase, TrialFileIdentity, trial_document_sha256,
+    trial_executable_digest, trial_file_digest,
 };
 use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::Read;
 use std::os::unix::fs::MetadataExt;
@@ -35,11 +35,8 @@ fn bounded(path: &Path, limit: u64) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn digest(path: &Path) -> Result<String> {
-    Ok(format!(
-        "{:x}",
-        Sha256::digest(bounded(path, 128 * 1024 * 1024)?)
-    ))
+fn executable_digest(path: &Path) -> Result<String> {
+    trial_executable_digest(&File::open(path).map_err(|_| Error::IncompatibleStore)?)
 }
 
 /// A successful return is only a synthetic observation. Caller-supplied hashes
@@ -69,7 +66,7 @@ pub fn verify(home: &Path, encoded: &str) -> Result<()> {
         }
     }
     // /proc/self/exe binds the running image even if its original name changes.
-    if digest(Path::new("/proc/self/exe"))? != activation.target_helper_sha256 {
+    if executable_digest(Path::new("/proc/self/exe"))? != activation.target_helper_sha256 {
         return Err(Error::IncompatibleStore);
     }
     let state = home.join("userdata");
@@ -82,12 +79,15 @@ pub fn verify(home: &Path, encoded: &str) -> Result<()> {
     )?;
     let saved: IsolatedTrialVerification =
         serde_json::from_slice(&receipt).map_err(|_| Error::IncompatibleStore)?;
-    if format!("{:x}", Sha256::digest(&receipt)) != request.receipt_sha256
+    if trial_document_sha256(&receipt) != request.receipt_sha256
         || saved.request.activation.as_ref() != Some(activation)
         || saved.preparation.database != request.database
         || saved.sealed_publication.as_ref().map(|p| p.phase)
             != Some(SealedPromotionPhase::ForwardCommitted)
-        || digest(&home.join("runtime/service-state.json"))? != request.selection_sha256
+        || trial_document_sha256(&bounded(
+            &home.join("runtime/service-state.json"),
+            1024 * 1024,
+        )?) != request.selection_sha256
     {
         return Err(Error::IncompatibleStore);
     }
@@ -104,8 +104,9 @@ pub fn verify(home: &Path, encoded: &str) -> Result<()> {
     let version = home
         .join("runtime/versions")
         .join(&activation.target_version);
-    if digest(&version.join("t3"))? != activation.target_entry_sha256
-        || digest(&version.join("native-bin/t3-code-ls-db"))? != activation.target_helper_sha256
+    if executable_digest(&version.join("t3"))? != activation.target_entry_sha256
+        || executable_digest(&version.join("native-bin/t3-code-ls-db"))?
+            != activation.target_helper_sha256
     {
         return Err(Error::IncompatibleStore);
     }
@@ -141,7 +142,7 @@ pub fn verify(home: &Path, encoded: &str) -> Result<()> {
         || format!("{:016x}", held.dev()) != request.database.device
         || format!("{:016x}", held.ino()) != request.database.inode
         || created != request.database.created
-        || digest(Path::new("/proc/self/fd/0"))? != request.database_sha256
+        || trial_file_digest(&inherited)? != request.database_sha256
     {
         return Err(Error::IncompatibleStore);
     }
