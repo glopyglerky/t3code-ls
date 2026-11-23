@@ -70,6 +70,16 @@ jobs:
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
           node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+      - name: Compare Codex import canonicalization with the retained scanner behavior
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t08-import-compressed-rust-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/composer-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/composer-target"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-core --lib codex_import
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 src/project/AgentSessionScanner.test.ts
       - name: Exercise local pairing in the retained and Dioxus browser builds
         if: env.PAIRING_PROOF == 'true'
         env:

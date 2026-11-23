@@ -1,6 +1,7 @@
 //! Bounded project command planning with retained JSON payload fields.
 //! Copyright (c) 2026 T3 Tools Inc. Distributed under the repository's MIT license.
 
+use crate::codex_import;
 use crate::guest_share::Timestamp;
 use crate::json::{self, Value};
 use crate::project_commands::{
@@ -10,6 +11,7 @@ use crate::project_commands::{
 use std::collections::HashSet;
 
 pub const MAX_FRAME_BYTES: usize = 128 * 1024 * 1024;
+pub const MAX_CODEX_IMPORT_FRAME_BYTES: usize = 1024 * 1024;
 const MAX_DEPTH: usize = 128;
 const MAX_VALUES: usize = 1_048_576;
 
@@ -507,4 +509,74 @@ pub fn respond(frame: &str) -> WireResult<String> {
     let mut response = json::stringify(&output);
     response.push('\n');
     Ok(response)
+}
+
+pub fn respond_codex_import(frame: &str) -> WireResult<String> {
+    if frame.len() > MAX_CODEX_IMPORT_FRAME_BYTES {
+        return Err(Error::InputLimit);
+    }
+    let body = frame.strip_suffix('\n').ok_or(Error::InvalidRequest)?;
+    if body.contains(['\n', '\r']) {
+        return Err(Error::InvalidRequest);
+    }
+    let value = json::parse_with_limits(
+        body,
+        json::Limits {
+            max_bytes: MAX_CODEX_IMPORT_FRAME_BYTES,
+            max_depth: 4,
+            max_values: 4 * codex_import::MAX_RECORDS + 4,
+        },
+    )
+    .map_err(|_| Error::InvalidRequest)?;
+    let Some([version, Value::Array(rows)]) = value.as_array() else {
+        return Err(Error::InvalidRequest);
+    };
+    if version.as_u64() != Some(1) || rows.len() > codex_import::MAX_RECORDS {
+        return Err(Error::InvalidRequest);
+    }
+    let rows = rows
+        .iter()
+        .map(|row| match row {
+            Value::Null => Ok(codex_import::Record::Assistant),
+            Value::String(text) => Ok(codex_import::Record::UserEvent { text }),
+            Value::Array(fields) => match fields.as_slice() {
+                [Value::String(turn_id), Value::String(text)] => {
+                    Ok(codex_import::Record::ResponseUser {
+                        turn_id: Some(turn_id),
+                        text,
+                    })
+                }
+                _ => Err(Error::InvalidRequest),
+            },
+            _ => Err(Error::InvalidRequest),
+        })
+        .collect::<WireResult<Vec<_>>>()?;
+    let indices =
+        codex_import::canonical_response_user_indices(&rows).map_err(|_| Error::InputLimit)?;
+    let indices = indices
+        .iter()
+        .map(|index| Value::Number(index.to_string()))
+        .collect();
+    let output = Value::Array(vec![Value::Number("1".into()), Value::Array(indices)]);
+    let mut response = json::stringify(&output);
+    response.push('\n');
+    if response.len() > MAX_CODEX_IMPORT_FRAME_BYTES {
+        return Err(Error::OutputLimit);
+    }
+    Ok(response)
+}
+
+#[cfg(test)]
+#[test]
+fn codex_import_wire_preserves_boundaries_and_rejects_malformed_frames() {
+    let request = "[1,[[\"turn\",\"context\"],\"こんにちは\",[\"turn\",\"こんにちは\"],null,[\"turn\",\"こんにちは\"]]]\n";
+    assert_eq!(respond_codex_import(request).as_deref(), Ok("[1,[0,2]]\n"));
+    for invalid in [
+        "[2,[]]\n",
+        "[1,[]]",
+        "[1,[]]\n[1,[]]\n",
+        "[1,[[null,\"x\"]]]\n",
+    ] {
+        assert_eq!(respond_codex_import(invalid), Err(Error::InvalidRequest));
+    }
 }

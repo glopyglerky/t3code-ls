@@ -31,6 +31,7 @@ import * as Stream from "effect/Stream";
 import { isBareGitConfig, parseOriginUrlFromGitConfig } from "@t3tools/shared/git";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
+import { selectNativeExecutable } from "@t3tools/shared/nativeExecutable";
 import { repositoryPathFromRemoteUrl } from "@t3tools/source-control-core/server/SourceControlProvider";
 
 import * as ServerConfig from "../config.ts";
@@ -207,6 +208,10 @@ const decodePiEntryLinks = Schema.decodeUnknownOption(
 );
 const selectTranscriptPath = createTranscriptJsonSelector(TranscriptRecord);
 const decodeCodexTurnMetadata = Schema.decodeUnknownOption(CodexTurnMetadata);
+const MAX_NATIVE_CODEX_IMPORT_FRAME = 1024 * 1024;
+const decodeCodexImportIndices = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Tuple([Schema.Literal(1), Schema.Array(Schema.Int)])),
+);
 export const decodeImportedTranscriptPayload = Schema.decodeUnknownOption(
   Schema.Struct({
     cwd: Schema.optional(Schema.String),
@@ -482,11 +487,58 @@ export function parseAgentSessionTranscript(
   return parseAgentSessionRecords(input, records, claudeFields, 0);
 }
 
+// Null ends a turn, a string is a canonical user event, and a pair is a response copy.
+type CodexCanonicalRow = null | string | readonly [turnId: string, text: string];
+
+function* codexCanonicalRows(
+  records: ReadonlyArray<DecodedTranscriptRecord>,
+): Generator<readonly [number, CodexCanonicalRow]> {
+  for (const [index, record] of records.entries()) {
+    const payload = record.payload;
+    if (record.type === "event_msg" && payload?.type === "user_message") {
+      const text = payload.message?.trim() ?? "";
+      if (text.length > 0) yield [index, text] as const;
+    }
+    if (record.type !== "response_item" || payload?.type !== "message") continue;
+    if (payload.role === "assistant") {
+      yield [index, null] as const;
+    } else if (payload.role === "user") {
+      const turnId = codexTurnId(payload.internal_chat_message_metadata_passthrough);
+      const text = extractText(payload.content);
+      if (turnId !== null && text.length > 0) yield [index, [turnId, text] as const] as const;
+    }
+  }
+}
+
+function canonicalCodexResponseUsers(records: ReadonlyArray<DecodedTranscriptRecord>) {
+  const suppressed = new Set<number>();
+  const eventTexts = new Set<string>();
+  const responses: Array<readonly [number, readonly [string, string]]> = [];
+  const finishTurn = () => {
+    const canonicalTurnIds = new Set(
+      responses.flatMap(([, [turnId, text]]) => (eventTexts.has(text) ? [turnId] : [])),
+    );
+    for (const [index, [turnId]] of responses) {
+      if (canonicalTurnIds.has(turnId)) suppressed.add(index);
+    }
+    eventTexts.clear();
+    responses.length = 0;
+  };
+  for (const [index, row] of codexCanonicalRows(records)) {
+    if (row === null) finishTurn();
+    else if (typeof row === "string") eventTexts.add(row);
+    else responses.push([index, row]);
+  }
+  finishTurn();
+  return suppressed;
+}
+
 function parseAgentSessionRecords(
   input: AgentSessionTranscriptMetadata,
   records: ReadonlyArray<DecodedTranscriptRecord>,
   claudeFields: ClaudeFields,
   droppedMessageCount: number,
+  nativeCodexResponseUsers?: ReadonlySet<number>,
 ): AgentSessionThread | null {
   const fallbackTimestamp = DateTime.formatIso(DateTime.makeUnsafe(input.lastActiveAtMs));
   // Claude filenames are session IDs. Codex rollout filenames include extra
@@ -509,58 +561,9 @@ function parseAgentSessionRecords(
   let firstUserMessage:
     | (AgentSessionThreadMessage & { readonly codexResponseUser: boolean })
     | undefined;
-  const canonicalCodexResponseUserIndices = new Set<number>();
-  let canonicalUserTextsInTurn = new Set<string>();
-  let responseUsersInTurn: Array<{
-    readonly index: number;
-    readonly turnId: string;
-    readonly text: string;
-  }> = [];
-  const finishCodexTurn = () => {
-    const canonicalTurnIds = new Set(
-      responseUsersInTurn.flatMap((responseUser) =>
-        canonicalUserTextsInTurn.has(responseUser.text) ? [responseUser.turnId] : [],
-      ),
-    );
-    for (const responseUser of responseUsersInTurn) {
-      if (canonicalTurnIds.has(responseUser.turnId)) {
-        canonicalCodexResponseUserIndices.add(responseUser.index);
-      }
-    }
-    canonicalUserTextsInTurn = new Set();
-    responseUsersInTurn = [];
-  };
-  if (input.source === "codex") {
-    let recordIndex = -1;
-    for (const record of records) {
-      recordIndex += 1;
-      if (
-        record.type === "response_item" &&
-        record.payload?.type === "message" &&
-        record.payload.role === "assistant"
-      ) {
-        finishCodexTurn();
-        continue;
-      }
-      if (record.type === "event_msg" && record.payload?.type === "user_message") {
-        const text = record.payload.message?.trim() ?? "";
-        if (text.length > 0) canonicalUserTextsInTurn.add(text);
-        continue;
-      }
-      if (
-        record.type === "response_item" &&
-        record.payload?.type === "message" &&
-        record.payload.role === "user"
-      ) {
-        const turnId = codexTurnId(record.payload.internal_chat_message_metadata_passthrough);
-        const text = extractText(record.payload.content);
-        if (turnId !== null && text.length > 0) {
-          responseUsersInTurn.push({ index: recordIndex, turnId, text });
-        }
-      }
-    }
-    finishCodexTurn();
-  }
+  const canonicalCodexResponseUserIndices = input.source === "codex"
+    ? nativeCodexResponseUsers ?? canonicalCodexResponseUsers(records)
+    : undefined;
 
   let conversationMessageCount = 0;
   const retainMessage = (
@@ -666,7 +669,7 @@ function parseAgentSessionRecords(
 
     const extractedText = extractText(record.payload.content);
     if (extractedText.length === 0) continue;
-    if (record.payload.role === "user" && canonicalCodexResponseUserIndices.has(recordIndex)) {
+    if (record.payload.role === "user" && canonicalCodexResponseUserIndices?.has(recordIndex)) {
       continue;
     }
     if (record.payload.role === "user" && hasMatchingCodexEventInTurn(extractedText)) {
@@ -872,6 +875,65 @@ export const make = Effect.gen(function* () {
   const isWindows = platform === "win32";
   const foldWorktreeCase = isWindows;
   const hostEnvironment = yield* HostProcess.Environment;
+  const architecture = yield* HostProcess.Architecture;
+  const codexImportHelper = hostEnvironment.T3_CODE_LS_CODEX_IMPORT_NATIVE === "1"
+    ? selectNativeExecutable(
+        "project",
+        hostEnvironment.T3_CODE_LS_PROJECT_EXECUTABLE,
+        platform,
+        architecture,
+        hostEnvironment.T3_CODE_LS_IMPLEMENTATION,
+      )
+    : undefined;
+  const nativeCodexResponseUsers = Effect.fn("AgentSessionScanner.nativeCodexResponseUsers")(
+    function* (records: ReadonlyArray<DecodedTranscriptRecord>) {
+      if (codexImportHelper === undefined || !path.isAbsolute(codexImportHelper) ||
+        codexImportHelper.includes("\0") || records.length > MAX_IMPORT_RECORDS) return undefined;
+      const rows: Array<string> = [];
+      const responseRows = new Map<number, number>();
+      let bytes = Buffer.byteLength("[1,[]]\n", "utf8");
+      for (const [index, row] of codexCanonicalRows(records)) {
+        if (typeof row === "string" && (row.length > MAX_NATIVE_CODEX_IMPORT_FRAME || !row.isWellFormed())) {
+          return undefined;
+        }
+        if (row !== null && typeof row !== "string") {
+          const [turnId, text] = row;
+          if (turnId.length + text.length > MAX_NATIVE_CODEX_IMPORT_FRAME ||
+            !turnId.isWellFormed() || !text.isWellFormed()) return undefined;
+          responseRows.set(rows.length, index);
+        }
+        const encoded = JSON.stringify(row);
+        bytes += Buffer.byteLength(encoded, "utf8") + Number(rows.length > 0);
+        if (bytes > MAX_NATIVE_CODEX_IMPORT_FRAME) return undefined;
+        rows.push(encoded);
+      }
+      if (responseRows.size === 0) return new Set<number>();
+      const output = yield* processRunner.run({
+        command: codexImportHelper,
+        args: ["codex-import"],
+        env: {},
+        extendEnv: false,
+        stdin: `[1,[${rows.join(",")}]]\n`,
+        timeout: "5 seconds",
+        maxOutputBytes: MAX_NATIVE_CODEX_IMPORT_FRAME,
+        outputMode: "error",
+      }).pipe(Effect.orElseSucceed(() => undefined));
+      if (!output || output.code !== 0 || output.stderr !== "" || output.timedOut ||
+        output.stdoutTruncated || output.stdoutInvalidUtf8 || !output.stdout.endsWith("\n") ||
+        output.stdout.slice(0, -1).includes("\n")) return undefined;
+      const decoded = Option.getOrUndefined(decodeCodexImportIndices(output.stdout));
+      if (decoded === undefined) return undefined;
+      const suppressed = new Set<number>();
+      let previous = -1;
+      for (const row of decoded[1]) {
+        const sourceIndex = responseRows.get(row);
+        if (sourceIndex === undefined || row <= previous) return undefined;
+        previous = row;
+        suppressed.add(sourceIndex);
+      }
+      return suppressed;
+    },
+  );
   const homeDir = yield* HostProcess.HomeDirectory;
   // `/private/tmp` is what macOS reports for sessions started in `/tmp`.
   const excludedProjectRoots = new Set(
@@ -2104,6 +2166,12 @@ export const make = Effect.gen(function* () {
                   snapshot.historyBytes,
                 )
               : null;
+          const records = inheritedRecords === null
+            ? snapshot.records
+            : [...inheritedRecords, ...snapshot.records];
+          const nativeResponseUsers = candidate.source === "codex"
+            ? yield* nativeCodexResponseUsers(records)
+            : undefined;
           const parsedThread = parseAgentSessionRecords(
             {
               source: candidate.source,
@@ -2111,11 +2179,10 @@ export const make = Effect.gen(function* () {
               fallbackSessionId: path.basename(transcript.filePath, ".jsonl"),
               lastActiveAtMs: transcript.mtimeMs,
             },
-            inheritedRecords === null
-              ? snapshot.records
-              : [...inheritedRecords, ...snapshot.records],
+            records,
             snapshot.claudeFields,
             snapshot.droppedMessageCount,
+            nativeResponseUsers,
           );
           if (parsedThread === null) {
             return Option.some<AgentSessionRecentThread>({ _tag: "Skipped" });

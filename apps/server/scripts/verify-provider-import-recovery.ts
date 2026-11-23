@@ -37,6 +37,7 @@ const dist = Path.join(root, "apps/server/dist");
 const bundle = Path.join(dist, "bin.mjs");
 const manifestPath = Path.join(dist, "native-bin", "manifest.json");
 const executable = Path.join(dist, "native-bin", "t3-code-ls-db");
+const projectExecutable = Path.join(dist, "native-bin", "t3-code-ls-project");
 // Stock ws.ts dispatches both RPCs. Its importer compares the stored roles and
 // texts before repairing the source marker, after a separate history commit.
 const stock = "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f";
@@ -114,6 +115,7 @@ try {
   Assert.equal(manifest.target, "linux-x64");
   Assert.equal(manifest.rustTarget, "x86_64-unknown-linux-gnu");
   Assert.equal(sha256(executable), manifest.files["t3-code-ls-db"]);
+  Assert.equal(sha256(projectExecutable), manifest.files["t3-code-ls-project"]);
   Assert.equal(sha256(manifestPath), sha256(Path.join(root, "bin", "manifest.json")));
   Assert.equal(git("status", "--porcelain", "--untracked-files=normal"), "", "Use a clean candidate checkout");
   report.source = {
@@ -131,6 +133,7 @@ try {
     ),
     nativeManifestSha256: sha256(manifestPath),
     nativeExecutableSha256: sha256(executable),
+    codexPrepassExecutableSha256: sha256(projectExecutable),
     toolchainLockSha256: sha256(Path.join(root, "toolchain.lock.json")),
     databaseLockSha256: sha256(Path.join(root, "database.lock.json")),
     node: process.version,
@@ -166,6 +169,7 @@ try {
     CODEX_HOME: codexHome,
     GIT_CONFIG_NOSYSTEM: "1",
     T3_CODE_LS_IMPLEMENTATION: "native",
+    T3_CODE_LS_CODEX_IMPORT_NATIVE: "1",
     T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
     T3CODE_TELEMETRY_ENABLED: "false",
     T3CODE_OTEL_SDK_DISABLED: "true",
@@ -188,10 +192,19 @@ try {
   }));
   const suffix = encoding === "zstd" ? ".jsonl.zst" : ".jsonl";
   const rollout = Path.join(sessions, `rollout-${day}T00-00-00-${sessionId}${suffix}`);
+  const responseUser = (text: string) => ({
+    type: "response_item",
+    payload: {
+      type: "message", role: "user", content: [{ type: "input_text", text }],
+      internal_chat_message_metadata_passthrough: { turn_id: "fixture-turn" },
+    },
+  });
   const writeRollout = (reply: string, mtime: Date): AgentSessionImportSource => {
     const records = [
       { type: "session_meta", payload: { id: sessionId, cwd: workspace, source: "cli" } },
+      responseUser("Generated context for the synthetic Codex turn"),
       { type: "event_msg", payload: { type: "user_message", message: prompt } },
+      responseUser(prompt),
       {
         type: "response_item",
         payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: reply }] },
@@ -221,6 +234,8 @@ try {
   const relay = Path.join(scratch, "native-relay.mjs");
   const fault = Path.join(proof, "fault.json");
   const trace = Path.join(proof, "native-relay.ndjson");
+  const projectRelay = Path.join(scratch, "project-relay.mjs");
+  const prepassTrace = Path.join(proof, "codex-prepass.ndjson");
   Assert.ok(!/\s/u.test(process.execPath), "The relay requires a Node path without whitespace");
   FS.writeFileSync(relay, `#!${process.execPath}\n` + FS.readFileSync(
     new URL("./provider-import-marker-fixture.mjs", import.meta.url), "utf8",
@@ -228,7 +243,21 @@ try {
   FS.writeFileSync(Path.join(scratch, "native-relay.json"), JSON.stringify({
     executable, database, threadId, rollout, fault, trace,
   }));
-  const relayedEnv = { ...env, T3_CODE_LS_DB_EXECUTABLE: relay };
+  FS.writeFileSync(projectRelay, `#!${process.execPath}
+import { execFileSync } from "node:child_process";
+import { readFileSync, appendFileSync } from "node:fs";
+const args = process.argv.slice(2);
+const output = execFileSync(${JSON.stringify(projectExecutable)}, args, {
+  input: readFileSync(0), maxBuffer: 1048576,
+});
+if (args.length === 1 && args[0] === "codex-import") {
+  appendFileSync(${JSON.stringify(prepassTrace)}, JSON.stringify(JSON.parse(output)) + "\\n");
+}
+process.stdout.write(output);
+`, { mode: 0o700 });
+  const relayedEnv = {
+    ...env, T3_CODE_LS_DB_EXECUTABLE: relay, T3_CODE_LS_PROJECT_EXECUTABLE: projectRelay,
+  };
 
   const inspect = (closed = false) => inspectNativeImport({ executable, baseDir, threadId, closed });
   const scanAndCheck = (client: WsRpcProtocolClient, existing: boolean) => Effect.gen(function* () {
@@ -390,6 +419,9 @@ try {
       receipt: { ok: true, result: { recovered: false } },
     },
   ]);
+  const nativePrepass = FS.readFileSync(prepassTrace, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  Assert.deepEqual(nativePrepass, [[1, [0, 2]], [1, [0, 2]], [1, [0, 2]]]);
+  report.nativePrepass = { invocations: nativePrepass.length, suppressedResponseRows: [0, 2] };
 
   checkpoint("reopen with the normal packaged helper selector");
   active = startServer({ name: "packaged-default", baseDir, port: await reservePort(), env });
