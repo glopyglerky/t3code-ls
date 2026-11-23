@@ -21,6 +21,17 @@ const targetDirectory = Path.resolve("/tmp/acceptance-target");
 const proofDirectory = Path.resolve("/tmp/acceptance-proof");
 const toolchainDirectory = Path.resolve("/tmp/qualified-bluefe");
 
+const workspacePackages = JSON.parse(ChildProcess.execFileSync("python3", ["-c", `
+import json, pathlib, tomllib
+
+workspace = tomllib.loads(pathlib.Path("Cargo.toml").read_text())
+members = workspace["workspace"]["members"]
+print(json.dumps({
+    member: tomllib.loads(pathlib.Path(member, "Cargo.toml").read_text())["package"]
+    for member in members
+}))
+`], { cwd: root, encoding: "utf8" }));
+
 Test.test("every declared acceptance test has exactly one execution route", () => {
   const mapping = JSON.parse(FS.readFileSync(Path.join(root, "port-map.json"), "utf8"));
   const declared = new Set(mapping.ports.flatMap((port) => port.acceptance_tests));
@@ -29,8 +40,12 @@ Test.test("every declared acceptance test has exactly one execution route", () =
   for (const script of declared) {
     Assert.ok(FS.existsSync(Path.join(root, script)), `Missing acceptance source: ${script}`);
     if (script.endsWith(".rs")) {
-      Assert.match(script, /^crates\/[a-z-]+\/tests\/[a-z_]+\.rs$/,
-        "Rust acceptance must be a Cargo integration test included by --all-targets");
+      const test = /^(.+)\/tests\/[a-z_]+\.rs$/u.exec(script);
+      const packageConfig = test && Object.hasOwn(workspacePackages, test[1])
+        ? workspacePackages[test[1]]
+        : undefined;
+      Assert.ok(packageConfig && packageConfig.autotests !== false,
+        `Rust acceptance must be a discovered integration test in a Cargo workspace member: ${script}`);
       Assert.equal(adapters.has(script) || components.has(script), false);
     } else {
       Assert.equal(Number(adapters.has(script)) + Number(components.has(script)), 1,
@@ -43,14 +58,8 @@ Test.test("every declared acceptance test has exactly one execution route", () =
 });
 
 Test.test("manifest executables belong to existing Cargo package targets", () => {
-  const packages = new Map();
-  for (const entry of FS.readdirSync(Path.join(root, "crates"), { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const directory = Path.join(root, "crates", entry.name);
-    const source = FS.readFileSync(Path.join(directory, "Cargo.toml"), "utf8");
-    const name = source.match(/^name\s*=\s*"([^"]+)"/m)?.[1];
-    if (name) packages.set(name, directory);
-  }
+  const packages = new Map(Object.entries(workspacePackages).map(([member, config]) =>
+    [config.name, Path.join(root, member)]));
   for (const [script, check] of Object.entries(acceptanceChecks)) {
     Assert.ok(packages.has(check.package), `Unknown manifest Cargo package: ${script}`);
     for (const target of acceptanceExecutables(check)) {
