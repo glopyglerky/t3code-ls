@@ -171,27 +171,21 @@ try {
     const envelope = JSON.parse(response.value);
     NodeAssert.equal(envelope.ok, true, JSON.stringify(envelope));
   };
-  const table = "orchestration_v2_projection_metadata";
-  const key = (name) => [{ type: "text", value: name }];
-  const stage = async (name) => {
+  const guideKey = (number) => ({ host: "fixture.invalid", repository: "owner/repo", number });
+  const guideJson = JSON.stringify({ summary: "Fixture guide" });
+  const stage = async (name, number) => {
     await request({ operation: "application_begin", transaction_id: name, mode: "write" });
     await request({
-      operation: "application_put",
+      operation: "application_guide_put",
       transaction_id: name,
-      table,
-      key: key(name),
-      row: {
-        projection_name: key(name)[0],
-        schema_version: { type: "integer", value: "1" },
-        last_sequence: { type: "integer", value: "42" },
-        updated_at: { type: "text", value: "2026-01-01T00:00:00Z" },
-      },
+      key: guideKey(number),
+      guide_json: guideJson,
     });
   };
   try {
-    await stage("crash-committed");
+    await stage("crash-committed", 1);
     await request({ operation: "application_commit", transaction_id: "crash-committed" });
-    await stage("crash-uncommitted");
+    await stage("crash-uncommitted", 2);
   } finally {
     writer.kill("SIGKILL");
     const [, signal] = await exited;
@@ -200,9 +194,10 @@ try {
   }
   await reopen(({ client }) =>
     Effect.gen(function* () {
-      const committed = yield* client.get(table, key("crash-committed"));
-      NodeAssert.equal(committed?.last_sequence.value, "42");
-      NodeAssert.equal(yield* client.get(table, key("crash-uncommitted")), null);
+      const readGuide = (number) =>
+        client.request("application_guide_get", { key: guideKey(number) }, Schema.NullOr(Schema.String));
+      NodeAssert.equal(yield* readGuide(1), guideJson);
+      NodeAssert.equal(yield* readGuide(2), null);
     }),
   );
   NodeAssert.deepEqual(readIdentity(crashed), beforeCrash);
