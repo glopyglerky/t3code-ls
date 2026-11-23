@@ -599,7 +599,7 @@ try {
     });
     try {
       const browserCommitted = read();
-      assertRedeemCommit(afterRevocation, browserCommitted, threadId);
+      assertRedeemCommit(afterRevocation, browserCommitted, threadId, "single");
       const rawThread = cellValue(browserCommitted.threads[0]?.row.payload_json);
       Assert.ok(typeof rawThread === "string");
       Assert.equal(JSON.parse(rawThread).guestShare.guestName, "Browser guest Café");
@@ -683,7 +683,9 @@ try {
   }
 }
 if (failure !== undefined) {
-  const label = failure instanceof Error ? failure.stack?.split("\n").slice(1, 5).join("\n") : "";
+  const label = failure instanceof Error
+    ? failure.stack?.split("\n").filter((line) => /^\s+at /u.test(line)).slice(0, 4).join("\n")
+    : "";
   throw new Error(
     `Guest authorization proof failed at ${report.phase}: ${report.failure ?? report.cleanupFailure}\n${label}`,
   );
