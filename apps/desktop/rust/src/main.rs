@@ -1,3 +1,4 @@
+mod history_view;
 mod replay;
 #[path = "../../../../packages/client-runtime/rust/host/server_snapshot.rs"]
 mod server_snapshot;
@@ -32,7 +33,7 @@ const SUBMIT_LABEL: &str = "Submit message";
 const STOP_LABEL: &str = "Stop";
 const APPROVAL_LABEL: &str = "Allow once";
 const REPLY_LABEL: &str = "Recorded assistant reply";
-const USAGE: &str = "Usage: t3-code-ls-desktop-gpui --fixture showcase | --thread-snapshot | --thread-compose < CONNECTION_JSON";
+const USAGE: &str = "Usage: t3-code-ls-desktop-gpui --fixture showcase | --thread-snapshot | --thread-compose | --thread-history < CONNECTION_JSON";
 const SHORTCUT: &str = if cfg!(target_os = "macos") {
     "Command+Enter"
 } else {
@@ -674,6 +675,7 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     let mut server_session = None;
+    let mut history_connection = None;
     let snapshot = if first.as_deref() == Some(OsStr::new("--thread-compose"))
         && args.next().is_none()
     {
@@ -682,6 +684,13 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         };
         server_session = Some(session);
+        None
+    } else if first.as_deref() == Some(OsStr::new("--thread-history")) && args.next().is_none() {
+        let Ok(connection) = server_snapshot::Connection::read(std::io::stdin().lock()) else {
+            eprintln!("Invalid server connection input.");
+            return ExitCode::from(2);
+        };
+        history_connection = Some(connection);
         None
     } else if first.as_deref() == Some(OsStr::new("--thread-snapshot")) && args.next().is_none() {
         Some(
@@ -699,7 +708,9 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
 
-    let title = if server_session.is_some() {
+    let title = if history_connection.is_some() {
+        "T3 Code · Saved conversation"
+    } else if server_session.is_some() {
         "T3 Code · Server composer"
     } else if snapshot.is_some() {
         "T3 Code · Server conversation"
@@ -727,7 +738,10 @@ fn main() -> ExitCode {
                     ..Default::default()
                 },
                 move |window, cx| {
-                    if let Some(server) = server_session {
+                    if let Some(connection) = history_connection {
+                        let workspace = cx.new(|cx| history_view::HistoryView::new(connection, window, cx));
+                        cx.new(|cx| Root::new(workspace, window, cx))
+                    } else if let Some(server) = server_session {
                         let workspace =
                             cx.new(|cx| Workspace::new_with_server(Some(server), window, cx));
                         cx.new(|cx| Root::new(workspace, window, cx))

@@ -221,3 +221,48 @@ unsent draft. Its dedicated approval and follow-up checks passed.
 Normal desktop integration, other platforms, stream recovery, live providers
 and durable desktop drafts still require qualification.
 [GPUI stream run](https://github.com/glopyglerky/t3code-ls/actions/runs/45232188579)
+
+## Load saved history
+
+The opt-in `--thread-history` entry accepts the same four stdin connection fields
+as `--thread-snapshot`. It uses the shared Rust `Connection::history` and `History`
+implementation, with no separate protocol or parser. The first authenticated
+bounded page appears in a persistent read-only **Saved thread history** document.
+Tab to **Load older** and press Space to prepend the next checked page. Focus
+returns to the document after each result. The document includes the selected
+thread identity and snapshot sequence.
+
+Only one request runs at a time, off the UI thread. The shared client caps each
+request at five seconds, retains at most 500 records and 2 MiB, and admits at most
+eight pages including the first. Environment validation precedes each page.
+A refused page retains the visible document and disables further paging in that
+view. The status tells the user to reopen to refresh. Closing the view suppresses
+publication; an already running bounded HTTP request may finish in the background.
+There is no automatic retry, subscription, navigation or provider invocation.
+The showcase, snapshot and compose entries keep their existing behavior.
+
+After the root owner builds the GPUI binary and packaged native Linux server,
+run this in the existing isolated loopback X11, Vulkan and AT-SPI D-Bus lane:
+
+```sh
+node apps/server/scripts/verify-gpui-thread-history.ts \
+  /absolute/path/t3-code-ls-desktop-gpui \
+  --server-executable /absolute/path/packaged/t3
+```
+
+The runner reuses Makepad's exact `saved-history.json` fixture, imports its 40
+turns through the production scan/import RPCs, and checks native omdb selection.
+It first observes a bounded newest page through AT-SPI. X11 Tab/Space activates
+Load older until all 80 records are visible in exact order. It checks thread
+identity, document read-only state and returned focus. A second window reads the
+newest page, then the runner stops only its owned disposable server before the
+next activation. The refusal must retain the exact initial document. Wrong
+environment, invalid token and missing-thread opens must show an empty refusal.
+For a standalone bundled runner, place both `check-gpui-history.py` and its reused
+`check-gpui-showcase.py` adapter beside the bundle and `saved-history.json`.
+
+This is an authored candidate check, pending execution against built artifacts.
+It does not change port status, the normal launcher, MIT licensing or the stock
+comparison pin `28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`. Linux evidence would
+qualify only the tested profile. Other platforms and full desktop parity remain
+open.
