@@ -268,11 +268,15 @@ function makeClaudeTestTurnInput(input: {
   };
 }
 
+const claudeStdioHelperExecutable = process.env.T3_CLAUDE_STDIO_HELPER;
 const claudeStdioFixtureExecutable = process.env.T3_CLAUDE_STDIO_FIXTURE;
 
-it.skipIf(claudeStdioFixtureExecutable === undefined)(
+it.skipIf(claudeStdioHelperExecutable === undefined && claudeStdioFixtureExecutable === undefined)(
   "runs ClaudeAdapterV2 against the Rust stdio host",
   async () => {
+    if (claudeStdioHelperExecutable === undefined || claudeStdioFixtureExecutable === undefined) {
+      throw new Error("Set both T3_CLAUDE_STDIO_HELPER and T3_CLAUDE_STDIO_FIXTURE.");
+    }
     const sdkQuery = vi.mocked(ClaudeSdk.query).mockClear();
     await sdkQuery.withImplementation(
       () => {
@@ -287,12 +291,46 @@ it.skipIf(claudeStdioFixtureExecutable === undefined)(
             const directory = yield* fileSystem.makeTempDirectoryScoped({
               prefix: "t3-claude-stdio-",
             });
-            const fixture = makeClaudeStdioFixture(claudeStdioFixtureExecutable!, directory);
+            const modelSelection = { ...CLAUDE_TEST_MODEL_SELECTION, options: [] };
+            const environment = { HOME: directory, CLAUDE_CONFIG_DIR: directory };
+            const expected = ClaudeAdapterV2.makeClaudeQueryOptions({
+              modelSelection,
+              nativeThreadId: "fixture",
+              title: "Claude attachment test",
+              resume: false,
+              cwd: directory,
+              environment,
+              settings: DEFAULT_CLAUDE_SETTINGS,
+              supportedDialogKinds: ["resume_return"],
+            });
+            const threadId = ThreadId.make("thread-native-claude-fixture");
+            const providerSessionId = ProviderSessionId.make(
+              "provider-session-native-claude-fixture",
+            );
+            const fixture = makeClaudeStdioFixture(
+              claudeStdioHelperExecutable,
+              claudeStdioFixtureExecutable,
+              directory,
+              expected,
+            );
             yield* Effect.addFinalizer(() => Effect.promise(fixture.close));
+            const refused = yield* fixture.runner
+              .open({
+                threadId,
+                providerSessionId,
+                options: {
+                  ...expected,
+                  permissionMode: "bypassPermissions",
+                  canUseTool: async () => ({ behavior: "deny", message: "fixture refusal" }),
+                },
+              })
+              .pipe(Effect.flip);
+            assert.equal(refused.method, "open");
+            assert.isFalse(yield* fileSystem.exists(path.join(directory, "adapter-child-started")));
             const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
               instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
               settings: DEFAULT_CLAUDE_SETTINGS,
-              environment: { HOME: directory, CLAUDE_CONFIG_DIR: directory },
+              environment,
               attachmentsDir: directory,
               fileSystem,
               path,
@@ -300,16 +338,14 @@ it.skipIf(claudeStdioFixtureExecutable === undefined)(
               idAllocator,
               queryRunner: fixture.runner,
             });
-            const threadId = ThreadId.make("thread-native-claude-fixture");
             const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
               runtimeMode: "approval-required",
               interactionMode: "default",
               cwd: directory,
             });
-            const modelSelection = { ...CLAUDE_TEST_MODEL_SELECTION, options: [] };
             const runtime = yield* adapter.openSession({
               threadId,
-              providerSessionId: ProviderSessionId.make("provider-session-native-claude-fixture"),
+              providerSessionId,
               modelSelection,
               runtimePolicy,
               promptSuggestions: Effect.succeed(false),
@@ -352,6 +388,7 @@ it.skipIf(claudeStdioFixtureExecutable === undefined)(
               runtimePolicy,
             });
             yield* runtime.startTurn(input);
+            assert.isTrue(yield* fileSystem.exists(path.join(directory, "adapter-child-started")));
             const first = yield* Queue.take(requests);
             assert.equal(first.status, "pending");
             const providerTurnId = idAllocator.derive.providerTurn({
@@ -416,7 +453,6 @@ it.skipIf(claudeStdioFixtureExecutable === undefined)(
     );
     assert.equal(sdkQuery.mock.calls.length, 0);
   },
-  15_000,
 );
 
 describe("ClaudeAdapterV2 runtime query policy", () => {

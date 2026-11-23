@@ -6,6 +6,15 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+claude-stdio-helper = []
+
+[[bin]]
+name = "t3-code-ls-claude-stdio"
+path = "src/bin/t3-code-ls-claude-stdio.rs"
+required-features = ["claude-stdio-helper"]
+test = false
+
 [target.'cfg(unix)'.dependencies]
 ryu-js = "=1.0.2"
 signal-hook = { version = "=0.4.4", default-features = false }

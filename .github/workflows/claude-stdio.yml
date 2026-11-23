@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "candidate/t3code-ls-t01-claude-adapter-*"
+      - "candidate/t3code-ls-t08-claude-*"
       - "candidate/t3code-ls-t02-bundled-native-integrated-*"
 
 permissions:
@@ -28,7 +29,7 @@ jobs:
           node-version: "26.12.1"
       - name: Install the pinned native compiler
         run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/claude-compiler"
-      - name: Build and test the bounded Rust session host
+      - name: Build the scoped application helper and test the Rust session
         run: |
           export CARGO_HOME="$RUNNER_TEMP/claude-cargo-home"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/claude-target"
@@ -37,20 +38,33 @@ jobs:
           # crates/core/tests/claude_stdio_host.rs
           "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
             -p t3-code-ls-core --test claude_stdio_control --test claude_stdio_host
-          messages="$RUNNER_TEMP/claude-artifacts.ndjson"
+          helper_messages="$RUNNER_TEMP/claude-helper-artifacts.ndjson"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --locked --message-format=json \
+            -p t3-code-ls-core --features claude-stdio-helper --bin t3-code-ls-claude-stdio > "$helper_messages"
+          messages="$RUNNER_TEMP/claude-fixture-artifacts.ndjson"
           "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked --no-run --message-format=json \
             -p t3-code-ls-core --test claude_stdio_host > "$messages"
-          fixture="$(node --input-type=module - "$messages" <<'JS'
+          artifact() {
+            node --input-type=module - "$1" "$2" <<'JS'
           import { readFileSync } from "node:fs";
-          const artifact = readFileSync(process.argv[2], "utf8").trim().split("\n").map(JSON.parse)
-            .find((entry) => entry.target?.name === "claude_stdio_host" && entry.executable);
+          const [messages, name] = process.argv.slice(2);
+          const artifact = readFileSync(messages, "utf8").trim().split("\n").map(JSON.parse)
+            .find((entry) => entry.target?.name === name && entry.executable);
           if (!artifact) process.exit(1);
           process.stdout.write(artifact.executable);
           JS
-          )"
+          }
+          helper="$(artifact "$helper_messages" t3-code-ls-claude-stdio)"
+          fixture="$(artifact "$messages" claude_stdio_host)"
+          test -x "$helper"
           test -x "$fixture"
-          sha256sum "$fixture"
+          sha256sum "$helper" "$fixture"
+          echo "T3_CLAUDE_STDIO_HELPER=$helper" >> "$GITHUB_ENV"
           echo "T3_CLAUDE_STDIO_FIXTURE=$fixture" >> "$GITHUB_ENV"
+      - name: Check helper refusal and direct child cleanup
+        run: |
+          node apps/server/scripts/check-claude-stdio-helper.mjs contract \
+            "$T3_CLAUDE_STDIO_HELPER" "$T3_CLAUDE_STDIO_FIXTURE"
       - name: Install locked application dependencies
         run: |
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
@@ -61,7 +75,7 @@ jobs:
             apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts \
             -t 'runs ClaudeAdapterV2 against the Rust stdio host'
       - name: Open and reap the pinned vendor CLI without network or a prompt
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-claude-adapter-vendor-')
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-claude-adapter-vendor-') || startsWith(github.ref_name, 'candidate/t3code-ls-t08-claude-vendor-')
         shell: bash
         run: |
           set -euo pipefail
@@ -69,7 +83,7 @@ jobs:
           trap 'rm -rf -- "$scratch"' EXIT
           proof="$RUNNER_TEMP/claude-vendor-proof"
           mkdir "$proof" "$scratch/profile"
-          git rev-parse HEAD HEAD^{tree} > "$proof/source.txt"
+          git rev-parse HEAD "HEAD^{tree}" > "$proof/source.txt"
           archive="$scratch/vendor.tgz"
           curl --fail --silent --show-error --location --proto '=https' --max-time 120 \
             https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64/-/claude-agent-sdk-linux-x64-0.3.321.tgz \
@@ -78,18 +92,19 @@ jobs:
           test "$(openssl dgst -sha512 -binary "$archive" | openssl base64 -A)" = "$expected"
           tar -xOzf "$archive" package/claude > "$scratch/claude"
           chmod u+x "$scratch/claude"
-          sha256sum "$archive" "$scratch/claude" "$T3_CLAUDE_STDIO_FIXTURE" > "$proof/inputs.sha256"
+          sha256sum "$archive" "$scratch/claude" "$T3_CLAUDE_STDIO_HELPER" > "$proof/inputs.sha256"
           sudo -n unshare --net -- bash -euc '
             ip link set dev lo up
             cd "$2/profile"
             runuser -u "$1" -- env -i HOME="$2/profile" PATH=/usr/bin:/bin \
               CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 "$2/claude" --version
             exec runuser -u "$1" -- env -i TMPDIR="$2/profile" PATH=/usr/bin:/bin \
-              "$3" --vendor-handshake "$2/claude"
-          ' _ "$(id -un)" "$scratch" "$T3_CLAUDE_STDIO_FIXTURE" | tee "$proof/handshake.log"
+              "$4" "$5" vendor "$3" "$2/claude"
+          ' _ "$(id -un)" "$scratch" "$T3_CLAUDE_STDIO_HELPER" "$(command -v node)" \
+            "$GITHUB_WORKSPACE/apps/server/scripts/check-claude-stdio-helper.mjs" | tee "$proof/handshake.log"
           grep -F 'Pinned vendor CLI acknowledged initialization and was reaped without a prompt.' "$proof/handshake.log"
       - name: Retain vendor handshake evidence
-        if: always() && startsWith(github.ref_name, 'candidate/t3code-ls-t01-claude-adapter-vendor-')
+        if: always() && (startsWith(github.ref_name, 'candidate/t3code-ls-t01-claude-adapter-vendor-') || startsWith(github.ref_name, 'candidate/t3code-ls-t08-claude-vendor-'))
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: claude-vendor-handshake

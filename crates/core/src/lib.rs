@@ -2,6 +2,9 @@
 
 #[path = "../../../apps/server/src/orchestration-v2/Adapters/claude_stdio_control.rs"]
 pub mod claude_stdio_control;
+#[cfg(all(unix, feature = "claude-stdio-helper"))]
+#[path = "../../../apps/server/src/orchestration-v2/Adapters/claude_stdio_helper.rs"]
+pub mod claude_stdio_helper;
 #[cfg(unix)]
 #[path = "../../../apps/server/src/orchestration-v2/Adapters/claude_stdio_host.rs"]
 pub mod claude_stdio_host;
