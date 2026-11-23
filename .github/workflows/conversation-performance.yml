@@ -14,8 +14,8 @@ jobs:
     env:
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
       STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
-      CANDIDATE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && 'eeef6d7633c890831293b6c0007c632970bc9554' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
-      CANDIDATE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '883b3bda684d53e7b5ec02e1fbd8e8511e4b7b79' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '78647c8e507b6b677fa6f1585839bd8bdc12bc55' || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
+      CANDIDATE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '08eadccbff571219466f7bc35e982730295f15d8' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
+      CANDIDATE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '38ff3e9ac680e4defe3d06fcfb3e79d0b94b841c' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '78647c8e507b6b677fa6f1585839bd8bdc12bc55' || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
       CATALOG_COMMIT: 2bb6ae9e57559bde6cff0feeddcff8ddf02de009
       CATALOG_TREE: 55e2c8aba6fc06642b06a8d60861c7bdaf3c67f9
       ROOT_RELEASE_COMMIT: a7ca741bd4c4d508fef316e164fb1ae897301965
