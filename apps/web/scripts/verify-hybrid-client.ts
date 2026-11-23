@@ -52,6 +52,11 @@ const capturedApproval = {
   prompt: "Replay the recorded permission request",
   reply: "Created the requested probe file.",
 };
+const capturedQuestion = {
+  path: "apps/server/src/orchestration-v2/testkit/fixtures/acp_elicitation/registry_transcript.ndjson",
+  sha256: "544a05a240a700ecad527fa785e9b8adf203fc8e93c48e9185e790ba86f103ee",
+  option: "Strict schemas (Recommended)",
+};
 const decodeSnapshot = Schema.decodeUnknownSync(
   Schema.toCodecJson(OrchestrationV2ThreadDetailSnapshot),
 );
@@ -562,6 +567,39 @@ async function acceptCapturedApproval(page: Page) {
   return { ...completed, requestId: request.id, source: capturedApproval.path, sha256 };
 }
 
+async function cancelCapturedQuestion(page: Page) {
+  const contents = NodeFS.readFileSync(NodePath.join(repoRoot, capturedQuestion.path));
+  const sha256 = NodeCrypto.createHash("sha256").update(contents).digest("hex");
+  Assert.equal(sha256, capturedQuestion.sha256, "The recorded ACP question fixture changed");
+  const threadId = await submitReplay(page, "Question", "Replay the recorded question");
+  const option = page.getByText(capturedQuestion.option, { exact: true }).first();
+  await option.waitFor({ state: "visible" });
+  const pending = await readThreadSnapshot(page, threadId);
+  const identity = replayTurnIdentity(pending, "question");
+  const request = pending.projection.runtimeRequests.find(
+    (item) => item.kind === "user_input" && item.providerTurnId === identity.providerTurnId,
+  );
+  Assert.equal(request?.status, "pending");
+  Assert.ok(request);
+  const requestId = request.id;
+  await page.getByRole("button", { name: "Stop generation", exact: true }).click();
+  await option.waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: /^(Stop generation|Stopping)$/u }).waitFor({ state: "hidden" });
+
+  function assertCancelled(snapshot: OrchestrationV2ThreadDetailSnapshot) {
+    const { projection } = snapshot;
+    Assert.equal(projection.runs.length, 1);
+    Assert.equal(projection.runs[0]?.id, identity.runId);
+    Assert.equal(projection.runs[0]?.status, "interrupted");
+    const cancelled = projection.runtimeRequests.find((item) => item.id === requestId);
+    Assert.equal(cancelled?.status, "cancelled");
+  }
+  assertCancelled(await readThreadSnapshot(page, threadId));
+  await page.reload({ waitUntil: "domcontentloaded" });
+  assertCancelled(await readThreadSnapshot(page, threadId));
+  return { ...identity, threadId, requestId, source: capturedQuestion.path, sha256 };
+}
+
 async function exercise(implementation: Implementation): Promise<void> {
   const directory = NodePath.join(proofRoot, implementation);
   NodeFS.mkdirSync(directory, { recursive: true });
@@ -640,6 +678,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     turnIdentity: null as ReplayTurnIdentity | null,
     interrupted: null as InterruptedShowcase | null,
     capturedApproval: null as Awaited<ReturnType<typeof acceptCapturedApproval>> | null,
+    cancelledQuestion: null as Awaited<ReturnType<typeof cancelCapturedQuestion>> | null,
     completedSnapshots: [] as Array<
       Awaited<ReturnType<typeof assertCompleted>> & { checkpoint: string }
     >,
@@ -807,6 +846,11 @@ async function exercise(implementation: Implementation): Promise<void> {
     starting("recorded ACP permission request");
     proof.capturedApproval = await acceptCapturedApproval(page);
     completed("Approved the recorded ACP permission request and received its expected reply");
+    if (bundledClient && implementation === "native") {
+      starting("recorded ACP question cancellation");
+      proof.cancelledQuestion = await cancelCapturedQuestion(page);
+      completed("Cancelled the recorded question in the composer and recovered its cancelled request");
+    }
     if (implementation === "native") {
       Assert.equal(proof.persistence.length, 4);
       completed(

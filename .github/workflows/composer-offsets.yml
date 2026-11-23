@@ -2,7 +2,10 @@ name: Rust composer browser proof
 
 on:
   push:
-    branches: ["candidate/t3code-ls-t01-offsets-*", "candidate/t3code-ls-t01-built-composer-*"]
+    branches:
+      - "candidate/t3code-ls-t01-offsets-*"
+      - "candidate/t3code-ls-t01-built-composer-*"
+      - "candidate/t3code-ls-t02-bundled-native-*"
 
 permissions:
   contents: read
@@ -21,6 +24,7 @@ jobs:
       VP_REMOTE_CACHE_URL: ""
       WASM_BINDGEN_VERSION: "0.2.130"
       WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
+      BUNDLED_NATIVE: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -63,7 +67,7 @@ jobs:
         working-directory: apps/web
         run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/ComposerPromptEditorTiptap.input.browser.test.tsx
       - name: Build and open the application with the Rust composer binding
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
+        if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
         env:
           T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
           VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
@@ -72,14 +76,26 @@ jobs:
           mkdir "$proof"
           node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/hybrid-client-persistence-tsconfig.json
           pnpm --dir apps/web run build
-          env -u T3_CODE_LS_TOOLCHAIN -u T3_CODE_LS_SYSROOT T3_CODE_LS_IMPLEMENTATION=upstream \
-            pnpm --dir apps/server run build:bundle
+          implementation=upstream
+          if [[ "$BUNDLED_NATIVE" == true ]]; then
+            implementation=native
+            export CARGO_HOME="$RUNNER_TEMP/bundled-cargo-home"
+            export CARGO_TARGET_DIR="$RUNNER_TEMP/bundled-target"
+            T3_CODE_LS_IMPLEMENTATION=native node tools/build-native.mjs
+            node tools/check-hybrid.mjs --verify-binaries
+            T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$GITHUB_WORKSPACE/bin" \
+              pnpm --dir apps/server run build:bundle
+            sha256sum bin/manifest.json apps/server/dist/native-bin/manifest.json > "$proof/native.sha256"
+          else
+            env -u T3_CODE_LS_TOOLCHAIN -u T3_CODE_LS_SYSROOT T3_CODE_LS_IMPLEMENTATION=upstream \
+              pnpm --dir apps/server run build:bundle
+          fi
           sha256sum apps/web/dist/client-text-wasm/composer_offsets.js \
             apps/web/dist/client-text-wasm/composer_offsets_bg.wasm apps/server/dist/bin.mjs \
             > "$proof/application.sha256"
-          node apps/web/scripts/verify-hybrid-client.ts "$proof" upstream
+          node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
       - name: Retain the bundled browser evidence
-        if: always() && startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
+        if: always() && (env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-'))
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: built-composer-proof
