@@ -34,6 +34,7 @@ import {
 } from "@t3tools/contracts";
 import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as NativeGitWorkspace from "./NativeGitWorkspace.ts";
 import { compactTraceAttributes } from "@t3tools/shared/observability";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 import { resolveSpawnCommand, runsGitWithoutConsole } from "@t3tools/shared/shell";
@@ -987,7 +988,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const digest = yield* Digest.Digest;
   const hostPlatform = yield* HostProcess.Platform;
   const environment = yield* HostProcess.Environment;
-  const gixExecutable = environment.T3_CODE_LS_GIT_WORKSPACE_EXECUTABLE;
+  const gixExecutable = yield* NativeGitWorkspace.select;
   const gitDiscoveryOverrides = Object.keys(environment).some((name) =>
     name.startsWith("GIT_CONFIG") ||
     name === "GIT_NAMESPACE" ||

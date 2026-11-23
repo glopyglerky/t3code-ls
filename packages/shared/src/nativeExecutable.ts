@@ -1,6 +1,7 @@
 /* oxlint-disable t3code/no-global-process-runtime -- Synchronous executable paths and standalone build scripts have no Effect runtime. */
 import * as NodeOS from "node:os";
 import * as NodeFS from "node:fs";
+import * as NodeCrypto from "node:crypto";
 // @effect-diagnostics nodeBuiltinImport:off -- Executable selection uses host paths in source and bundled distributions.
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
@@ -107,4 +108,57 @@ export function nativeExecutable(
     bundledDirectory ?? NodePath.resolve(directory, source ? "../../../bin" : "native-bin"),
     `t3-code-ls-${component}${NodeOS.platform() === "win32" ? ".exe" : ""}`,
   );
+}
+
+/** Verify an optional Linux sidecar before selecting its package-owned path. */
+export async function verifyBundledNativeExecutable(component: string, executable: string): Promise<void> {
+  if (!/^[a-z][a-z0-9-]*$/.test(component) || !NodePath.isAbsolute(executable) ||
+    NodePath.basename(executable) !== `t3-code-ls-${component}`) {
+    throw new Error("Invalid bundled native helper identity");
+  }
+  const flags = NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW | NodeFS.constants.O_NONBLOCK;
+  const manifestPath = NodePath.join(NodePath.dirname(executable), "manifest.json");
+  const manifestFile = await NodeFS.promises.open(manifestPath, flags);
+  let manifest;
+  try {
+    const before = await manifestFile.stat();
+    if (!before.isFile() || before.size > 1_048_576) throw new Error("Invalid native helper manifest");
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    for await (const chunk of manifestFile.createReadStream({ autoClose: false })) {
+      bytes += chunk.length;
+      if (bytes > 1_048_576) throw new Error("Native helper manifest exceeds its bound");
+      chunks.push(chunk);
+    }
+    const after = await NodeFS.promises.lstat(manifestPath);
+    if (!after.isFile() || before.dev !== after.dev || before.ino !== after.ino ||
+      before.size !== after.size || before.ctimeMs !== after.ctimeMs) {
+      throw new Error("Native helper manifest changed during verification");
+    }
+    manifest = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } finally { await manifestFile.close(); }
+  const declared = manifest?.files?.[`t3-code-ls-${component}`];
+  if (manifest?.target !== "linux-x64" || manifest.rustTarget !== "x86_64-unknown-linux-gnu" ||
+    (manifest.implementation !== undefined && manifest.implementation !== "native") ||
+    typeof declared !== "string" || !/^[0-9a-f]{64}$/.test(declared)) {
+    throw new Error("The bundled native manifest does not select this helper");
+  }
+  const helper = await NodeFS.promises.open(executable, flags);
+  try {
+    const before = await helper.stat();
+    if (!before.isFile() || before.size > 134_217_728) throw new Error("Invalid bundled native helper");
+    const hash = NodeCrypto.createHash("sha256");
+    let bytes = 0;
+    for await (const chunk of helper.createReadStream({ autoClose: false })) {
+      bytes += chunk.length;
+      if (bytes > 134_217_728) throw new Error("Bundled native helper exceeds its bound");
+      hash.update(chunk);
+    }
+    const after = await NodeFS.promises.lstat(executable);
+    if (hash.digest("hex") !== declared || !after.isFile() || before.dev !== after.dev ||
+      before.ino !== after.ino || before.size !== after.size || before.ctimeMs !== after.ctimeMs) {
+      throw new Error("The bundled native helper does not match its manifest");
+    }
+    await NodeFS.promises.access(executable, NodeFS.constants.X_OK);
+  } finally { await helper.close(); }
 }

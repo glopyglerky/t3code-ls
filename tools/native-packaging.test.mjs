@@ -1,6 +1,7 @@
 import * as NodeTest from "node:test";
 import * as NodeAssert from "node:assert/strict";
 import * as NodeFS from "node:fs";
+import * as NodeCrypto from "node:crypto";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
@@ -71,11 +72,12 @@ NodeTest.test(
 const NodeFS = require('node:fs'), p = require('node:path');
 const args = process.argv.slice(2);
 const packages = args.flatMap((arg, index) => arg === '-p' ? [args[index + 1]] : []);
-const optional = args.includes('--manifest-path') ? ['pty-host'] : [];
+const manifest = args.includes('--manifest-path') ? args[args.indexOf('--manifest-path') + 1] : '';
+const optional = ['pty-host', 'git-workspace'].filter(name => manifest.endsWith('/' + name + '/Cargo.toml'));
 const dir = p.join(args[args.indexOf('--target-dir') + 1], args[args.indexOf('--target') + 1], 'release');
 NodeFS.mkdirSync(dir, {recursive:true});
 for (const name of [...${JSON.stringify(nativeComponents)}, ...optional]) {
-  if (name !== 'pty-host' && !packages.includes(name === 'db' ? 't3-code-ls-storage' : 't3-code-ls-core')) continue;
+  if (!optional.includes(name) && !packages.includes(name === 'db' ? 't3-code-ls-storage' : 't3-code-ls-core')) continue;
   NodeFS.writeFileSync(p.join(dir, 't3-code-ls-' + name), '#!/usr/bin/env node\\nconsole.log("fixture-component")\\n', {mode:0o755});
 }
 NodeFS.writeFileSync(p.join(dir, 'flags.json'), JSON.stringify(process.env.CARGO_ENCODED_RUSTFLAGS));
@@ -127,15 +129,18 @@ NodeFS.writeFileSync(p.join(dir, 'packages.json'), JSON.stringify(packages));
       const optional = NodeChildProcess.spawnSync(
         process.execPath,
         [new URL("./build-native.mjs", import.meta.url).pathname, output],
-        { env: { ...env, T3_CODE_LS_BUNDLE_PTY_HOST: "1" }, encoding: "utf8" },
+        { env: { ...env, T3_CODE_LS_BUNDLE_PTY_HOST: "1", T3_CODE_LS_BUNDLE_GIT_WORKSPACE: "1" }, encoding: "utf8" },
       );
       NodeAssert.equal(optional.status, 0, optional.stderr);
       const optionalManifest = JSON.parse(NodeFS.readFileSync(NodePath.join(output, "manifest.json")));
       NodeAssert.ok(Object.hasOwn(optionalManifest.files, "t3-code-ls-pty-host"));
+      NodeAssert.ok(Object.hasOwn(optionalManifest.files, "t3-code-ls-git-workspace"));
       const packagedPty = NodePath.join(output, "t3-code-ls-pty-host");
       const originalPty = NodeFS.readFileSync(packagedPty);
       const optionalStage = NodePath.join(root, "optional-archive/native-bin");
       stageNativeArtifacts(output, optionalStage, "linux-x64");
+      NodeAssert.deepEqual(NodeFS.readFileSync(NodePath.join(optionalStage, "t3-code-ls-git-workspace")),
+        NodeFS.readFileSync(NodePath.join(output, "t3-code-ls-git-workspace")));
       NodeAssert.deepEqual(NodeFS.readFileSync(NodePath.join(optionalStage, "t3-code-ls-pty-host")), originalPty);
       NodeFS.appendFileSync(packagedPty, "damaged");
       NodeAssert.throws(() => stageNativeArtifacts(output, optionalStage, "linux-x64"), /hash mismatch/);
@@ -327,3 +332,31 @@ NodeTest.test(
     }
   },
 );
+
+NodeTest.test("optional package helpers require matching manifest identities", {
+  skip: process.platform !== "linux",
+}, async () => {
+  const { verifyBundledNativeExecutable } = await import("../packages/shared/src/nativeExecutable.ts");
+  const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-optional-package-"));
+  try {
+    for (const component of ["pty-host", "git-workspace"]) {
+      const helper = NodePath.join(root, `t3-code-ls-${component}`);
+      const manifestPath = NodePath.join(root, "manifest.json");
+      const bytes = Buffer.from("#!/bin/sh\nexit 0\n");
+      NodeFS.writeFileSync(helper, bytes, { mode: 0o700 });
+      const manifest = { target: "linux-x64", rustTarget: "x86_64-unknown-linux-gnu",
+        files: { [`t3-code-ls-${component}`]: NodeCrypto.createHash("sha256").update(bytes).digest("hex") } };
+      NodeFS.writeFileSync(manifestPath, JSON.stringify(manifest));
+      await verifyBundledNativeExecutable(component, helper);
+      NodeFS.appendFileSync(helper, "changed");
+      await NodeAssert.rejects(verifyBundledNativeExecutable(component, helper), /does not match/u);
+      NodeFS.writeFileSync(helper, bytes);
+      NodeFS.writeFileSync(manifestPath, JSON.stringify({ ...manifest, target: "darwin-x64" }));
+      await NodeAssert.rejects(verifyBundledNativeExecutable(component, helper), /does not select/u);
+      NodeFS.writeFileSync(manifestPath, JSON.stringify(manifest));
+      NodeFS.renameSync(helper, helper + ".real");
+      NodeFS.symlinkSync(helper + ".real", helper);
+      await NodeAssert.rejects(verifyBundledNativeExecutable(component, helper));
+    }
+  } finally { NodeFS.rmSync(root, { recursive: true, force: true }); }
+});

@@ -23,6 +23,9 @@ const rustTarget = nativeTargets[targetKey];
 if (!rustTarget) throw new Error(`Unsupported native component target: ${targetKey}`);
 const requestedImplementation = process.env.T3_CODE_LS_IMPLEMENTATION;
 const bundlePtyHost = process.env.T3_CODE_LS_BUNDLE_PTY_HOST;
+const bundleGitWorkspace = process.env.T3_CODE_LS_BUNDLE_GIT_WORKSPACE;
+if (bundleGitWorkspace !== undefined && bundleGitWorkspace !== "1")
+  throw new Error("T3_CODE_LS_BUNDLE_GIT_WORKSPACE must be 1 when selected");
 if (bundlePtyHost !== undefined && bundlePtyHost !== "1")
   throw new Error("T3_CODE_LS_BUNDLE_PTY_HOST must be 1 when selected");
 if (
@@ -49,6 +52,7 @@ if (
     process.env.T3_CODE_LS_SYSROOT !== undefined ||
     explicitHelper ||
     bundlePtyHost !== undefined ||
+    bundleGitWorkspace !== undefined ||
     requestedImplementation === "native")
 ) {
   throw new Error(
@@ -63,6 +67,8 @@ if (process.env.T3_CODE_LS_NATIVE_DIR) {
   );
   if (bundlePtyHost === "1" && !selected.files?.[nativeFile("pty-host", targetKey)])
     throw new Error("The selected native bundle does not include its PTY host");
+  if (bundleGitWorkspace === "1" && !selected.files?.[nativeFile("git-workspace", targetKey)])
+    throw new Error("The selected native bundle does not include its Git workspace helper");
   if (
     (requestedImplementation === "upstream" && selected.implementation !== "upstream") ||
     (requestedImplementation === "native" && selected.implementation === "upstream") ||
@@ -130,12 +136,16 @@ if (process.env.T3_CODE_LS_NATIVE_DIR) {
     ],
     { cwd: root, env, stdio: "inherit" },
   );
-  if (bundlePtyHost === "1") {
+  const optionalComponents = [
+    ...(bundlePtyHost === "1" ? ["pty-host"] : []),
+    ...(bundleGitWorkspace === "1" ? ["git-workspace"] : []),
+  ];
+  for (const component of optionalComponents) {
     NodeChildProcess.execFileSync(
       NodePath.resolve(toolchain, "bin/lustr"),
       [
         "--bluefe-root", toolchain, "build", "--locked", "--release",
-        "--manifest-path", NodePath.join(root, "apps/server/rust/pty-host/Cargo.toml"),
+        "--manifest-path", NodePath.join(root, `apps/server/rust/${component}/Cargo.toml`),
         "--target", rustTarget, "--target-dir", target,
       ],
       { cwd: root, env, stdio: "inherit" },
@@ -143,7 +153,7 @@ if (process.env.T3_CODE_LS_NATIVE_DIR) {
   }
   NodeFS.mkdirSync(destination, { recursive: true });
   const files = {};
-  for (const component of [...nativeComponents, ...(bundlePtyHost === "1" ? ["pty-host"] : [])]) {
+  for (const component of [...nativeComponents, ...optionalComponents]) {
     const file = nativeFile(component, targetKey);
     NodeFS.copyFileSync(
       NodePath.resolve(target, rustTarget, "release", file),
