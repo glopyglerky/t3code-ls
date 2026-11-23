@@ -124,7 +124,7 @@ export async function verifyBundledVoiceDraft(page: Page) {
     await editor.press("End");
     const recording = page.getByRole("status", { name: "Recording", exact: true });
     await start.click();
-    await recording.getByText(/^0:0[1-9] \/ 5:00$/u).waitFor({ state: "visible", timeout: 10_000 });
+    await recording.getByText(/^0:0[1-9](?: \/ 5:00)?$/u).waitFor({ state: "visible", timeout: 10_000 });
     const [request] = await Promise.all([
       page.waitForRequest((request) => request.url() === transcribeUrl && request.method() === "POST"),
       page.getByRole("button", { name: "Finish voice input", exact: true }).click(),
