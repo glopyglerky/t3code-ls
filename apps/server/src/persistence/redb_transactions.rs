@@ -4,6 +4,7 @@
 //! Scan cursors order encoded storage keys; they do not imply SQL primary-key ordering.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -134,6 +135,19 @@ pub(crate) async fn read_generation_identity(
     catalog: &ApplicationCatalog,
     encoded_catalog: &[u8],
 ) -> Result<Option<ApplicationGenerationIdentity>> {
+    verify_generation_identity(
+        transaction,
+        catalog,
+        &generation_identity(catalog, encoded_catalog),
+    )
+    .await
+}
+
+async fn verify_generation_identity(
+    transaction: &mut Transaction,
+    catalog: &ApplicationCatalog,
+    expected: &ApplicationGenerationIdentity,
+) -> Result<Option<ApplicationGenerationIdentity>> {
     let Some(bytes) = transaction.get(&generation_identity_key(catalog)).await? else {
         if catalog.event_layout.is_some() {
             return Err(Error::IncompatibleStore);
@@ -143,7 +157,7 @@ pub(crate) async fn read_generation_identity(
     };
     let identity: ApplicationGenerationIdentity =
         serde_json::from_slice(&bytes).map_err(|_| Error::IncompatibleStore)?;
-    if identity != generation_identity(catalog, encoded_catalog) {
+    if &identity != expected {
         return Err(Error::IncompatibleStore);
     }
     Ok(Some(identity))
@@ -356,10 +370,16 @@ struct Savepoint {
 
 pub(crate) struct Session {
     pub(crate) transaction: Transaction,
-    pub(crate) catalog: ApplicationCatalog,
+    pub(crate) catalog: Arc<ApplicationCatalog>,
     touched: Instant,
     savepoints: Vec<Savepoint>,
     savepoint_bytes: usize,
+}
+
+struct ValidatedCatalog {
+    bytes: Vec<u8>,
+    catalog: Arc<ApplicationCatalog>,
+    identity: ApplicationGenerationIdentity,
 }
 
 /// A helper owns these sessions. Dropping the helper drops every uncommitted write.
@@ -368,6 +388,7 @@ pub(crate) struct Session {
 pub struct ApplicationTransactions {
     store: Store,
     sessions: BTreeMap<String, Session>,
+    validated_catalog: Option<ValidatedCatalog>,
 }
 
 impl ApplicationTransactions {
@@ -375,6 +396,7 @@ impl ApplicationTransactions {
         Self {
             store,
             sessions: BTreeMap::new(),
+            validated_catalog: None,
         }
     }
 
@@ -488,13 +510,26 @@ impl ApplicationTransactions {
             .get(&schema_key())
             .await?
             .ok_or_else(|| invalid("application schema is not initialized"))?;
-        let catalog = decode_catalog(&bytes)?;
-        read_generation_identity(&mut transaction, &catalog, &bytes).await?;
+        // Bind the cache to the exact catalog bytes visible to this snapshot.
+        // The engine record is read from the transaction even on a cache hit.
+        let cached = match &mut self.validated_catalog {
+            Some(cached) if cached.bytes == bytes => cached,
+            slot => {
+                let catalog = Arc::new(decode_catalog(&bytes)?);
+                let identity = generation_identity(&catalog, &bytes);
+                slot.insert(ValidatedCatalog {
+                    bytes,
+                    catalog,
+                    identity,
+                })
+            }
+        };
+        verify_generation_identity(&mut transaction, &cached.catalog, &cached.identity).await?;
         self.sessions.insert(
             transaction_id.into(),
             Session {
                 transaction,
-                catalog,
+                catalog: Arc::clone(&cached.catalog),
                 touched: Instant::now(),
                 savepoints: Vec::new(),
                 savepoint_bytes: 0,
