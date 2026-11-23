@@ -338,6 +338,32 @@ function launchInput(input: {
   };
 }
 
+it.effect("commits root workspace metadata with the prepared run release", () => {
+  let reads = 0;
+  const harness = makeHarness({
+    git: { currentBranch: () => Effect.sync(() => ++reads === 1 ? "before" : "current") },
+  });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const launched = yield* launches.launch(launchInput({
+      command: "root-launch",
+      thread: "root-launch-thread",
+      message: "Finish the root workspace task",
+    }));
+    const projection = yield* preparationSettled(launched.threadId);
+    assert.equal(projection.runs[0]?.status, "starting");
+    assert.equal(projection.thread.branch, "current");
+    const events = yield* threads.streamStoredEventsFrom({ threadId: launched.threadId }).pipe(
+      Stream.takeUntil((stored) => stored.commandId === "root-launch:release" &&
+        stored.event.type === "run.updated"),
+      Stream.runCollect,
+    );
+    assert.deepEqual(events.filter((stored) => stored.event.type === "thread.metadata-updated")
+      .map((stored) => stored.commandId), ["root-launch:release"]);
+  }).pipe(Effect.provide(harness.layer));
+});
+
 it.effect.each(
   (["new", "existing"] as const).flatMap((target) =>
     (["user", "agent"] as const).map((createdBy) => ({ target, createdBy })),

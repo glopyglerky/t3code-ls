@@ -649,8 +649,10 @@ const make = Effect.gen(function* () {
         yield* setupTracker.stageStatus(threadId, "checkout", "done");
       }
 
-      // Do not rewrite reused worktrees; that could undo the original branch rename.
-      if (reused === undefined) {
+      const releaseRootWithMetadata =
+        reused === undefined && input.workspaceStrategy.type === "root" && runId !== null;
+      // Reused worktrees keep the original branch rename. Root runs publish metadata with release.
+      if (reused === undefined && !releaseRootWithMetadata) {
         yield* threads
           .dispatch({
             type: "thread.metadata.update",
@@ -851,6 +853,7 @@ const make = Effect.gen(function* () {
             commandId: CommandId.make(`${input.commandId}:release`),
             threadId,
             runId,
+            ...(releaseRootWithMetadata ? { rootBranch: branch } : {}),
           })
           .pipe(
             Effect.mapError(mapError(input, "release-run", threadId)),

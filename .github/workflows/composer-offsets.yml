@@ -70,6 +70,13 @@ jobs:
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
           node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+      - name: Verify root workspace release and pull request refresh
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t16-root-release-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 \
+            src/orchestration-v2/ThreadLaunchService.test.ts src/orchestration-v2/ThreadPullRequestService.test.ts
       - name: Exercise local pairing in the retained and Dioxus browser builds
         if: env.PAIRING_PROOF == 'true'
         env:
