@@ -6,6 +6,7 @@ on:
       - "candidate/t3code-ls-t01-offsets-*"
       - "candidate/t3code-ls-t01-built-composer-*"
       - "candidate/t3code-ls-t02-bundled-native-*"
+      - "candidate/t3code-ls-t06-file-revisions-*"
 
 permissions:
   contents: read
@@ -24,7 +25,7 @@ jobs:
       VP_REMOTE_CACHE_URL: ""
       WASM_BINDGEN_VERSION: "0.2.130"
       WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
-      BUNDLED_NATIVE: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-') }}
+      BUNDLED_NATIVE: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-') || startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -70,6 +71,7 @@ jobs:
         if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
         env:
           T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
+          T3_CODE_LS_FILE_EDITOR_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
           VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
         run: |
           proof="$RUNNER_TEMP/built-composer-proof"

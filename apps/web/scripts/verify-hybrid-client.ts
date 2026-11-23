@@ -5,6 +5,7 @@
 import * as Assert from "node:assert/strict";
 import * as ChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
+import { EventEmitter, once } from "node:events";
 import * as NodeFS from "node:fs";
 import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
@@ -43,6 +44,9 @@ const startupTimeoutMs = 180_000;
 const replayPrompt = "Replay: showcase";
 const replayMarker = "This turn is a replay.";
 const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
+const fileEditorProof = process.env.T3_CODE_LS_FILE_EDITOR_PROOF === "true";
+const tasksFile = "fixture-tasks.md";
+const initialTasks = "- [ ] First milestone\n- [ ] Second milestone\n- [ ] Keep the draft\n";
 const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
 const capturedApproval = {
   path: "apps/server/src/orchestration-v2/testkit/fixtures/tool_call_read_only_on_request/registry_transcript.ndjson",
@@ -600,6 +604,62 @@ async function cancelCapturedQuestion(page: Page) {
   return { ...identity, threadId, requestId, source: capturedQuestion.path, sha256 };
 }
 
+type FileWriteReceipt = {
+  readonly expectedRevision: unknown;
+  readonly status: unknown;
+  readonly revision: unknown;
+};
+
+async function verifyFileEditor(page: Page, workspace: string, writes: EventEmitter) {
+  const onDisk = NodePath.join(workspace, tasksFile);
+  const revision = (contents: string) =>
+    NodeCrypto.createHash("sha256").update(contents).digest("hex");
+  const checkboxes = page.locator(".task-list-item").getByRole("checkbox");
+  await page.keyboard.press("Control+p");
+  await page.getByPlaceholder("Search files…").fill(tasksFile);
+  await page.getByRole("option", { name: /fixture-tasks\.md/u }).click();
+  const rendered = page.getByRole("button", { name: "Show rendered markdown", exact: true });
+  await checkboxes.first().or(rendered).first().waitFor({ state: "visible" });
+  if (await rendered.isVisible()) await rendered.click();
+
+  const save = async (
+    index: number,
+    beforeWrite?: () => void,
+  ): Promise<FileWriteReceipt> => {
+    const signal = AbortSignal.timeout(15_000);
+    const receipt = once(writes, "result", { signal });
+    try {
+      await checkboxes.nth(index).check({ timeout: 10_000 });
+      beforeWrite?.();
+    } catch (error) {
+      void receipt.catch(() => {});
+      throw error;
+    }
+    const [result] = await receipt;
+    return result as FileWriteReceipt;
+  };
+  const first = initialTasks.replace("- [ ] First", "- [x] First");
+  const second = first.replace("- [ ] Second", "- [x] Second");
+  for (const [index, base, saved] of [[0, initialTasks, first], [1, first, second]] as const) {
+    Assert.deepEqual(await save(index), {
+      status: "Success",
+      expectedRevision: revision(base),
+      revision: revision(saved),
+    });
+    Assert.equal(NodeFS.readFileSync(onDisk, "utf8"), saved);
+    Assert.ok(await checkboxes.nth(index).isChecked(), "The saved checkbox must stay checked");
+  }
+
+  const external = second + "\nAn external writer changed this file.\n";
+  const conflict = await save(2, () => NodeFS.writeFileSync(onDisk, external));
+  Assert.equal(conflict.status, "Failure");
+  Assert.equal(conflict.expectedRevision, revision(second));
+  await page.getByText("File changed on disk", { exact: true }).waitFor({ state: "visible" });
+  Assert.equal(NodeFS.readFileSync(onDisk, "utf8"), external);
+  Assert.ok(await checkboxes.nth(2).isChecked(), "The visible unsaved edit must remain after refusal");
+  return { path: tasksFile, confirmedEdits: 2, externalChangePreserved: true, draftPreserved: true };
+}
+
 async function exercise(implementation: Implementation): Promise<void> {
   const directory = NodePath.join(proofRoot, implementation);
   NodeFS.mkdirSync(directory, { recursive: true });
@@ -631,8 +691,9 @@ async function exercise(implementation: Implementation): Promise<void> {
     NodePath.join(workspace, "src", "math.ts"),
     "export const sum = (a: number, b: number) => a + b;\n",
   );
+  if (fileEditorProof) NodeFS.writeFileSync(NodePath.join(workspace, tasksFile), initialTasks);
   git(["init", "--initial-branch=main"], workspace);
-  git(["add", "package.json", "src/math.ts"], workspace);
+  git(["add", "package.json", "src/math.ts", ...(fileEditorProof ? [tasksFile] : [])], workspace);
   git(
     [
       "-c",
@@ -680,6 +741,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     capturedApproval: null as Awaited<ReturnType<typeof acceptCapturedApproval>> | null,
     cancelledQuestion: null as Awaited<ReturnType<typeof cancelCapturedQuestion>> | null,
     historyFind: null as { query: string; count: string; draftPreserved: boolean } | null,
+    fileEditor: null as Awaited<ReturnType<typeof verifyFileEditor>> | null,
     completedSnapshots: [] as Array<
       Awaited<ReturnType<typeof assertCompleted>> & { checkpoint: string }
     >,
@@ -721,6 +783,7 @@ async function exercise(implementation: Implementation): Promise<void> {
   let context = await browser!.newContext(contextOptions);
   let page = await context.newPage();
   let threadFindRequests = 0;
+  const fileWrites = new EventEmitter();
   function observePage(current: Page): void {
     current.setDefaultTimeout(timeoutMs);
     current.setDefaultNavigationTimeout(timeoutMs);
@@ -730,13 +793,32 @@ async function exercise(implementation: Implementation): Promise<void> {
     current.on("console", (message) => {
       if (message.type() === "error") proof.browserErrors.push(redact(message.text()));
     });
-    current.on("websocket", (socket) =>
+    current.on("websocket", (socket) => {
+      const pending = new Map<string, unknown>();
       socket.on("framesent", ({ payload }) => {
-        if (payload.toString().includes('"orchestration.searchThreadStream"')) {
-          threadFindRequests += 1;
+        const json = payload.toString();
+        if (json.includes('"orchestration.searchThreadStream"')) threadFindRequests += 1;
+        if (!fileEditorProof || !json.includes('"projects.writeFile"')) return;
+        const request = JSON.parse(json);
+        if (request.payload?.relativePath === tasksFile) {
+          pending.set(String(request.id), request.payload.expectedRevision);
         }
-      }),
-    );
+      });
+      if (!fileEditorProof) return;
+      socket.on("framereceived", ({ payload }) => {
+        const json = payload.toString();
+        if (pending.size === 0 || !json.includes('"Exit"')) return;
+        const response = JSON.parse(json);
+        const requestId = String(response.requestId);
+        if (response._tag !== "Exit" || !pending.has(requestId)) return;
+        fileWrites.emit("result", {
+          expectedRevision: pending.get(requestId),
+          status: response.exit?._tag,
+          revision: response.exit?.value?.revision,
+        } satisfies FileWriteReceipt);
+        pending.delete(requestId);
+      });
+    });
   }
   observePage(page);
 
@@ -884,6 +966,11 @@ async function exercise(implementation: Implementation): Promise<void> {
       starting("recorded ACP question cancellation");
       proof.cancelledQuestion = await cancelCapturedQuestion(page);
       completed("Cancelled the recorded question in the composer and recovered its cancelled request");
+    }
+    if (fileEditorProof) {
+      starting("versioned workspace file edits and conflict");
+      proof.fileEditor = await verifyFileEditor(page, workspace, fileWrites);
+      completed("Saved two workspace edits and retained the next draft after an external change");
     }
     if (implementation === "native") {
       Assert.equal(proof.persistence.length, 4);
