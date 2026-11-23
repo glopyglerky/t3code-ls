@@ -101,9 +101,11 @@ try {
     await server.ready;
     return server;
   };
+  report.phase = "boot";
   const first = await start("initial");
   const client = await authenticatePackagedServer(first, abort.signal);
   await client.createProject({ projectId, title: "Synthetic Claude refusal", workspaceRoot: workspace });
+  report.phase = "launch";
   const { threadId } = await client.rpc((rpc) => rpc[ORCHESTRATION_V2_WS_METHODS.launchThread]({
     commandId: CommandId.make(Crypto.randomUUID()), projectId, title: "Synthetic Claude refusal", generateTitle: false,
     modelSelection: { instanceId, model: "claude-sonnet-4-6" }, runtimeMode: "approval-required",
@@ -113,9 +115,11 @@ try {
   const empty = await read(client);
   Assert.equal(empty.messages.length, 0);
   Assert.equal(empty.runs.length, 0);
+  report.phase = "dispatch";
   // Exactly one dispatch. A timeout/error never retries this operation.
   await client.rpc((rpc) => rpc[ORCHESTRATION_V2_WS_METHODS.dispatchCommand]({ type: "message.dispatch", commandId,
-    threadId, messageId, text, attachments: [], createdBy: "user", creationSource: "web" }));
+    threadId, messageId, text, attachments: [], createdBy: "user", creationSource: "web",
+    dispatchMode: { type: "start_immediately" } }));
   let settled = await read(client);
   const deadline = AbortSignal.any([abort.signal, AbortSignal.timeout(45_000)]);
   while (!settled.runs.some((run) => run.status === "failed")) {
@@ -130,6 +134,7 @@ try {
   Assert.equal(settled.messages.filter((message) => message.role === "assistant" && message.text.length > 0).length, 0);
   // The runner witness proves selection reached the controlled open.
   // A failed earlier account/binary check cannot satisfy this gate.
+  report.phase = "runner-refusal";
   const witnessFile = Path.join(workspace, "claude-stdio-options-refused.json");
   const witness = JSON.parse(FS.readFileSync(witnessFile, "utf8"));
   Assert.equal(witness.version, 1);
@@ -162,12 +167,14 @@ try {
     Assert.equal(replies[1].result.next, null);
     return replies[1].result.rows as RowPage["rows"];
   };
+  report.phase = "native-events";
   const before = snapshot();
   const events = before.filter(({ row }) => cellValue(row.stream_id) === threadId)
     .map(({ row }) => ({ type: cellValue(row.event_type), payload: JSON.parse(String(cellValue(row.payload_json))) }));
   const terminals = events.filter((event) => event.type === "run.updated" && event.payload.id === settled.runs[0]?.id && event.payload.status === "failed");
   Assert.equal(terminals.length, 1);
   Assert.ok(events.some((event) => event.type === "message.updated" && event.payload.id === messageId && event.payload.text === text));
+  report.phase = "reopen";
   const reopened = await start("reopened");
   Assert.notEqual(first.pid, reopened.pid);
   const reopenedClient = await authenticatePackagedServer(reopened, abort.signal);
@@ -191,6 +198,7 @@ try {
     dispatchCount: 1, failedTerminalEvents: 1, assistantMessages: 0, nativeStore: "omdb", reopened: true,
     helperManifestVerified: true, controlledOpenRefusedMcpOptions: !noMcp,
     controlledNoMcpRefusedUnrelatedModel: noMcp, helperOrProviderExecuted: false };
+  report.phase = "complete";
   report.status = "passed";
 } catch (error) {
   failure = error;
