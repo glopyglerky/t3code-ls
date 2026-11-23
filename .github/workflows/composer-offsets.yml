@@ -119,7 +119,7 @@ jobs:
           node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/launch-receipt-tsconfig.json
       - name: Type check the full server with the pinned Rust checker
         id: server-types
-        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t16-root-release-server-types-')
+        if: env.INTEGRATED_NATIVE == 'true' || env.DIOXUS_TIMELINE_PROOF == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t16-root-release-server-types-')
         run: node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit --pretty false -p apps/server/tsconfig.json
       - name: Compare a typecheck failure with the pinned Go checker and Effect diagnostics
         if: failure() && steps.server-types.outcome == 'failure'
@@ -354,6 +354,8 @@ jobs:
           fi
           if [[ "$DIOXUS_TIMELINE_PROOF" == true ]]; then
             export VITE_T3_CODE_LS_ASSISTANT_TEXT_RENDERER=dioxus
+          fi
+          if [[ "$DIOXUS_TIMELINE_PROOF" == true || "$DIOXUS_COMPOSITION_PROOF" == true || "$INTEGRATED_NATIVE" == true ]]; then
             # packages/client-runtime/src/state/threadDetail.test.ts
             pnpm --dir packages/client-runtime exec vp test run src/state/threadDetail.test.ts
             # apps/web/src/components/chat/DioxusAssistantText.browser.test.tsx
