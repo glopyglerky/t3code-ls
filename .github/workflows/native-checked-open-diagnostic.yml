@@ -18,9 +18,10 @@ jobs:
       PROBE_TREE: c38176b1d15a863f4b4c3829b90fcc98b5b032c0
       OMDB_COMMIT: b2ff031398b1f0a793a352db7a699575b5d4d3d4
       OMDB_TREE: 8297dd226d54782c5940f6b95cef3c8f59e92281
-      OMDB_PHASE_COMMIT: 410df55de0e17959bd75104c90431718382aded5
-      OMDB_PHASE_TREE: 2028c97c9301f4164a5bb812bdc404f9c3245e8d
-      ENGINE_PHASE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-phases-') }}
+      OMDB_PHASE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-') && 'd29d60de9c8fb61331affc7f790c643ac2d32c05' || '410df55de0e17959bd75104c90431718382aded5' }}
+      OMDB_PHASE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-') && 'e5981a1ec8958420e6061db4390b5f41e87986bb' || '2028c97c9301f4164a5bb812bdc404f9c3245e8d' }}
+      ENGINE_PHASE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-') }}
+      ENGINE_REUSE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-') }}
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
       WASM_BINDGEN_VERSION: "0.2.130"
       WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
@@ -65,10 +66,14 @@ jobs:
           sha256sum tools/diagnostics/t16-* > "$evidence/diagnostic-source.sha256"
           if [[ "$ENGINE_PHASE_PROOF" == true ]]; then
             touch "$scratch/bin/engine-phases"
-            python3 - "$scratch/native" "$OMDB_COMMIT" "$OMDB_PHASE_COMMIT" <<'PY'
+            python3 - "$scratch/native" "$OMDB_COMMIT" "$OMDB_PHASE_COMMIT" "$ENGINE_REUSE_PROOF" <<'PY'
+          import json
           import pathlib
           import sys
           root, old, new = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+          features = ["checked_open_diagnostics"]
+          if sys.argv[4] == "true":
+              features.append("checked_open_reuse_verified_pages")
           for relative in ("Cargo.lock", "database.lock.json", "crates/storage/Cargo.toml",
                            "apps/server/src/persistence/redb_transactions.rs"):
               path = root / relative
@@ -80,7 +85,7 @@ jobs:
                   tail = f'rev = "{new}" }}'
                   if text.count(tail) != 1:
                       raise SystemExit("expected one matching backend dependency")
-                  text = text.replace(tail, f'rev = "{new}", features = ["checked_open_diagnostics"] }}')
+                  text = text.replace(tail, f'rev = "{new}", features = {json.dumps(features)} }}')
               path.write_text(text)
           PY
             git -C "$scratch/native" diff --check
@@ -224,14 +229,14 @@ jobs:
           jq -e '.journey == "J02" and .profile == "native" and .snapshot.valid and
             .snapshot.threadCount == 32 and .snapshot.messageCount == 200 and .fixture.total_messages == 6400 and
             .database_migration > 0 and .saved_thread_sequence > 0' "$evidence/engine-reopen.json"
-          awk '
+          awk -v reuse="$ENGINE_REUSE_PROOF" '
             BEGIN { print "phase\tbackend_reads\tbackend_read_errors\tbackend_bytes" }
             /^redb_checked_open / {
               if (NF != 5 || $2 !~ /^phase=(Preparation|VerifyCurrentRoots|VerifyAlternateRoots|RebuildDataAllocator|RebuildSystemAllocator|MarkPinnedPages|RepairCommit|RestoreSavepoints|RecordAllocator)$/ ||
                   $3 !~ /^backend_reads=[0-9]+$/ || $4 !~ /^backend_read_errors=0$/ || $5 !~ /^backend_bytes=[0-9]+$/) exit 1
               split($2, phase, "="); split($3, reads, "="); split($4, failures, "="); split($5, bytes, "=")
               if (seen[phase[2]]++) exit 1
-              if (phase[2] == "VerifyCurrentRoots" || phase[2] == "RebuildDataAllocator") {
+              if (phase[2] == "VerifyCurrentRoots" || (reuse != "true" && phase[2] == "RebuildDataAllocator")) {
                 if (reads[2] + 0 == 0 || bytes[2] + 0 == 0) exit 1
               }
               print phase[2] "\t" reads[2] "\t" failures[2] "\t" bytes[2]
@@ -241,6 +246,16 @@ jobs:
                   !seen["RebuildSystemAllocator"] || !seen["RepairCommit"] || !seen["RecordAllocator"]) exit 1
             }
           ' "$trial/checked-open-phases.log" > "$evidence/engine-phases.tsv"
+          if [[ "$ENGINE_REUSE_PROOF" == true ]]; then
+            awk -F '\t' '
+              $1 == "VerifyCurrentRoots" { verify_reads = $2; verify_bytes = $4 }
+              $1 == "RebuildDataAllocator" { rebuilt_reads = $2; rebuilt_bytes = $4 }
+              END {
+                if (verify_reads == 0 || verify_bytes == 0 ||
+                    rebuilt_reads * 4 >= verify_reads || rebuilt_bytes * 4 >= verify_bytes) exit 1
+              }
+            ' "$evidence/engine-phases.tsv"
+          fi
       - name: Remove task-owned generated files and record available space
         if: always() && env.DIAGNOSTIC_WORK != ''
         shell: bash
