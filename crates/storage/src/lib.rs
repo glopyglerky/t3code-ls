@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod backend;
+#[cfg(all(test, feature = "ordered-engine-fixture"))]
+mod ordered_engine_fixture;
 
 #[path = "../../../apps/server/src/persistence/redb_transactions.rs"]
 pub mod application;

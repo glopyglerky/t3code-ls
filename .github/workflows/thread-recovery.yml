@@ -5,6 +5,7 @@ on:
     branches:
       - "candidate/t3code-ls-t03-text-revision-*"
       - "candidate/t3code-ls-t04-inherited-history-*"
+      - "candidate/t3code-ls-t04-ordered-application-*"
       - "candidate/t3code-ls-t03-layout-*"
       - "candidate/t3code-ls-t05-helper-contract-*"
       - "candidate/t3code-ls-t12-outbox-identity-*"
@@ -25,6 +26,7 @@ jobs:
   thread-recovery:
     if: >-
       !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-') &&
+      !startsWith(github.ref_name, 'candidate/t3code-ls-t04-ordered-application-') &&
       !startsWith(github.ref_name, 'candidate/t3code-ls-acceptance-types-') &&
       !startsWith(github.ref_name, 'candidate/t3code-ls-t15-maintenance-snapshot-') &&
       !startsWith(github.ref_name, 'candidate/t3code-ls-t16-migration-witness-')
@@ -586,6 +588,54 @@ jobs:
           name: native-migration-witness
           path: ${{ runner.temp }}/migration-proof/
           if-no-files-found: warn
+          retention-days: 14
+
+  ordered-application:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-ordered-application-')
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 25
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install the pinned Linux storage compiler
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/ordered-application-toolchain"
+      - name: Reopen and decode a fresh application generation on both engines
+        shell: bash
+        run: |
+          set -euo pipefail
+          proof="$RUNNER_TEMP/ordered-application-proof"
+          scratch="$(mktemp -d "$RUNNER_TEMP/ordered-application.XXXXXX")"
+          trap 'rm -rf -- "$scratch"' EXIT
+          mkdir "$proof" "$scratch/fixtures"
+          export CARGO_HOME="$scratch/cargo" CARGO_TARGET_DIR="$scratch/target" TMPDIR="$scratch/fixtures"
+          git rev-parse HEAD HEAD^{tree} > "$proof/source.txt"
+          sha256sum Cargo.lock database.lock.json toolchain.lock.json > "$proof/inputs.sha256"
+          cp "$RUNNER_TEMP/ordered-application-toolchain/installation-proof.json" "$proof/"
+          lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked --release \
+            -p t3-code-ls-storage --features ordered-engine-fixture --lib \
+            ordered_engine_fixture::ordered_engines_preserve_a_fresh_application_generation \
+            -- --exact --test-threads=1 2>&1 | tee "$proof/ordered-application.log"
+          grep -F 'ordered_engine_fixture::ordered_engines_preserve_a_fresh_application_generation ... ok' \
+            "$proof/ordered-application.log"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked --release \
+            -p t3-code-ls-storage --lib application_events::tests \
+            -- --test-threads=1 2>&1 | tee "$proof/default-events.log"
+          grep -Eq 'test result: ok[.] [1-9][0-9]* passed;' "$proof/default-events.log"
+      - name: Retain source, lock and storage test receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ordered-application-proof
+          path: ${{ runner.temp }}/ordered-application-proof/
+          if-no-files-found: error
           retention-days: 14
 
   server-acceptance-types:
