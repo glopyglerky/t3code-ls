@@ -27,7 +27,6 @@ import { createQuestionHistoryProjector } from "@t3tools/client-runtime/state/th
 import { ArrowUpIcon, PaperclipIcon, XIcon } from "lucide-react";
 import {
   useEffect,
-  useEffectEvent,
   useReducer,
   useRef,
   useState,
@@ -240,6 +239,7 @@ export function GuestPage() {
         <Notice title="Connecting..." />
       ) : access === "name" && credential !== null ? (
         <NameForm
+          key={credential}
           credential={credential}
           onJoined={() => {
             // The invite is spent; a remount must open the session, not the name form again.
@@ -363,7 +363,6 @@ export function NameForm({
   const [standard, setStandard] = useState(false);
   const pending = useRef(false);
   const generation = useRef(0);
-  const joined = useEffectEvent(onJoined);
   useEffect(() => {
     generation.current++;
     return () => { generation.current++; };
@@ -379,7 +378,7 @@ export function NameForm({
     if (generation.current !== current) return;
     pending.current = false;
     setSubmitting(false);
-    if (failure === null) joined();
+    if (failure === null) onJoined();
     else setError(failure);
   };
   const submit = (event: FormEvent) => { event.preventDefault(); void submitName(name); };
