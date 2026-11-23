@@ -94,9 +94,21 @@ fn explicit_environment_and_drop_kill_and_reap_the_owned_group() {
         .unwrap();
     drop(owner);
     assert!(!Path::new(&format!("/proc/{pid}")).exists());
-    if let Ok(stat) = std::fs::read_to_string(format!("/proc/{descendant}/stat")) {
-        // A killed orphan may await init's reap, but it must no longer execute.
-        assert_eq!(stat.split_once(") ").unwrap().1.as_bytes()[0], b'Z');
+    let descendant_stat = format!("/proc/{descendant}/stat");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match std::fs::read_to_string(&descendant_stat) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => panic!("Could not inspect the fixture descendant: {error}"),
+            Ok(stat) if stat.rsplit_once(") ").unwrap().1.starts_with(['Z', 'X']) => break,
+            Ok(_) => {}
+        }
+        // The direct child has been reaped. The orphan may still be processing SIGKILL.
+        assert!(
+            Instant::now() < deadline,
+            "The fixture descendant survived group termination"
+        );
+        thread::sleep(Duration::from_millis(2));
     }
 }
 
