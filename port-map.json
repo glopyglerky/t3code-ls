@@ -2027,7 +2027,8 @@
       ],
       "rust_paths": [
         "packages/provider-cursor/rust/src/lib.rs",
-        "packages/provider-cursor/rust/host/src/lib.rs"
+        "packages/provider-cursor/rust/host/src/lib.rs",
+        "packages/provider-cursor/rust/host/src/main.rs"
       ],
       "adapter_paths": [],
       "platform_routes": [
@@ -2041,7 +2042,8 @@
       ],
       "acceptance_tests": [
         "packages/provider-cursor/rust/tests/send_stream.rs",
-        "packages/provider-cursor/rust/host/tests/loopback.rs"
+        "packages/provider-cursor/rust/host/tests/loopback.rs",
+        "packages/provider-cursor/src/server/CursorBridge.integration.test.ts"
       ],
       "retired_paths": [],
       "notes": "T01 Cursor Send stream candidate using the public sdk.v1 protocol at cursor/sdk-bridge 6c9101088c18fab95c73d2dd68ca11d6fbf7d483. The portable component covers uncompressed Connect JSON framing and terminal outcomes. A separate host client exercises CreateAgent, Send, and CloseAgent with a loopback peer. The production Cursor adapter still needs integration. The vendor bridge embeds the vendor SDK.",
