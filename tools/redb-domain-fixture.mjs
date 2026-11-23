@@ -5,6 +5,7 @@ import * as FS from "node:fs/promises";
 import * as Module from "node:module";
 import * as Path from "node:path";
 import { pathToFileURL } from "node:url";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
@@ -80,7 +81,12 @@ export async function withNative(executable, fixture, use, wrap = (database) => 
       return yield* use(client, database).pipe(
         Effect.provideService(RedbClient.RedbClient, client),
       );
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.provide(Logger.layer([]))),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(NodeCrypto.layer),
+      Effect.provide(NodeServices.layer),
+      Effect.provide(Logger.layer([])),
+    ),
   );
 }
 
