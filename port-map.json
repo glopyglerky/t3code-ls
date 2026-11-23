@@ -2062,6 +2062,7 @@
       "rust_paths": ["apps/web/rust/pairing/src/approval_action.rs"],
       "adapter_paths": [
         ".github/workflows/composer-offsets.yml",
+        "apps/web/scripts/hybrid-client-approval-action.ts",
         "apps/web/src/components/chat/ComposerPendingApprovalActions.tsx",
         "apps/web/src/components/chat/DioxusApprovalAction.tsx",
         "apps/web/src/components/chat/TimelinePendingApprovalRow.tsx",
@@ -2077,11 +2078,9 @@
         }
       ],
       "acceptance_tests": [
-        "apps/web/scripts/hybrid-client-approval-action.ts",
         "apps/web/scripts/verify-hybrid-client.ts"
       ],
       "hosted_acceptance": {
-        "apps/web/scripts/hybrid-client-approval-action.ts": ".github/workflows/composer-offsets.yml",
         "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
       },
       "retired_paths": [],

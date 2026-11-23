@@ -308,6 +308,7 @@ jobs:
             sha256sum apps/web/dist/pairing-wasm/local_pairing.js \
               apps/web/dist/pairing-wasm/local_pairing_bg.wasm >> "$proof/application.sha256"
             if [[ "$DIOXUS_STOP_PROOF" == true ]]; then
+              # apps/web/src/components/chat/ComposerPrimaryActions.browser.test.tsx
               pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
                 src/components/chat/ComposerPrimaryActions.browser.test.tsx
             fi
