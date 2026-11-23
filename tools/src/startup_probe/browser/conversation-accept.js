@@ -28,6 +28,11 @@ function observe(socket, data) {
       state.error = "unexpected fixture launch identity";
       continue;
     }
+    const requestResponseMode = command.responseMode ?? null;
+    if (requestResponseMode !== null && requestResponseMode !== "receipt") {
+      state.error = "unexpected launch response mode";
+      continue;
+    }
     let pending = "";
     const listener = (event) => {
       const arrived = epoch();
@@ -56,19 +61,37 @@ function observe(socket, data) {
         const value = response.exit?.value;
         if (response.exit?._tag !== "Success" || value?.resumed !== false ||
             !Number.isSafeInteger(value?.sequence) || value.sequence <= 0 ||
-            value.threadId !== command.threadId || value.projection?.thread?.id !== command.threadId) {
+            value.threadId !== command.threadId) {
           state.error = "launch did not acknowledge a fresh committed message";
           return;
         }
-        const users = value.projection.messages.filter(message => message.role === "user");
-        if (users.length !== 1 || users[0].id !== command.initialMessage.messageId ||
-            users[0].text !== expectedPrompt) {
-          state.error = "launch projection does not match submitted message";
-          return;
+        const receipt = value.responseMode === "receipt";
+        if (receipt) {
+          if (requestResponseMode !== "receipt" ||
+              Object.keys(value).sort().join(",") !== "responseMode,resumed,sequence,threadId") {
+            state.error = "unexpected launch receipt shape or negotiation";
+            return;
+          }
+        } else {
+          if (value.responseMode !== undefined || value.projection?.thread?.id !== command.threadId ||
+              !Array.isArray(value.projection?.messages)) {
+            state.error = "unexpected launch projection shape";
+            return;
+          }
+          const users = value.projection.messages.filter(message => message.role === "user");
+          if (users.length !== 1 || users[0].id !== command.initialMessage.messageId ||
+              users[0].text !== expectedPrompt) {
+            state.error = "launch projection does not match submitted message";
+            return;
+          }
         }
         state.result = { commandId: command.commandId, requestId: String(frame.id),
           threadId: command.threadId, messageId: command.initialMessage.messageId,
-          sequence: value.sequence, ackEpochMillis: arrived };
+          sequence: value.sequence, ackEpochMillis: arrived,
+          requestResponseMode, responseKind: receipt ? "receipt" : "projection",
+          // UTF-8 JSON sizes of the matching decoded value and Exit, excluding frame/batch overhead.
+          ackValueBytes: new TextEncoder().encode(JSON.stringify(value)).byteLength,
+          ackExitBytes: new TextEncoder().encode(JSON.stringify(response)).byteLength };
       }
     };
     socket.addEventListener("message", listener);

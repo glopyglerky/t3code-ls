@@ -17,7 +17,7 @@ function observer() {
     removeEventListener(_,fn){this.listeners.delete(fn);}
     receive(frame){for(const fn of this.listeners) fn({data:typeof frame === 'string' ? frame : JSON.stringify(frame)});}
   }
-  const context={WebSocket:Socket,window:{},performance:{timeOrigin:1000,now:()=>10}};
+  const context={TextEncoder,WebSocket:Socket,window:{},performance:{timeOrigin:1000,now:()=>10}};
   vm.runInNewContext('(function(){'+accept+'}).apply(null, '+JSON.stringify([prompt])+')',context);
   return {socket:new Socket(),state:context.window.fixtureConversationAccept,Socket};
 }
@@ -86,7 +86,7 @@ function diagnosticObserver(enabled=true) {
   receive(data){for(const fn of this.listeners) fn({data:typeof data==='string'?data:JSON.stringify(data)});}
  }
  let now=10;
- const context={WebSocket:Socket,window:{},performance:{timeOrigin:1000,now:()=>now}};
+ const context={TextEncoder,WebSocket:Socket,window:{},performance:{timeOrigin:1000,now:()=>now}};
  vm.runInNewContext('(function(){'+accept+'}).apply(null, '+JSON.stringify([prompt,enabled])+')',context);
  return {socket:new Socket(),state:context.window.fixtureConversationAccept,tick:()=>now+=10};
 }
@@ -113,6 +113,58 @@ okCase('diagnostic recognizes a same-thread uncompressed snapshot',()=>{
  const {socket,state}=diagnosticObserver();socket.send(JSON.stringify(request));
  socket.receive({_tag:'Chunk',values:[{kind:'snapshot',projection:{thread:{id:command.threadId},messages:[{role:'assistant',text:"I'll track the"}]}}]});
  assert.equal(state.attribution.firstTextWireEpochMillis,1010);
+});
+
+const receiptRequest = {...request,payload:{...command,responseMode:'receipt'}};
+const receiptSuccess = {...success,exit:{_tag:'Success',value:{responseMode:'receipt',threadId:command.threadId,resumed:false,sequence:7}}};
+okCase('records advertised mode and matching UTF-8 response sizes',()=>{
+ for (const [req,reply,kind] of [[receiptRequest,receiptSuccess,'receipt'],[receiptRequest,success,'projection'],[request,success,'projection']]) {
+  const {socket,state}=observer();const sent=JSON.stringify(req);socket.send(sent);
+  socket.receive({...reply,requestId:'unrelated'});assert.equal(state.result,null);
+  const text=JSON.stringify([reply]);socket.receive('\u001e'+text.slice(0,25));socket.receive(text.slice(25));
+  assert.equal(state.error,null);assert.equal(state.result.responseKind,kind);
+  assert.equal(state.result.requestResponseMode,req.payload.responseMode??null);
+  assert.equal(state.result.ackValueBytes,Buffer.byteLength(JSON.stringify(reply.exit.value)));
+  assert.equal(state.result.ackExitBytes,Buffer.byteLength(JSON.stringify(reply)));
+  assert.equal(socket.sent[0],sent);assert.equal(socket.sent.length,1);
+ }
+});
+for (const [name,mutate] of [
+ ['receipt zero sequence',x=>x.exit.value.sequence=0],
+ ['receipt missing sequence',x=>delete x.exit.value.sequence],
+ ['receipt unsafe sequence',x=>x.exit.value.sequence=Number.MAX_SAFE_INTEGER+1],
+ ['receipt resumed',x=>x.exit.value.resumed=true],
+ ['receipt wrong thread',x=>x.exit.value.threadId='other'],
+ ['receipt with projection',x=>x.exit.value.projection=success.exit.value.projection],
+ ['receipt extra field',x=>x.exit.value.unexpected=true],
+ ['receipt missing discriminator',x=>delete x.exit.value.responseMode],
+ ['receipt unknown discriminator',x=>x.exit.value.responseMode='future'],
+ ['receipt failure',x=>x.exit._tag='Failure'],
+]) okCase('rejects '+name,()=>{
+ const {socket,state}=observer();socket.send(JSON.stringify(receiptRequest));
+ const reply=clone(receiptSuccess);mutate(reply);socket.receive(reply);
+ assert.ok(state.error);assert.equal(state.result,null);
+});
+okCase('rejects unadvertised receipt',()=>{
+ const {socket,state}=observer();socket.send(JSON.stringify(request));socket.receive(receiptSuccess);
+ assert.ok(state.error);assert.equal(state.result,null);
+});
+okCase('rejects malformed legacy sibling after receipt advertisement',()=>{
+ for (const mutate of [x=>delete x.exit.value.projection.messages,x=>x.exit.value.projection.thread.id='other',x=>x.exit.value.projection.messages[0].id='other']) {
+  const {socket,state}=observer();socket.send(JSON.stringify(receiptRequest));
+  const reply=clone(success);mutate(reply);socket.receive(reply);
+  assert.ok(state.error);assert.equal(state.result,null);
+ }
+});
+okCase('rejects duplicate receipt exit',()=>{
+ const {socket,state}=observer();socket.send(JSON.stringify(receiptRequest));socket.receive(receiptSuccess);socket.receive(receiptSuccess);
+ assert.equal(state.error,'duplicate launch exit');
+});
+okCase('counts UTF-8 bytes rather than UTF-16 code units',()=>{
+ const {socket,state}=observer();socket.send(JSON.stringify(request));
+ const reply=clone(success);reply.exit.value.projection.extra='雪';socket.receive(reply);
+ assert.equal(state.result.ackValueBytes,Buffer.byteLength(JSON.stringify(reply.exit.value)));
+ assert.ok(state.result.ackValueBytes>JSON.stringify(reply.exit.value).length);
 });
 
 console.log(`Passed ${checks} synthetic checks; no browser, provider, network or installed profile used.`);

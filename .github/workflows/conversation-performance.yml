@@ -16,12 +16,13 @@ jobs:
       STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
       COMPOSED_J06: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') }}
       LAUNCH_RECEIPT_COMPARISON: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') }}
-      CANDIDATE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && '951537f189353748fa6bdb3f936fd716b9c86d18' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') && 'd3217d6c0176faad753f8ce2525cc2552fe502d7' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '7216183e0c013c7f5d7e9975d8aee7beda42b880' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '08eadccbff571219466f7bc35e982730295f15d8' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
-      CANDIDATE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && 'bf42c79d73bc46a39c6c41e71084bfd140fc7c7f' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') && '0bf400e6b6884ce602e9cb1cd094abe437e1c62f' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '675636c7feb22a55179fa726af94e5cfa49212b8' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '38ff3e9ac680e4defe3d06fcfb3e79d0b94b841c' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '78647c8e507b6b677fa6f1585839bd8bdc12bc55' || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
+      LIGHTWEIGHT_RESPONSE_COMPARISON: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-lightweight-response-') }}
+      CANDIDATE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-lightweight-response-') && '14671e4314fa982fed480e4636141bc11431bba2' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && '951537f189353748fa6bdb3f936fd716b9c86d18' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') && 'd3217d6c0176faad753f8ce2525cc2552fe502d7' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '7216183e0c013c7f5d7e9975d8aee7beda42b880' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '08eadccbff571219466f7bc35e982730295f15d8' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
+      CANDIDATE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-lightweight-response-') && 'aa4bd4013148d3d024c5f29338e99b79bfc337a1' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && 'bf42c79d73bc46a39c6c41e71084bfd140fc7c7f' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') && '0bf400e6b6884ce602e9cb1cd094abe437e1c62f' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '675636c7feb22a55179fa726af94e5cfa49212b8' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '38ff3e9ac680e4defe3d06fcfb3e79d0b94b841c' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '78647c8e507b6b677fa6f1585839bd8bdc12bc55' || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
       CATALOG_COMMIT: 2bb6ae9e57559bde6cff0feeddcff8ddf02de009
       CATALOG_TREE: 55e2c8aba6fc06642b06a8d60861c7bdaf3c67f9
-      ROOT_RELEASE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && '143ee1ffe940cf519b1d55bc988beaa441f82599' || 'a7ca741bd4c4d508fef316e164fb1ae897301965' }}
-      ROOT_RELEASE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && 'af6df769479d59648c84be59a5d9b651f257e108' || '3458897fed59a6a500ed14edecc0e17f0d41707b' }}
+      ROOT_RELEASE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-lightweight-response-') && 'c29e9d9ed8e975ea658e55f40e8316e8294c5a13' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && '143ee1ffe940cf519b1d55bc988beaa441f82599' || 'a7ca741bd4c4d508fef316e164fb1ae897301965' }}
+      ROOT_RELEASE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-lightweight-response-') && 'd28cf2166780c0ce6cd5bedda55b5b2e1972dd18' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && 'af6df769479d59648c84be59a5d9b651f257e108' || '3458897fed59a6a500ed14edecc0e17f0d41707b' }}
       WASM_BINDGEN_VERSION: "0.2.130"
       WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
       VP_REMOTE_CACHE: "off"
@@ -38,7 +39,7 @@ jobs:
       COMPARE_SINGLE_READS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') }}
       COMPARE_INDEPENDENT_READS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') }}
       COMPARE_INDEPENDENT_LOOKUPS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') }}
-      COMPARE_ROOT_RELEASE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') }}
+      COMPARE_ROOT_RELEASE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-lightweight-response-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -77,7 +78,30 @@ jobs:
             test "$(git -C candidate rev-parse 'FETCH_HEAD^{tree}')" = "$ROOT_RELEASE_TREE"
             git -C candidate worktree add --detach "$GITHUB_WORKSPACE/root-release" "$ROOT_RELEASE_COMMIT"
             git -C candidate diff --exit-code "$CANDIDATE_COMMIT" "$ROOT_RELEASE_COMMIT" -- \
-              Cargo.lock pnpm-lock.yaml toolchain.lock.json database.lock.json ':(glob)**/*.rs' ':(glob)**/Cargo.toml'
+              Cargo.lock pnpm-lock.yaml toolchain.lock.json database.lock.json ':(glob)**/*.rs' ':(glob)**/Cargo.toml' tools/build-native.mjs tools/native-artifacts.mjs tools/install-toolchain.mjs
+            if [[ "$LIGHTWEIGHT_RESPONSE_COMPARISON" == true ]]; then
+              test "$(git -C root-release rev-parse HEAD)" = "$ROOT_RELEASE_COMMIT"
+              git -C candidate diff --name-only "$ROOT_RELEASE_COMMIT" "$CANDIDATE_COMMIT" \
+                > "$RUNNER_TEMP/lightweight-response-source-diff"
+              cat <<'EXPECTED' | diff - "$RUNNER_TEMP/lightweight-response-source-diff"
+          .github/workflows/composer-offsets.yml
+          apps/server/scripts/verify-gpui-thread-submit.ts
+          apps/server/scripts/verify-packaged-guest-authorization.ts
+          apps/server/scripts/verify-scheduled-relay-recovery.ts
+          apps/server/src/mcp/linkOrigin.test.ts
+          apps/server/src/orchestration-v2/ThreadLaunchService.test.ts
+          apps/server/src/orchestration-v2/ThreadLaunchService.ts
+          apps/server/src/orchestration-v2/ThreadMessageIntake.ts
+          apps/server/src/ws.ts
+          apps/web/scripts/hybrid-client-database.ts
+          apps/web/scripts/verify-hybrid-client.ts
+          packages/client-runtime/src/operations/commands.test.ts
+          packages/client-runtime/src/operations/commands.ts
+          packages/contracts/src/orchestrationV2.test.ts
+          packages/contracts/src/orchestrationV2.ts
+          tools/launch-receipt-tsconfig.json
+          EXPECTED
+            fi
             if [[ "$LAUNCH_RECEIPT_COMPARISON" == true ]]; then
               test "$(git -C root-release rev-parse HEAD)" = "$ROOT_RELEASE_COMMIT"
               git -C candidate diff --name-only "$CANDIDATE_COMMIT" "$ROOT_RELEASE_COMMIT" \
@@ -146,7 +170,7 @@ jobs:
         working-directory: root-release
         run: |
           pnpm install --frozen-lockfile
-          if [[ "$LAUNCH_RECEIPT_COMPARISON" == true ]]; then
+          if [[ "$LAUNCH_RECEIPT_COMPARISON" == true || "$LIGHTWEIGHT_RESPONSE_COMPARISON" == true ]]; then
             cp -a ../candidate/apps/web/dist apps/web/dist
             diff -qr ../candidate/apps/web/dist apps/web/dist
           else
@@ -201,7 +225,7 @@ jobs:
             'candidate stock root-release' 'candidate root-release stock'
             'root-release stock candidate' 'root-release candidate stock'
           )
-          if [[ "$LAUNCH_RECEIPT_COMPARISON" == true ]]; then pairs="${#orders[@]}"; fi
+          if [[ "$LAUNCH_RECEIPT_COMPARISON" == true || "$LIGHTWEIGHT_RESPONSE_COMPARISON" == true ]]; then pairs="${#orders[@]}"; fi
           for profile in "${bundles[@]}"; do
             (
               cd "$profile"
@@ -221,9 +245,10 @@ jobs:
             --arg image "${ImageOS:-unknown}/${ImageVersion:-unknown}" --arg kernel "$(uname -r)" \
             --arg cpu "$(LC_ALL=C lscpu | sed -n 's/^Model name:[[:space:]]*//p')" --argjson trace "$TRACE_CONVERSATION" \
             --argjson composedJ06 "$COMPOSED_J06" \
+            --argjson lightweightResponseComparison "$LIGHTWEIGHT_RESPONSE_COMPARISON" \
             --argjson launchReceiptComparison "$LAUNCH_RECEIPT_COMPARISON" \
             --arg systemLoad "$(uptime)" --argjson cpus "$(nproc)" \
-            '{attribution:$attribution,composedJ06:$composedJ06,launchReceiptComparison:$launchReceiptComparison,acceptBoundary:(if $composedJ06 then "browser launch acknowledgement upper bound; observer overhead included" else null end),stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},catalog:(if $compareCatalog then {commit:$catalog,tree:$catalogTree,durability:"omdb Immediate"} else null end),rootRelease:(if $compareRootRelease then {commit:$rootRelease,tree:$rootReleaseTree,durability:"omdb Immediate"} else null end),singleProjectionReads:$compareSingleReads,independentReads:$compareIndependentReads,independentLookups:$compareIndependentLookups,forkSqliteControl:$trace,providerTrace:($trace or $attribution),probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
+            '{attribution:$attribution,composedJ06:$composedJ06,launchReceiptComparison:$launchReceiptComparison,lightweightResponseComparison:$lightweightResponseComparison,responseRoles:(if $lightweightResponseComparison then {candidate:"receipt",rootRelease:"legacy-projection",stock:"legacy-projection"} else null end),acceptBoundary:(if $composedJ06 then "browser launch acknowledgement upper bound; observer overhead included" else null end),stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},catalog:(if $compareCatalog then {commit:$catalog,tree:$catalogTree,durability:"omdb Immediate"} else null end),rootRelease:(if $compareRootRelease then {commit:$rootRelease,tree:$rootReleaseTree,durability:"omdb Immediate"} else null end),singleProjectionReads:$compareSingleReads,independentReads:$compareIndependentReads,independentLookups:$compareIndependentLookups,forkSqliteControl:$trace,providerTrace:($trace or $attribution),probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
             > "$evidence/inputs.json"
           printf 'pair\tposition\tprofile\tfirst_visible_ms\tterminal_ms\tmax_frame_gap_ms\n' > "$evidence/trials.tsv"
           if [[ "$COMPOSED_J06" == true ]]; then
@@ -238,7 +263,7 @@ jobs:
             if [[ "$COMPARE_INDEPENDENT_READS" == true ]]; then profiles+=(independent-reads); fi
             if [[ "$COMPARE_INDEPENDENT_LOOKUPS" == true ]]; then profiles+=(independent-lookups); fi
             if [[ "$COMPARE_ROOT_RELEASE" == true ]]; then profiles+=(root-release); fi
-            if [[ "$LAUNCH_RECEIPT_COMPARISON" == true ]]; then
+            if [[ "$LAUNCH_RECEIPT_COMPARISON" == true || "$LIGHTWEIGHT_RESPONSE_COMPARISON" == true ]]; then
               read -r -a profiles <<< "${orders[pair - 1]}"
             fi
             for ((position=0; position<${#profiles[@]}; position++)); do
@@ -266,6 +291,15 @@ jobs:
               ' _ "$(id -un)" "$probe" probe-conversation "$node_path" \
                 "$PWD/$bundle_profile/apps/server/dist/bin.mjs" "$RUNNER_TEMP/conversation-trial-$trial" \
                 "$driver" "$chrome" "$replay" "$mode" "${trace[@]}" | tee "$result" > /dev/null
+              if [[ "$LIGHTWEIGHT_RESPONSE_COMPARISON" == true ]]; then
+                jq -e --arg profile "$profile" '
+                  .browser.conversation.acceptance as $ack |
+                  $ack.requests == 1 and $ack.error == null and
+                  $ack.result.requestResponseMode == (if $profile == "stock" then null else "receipt" end) and
+                  $ack.result.responseKind == (if $profile == "candidate" then "receipt" else "projection" end) and
+                  $ack.result.ackValueBytes > 0 and $ack.result.ackExitBytes > $ack.result.ackValueBytes
+                ' "$result" > /dev/null
+              fi
               if [[ "$COMPOSED_J06" == true ]]; then
                 jq -er --argjson pair "$pair" --argjson position "$((position + 1))" --arg profile "$profile" '
                   select(.scoped_j06 and (.single_projection_reads | not) and (.independent_reads | not) and .accept_observer == "browser-websocket-launch-ack-upper-bound" and
