@@ -1,6 +1,6 @@
 import { startTransition, useEffect, useEffectEvent, useRef, useState } from "react";
 
-import { takePairingTokenFromUrl } from "../../environments/primary";
+import { peekPairingTokenFromUrl, stripPairingTokenFromUrl } from "../../environments/primary";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 
@@ -35,10 +35,12 @@ export function DioxusPairingForm({
   initialErrorMessage,
   submitCredential,
   onAuthenticated,
+  onUseStandardPairing,
 }: {
   initialErrorMessage: string;
   submitCredential: (credential: string) => Promise<string | null>;
   onAuthenticated: () => void;
+  onUseStandardPairing: () => void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<"loading" | "mounted" | "error">("loading");
@@ -54,15 +56,17 @@ export function DioxusPairingForm({
     void (pairingBindings ??= initializePairingBindings())
       .then((bindings) => {
         if (disposed) return;
+        const token = peekPairingTokenFromUrl() ?? "";
         mount = bindings.mount_pairing_form(
           root,
-          takePairingTokenFromUrl() ?? "",
+          token,
           readInitialError(),
           submitCredential,
           () => {
             if (!disposed) completePairing();
           },
         );
+        if (token) stripPairingTokenFromUrl();
         setStatus("mounted");
       })
       .catch(() => {
@@ -87,8 +91,8 @@ export function DioxusPairingForm({
           <Alert variant="error">
             <AlertDescription>Could not open the pairing form.</AlertDescription>
           </Alert>
-          <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
-            Reload app
+          <Button size="sm" onClick={onUseStandardPairing}>
+            Use standard pairing
           </Button>
         </div>
       )}

@@ -93,6 +93,9 @@ jobs:
             T3_CODE_LS_PAIRING_PROOF="$renderer" \
               node apps/web/scripts/verify-hybrid-client.ts "$proof/$renderer" upstream
           done
+          mkdir "$proof/dioxus-fallback"
+          T3_CODE_LS_PAIRING_PROOF=dioxus-fallback \
+            node apps/web/scripts/verify-hybrid-client.ts "$proof/dioxus-fallback" upstream
       - name: Exercise the composer with the retained offset mapper
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-offsets-')
         working-directory: apps/web
