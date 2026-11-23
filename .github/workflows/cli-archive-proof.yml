@@ -59,6 +59,7 @@ jobs:
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-packaged-preparation-') || startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-')
         env:
           LAUNCHER_PROMOTION_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-') }}
+          T3_TEST_LAUNCHER_SEALED_PUBLICATION: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-sealed-') && '1' || '0' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -82,6 +83,10 @@ jobs:
               tools/service-launcher-trial.test.mjs | tee "$RUNNER_TEMP/cli-proof/preparation.log"
           if [[ "$LAUNCHER_PROMOTION_PROOF" == true ]]; then
             grep -E '^ok [1-9][0-9]* - compiled Rust helper records ' "$RUNNER_TEMP/cli-proof/preparation.log"
+          fi
+          if [[ "$T3_TEST_LAUNCHER_SEALED_PUBLICATION" == 1 ]]; then
+            grep -F 'Packaged native helper published, verified the serving fence, and restored the original sealed-trial source.' \
+              "$RUNNER_TEMP/cli-proof/preparation.log"
           fi
       - name: Retain the archive identity and smoke results
         if: always()
