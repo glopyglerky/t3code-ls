@@ -97,8 +97,8 @@ try {
   ));
   Assert.equal(failure._tag, "Failure");
   Assert.equal(batches, batchesBeforeFailure);
-  console.log(JSON.stringify({ differentialCases: inputs.length, receiptRows: 2, duplicateTotals: false,
-    failedBatchRolledBack: true, failedModuleWrites: 0 }));
+  NodeFS.writeSync(1, `${JSON.stringify({ differentialCases: inputs.length, receiptRows: 2,
+    duplicateTotals: false, failedBatchRolledBack: true, failedModuleWrites: 0 })}\n`);
 } finally {
   sqlite.close();
 }
