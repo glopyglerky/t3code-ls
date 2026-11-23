@@ -122,7 +122,7 @@ const BoundedJson = Schema.toCodecJson(OrchestrationV2ThreadBoundedSnapshot);
 const idTableBody = () => {
   const decodeBoundedJson = Schema.decodeSync(BoundedJson);
 
-  const snapshot = decodeBoundedJson(boundedBody(true));
+  const snapshot = decodeBoundedJson({ ...boundedBody(true), historyViewRevision: 18 });
   const encodeBoundedJson = Schema.encodeSync(BoundedJson);
 
   return encodeBoundedJson({ ...snapshot, idTable: true });
@@ -130,10 +130,10 @@ const idTableBody = () => {
 
 describe("boundedThreadSnapshotLoader", () => {
   it.effect.each([
-    ["an older server that ignores the opt-in", () => boundedBody(false)],
-    ["a server that sends compact turnItems", () => boundedBody(true)],
-    ["a server that also sends an ID table", idTableBody],
-  ] as const)("requests compact turnItems and loads %s", ([, body]) => {
+    ["an older server that ignores the opt-in", () => boundedBody(false), undefined],
+    ["a server that sends compact turnItems", () => boundedBody(true), undefined],
+    ["a server that sends an ID table and history revision", idTableBody, 18],
+  ] as const)("requests compact turnItems and loads %s", ([, body, historyViewRevision]) => {
     const urls: string[] = [];
     const fetchFn = ((input: RequestInfo | URL) => {
       urls.push(String(input));
@@ -147,6 +147,8 @@ describe("boundedThreadSnapshotLoader", () => {
       expect(new URL(urls[0]!).searchParams.get("compactIds")).toBe("1");
       expect(result._tag).toBe("present");
       if (result._tag !== "present") return;
+      expect(result.snapshot.snapshotSequence).toBe(12);
+      expect(result.historyViewRevision).toBe(historyViewRevision);
       expect(result.snapshot.projection.turnItems.map((item) => String(item.id))).toEqual([
         "local-1",
         "local-2",

@@ -4007,6 +4007,8 @@ export type OrchestrationV2ThreadDetailSnapshot = typeof OrchestrationV2ThreadDe
 export const OrchestrationV2ThreadBoundedSnapshot = withRecordIdTable(
   Schema.Struct({
     snapshotSequence: NonNegativeInt,
+    /** Compare only with a history page for the same fork. Replay still uses snapshotSequence. */
+    historyViewRevision: Schema.optionalKey(NonNegativeInt),
     projection: OrchestrationV2ThreadProjection,
     historyCursor: Schema.NullOr(TrimmedNonEmptyString),
     hasMoreHistory: Schema.Boolean,
@@ -4026,6 +4028,7 @@ export type OrchestrationV2ThreadBoundedSnapshot = typeof OrchestrationV2ThreadB
 export const OrchestrationV2ThreadHistoryPage = withRecordIdTable(
   Schema.Struct({
     snapshotSequence: NonNegativeInt,
+    historyViewRevision: Schema.optionalKey(NonNegativeInt),
     items: projectedTurnItemArray(
       OrchestrationV2ProjectedTurnItem,
       OrchestrationV2ProjectedTurnItem.mapFields((fields) => ({

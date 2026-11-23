@@ -1628,17 +1628,10 @@ const make = Effect.gen(function* () {
     }),
     dispatch,
     getThreadHistoryPage: Effect.fn("ThreadManagementService.getThreadHistoryPage")(
-      function (threadId, cursor, throughEntryId, conversationOnly, workMode) {
+      function (...args: Parameters<ThreadManagementServiceShape["getThreadHistoryPage"]>) {
+        const [threadId] = args;
         return ensureProjectionTranscript(threadId).pipe(
-          Effect.andThen(
-            orchestrator.getThreadHistoryPage(
-              threadId,
-              cursor,
-              throughEntryId,
-              conversationOnly,
-              workMode,
-            ),
-          ),
+          Effect.andThen(orchestrator.getThreadHistoryPage(...args)),
         );
       },
     ),

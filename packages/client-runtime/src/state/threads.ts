@@ -702,7 +702,12 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     const oldest = current.history.expanded
       ? current.data.value.visibleTurnItems.find((row) => row.visibility !== "synthetic")
       : undefined;
-    if (oldest !== undefined && history.historyCursor !== null && Option.isSome(httpClient)) {
+    if (
+      fresh.historyViewRevision !== undefined &&
+      oldest !== undefined &&
+      history.historyCursor !== null &&
+      Option.isSome(httpClient)
+    ) {
       const anchor = oldest.item;
       const page = yield* fetchEnvironmentThreadHistoryPage({
         prepared: prepared.value,
@@ -713,9 +718,12 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         signer: dpopSigner,
         remoteAuthorization,
       }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient.value), Effect.option);
-      // Publish the refreshed window and at most one bounded older page together.
-      // If the child advanced between reads, the page can be loaded again on demand.
-      if (Option.isSome(page) && page.value.snapshotSequence === fresh.snapshot.snapshotSequence) {
+      // An ancestor can commit between reads while the child replay sequence stays fixed.
+      if (
+        Option.isSome(page) &&
+        page.value.snapshotSequence === fresh.snapshot.snapshotSequence &&
+        page.value.historyViewRevision === fresh.historyViewRevision
+      ) {
         projection = mergeOlderHistoryIntoProjection(projection, page.value.items);
         history = applyHistoryPageMeta(history, page.value);
       }

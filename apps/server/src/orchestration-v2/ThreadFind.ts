@@ -184,9 +184,34 @@ export type ReadThreadFindIndex = (threadId: ThreadId) => Effect.Effect<
   ProjectionStoreV2Error
 >;
 
+const encodeThreadIds = Schema.encodeEffect(Schema.fromJsonString(Schema.Array(ThreadId)));
+
+export const readSqliteThreadFindRevision = Effect.fn("ThreadFindRows.revision")(function* (
+  sql: SqlClient.SqlClient,
+  threadIds: ReadonlyArray<ThreadId>,
+) {
+  const sources = yield* encodeThreadIds(threadIds);
+  const revision = yield* sql<{ sequence: number }>`
+    WITH RECURSIVE source_threads(thread_id) AS (
+      SELECT value FROM json_each(${sources})
+      UNION
+      SELECT json_extract(t.payload_json, '$.forkedFrom.threadId')
+      FROM orchestration_v2_projection_threads t
+      JOIN source_threads s ON s.thread_id = t.thread_id
+      WHERE json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
+    )
+    SELECT COALESCE(MAX((
+      SELECT MAX(e.sequence) FROM orchestration_events e
+      INDEXED BY idx_orch_events_stream_sequence
+      WHERE e.application_event_version = 2 AND e.aggregate_kind = 'thread'
+        AND e.stream_id = source_threads.thread_id
+    )), 0) AS sequence FROM source_threads
+  `;
+  return revision[0]?.sequence ?? 0;
+});
+
 const makeSqliteThreadFindRows = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
-  const encodeThreadIds = Schema.encodeEffect(Schema.fromJsonString(Schema.Array(ThreadId)));
   const encodeSources = Schema.encodeEffect(
     Schema.fromJsonString(Schema.Array(Schema.Struct({ threadId: ThreadId, id: TurnItemId }))),
   );
@@ -218,24 +243,7 @@ const makeSqliteThreadFindRows = Effect.gen(function* () {
             AND item.turn_item_id = json_extract(wanted.value, '$.id')
       `;
     }),
-    revision: Effect.fn("ThreadFindRows.revision")(function* (threadIds) {
-      const sources = yield* encodeThreadIds(threadIds);
-      const revision = yield* sql<{ sequence: number }>`
-        WITH RECURSIVE source_threads(thread_id) AS (
-          SELECT value FROM json_each(${sources})
-          UNION
-          SELECT json_extract(t.payload_json, '$.forkedFrom.threadId')
-          FROM orchestration_v2_projection_threads t
-          JOIN source_threads s ON s.thread_id = t.thread_id
-          WHERE json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
-        )
-        SELECT COALESCE(MAX(sequence), 0) AS sequence FROM orchestration_events
-        INDEXED BY idx_orch_events_stream_sequence
-        WHERE application_event_version = 2 AND aggregate_kind = 'thread'
-          AND stream_id IN (SELECT thread_id FROM source_threads)
-      `;
-      return revision[0]?.sequence ?? 0;
-    }),
+    revision: (threadIds) => readSqliteThreadFindRevision(sql, threadIds),
     withReadTransaction: (effect) => sql.withTransaction(effect).pipe(NodeSqliteClient.readOnly),
   } satisfies ThreadFindRows;
 });

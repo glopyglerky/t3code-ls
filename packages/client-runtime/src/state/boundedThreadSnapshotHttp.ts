@@ -85,6 +85,9 @@ export const layer: Layer.Layer<
         }).pipe(
           Effect.map((bounded): ThreadSnapshotLoader.ThreadSnapshotLoadResult => ({
             _tag: "present",
+            ...(bounded.historyViewRevision === undefined
+              ? {}
+              : { historyViewRevision: bounded.historyViewRevision }),
             snapshot: {
               snapshotSequence: bounded.snapshotSequence,
               projection: bounded.projection,
