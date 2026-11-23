@@ -24,23 +24,43 @@ pub struct OwnerLock {
 
 impl OwnerLock {
     pub fn acquire(path: &Path) -> Result<Self> {
+        Self::acquire_with(path, true)
+    }
+
+    pub(crate) fn acquire_existing_native(path: &Path) -> Result<Self> {
+        let owner = Self::acquire_with(path, false)?;
+        owner.verify_native()?;
+        Ok(owner)
+    }
+
+    fn acquire_with(path: &Path, create: bool) -> Result<Self> {
         if !path.is_absolute() {
             return Err(Error::Invalid("ownership path must be absolute".into()));
         }
-        let parent = path.parent().ok_or(Error::IncompatibleStore)?;
-        std::fs::create_dir_all(parent)
-            .map_err(|_| Error::Database("ownership directory unavailable".into()))?;
+        if create {
+            let parent = path.parent().ok_or(Error::IncompatibleStore)?;
+            std::fs::create_dir_all(parent)
+                .map_err(|_| Error::Database("ownership directory unavailable".into()))?;
+        }
         let before = same_file::Handle::from_path(path).ok();
         let mut options = OpenOptions::new();
-        options.read(true).write(true).create(true).truncate(false);
+        options
+            .read(true)
+            .write(true)
+            .create(create)
+            .truncate(false);
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
-        let file = options
-            .open(path)
-            .map_err(|_| Error::Database("ownership lock unavailable".into()))?;
+        let file = if create {
+            options
+                .open(path)
+                .map_err(|_| Error::Database("ownership lock unavailable".into()))?
+        } else {
+            crate::backend::open_regular_file(path, &mut options)?
+        };
         let identity = same_file::Handle::from_file(
             file.try_clone()
                 .map_err(|_| Error::Database("ownership identity unavailable".into()))?,
@@ -77,6 +97,31 @@ impl OwnerLock {
         }
     }
 
+    pub(crate) fn verify_native(&self) -> Result<()> {
+        if self.replaced_during_acquire
+            || crate::backend::path_identity(&self.path)? != self.identity
+            || !self.matches_native_marker()?
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    }
+
+    fn matches_native_marker(&self) -> Result<bool> {
+        let length = self
+            .file
+            .len()
+            .map_err(|_| Error::Database("ownership file unavailable".into()))?;
+        if length != NATIVE_OWNER_MARKER.len() as u64 {
+            return Ok(false);
+        }
+        let mut bytes = [0; NATIVE_OWNER_MARKER.len()];
+        self.file
+            .read(0, &mut bytes)
+            .map_err(|_| Error::Database("ownership marker unreadable".into()))?;
+        Ok(bytes.as_slice() == NATIVE_OWNER_MARKER)
+    }
+
     pub fn activate_native(&self) -> Result<()> {
         if self.path.file_name().and_then(|name| name.to_str()) != Some("server-owner.sqlite")
             || !self.owned()?
@@ -89,17 +134,8 @@ impl OwnerLock {
             .map_err(|_| Error::Database("ownership file unavailable".into()))?;
         // Historical ownership never writes database content. Refuse to truncate
         // unexpected nonempty data even if someone placed it at the lock path.
-        if length != 0 {
-            if length != NATIVE_OWNER_MARKER.len() as u64 {
-                return Err(Error::IncompatibleStore);
-            }
-            let mut bytes = vec![0; NATIVE_OWNER_MARKER.len()];
-            self.file
-                .read(0, &mut bytes)
-                .map_err(|_| Error::Database("ownership marker unreadable".into()))?;
-            if bytes != NATIVE_OWNER_MARKER {
-                return Err(Error::IncompatibleStore);
-            }
+        if length != 0 && !self.matches_native_marker()? {
+            return Err(Error::IncompatibleStore);
         }
         self.file
             .write(0, NATIVE_OWNER_MARKER)
