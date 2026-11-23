@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 
 import * as ProjectionStore from "../apps/server/src/orchestration-v2/ProjectionStore.ts";
 import * as NativeProjectionRecords from "../apps/server/src/orchestration-v2/NativeProjectionRecordRows.ts";
@@ -760,6 +761,78 @@ async function checkWindowAcrossCommit() {
   );
 }
 
+async function checkInheritedWindowAcrossParentCommit() {
+  const thread = "thread:grandchild";
+  const parent = "thread:main";
+  const itemId = "item:main:work:0002";
+  const options = { rowLimit: 8, anchorItemId: itemId, anchorThreadId: parent };
+  const original = eventsFor("main", 160).find((event) => event.payload.id === itemId);
+  NodeAssert.ok(original);
+  const change = { ...original, id: "event:ancestor-only-window-commit",
+    payload: { ...original.payload, text: "Ancestor-only edit inside anchored read" } };
+  const text = (window) => window.projection.visibleTurnItems.find(
+    (row) => row.sourceThreadId === parent && row.sourceItemId === itemId,
+  )?.item.text;
+  const commit = () => withNative(executable, fixture, (client) => Effect.gen(function* () {
+    const writer = yield* NativeProjectionStore.make;
+    const events = yield* OrchestrationEventStore.OrchestrationEventStore.pipe(
+      Effect.provide(OrchestrationEventStore.layerFromEventRows.pipe(Layer.provide(NativeEventRows.layer))),
+    );
+    return yield* client.withTransaction(Effect.gen(function* () {
+      const stored = yield* events.appendAgentEvents({ events: [change] });
+      yield* writer.apply(change);
+      return stored[0].sequence;
+    }));
+  }));
+  let armed = false;
+  let parentSequence;
+  const intercept = (database) => ({ ...database,
+    withSession: (use) => database.withSession((session) => use({ ...session,
+      request: Effect.fnUntraced(function* (input, response) {
+        if (armed && input.operation === "application_events_latest" && input.thread_id === thread) {
+          armed = false;
+          parentSequence = yield* Effect.promise(commit);
+        }
+        return yield* session.request(input, response);
+      }),
+    })),
+  });
+  const after = await withNative(executable, fixture, (client) => Effect.gen(function* () {
+    const store = yield* NativeProjectionStore.make;
+    const events = yield* NativeEventRows.make;
+    // Reuse the indexed find owner's ancestry revision, under this same reader.
+    const read = () => client.withReadTransaction(Effect.gen(function* () {
+      const window = yield* store.getThreadSnapshotWindow(thread, options);
+      const revision = yield* client.request("application_thread_find_read",
+        { query: { kind: "revision", thread_ids: [thread] } }, Schema.Number);
+      return { window, revision };
+    }));
+    const before = yield* read();
+    NodeAssert.equal(text(before.window), original.payload.text);
+    armed = true;
+    const during = yield* read();
+    NodeAssert.deepEqual(normalized(during), normalized(before), "Window and ancestry revision retain one snapshot");
+    const fresh = yield* read();
+    NodeAssert.equal(fresh.window.snapshotSequence, before.window.snapshotSequence,
+      "An ancestor edit must not change the child's replay watermark");
+    NodeAssert.equal(fresh.revision, parentSequence);
+    NodeAssert.ok(fresh.revision > before.revision);
+    NodeAssert.equal(text(fresh.window), change.payload.text);
+    NodeAssert.equal(yield* events.latest({ kind: "agent", thread_id: thread }), before.window.snapshotSequence,
+      "A child-only resume would report no missed child events despite its stale inherited text");
+    return normalized(fresh);
+  }).pipe(Effect.timeout("30 seconds")), intercept);
+  await withNative(executable, fixture, (client) => Effect.gen(function* () {
+    const store = yield* NativeProjectionStore.make;
+    yield* client.withReadTransaction(Effect.gen(function* () {
+      const window = yield* store.getThreadSnapshotWindow(thread, options);
+      const revision = yield* client.request("application_thread_find_read",
+        { query: { kind: "revision", thread_ids: [thread] } }, Schema.Number);
+      NodeAssert.deepEqual(normalized({ window, revision }), after);
+    }));
+  }));
+}
+
 try {
   const source = NodePath.join(fixture.root, "source.sqlite");
   await createMigratedSqlite(source, (sql) =>
@@ -942,6 +1015,8 @@ try {
   checks.push("Reopened native windows preserve committed state");
   await checkWindowAcrossCommit();
   checks.push("Anchored windows and their replay watermarks share a snapshot across a concurrent commit and reopen");
+  await checkInheritedWindowAcrossParentCommit();
+  checks.push("Ancestor-only edits refresh anchored two-level inherited windows without advancing child replay; ancestry revision and payload share the read snapshot across commit and reopen");
   NodeAssert.equal(hash(await NodeFSP.readFile(source)), sourceHash);
   await finishProof({
     executable,
@@ -958,6 +1033,7 @@ try {
       "apps/server/src/orchestration-v2/NativeProjectionStore.ts",
       "apps/server/src/persistence/NativeEventRows.ts",
       "apps/server/src/persistence/redb_event_rows.rs",
+      "apps/server/src/persistence/redb_thread_find.rs",
       "apps/server/src/persistence/redb_projection_records.rs",
       "apps/server/src/persistence/redb_projection_window.rs",
       "apps/server/src/persistence/redb_projection_window_index.rs",
