@@ -124,19 +124,22 @@ try {
         break;
       }
     }
-    if (["application_receipts_insert", "application_receipts_upsert"].includes(request.operation)) {
+    if (request.operation === "application_receipts_upsert") {
       const receipt = request.receipt;
-      if (freshLaunch && receipt.command_id === admit.commandId && receipt.command_type === "thread.create" &&
-          receipt.status === "accepted") {
-        launchThreadId = receipt.thread_id;
-      }
-      const dispatchId = freshLaunch ? `${admit.commandId}:initial-message` : admit.commandId;
-      if (receipt.command_id === dispatchId && receipt.command_type === "message.dispatch" &&
-          receipt.status === "accepted") {
-        Assert.equal(JSON.parse(reply.value).ok, true, "The helper rejected the dispatch receipt");
-        Assert.equal(typeof request.transaction_id, "string");
-        if (freshLaunch) Assert.equal(receipt.thread_id, launchThreadId);
-        dispatchTransaction = request.transaction_id;
+      if (receipt.aggregate_kind === "thread" && receipt.status === "accepted" &&
+          Number.isSafeInteger(receipt.result_sequence) && receipt.result_sequence > 0) {
+        if (freshLaunch && receipt.command_id === admit.commandId && receipt.command_type === "thread.create") {
+          Assert.equal(JSON.parse(reply.value).ok, true, "The helper rejected the launch receipt");
+          Assert.equal(typeof receipt.aggregate_id, "string");
+          launchThreadId = receipt.aggregate_id;
+        }
+        const dispatchId = freshLaunch ? `${admit.commandId}:initial-message` : admit.commandId;
+        if (receipt.command_id === dispatchId && receipt.command_type === "message.dispatch") {
+          Assert.equal(JSON.parse(reply.value).ok, true, "The helper rejected the dispatch receipt");
+          Assert.equal(typeof request.transaction_id, "string");
+          if (freshLaunch) Assert.equal(receipt.aggregate_id, launchThreadId);
+          dispatchTransaction = request.transaction_id;
+        }
       }
     }
     if (request.operation === "application_commit" && request.transaction_id === dispatchTransaction) {
