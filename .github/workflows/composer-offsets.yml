@@ -26,6 +26,7 @@ jobs:
       WASM_BINDGEN_VERSION: "0.2.130"
       WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
       BUNDLED_NATIVE: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-') || startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
+      INTEGRATED_NATIVE: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -68,17 +69,17 @@ jobs:
         working-directory: apps/web
         run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/ComposerPromptEditorTiptap.input.browser.test.tsx
       - name: Exercise same-draft saves in both orders
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-')
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-')
         working-directory: apps/web
         run: pnpm exec vp test run --project unit --maxWorkers 2 src/composerDraftStore.test.ts
       - name: Build and open the application with the Rust composer binding
         if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
         env:
           T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
-          T3_CODE_LS_MULTI_TAB_DRAFT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-') }}
-          T3_CODE_LS_FILE_EDITOR_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
-          T3_CODE_LS_DURABLE_TEXT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-durable-') }}
-          T3_CODE_LS_PDF_LINK_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-') }}
+          T3_CODE_LS_MULTI_TAB_DRAFT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-') }}
+          T3_CODE_LS_FILE_EDITOR_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
+          T3_CODE_LS_DURABLE_TEXT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-durable-') }}
+          T3_CODE_LS_PDF_LINK_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-') }}
           VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
         run: |
           proof="$RUNNER_TEMP/built-composer-proof"
@@ -104,7 +105,7 @@ jobs:
             > "$proof/application.sha256"
           node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
       - name: Exercise PDF link handling in the browser
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-')
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-')
         working-directory: apps/web
         run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/files/PdfViewer.browser.test.tsx
       - name: Retain the bundled browser evidence
