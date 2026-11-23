@@ -533,6 +533,29 @@ function canonicalCodexResponseUsers(records: ReadonlyArray<DecodedTranscriptRec
   return suppressed;
 }
 
+function encodeCodexCanonicalRequest(records: ReadonlyArray<DecodedTranscriptRecord>) {
+  if (records.length > MAX_IMPORT_RECORDS) return undefined;
+  const rows: Array<string> = [];
+  const responseRows = new Map<number, number>();
+  let bytes = Buffer.byteLength("[1,[]]\n", "utf8");
+  for (const [index, row] of codexCanonicalRows(records)) {
+    if (typeof row === "string" && (row.length > MAX_NATIVE_CODEX_IMPORT_FRAME || !row.isWellFormed())) {
+      return undefined;
+    }
+    if (row !== null && typeof row !== "string") {
+      const [turnId, text] = row;
+      if (turnId.length + text.length > MAX_NATIVE_CODEX_IMPORT_FRAME ||
+        !turnId.isWellFormed() || !text.isWellFormed()) return undefined;
+      responseRows.set(rows.length, index);
+    }
+    const encoded = JSON.stringify(row);
+    bytes += Buffer.byteLength(encoded, "utf8") + Number(rows.length > 0);
+    if (bytes > MAX_NATIVE_CODEX_IMPORT_FRAME) return undefined;
+    rows.push(encoded);
+  }
+  return { stdin: `[1,[${rows.join(",")}]]\n`, responseRows };
+}
+
 function parseAgentSessionRecords(
   input: AgentSessionTranscriptMetadata,
   records: ReadonlyArray<DecodedTranscriptRecord>,
@@ -888,32 +911,17 @@ export const make = Effect.gen(function* () {
   const nativeCodexResponseUsers = Effect.fn("AgentSessionScanner.nativeCodexResponseUsers")(
     function* (records: ReadonlyArray<DecodedTranscriptRecord>) {
       if (codexImportHelper === undefined || !path.isAbsolute(codexImportHelper) ||
-        codexImportHelper.includes("\0") || records.length > MAX_IMPORT_RECORDS) return undefined;
-      const rows: Array<string> = [];
-      const responseRows = new Map<number, number>();
-      let bytes = Buffer.byteLength("[1,[]]\n", "utf8");
-      for (const [index, row] of codexCanonicalRows(records)) {
-        if (typeof row === "string" && (row.length > MAX_NATIVE_CODEX_IMPORT_FRAME || !row.isWellFormed())) {
-          return undefined;
-        }
-        if (row !== null && typeof row !== "string") {
-          const [turnId, text] = row;
-          if (turnId.length + text.length > MAX_NATIVE_CODEX_IMPORT_FRAME ||
-            !turnId.isWellFormed() || !text.isWellFormed()) return undefined;
-          responseRows.set(rows.length, index);
-        }
-        const encoded = JSON.stringify(row);
-        bytes += Buffer.byteLength(encoded, "utf8") + Number(rows.length > 0);
-        if (bytes > MAX_NATIVE_CODEX_IMPORT_FRAME) return undefined;
-        rows.push(encoded);
-      }
+        codexImportHelper.includes("\0")) return undefined;
+      const request = encodeCodexCanonicalRequest(records);
+      if (request === undefined) return undefined;
+      const { stdin, responseRows } = request;
       if (responseRows.size === 0) return new Set<number>();
       const output = yield* processRunner.run({
         command: codexImportHelper,
         args: ["codex-import"],
         env: {},
         extendEnv: false,
-        stdin: `[1,[${rows.join(",")}]]\n`,
+        stdin,
         timeout: "5 seconds",
         maxOutputBytes: MAX_NATIVE_CODEX_IMPORT_FRAME,
         outputMode: "error",
