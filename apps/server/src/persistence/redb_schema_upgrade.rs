@@ -55,6 +55,7 @@ fn target_89(source: &ApplicationCatalog, current: &Definition) -> ApplicationCa
             current.schema
         ])),
         schema: current.schema.clone(),
+        event_layout: None,
     }
 }
 
@@ -415,6 +416,7 @@ impl Store {
                 current.schema
             ])),
             schema: current.schema.clone(),
+            event_layout: None,
         };
         for stage in [
             Stage::Clear,

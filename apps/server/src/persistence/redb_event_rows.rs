@@ -9,15 +9,16 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value, json};
 
 use crate::application::{
-    ApplicationCatalog, ApplicationRow, ApplicationTransactions, Session, decode_catalog,
-    decode_row, encode_row, row_key, row_prefix, schema_key, table, validate_row,
+    ApplicationCatalog, ApplicationRow, ApplicationTable, ApplicationTransactions, Session,
+    decode_catalog, decode_row, encode_row, read_generation_identity, row_key, row_prefix,
+    schema_key, table, validate_row,
 };
 use crate::application_json::{compact_json, field, object_fields, render_fields, set_field};
 use crate::application_rows::{integer, nullable, text, text_cell};
 use crate::backend::Transaction;
 use crate::{Error, MAX_BATCH_BYTES, Result, Store, request_digest, store_key};
 
-const EVENTS: &str = "orchestration_events";
+pub(crate) const EVENTS: &str = "orchestration_events";
 const METADATA: &str = "orchestration_v2_projection_metadata";
 const MAX_SEQUENCE: u64 = (1 << 53) - 1;
 const PREPARE_ROWS: usize = 32;
@@ -294,16 +295,46 @@ impl EventRecord {
     }
 }
 
+#[path = "redb_event_text_revisions.rs"]
+mod text_revisions;
+
+fn event_key(catalog: &ApplicationCatalog, sequence: u64) -> Result<Vec<u8>> {
+    row_key(&catalog.generation, EVENTS, &[int_cell(sequence)])
+}
+
+pub(crate) async fn decode_transaction_row(
+    tx: &mut Transaction,
+    catalog: &ApplicationCatalog,
+    definition: &ApplicationTable,
+    encoded_key: &[u8],
+    bytes: &[u8],
+) -> Result<ApplicationRow> {
+    if catalog.event_layout.is_some() && definition.name == EVENTS {
+        text_revisions::decode_row_or_revision(tx, catalog, definition, encoded_key, bytes).await
+    } else {
+        decode_row(catalog, definition, encoded_key, bytes)
+    }
+}
+
+pub(crate) fn account_payload_bytes(total: &mut usize, payload: &str) -> Result<()> {
+    *total = total.saturating_add(payload.len());
+    if *total > MAX_BATCH_BYTES {
+        return Err(invalid("response exceeds 16 MiB; request fewer records"));
+    }
+    Ok(())
+}
+
 async fn event_at(
     tx: &mut Transaction,
     catalog: &ApplicationCatalog,
     sequence: u64,
 ) -> Result<Option<EventRecord>> {
-    let encoded_key = row_key(&catalog.generation, EVENTS, &[int_cell(sequence)])?;
+    let encoded_key = event_key(catalog, sequence)?;
     let Some(bytes) = tx.get(&encoded_key).await? else {
         return Ok(None);
     };
-    let value = decode_row(catalog, table(catalog, EVENTS)?, &encoded_key, &bytes)?;
+    let value =
+        decode_transaction_row(tx, catalog, table(catalog, EVENTS)?, &encoded_key, &bytes).await?;
     let event = EventRecord::from_row(value.row)?;
     if event.sequence != sequence {
         return Err(Error::IncompatibleStore);
@@ -805,11 +836,12 @@ impl Store {
             .db
             .begin_reserved(Duration::from_secs(5), Duration::from_secs(300))
             .await?;
-        let catalog = decode_catalog(
-            &tx.get(&schema_key())
-                .await?
-                .ok_or_else(|| invalid("application schema is not initialized"))?,
-        )?;
+        let bytes = tx
+            .get(&schema_key())
+            .await?
+            .ok_or_else(|| invalid("application schema is not initialized"))?;
+        let catalog = decode_catalog(&bytes)?;
+        read_generation_identity(&mut tx, &catalog, &bytes).await?;
         validate_event_table(&catalog)?;
         let stored = tx.get(&key(&catalog, "preparation")).await?;
         let mut state = match stored {
@@ -898,7 +930,14 @@ impl Store {
         let rows = tx.scan(&start, &prefix_end(&prefix), limit).await?;
         let count = rows.len();
         for (encoded, bytes) in rows {
-            let source = decode_row(&catalog, table(&catalog, EVENTS)?, &encoded, &bytes)?;
+            let source = decode_transaction_row(
+                &mut tx,
+                &catalog,
+                table(&catalog, EVENTS)?,
+                &encoded,
+                &bytes,
+            )
+            .await?;
             let event = EventRecord::from_row(source.row)?;
             index_event(&mut tx, &catalog, &event).await?;
             state.after = Some(
@@ -1037,13 +1076,15 @@ impl ApplicationTransactions {
             };
             let stored = event.stored();
             validate_row(table(&session.catalog, EVENTS)?, &stored.key, &stored.row)?;
-            session
-                .transaction
-                .insert(
-                    row_key(&session.catalog.generation, EVENTS, &stored.key)?,
-                    encode_row(&stored)?,
-                )
-                .await?;
+            let encoded_key = event_key(&session.catalog, sequence)?;
+            let bytes = text_revisions::encode_event(
+                &mut session.transaction,
+                &session.catalog,
+                &event,
+                stored,
+            )
+            .await?;
+            session.transaction.insert(encoded_key, bytes).await?;
             index_event(&mut session.transaction, &session.catalog, &event).await?;
             Ok(AppendResult {
                 sequence,
@@ -1207,6 +1248,7 @@ pub(crate) async fn read_events(
         .scan(&start, &end, input.limit as usize)
         .await?;
     let mut output = Vec::with_capacity(rows.len());
+    let mut payload_bytes = 0;
     for (encoded, bytes) in rows {
         let sequence = sequence_from_key(&prefix, &encoded)?;
         if decode::<u64>(&bytes)? != sequence {
@@ -1235,6 +1277,7 @@ pub(crate) async fn read_events(
             return Err(Error::IncompatibleStore);
         }
         let payload = restored_payload(&mut session.transaction, &session.catalog, &event).await?;
+        account_payload_bytes(&mut payload_bytes, &payload)?;
         output.push(event.output(payload));
     }
     crate::validate_response_bytes(&output)?;

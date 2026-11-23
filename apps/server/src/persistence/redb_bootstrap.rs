@@ -1,11 +1,11 @@
 //! Compile-time current schema: fresh application startup has no SQL dependency.
 use crate::application::{
-    ApplicationCatalog, ApplicationSchema, decode_catalog, decode_row, encode_catalog,
-    read_generation_identity, record_generation_identity, row_prefix, schema_key, table,
-    validate_schema,
+    ApplicationCatalog, ApplicationEventLayout, ApplicationSchema, decode_catalog, decode_row,
+    encode_catalog, read_generation_identity, record_generation_identity, row_prefix, schema_key,
+    table, validate_schema,
 };
 use crate::application_rows::{int_cell, integer, text, text_cell, write_row};
-use crate::{Error, Result, Store};
+use crate::{Error, Result, Store, store_key};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
@@ -90,6 +90,13 @@ impl Store {
     /// New files are initialized atomically; an imported or existing file is
     /// verified, never overwritten or silently replaced by an empty database.
     pub async fn bootstrap_application(&self) -> Result<BootstrapResult> {
+        self.bootstrap_application_with_event_layout(None).await
+    }
+
+    pub async fn bootstrap_application_with_event_layout(
+        &self,
+        event_layout: Option<ApplicationEventLayout>,
+    ) -> Result<BootstrapResult> {
         let definition = definition()?;
         let mut tx = self
             .db
@@ -99,10 +106,21 @@ impl Store {
             let catalog = decode_catalog(&bytes)?;
             read_generation_identity(&mut tx, &catalog, &bytes).await?;
             tx.rollback().await?;
+            if event_layout.is_some() && event_layout != catalog.event_layout {
+                return Err(Error::Invalid(
+                    "assistant text revisions require a fresh native application profile".into(),
+                ));
+            }
             if catalog.schema != definition.schema {
+                if catalog.event_layout.is_some() {
+                    return Err(Error::IncompatibleStore);
+                }
                 return self.upgrade_application_80(catalog, definition).await;
             }
             if self.application_migrations().await? != definition.migrations {
+                if catalog.event_layout.is_some() {
+                    return Err(Error::IncompatibleStore);
+                }
                 return self.upgrade_application_88(catalog, definition).await;
             }
             return Ok(BootstrapResult {
@@ -111,9 +129,20 @@ impl Store {
                 schema_version: 1,
             });
         }
+        if event_layout.is_some()
+            && !tx
+                .scan(&store_key("application/"), &store_key("application0"), 1)
+                .await?
+                .is_empty()
+        {
+            return Err(Error::Invalid(
+                "assistant text revisions require an empty application namespace".into(),
+            ));
+        }
         let catalog = ApplicationCatalog {
             schema: definition.schema,
             generation: "native".into(),
+            event_layout,
         };
         let bytes = encode_catalog(&catalog)?;
         record_generation_identity(&mut tx, &catalog, &bytes).await?;
@@ -178,6 +207,14 @@ mod tests {
         let first = store.bootstrap_application().await.unwrap();
         assert!(first.initialized);
         assert_eq!(first.migrations.len(), 89);
+        assert!(matches!(
+            store
+                .bootstrap_application_with_event_layout(Some(
+                    ApplicationEventLayout::AssistantTextRevisionsV1
+                ))
+                .await,
+            Err(Error::Invalid(_))
+        ));
         assert!(store.prepare_application_search().await.unwrap().prepared);
         assert!(!store.bootstrap_application().await.unwrap().initialized);
         assert_eq!(store.application_migrations().await.unwrap().len(), 89);

@@ -431,7 +431,11 @@ impl Store {
             excluded_derived_tables,
             replayed: false,
         };
-        let catalog = ApplicationCatalog { schema, generation };
+        let catalog = ApplicationCatalog {
+            schema,
+            generation,
+            event_layout: None,
+        };
         let mut tx = self.db.begin().await?;
         if tx.get(&schema_key()).await?.is_some() {
             tx.rollback().await?;

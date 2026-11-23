@@ -65,6 +65,14 @@ pub struct ApplicationPage {
 pub(crate) struct ApplicationCatalog {
     pub(crate) schema: ApplicationSchema,
     pub(crate) generation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) event_layout: Option<ApplicationEventLayout>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationEventLayout {
+    AssistantTextRevisionsV1,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,7 +96,13 @@ fn generation_identity(
         engine: "omdb".into(),
         engine_version: "4.5.0".into(),
         engine_revision: OMDB_REVISION.into(),
-        layout: "t3-application-keyspace-v1".into(),
+        layout: match catalog.event_layout {
+            None => "t3-application-keyspace-v1",
+            Some(ApplicationEventLayout::AssistantTextRevisionsV1) => {
+                "t3-application-keyspace-v1+assistant-text-revisions-v1"
+            }
+        }
+        .into(),
         schema_version: catalog.schema.version,
         catalog_sha256: Sha256::digest(encoded_catalog)
             .iter()
@@ -121,6 +135,9 @@ pub(crate) async fn read_generation_identity(
     encoded_catalog: &[u8],
 ) -> Result<Option<ApplicationGenerationIdentity>> {
     let Some(bytes) = transaction.get(&generation_identity_key(catalog)).await? else {
+        if catalog.event_layout.is_some() {
+            return Err(Error::IncompatibleStore);
+        }
         // Older generations have a validated catalog without an engine record.
         return Ok(None);
     };
@@ -254,6 +271,9 @@ fn validate_catalog(catalog: &ApplicationCatalog) -> Result<()> {
     if catalog.generation != "native" && !digest(&catalog.generation) {
         return Err(invalid("invalid application generation"));
     }
+    if catalog.event_layout.is_some() && catalog.generation != "native" {
+        return Err(invalid("event layout requires a fresh native generation"));
+    }
     Ok(())
 }
 
@@ -310,11 +330,21 @@ pub(crate) fn decode_row(
 ) -> Result<ApplicationRow> {
     let value: ApplicationRow =
         serde_json::from_slice(bytes).map_err(|_| Error::IncompatibleStore)?;
+    validate_row_identity(catalog, table, encoded_key, &value)?;
+    Ok(value)
+}
+
+pub(crate) fn validate_row_identity(
+    catalog: &ApplicationCatalog,
+    table: &ApplicationTable,
+    encoded_key: &[u8],
+    value: &ApplicationRow,
+) -> Result<()> {
     validate_row(table, &value.key, &value.row).map_err(|_| Error::IncompatibleStore)?;
     if row_key(&catalog.generation, &table.name, &value.key)? != encoded_key {
         return Err(Error::IncompatibleStore);
     }
-    Ok(value)
+    Ok(())
 }
 
 struct Savepoint {
@@ -411,6 +441,7 @@ impl ApplicationTransactions {
         let catalog = ApplicationCatalog {
             schema,
             generation: "native".into(),
+            event_layout: None,
         };
         let bytes = encode_catalog(&catalog)?;
         record_generation_identity(&mut transaction, &catalog, &bytes).await?;
@@ -549,7 +580,14 @@ impl ApplicationTransactions {
             let Some(bytes) = session.transaction.get(&encoded_key).await? else {
                 return Ok(None);
             };
-            let value = decode_row(&session.catalog, table, &encoded_key, &bytes)?;
+            let value = crate::application_events::decode_transaction_row(
+                &mut session.transaction,
+                &session.catalog,
+                table,
+                &encoded_key,
+                &bytes,
+            )
+            .await?;
             if value.key != key {
                 return Err(Error::IncompatibleStore);
             }
@@ -648,8 +686,26 @@ impl ApplicationTransactions {
             }
             let mut rows = Vec::with_capacity(found.len());
             let mut cursor = None;
+            let mut payload_bytes = 0;
             for (encoded_key, bytes) in found {
-                rows.push(decode_row(&session.catalog, table, &encoded_key, &bytes)?);
+                let row = crate::application_events::decode_transaction_row(
+                    &mut session.transaction,
+                    &session.catalog,
+                    table,
+                    &encoded_key,
+                    &bytes,
+                )
+                .await?;
+                if session.catalog.event_layout.is_some()
+                    && name == crate::application_events::EVENTS
+                    && let Some(payload) = row
+                        .row
+                        .get("payload_json")
+                        .and_then(|cell| cell["value"].as_str())
+                {
+                    crate::application_events::account_payload_bytes(&mut payload_bytes, payload)?;
+                }
+                rows.push(row);
                 let suffix = encoded_key
                     .strip_prefix(prefix.as_slice())
                     .and_then(|bytes| std::str::from_utf8(bytes).ok())
