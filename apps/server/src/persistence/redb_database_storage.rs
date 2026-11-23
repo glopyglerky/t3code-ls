@@ -123,6 +123,33 @@ pub struct IsolatedTrialSelection {
     pub prepared_database: TrialFileIdentity,
 }
 
+#[derive(Debug, Serialize)]
+pub struct IsolatedTrialPublication {
+    pub activation: PreparedServiceActivation,
+    pub database: TrialFileIdentity,
+    pub preserved_database: TrialFileIdentity,
+    pub reused: bool,
+}
+
+/// Publish the still-sealed candidate while preserving its stopped predecessor.
+/// The sealed catalog keeps ordinary server startup fenced pending activation.
+pub async fn publish_isolated_service_trial(
+    home: PathBuf,
+    update_id: String,
+) -> Result<IsolatedTrialPublication> {
+    if !home.is_absolute() || !valid_update_id(&update_id) {
+        return Err(Error::Invalid("invalid isolated trial selection".into()));
+    }
+    #[cfg(target_os = "linux")]
+    return tokio::spawn(isolated::publish(home, update_id))
+        .await
+        .map_err(|_| Error::UnknownCommit)?;
+    #[cfg(not(target_os = "linux"))]
+    Err(Error::Invalid(
+        "isolated service trial publication is unsupported on this platform".into(),
+    ))
+}
+
 /// Inspect a pending selection together with its durable native trial.
 /// The observation grants no authority after the ownership leases are dropped.
 pub async fn inspect_isolated_service_trial_selection(

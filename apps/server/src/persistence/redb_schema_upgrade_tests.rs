@@ -579,6 +579,25 @@ async fn fixture_88() -> (TestFixture, Store, ApplicationCatalog) {
 }
 
 #[cfg(target_os = "linux")]
+const ISOLATED_UPDATE: &str = "aa212c2b-63d4-4b28-97e4-1c1d6dc6d281";
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn isolated_trial_publish_interrupt_fixture() {
+    let Some(home) = std::env::var_os("T3_TEST_ISOLATED_TRIAL_HOME").map(std::path::PathBuf::from)
+    else {
+        return;
+    };
+    assert!(
+        home.file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("t3-redb-test-"))
+    );
+    crate::application_storage::publish_isolated_service_trial(home, ISOLATED_UPDATE.into())
+        .await
+        .unwrap();
+}
+
+#[cfg(target_os = "linux")]
 #[tokio::test]
 async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
     use crate::application::PreparedServiceActivation;
@@ -587,11 +606,12 @@ async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
     use crate::application_storage::{
         IsolatedTrialRequest, TrialSnapshot, backup_service_trial,
         inspect_isolated_service_trial_selection, prepare_isolated_service_trial,
+        publish_isolated_service_trial,
     };
     use sha2::{Digest, Sha256};
     use std::fs;
 
-    const UPDATE: &str = "aa212c2b-63d4-4b28-97e4-1c1d6dc6d281";
+    const UPDATE: &str = ISOLATED_UPDATE;
     let hash = |bytes: &[u8]| -> String {
         Sha256::digest(bytes)
             .iter()
@@ -760,9 +780,57 @@ async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
                     Err(Error::IncompatibleStore)
                 ));
                 assert_eq!(fs::read(&trial).unwrap(), trial_bytes);
+                assert!(matches!(
+                    publish_isolated_service_trial(home.clone(), UPDATE.into()).await,
+                    Err(Error::IncompatibleStore)
+                ));
+                assert_eq!(fs::read(&live).unwrap(), live_bytes);
+                fs::write(&helper, b"fixture helper").unwrap();
+                let interrupt = |boundary: &str| {
+                    let child = std::process::Command::new(std::env::current_exe().unwrap())
+                        .arg("isolated_trial_publish_interrupt_fixture")
+                        .env("T3_TEST_ISOLATED_TRIAL_HOME", &home)
+                        .env("T3_TEST_INTERRUPT_TRIAL_PUBLICATION", boundary)
+                        .output()
+                        .unwrap();
+                    assert_eq!(
+                        child.status.code(),
+                        Some(73),
+                        "{}",
+                        String::from_utf8_lossy(&child.stdout)
+                    );
+                };
+                let preserved = state.join(format!(".statev2-source-{UPDATE}.omdb"));
+                interrupt("isolated-preserved");
+                assert_eq!(fs::read(&live).unwrap(), live_bytes);
+                assert_eq!(fs::read(&preserved).unwrap(), live_bytes);
+                assert_eq!(fs::read(&trial).unwrap(), trial_bytes);
+                interrupt("isolated-renamed");
+                assert!(!trial.exists());
+                assert_eq!(fs::read(&live).unwrap(), trial_bytes);
+                let recovered = publish_isolated_service_trial(home.clone(), UPDATE.into())
+                    .await
+                    .unwrap();
+                assert!(recovered.reused);
+                assert_eq!(recovered.database, prepared.database);
+                assert_eq!(recovered.preserved_database, backup.database);
+                assert_eq!(Some(recovered.activation), activation);
+                assert_eq!(fs::read(&preserved).unwrap(), live_bytes);
+                let canonical = Store::open_read_only(&live).await.unwrap();
+                let candidate = ApplicationTransactions::new(canonical);
+                assert!(matches!(
+                    candidate.schema().await,
+                    Err(Error::IncompatibleStore)
+                ));
+                assert_eq!(
+                    candidate.prepared_service_activation().await.unwrap(),
+                    activation
+                );
             }
         }
-        assert_eq!(fs::read(&live).unwrap(), live_bytes);
+        if !bind_runtime {
+            assert_eq!(fs::read(&live).unwrap(), live_bytes);
+        }
         assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);
     }
 }

@@ -1,9 +1,10 @@
 use super::{
-    IsolatedTrialPreparation, IsolatedTrialRequest, IsolatedTrialSelection,
-    IsolatedTrialVerification, MAX_TRIAL_FILE_BYTES, TrialBackupReceipt, TrialFileIdentity,
-    TrialRestoreDirectories, TrialSnapshot, checked_generation, io_error, read_trial_receipt,
-    trial_file_digest, trial_file_identity, validate_isolated_trial_preparation,
-    validate_isolated_trial_request, verify_restore_snapshot, write_trial_receipt,
+    IsolatedTrialPreparation, IsolatedTrialPublication, IsolatedTrialRequest,
+    IsolatedTrialSelection, IsolatedTrialVerification, MAX_TRIAL_FILE_BYTES, TrialBackupReceipt,
+    TrialFileIdentity, TrialRestoreDirectories, TrialSnapshot, checked_generation, io_error,
+    read_trial_receipt, trial_file_digest, trial_file_identity,
+    validate_isolated_trial_preparation, validate_isolated_trial_request, verify_restore_snapshot,
+    write_trial_receipt,
 };
 use crate::application::{
     ApplicationTransactions, PreparedServiceActivation, exact_service_version,
@@ -27,10 +28,18 @@ struct TrialInput {
 
 impl TrialInput {
     async fn open(path: PathBuf, expected: &TrialSnapshot) -> Result<Self> {
+        Self::open_with_links(path, expected, 1).await
+    }
+
+    async fn open_with_links(
+        path: PathBuf,
+        expected: &TrialSnapshot,
+        expected_links: u64,
+    ) -> Result<Self> {
         let store = verify_restore_snapshot(&path, expected).await?;
         let file = store.db.open_verified_offline_file(&path)?;
         let (identity, links) = trial_file_identity(&file)?;
-        if links != 1 {
+        if links != expected_links {
             return Err(Error::IncompatibleStore);
         }
         Ok(Self {
@@ -42,12 +51,19 @@ impl TrialInput {
     }
 
     fn verify(&self) -> Result<()> {
-        let file = self.store.db.open_verified_offline_file(&self.path)?;
+        self.verify_at(&self.path, 1).map(|_| ())
+    }
+
+    fn verify_at(&self, path: &Path, expected_links: u64) -> Result<fs::File> {
+        let file = self.store.db.open_verified_offline_file(path)?;
         let (identity, links) = trial_file_identity(&file)?;
-        if links != 1 || identity != self.identity || trial_file_digest(&file)? != self.sha256 {
+        if links != expected_links
+            || identity != self.identity
+            || trial_file_digest(&file)? != self.sha256
+        {
             return Err(Error::IncompatibleStore);
         }
-        Ok(())
+        Ok(file)
     }
 }
 
@@ -60,9 +76,14 @@ fn disposable_file_exists(path: &Path) -> Result<bool> {
     }
 }
 
+fn preserved_path(state: &Path, update_id: &str) -> PathBuf {
+    state.join(format!(".statev2-source-{update_id}.omdb"))
+}
+
 struct TrialLease {
     home: PathBuf,
     live: TrialInput,
+    source_links: u64,
     checkpoint: TrialInput,
     trial: PathBuf,
     owner: OwnerLock,
@@ -72,6 +93,14 @@ struct TrialLease {
 
 impl TrialLease {
     async fn open(home: PathBuf, request: &IsolatedTrialRequest) -> Result<Self> {
+        Self::open_for(home, request, false).await
+    }
+
+    async fn open_for(
+        home: PathBuf,
+        request: &IsolatedTrialRequest,
+        publication: bool,
+    ) -> Result<Self> {
         if request.target_schema_sha256 != bootstrap_schema_sha256() {
             return Err(Error::IncompatibleStore);
         }
@@ -92,7 +121,23 @@ impl TrialLease {
         if receipt.database != request.database || receipt.snapshot != request.checkpoint {
             return Err(Error::IncompatibleStore);
         }
-        let live = TrialInput::open(state.join("statev2.omdb"), &request.checkpoint).await?;
+        let trial = state.join(format!(".statev2-trial-{}.omdb", request.update_id));
+        let preserved = preserved_path(&state, &request.update_id);
+        let already_published = publication && !disposable_file_exists(&trial)?;
+        let source = if already_published {
+            preserved
+        } else {
+            state.join("statev2.omdb")
+        };
+        let source_links = if publication
+            && !already_published
+            && super::trial_entry_exists(&preserved_path(&state, &request.update_id))?
+        {
+            2
+        } else {
+            1
+        };
+        let live = TrialInput::open_with_links(source, &request.checkpoint, source_links).await?;
         if live.identity != request.database {
             return Err(Error::IncompatibleStore);
         }
@@ -104,8 +149,9 @@ impl TrialLease {
         let lease = Self {
             home,
             live,
+            source_links,
             checkpoint,
-            trial: state.join(format!(".statev2-trial-{}.omdb", request.update_id)),
+            trial,
             owner,
             selection_lock,
             directories,
@@ -115,13 +161,17 @@ impl TrialLease {
     }
 
     fn verify_inputs(&self) -> Result<()> {
+        self.verify_ownership()?;
+        self.live.verify_at(&self.live.path, self.source_links)?;
+        self.checkpoint.verify()
+    }
+
+    fn verify_ownership(&self) -> Result<()> {
         self.directories.verify(&self.home)?;
         if let Some(selection_lock) = &self.selection_lock {
             selection_lock.verify()?;
         }
-        self.owner.verify_native()?;
-        self.live.verify()?;
-        self.checkpoint.verify()
+        self.owner.verify_native()
     }
 
     async fn verify_candidate(
@@ -129,7 +179,21 @@ impl TrialLease {
         request: &IsolatedTrialRequest,
         preparation: &IsolatedTrialPreparation,
     ) -> Result<()> {
-        let candidate = TrialInput::open(self.trial.clone(), &preparation.snapshot).await?;
+        let candidate = self
+            .open_candidate(self.trial.clone(), request, preparation)
+            .await?;
+        self.verify_activation(request)?;
+        self.verify_inputs()?;
+        candidate.verify()
+    }
+
+    async fn open_candidate(
+        &self,
+        path: PathBuf,
+        request: &IsolatedTrialRequest,
+        preparation: &IsolatedTrialPreparation,
+    ) -> Result<TrialInput> {
+        let candidate = TrialInput::open(path, &preparation.snapshot).await?;
         if candidate.identity != preparation.database || candidate.sha256 != preparation.file_sha256
         {
             return Err(Error::IncompatibleStore);
@@ -142,9 +206,7 @@ impl TrialLease {
         {
             return Err(Error::IncompatibleStore);
         }
-        self.verify_activation(request)?;
-        self.verify_inputs()?;
-        candidate.verify()
+        Ok(candidate)
     }
 
     fn verify_activation(&self, request: &IsolatedTrialRequest) -> Result<()> {
@@ -401,6 +463,92 @@ pub(super) async fn verify(
 ) -> Result<()> {
     let lease = TrialLease::open(home, &request).await?;
     lease.verify_candidate(&request, &preparation).await
+}
+
+pub(super) async fn publish(home: PathBuf, update_id: String) -> Result<IsolatedTrialPublication> {
+    let directories = TrialRestoreDirectories::open(&home)?;
+    let receipt = TrialRestoreDirectories::pinned(&directories.state)
+        .join(format!(".statev2-trial-{update_id}.receipt-v1.json"));
+    let saved = read_trial_receipt::<IsolatedTrialVerification>(&receipt)?
+        .ok_or(Error::IncompatibleStore)?;
+    let activation = saved
+        .request
+        .activation
+        .as_ref()
+        .ok_or(Error::IncompatibleStore)?;
+    validate_isolated_trial_request(&home, &update_id, &saved.request)?;
+    validate_isolated_trial_preparation(&saved.request, &saved.preparation)?;
+    let lease = TrialLease::open_for(home.clone(), &saved.request, true).await?;
+    directories.verify(&home)?;
+    let state = TrialRestoreDirectories::pinned(&lease.directories.state);
+    let canonical = state.join("statev2.omdb");
+    let preserved = preserved_path(&state, &update_id);
+    let reused = !disposable_file_exists(&lease.trial)?;
+    let candidate_path = if reused {
+        canonical.clone()
+    } else {
+        lease.trial.clone()
+    };
+    let candidate = lease
+        .open_candidate(candidate_path, &saved.request, &saved.preparation)
+        .await?;
+    let verify_binding = || {
+        lease.verify_ownership()?;
+        lease.verify_activation(&saved.request)?;
+        lease.checkpoint.verify()?;
+        if read_trial_receipt::<IsolatedTrialVerification>(&receipt)?.as_ref() != Some(&saved) {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    };
+    verify_binding()?;
+    if !reused {
+        let source = lease.live.verify_at(&canonical, lease.source_links)?;
+        let staged = candidate.verify_at(&lease.trial, 1)?;
+        staged.sync_all().map_err(io_error)?;
+        if lease.source_links == 1 {
+            fs::hard_link(&canonical, &preserved).map_err(io_error)?;
+        }
+        source.sync_all().map_err(|_| Error::UnknownCommit)?;
+        lease.sync_publication()?;
+        #[cfg(test)]
+        super::tests::interrupt_trial_publication("isolated-preserved");
+
+        verify_binding().map_err(|_| Error::UnknownCommit)?;
+        lease
+            .live
+            .verify_at(&canonical, 2)
+            .map_err(|_| Error::UnknownCommit)?;
+        lease
+            .live
+            .verify_at(&preserved, 2)
+            .map_err(|_| Error::UnknownCommit)?;
+        candidate
+            .verify_at(&lease.trial, 1)
+            .map_err(|_| Error::UnknownCommit)?;
+        // The catalog carries the candidate and runtime identity through this rename.
+        fs::rename(&lease.trial, &canonical).map_err(|_| Error::UnknownCommit)?;
+        #[cfg(test)]
+        super::tests::interrupt_trial_publication("isolated-renamed");
+    }
+    lease.sync_publication()?;
+    verify_binding().map_err(|_| Error::UnknownCommit)?;
+    lease
+        .live
+        .verify_at(&preserved, 1)
+        .map_err(|_| Error::UnknownCommit)?;
+    candidate
+        .verify_at(&canonical, 1)
+        .map_err(|_| Error::UnknownCommit)?;
+    if disposable_file_exists(&lease.trial).map_err(|_| Error::UnknownCommit)? {
+        return Err(Error::UnknownCommit);
+    }
+    Ok(IsolatedTrialPublication {
+        activation: activation.clone(),
+        database: saved.preparation.database,
+        preserved_database: saved.request.database,
+        reused,
+    })
 }
 
 // Ported from cloud/serviceProtocol.ts, retained stock 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f.

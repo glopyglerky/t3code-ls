@@ -853,6 +853,17 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
     fs::rename(&receipt_path, &held_receipt).unwrap();
     assert_eq!(inspect_selection()["error"]["kind"], "incompatible_store");
     fs::rename(&held_receipt, &receipt_path).unwrap();
+    let unsealed = Command::new(executable)
+        .arg("trial-publish-sealed")
+        .arg(&home)
+        .arg(UPDATE)
+        .output()
+        .unwrap();
+    assert!(unsealed.status.success());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&unsealed.stdout).unwrap()["error"]["kind"],
+        "incompatible_store"
+    );
     assert_eq!(fs::read(&live).unwrap(), before);
     assert_eq!(fs::read(&trial).unwrap(), old_result);
     assert_eq!(fs::read(&checkpoint).unwrap(), original_checkpoint);
