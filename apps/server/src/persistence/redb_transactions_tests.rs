@@ -1353,3 +1353,55 @@ async fn helper_writer_guard_expires_owners_without_touching_live_read_snapshots
         .unwrap();
     transactions.rollback("replacement").await.unwrap();
 }
+
+#[test]
+fn forward_catalog_marker_is_strict_and_keeps_the_serving_fence() {
+    let plain = json!({"schema": schema(), "generation": "native"});
+    let marker = json!({
+        "update_id": "aa212c2b-63d4-4b28-97e4-1c1d6dc6d281",
+        "forward_selection_sha256": "a".repeat(64)
+    });
+    let mut marked = plain.clone();
+    marked["forward_service_activation_v1"] = marker.clone();
+    let bytes = serde_json::to_vec(&marked).unwrap();
+    let catalog = decode_catalog(&bytes).expect("the compatible reader must retain the marker");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&encode_catalog(&catalog).unwrap()).unwrap(),
+        marked
+    );
+    assert!(matches!(
+        catalog.ensure_serving(),
+        Err(Error::IncompatibleStore)
+    ));
+
+    let seal = json!({
+        "update_id": marker["update_id"],
+        "from_version": "1.2.3", "target_version": "1.2.4",
+        "target_entry_sha256": "a".repeat(64), "target_helper_sha256": "b".repeat(64),
+        "target_schema_sha256": "c".repeat(64),
+    });
+    let mut both = marked.clone();
+    both["prepared_service_activation_v1"] = seal;
+    assert!(decode_catalog(&serde_json::to_vec(&both).unwrap()).is_err());
+    for invalid in [
+        Value::Null,
+        json!({"update_id": marker["update_id"]}),
+        json!({"update_id": "wrong", "forward_selection_sha256": marker["forward_selection_sha256"]}),
+        json!({"update_id": marker["update_id"], "forward_selection_sha256": "A".repeat(64)}),
+        json!({"update_id": marker["update_id"], "forward_selection_sha256": marker["forward_selection_sha256"], "ready": true}),
+    ] {
+        marked["forward_service_activation_v1"] = invalid;
+        assert!(decode_catalog(&serde_json::to_vec(&marked).unwrap()).is_err());
+    }
+    let duplicate = format!(
+        "{{\"forward_service_activation_v1\":{marker},\"forward_service_activation_v1\":{marker},{}",
+        plain.to_string().strip_prefix('{').unwrap()
+    );
+    assert!(decode_catalog(duplicate.as_bytes()).is_err());
+    assert!(
+        decode_catalog(&serde_json::to_vec(&plain).unwrap())
+            .unwrap()
+            .ensure_serving()
+            .is_ok()
+    );
+}
