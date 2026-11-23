@@ -672,6 +672,12 @@ handles. It recovered the exact sealed and marked states after process exit
 and repeated generic restore refusal with both installed helpers.
 [Same-inode writer and restore proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45218639908/attempts/2)
 
+The Linux child fixture accepted a duplicate of the locked file description.
+Missing, independently reopened, foreign and stale inputs were refused. The
+parent preserved the marked database and original forward decision after a
+deliberately failing child. The parent held home and selection ownership
+throughout. [Child lease proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45227883095)
+
 Promotion to the target runtime, catalog unsealing and ordinary native update
 admission still require production recovery proof.
 
