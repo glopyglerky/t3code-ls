@@ -826,6 +826,30 @@ async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
                     candidate.prepared_service_activation().await.unwrap(),
                     activation
                 );
+                drop(candidate);
+                if let Some(helper) = std::env::var_os("T3_TEST_RETAINED_TRIAL_HELPER") {
+                    use std::io::Write;
+                    use std::process::{Command, Stdio};
+
+                    let mut retained = Command::new(helper)
+                        .arg("read-only-local")
+                        .arg(&live)
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .spawn()
+                        .unwrap();
+                    retained
+                        .stdin
+                        .take()
+                        .unwrap()
+                        .write_all(b"{\"operation\":\"application_schema\"}\n")
+                        .unwrap();
+                    let refused = retained.wait_with_output().unwrap();
+                    assert!(refused.status.success());
+                    let receipt: Value = serde_json::from_slice(&refused.stdout).unwrap();
+                    assert_eq!(receipt["error"]["kind"], "incompatible_store", "{receipt}");
+                    assert_eq!(fs::read(&live).unwrap(), trial_bytes);
+                }
             }
         }
         if !bind_runtime {
