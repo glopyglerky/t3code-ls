@@ -36,7 +36,7 @@ jobs:
           cargo +1.99.1 test --locked --offline --manifest-path "$manifest" server_snapshot | tee "$RUNNER_TEMP/makepad-reader.log"
           grep -Eq 'test result: ok\. [1-9][0-9]* passed' "$RUNNER_TEMP/makepad-reader.log"
   macos-arm64:
-    if: ${{ !startsWith(github.ref_name, 'candidate/t3code-ls-t01-makepad-input-lock-') }}
+    if: ${{ !startsWith(github.ref_name, 'candidate/t3code-ls-t01-makepad-input-lock-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t01-makepad-input-cross-') }}
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['macos-15'] || 'macos-15' }}
     timeout-minutes: 35
     env:
@@ -86,3 +86,164 @@ jobs:
         run: |
           node apps/server/scripts/verify-makepad-thread-snapshot.ts \
             "$RUNNER_TEMP/makepad-target/debug/t3-code-ls-makepad-input" --history
+
+  macos-intel-arm64-build:
+    # Build-only fallback. The arm64 job above remains the native runtime gate.
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-makepad-input-cross-')
+    runs-on: macos-15-intel
+    timeout-minutes: 35
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Cross-build the locked arm64 candidate without executing it
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = x86_64
+          rustup toolchain install 1.99.1 --profile minimal --target aarch64-apple-darwin
+          export CARGO_HOME="$RUNNER_TEMP/makepad-cross-cargo"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/makepad-cross-target"
+          SDKROOT=$(xcrun --sdk macosx --show-sdk-path)
+          export SDKROOT
+          unset RUSTC RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER RUSTFLAGS CARGO_ENCODED_RUSTFLAGS MAKEPAD
+          trap 'rm -rf "$CARGO_HOME" "$CARGO_TARGET_DIR"' EXIT
+          manifest=apps/desktop/makepad-input/Cargo.toml
+          target=aarch64-apple-darwin
+          stage="$RUNNER_TEMP/makepad-arm64-build"
+          trap 'rm -rf "$stage" "$CARGO_HOME" "$CARGO_TARGET_DIR"' EXIT
+          mkdir -p "$stage"
+          cargo +1.99.1 fetch --locked --target "$target" --manifest-path "$manifest"
+          MAKEPAD_PACKAGE_DIR=. cargo +1.99.1 build --locked --offline --target "$target" --manifest-path "$manifest"
+          binary="$CARGO_TARGET_DIR/$target/debug/t3-code-ls-makepad-input"
+          test "$(lipo -archs "$binary")" = arm64
+          install -m 0755 "$binary" "$stage/t3-code-ls-makepad-input"
+          cp apps/server/scripts/verify-makepad-thread-snapshot.ts "$stage/"
+          cp LICENSE "$stage/LICENSE"
+          makepad=("$CARGO_HOME"/git/checkouts/makepad-*/888d1b5)
+          test "${#makepad[@]}" = 1
+          test "$(git -C "${makepad[0]}" rev-parse HEAD)" = 888d1b501ff41d0084ddd5417446b7341d5f873e
+          cp "${makepad[0]}/LICENSE" "$stage/Makepad-LICENSE"
+          # Pinned app_main!(App) selects the International set. Preserve it.
+          # desktop bundle rejects --target; use its executable-relative map format.
+          mkdir -p "$stage/resources/makepad_widgets/resources"
+          for font in IBMPlexSans-Text.ttf IBMPlexSans-SemiBold.ttf IBMPlexSans-Italic.ttf \
+            IBMPlexSans-BoldItalic.ttf LiberationMono-Regular.ttf fa-solid-900.ttf \
+            LXGWWenKaiRegular.ttf LXGWWenKaiBold.ttf NotoColorEmoji.ttf; do
+            cp "${makepad[0]}/widgets/resources/$font" "$stage/resources/makepad_widgets/resources/"
+          done
+          cp -R "${makepad[0]}/widgets/resources/icons" "$stage/resources/makepad_widgets/resources/"
+          printf 'makepad_widgets\tresources/makepad_widgets\n' \
+            > "$stage/t3-code-ls-makepad-input.makepad-package-paths"
+          (cd "$stage" && find resources -type f -exec shasum -a 256 {} \; \
+            | LC_ALL=C sort > resources.sha256)
+          rm -r "$stage/resources"
+          shasum -a 256 "$manifest" apps/desktop/makepad-input/Cargo.lock \
+            apps/server/scripts/verify-makepad-thread-snapshot.ts \
+            packages/client-runtime/rust/host/fixtures/saved-history.json \
+            pnpm-lock.yaml toolchain.lock.json > "$stage/source.sha256"
+          {
+            git rev-parse HEAD 'HEAD^{tree}'
+            printf '%s\n' 'bootstrap Rust 1.99.1; not packaged Lustr/BlueFe qualification' \
+              'build-only; no native input, snapshot or history execution' \
+              'Makepad 888d1b501ff41d0084ddd5417446b7341d5f873e; MIT' \
+              'Stage executable-relative resources from the pinned Makepad Git object on the runtime host.'
+            rustc +1.99.1 -vV
+            cargo +1.99.1 -V
+            shasum -a 256 "$(rustc +1.99.1 --print sysroot)/lib/rustlib/$target/lib/"libstd-*.rlib
+            xcrun clang --version
+            shasum -a 256 "$(rustup which --toolchain 1.99.1 rustc)"
+            xcodebuild -version
+            xcrun --sdk macosx --show-sdk-version
+            sw_vers
+            otool -L "$binary"
+          } > "$stage/identity.txt"
+          cargo +1.99.1 tree --locked --offline --target "$target" \
+            --manifest-path "$manifest" --prefix none > "$stage/dependencies.txt"
+          cat > "$stage/verify-package.sh" <<'VERIFY'
+          #!/bin/bash
+          set -euo pipefail
+          artifact=$(cd "$(dirname "$0")" && pwd)
+          cd "$artifact"
+          shasum -a 256 -c SHA256SUMS
+          if [[ "$#" == 1 ]]; then
+            pin=888d1b501ff41d0084ddd5417446b7341d5f873e
+            test "$(git -C "$1" rev-parse --verify "$pin^{commit}")" = "$pin"
+            test ! -e resources
+            while IFS= read -r record; do
+              entry=${record#*  }
+              case "$entry" in
+                *'/../'*|*'/./'*|*'//'*|*'/..'|*'/.'|*'/') exit 1 ;;
+                resources/makepad_widgets/resources/*) ;;
+                *) exit 1 ;;
+              esac
+              mkdir -p "$(dirname "$entry")"
+              git -C "$1" cat-file blob "$pin:widgets/${entry#resources/makepad_widgets/}" > "$entry"
+            done < resources.sha256
+          else
+            test "$#" = 0
+          fi
+          shasum -a 256 -c resources.sha256
+          VERIFY
+          chmod 0755 "$stage/verify-package.sh"
+          cat > "$stage/run-loopback.sh" <<'RUNNER'
+          #!/bin/bash
+          set -euo pipefail
+          test "$(uname -m)" = arm64
+          test "$#" = 2
+          artifact=$(cd "$(dirname "$0")" && pwd)
+          makepad_source=$(cd "$2" && pwd)
+          cd "$1"
+          shasum -a 256 -c "$artifact/source.sha256"
+          test -f apps/server/dist/bin.mjs
+          node=$(command -v node)
+          test "$("$node" --version)" = v26.12.1
+          scratch=$(mktemp -d)
+          trap 'rm -rf "$scratch"' EXIT
+          mkdir "$scratch/relocated package" "$scratch/unrelated-cwd"
+          cp -R "$artifact/." "$scratch/relocated package/"
+          artifact="$scratch/relocated package"
+          /bin/bash "$artifact/verify-package.sh" "$makepad_source"
+          # Launch the moved binary from a directory with no package resources.
+          # Use a logged-in graphical session. Never supply an installed profile.
+          clean=(env -i HOME="$scratch" TMPDIR="$scratch/" PATH=/usr/bin:/bin)
+          (cd "$scratch/unrelated-cwd" && "${clean[@]}" "$artifact/t3-code-ls-makepad-input" --proof)
+          "${clean[@]}" "$node" apps/server/scripts/verify-makepad-thread-snapshot.ts \
+            "$artifact/t3-code-ls-makepad-input"
+          "${clean[@]}" "$node" apps/server/scripts/verify-makepad-thread-snapshot.ts \
+            "$artifact/t3-code-ls-makepad-input" --history
+          RUNNER
+          chmod 0755 "$stage/run-loopback.sh"
+          (cd "$stage" && shasum -a 256 t3-code-ls-makepad-input \
+            verify-makepad-thread-snapshot.ts run-loopback.sh verify-package.sh \
+            t3-code-ls-makepad-input.makepad-package-paths LICENSE Makepad-LICENSE \
+            resources.sha256 source.sha256 identity.txt dependencies.txt > SHA256SUMS)
+          # Integrity relocation/refusal checks do not execute the arm64 app.
+          relocation=$(mktemp -d)
+          trap 'rm -rf "$relocation" "$stage" "$CARGO_HOME" "$CARGO_TARGET_DIR"' EXIT
+          cp -R "$stage" "$relocation/moved package"
+          (cd / && /bin/bash "$relocation/moved package/verify-package.sh" "${makepad[0]}")
+          victim="$relocation/moved package/resources/makepad_widgets/resources/IBMPlexSans-Text.ttf"
+          mv "$victim" "$relocation/font.saved"
+          if /bin/bash "$relocation/moved package/verify-package.sh"; then
+            echo 'Missing resource accepted' >&2; exit 1
+          fi
+          mv "$relocation/font.saved" "$victim"
+          printf 'changed' >> "$victim"
+          if /bin/bash "$relocation/moved package/verify-package.sh"; then
+            echo 'Hash-mismatched resource accepted' >&2; exit 1
+          fi
+          rm -rf "$relocation"
+          # Preserve the executable without redistributing dependency assets.
+          test ! -e "$stage/resources"
+          tar -czf "$RUNNER_TEMP/makepad-arm64-build.tar.gz" -C "$stage" .
+      - name: Retain the build-only candidate and exact rerun inputs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: makepad-arm64-cross-build-${{ github.sha }}
+          path: ${{ runner.temp }}/makepad-arm64-build.tar.gz
+          if-no-files-found: error
+          retention-days: 7
