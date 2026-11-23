@@ -80,6 +80,13 @@ jobs:
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
             -p t3-code-ls-core --lib codex_import
           pnpm --dir apps/server exec vp test run --maxWorkers 2 src/project/AgentSessionScanner.test.ts
+      - name: Verify root workspace release and pull request refresh
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t16-root-release-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 \
+            src/orchestration-v2/ThreadLaunchService.test.ts src/orchestration-v2/ThreadPullRequestService.test.ts
       - name: Exercise local pairing in the retained and Dioxus browser builds
         if: env.PAIRING_PROOF == 'true'
         env:

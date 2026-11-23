@@ -3320,6 +3320,7 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     runId: RunId,
+    rootBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   }),
   Schema.Struct({
     type: Schema.Literal("notification.delivery.accept"),

@@ -11510,8 +11510,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
       }
       const now = yield* DateTime.now;
+      let thread = projection.thread;
+      if (command.rootBranch !== undefined) {
+        if (state.run.workspacePreparation?.type !== "root" || thread.worktreePath !== null) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: `Run ${command.runId} no longer owns the root workspace.`,
+          });
+        }
+        thread = { ...thread, branch: command.rootBranch, updatedAt: now };
+      }
       const resolvedRuntimePolicy = yield* runtimePolicy
-        .resolve({ thread: projection.thread, modelSelection: state.run.modelSelection })
+        .resolve({ thread, modelSelection: state.run.modelSelection })
         .pipe(mapDispatchError(command));
       const checkpointScope = yield* checkpointService
         .prepareRootRunScope({
@@ -11524,6 +11535,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         })
         .pipe(mapDispatchError(command));
       const emitEvent = emit(events, command);
+      if (thread !== projection.thread) {
+        yield* emitEvent({
+          type: "thread.metadata-updated",
+          threadId: command.threadId,
+          providerInstanceId: thread.providerInstanceId,
+          occurredAt: now,
+          payload: thread,
+        });
+      }
       yield* emitEvent({
         type: "checkpoint-scope.created",
         threadId: command.threadId,
