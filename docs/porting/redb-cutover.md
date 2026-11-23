@@ -427,6 +427,18 @@ Registration and the assertions described here are not a declaration that a
 particular committed head has passed. Qualification must run the mapped checks
 against that exact head and its packaged helpers.
 
+The dual-engine EventSink fixture passed on the integration candidate
+`0ef9bc8b0b7e11cd8f7b3d9e449b8d98ac6b9d93`. Direct redb and Fjall each handled
+67 requests, produced the same state digest, and preserved both the committed
+replay and the unchanged seed after a failed staging transaction. Both routes
+refused ordinary startup. [Dual-engine fixture](https://github.com/glopyglerky/t3code-ls/actions/runs/45238019829)
+
+The aged-retention fixture passed at `0c046ce958cad9671785ec909da46e7991633d3c`.
+It reopened after a committed deletion page, then issued and observed a
+foreground command while pruning resumed. Active and pending work, projections,
+the accepted receipt and attachment bytes survived. The pre-retention backup
+reopened separately. [Retention fixture](https://github.com/glopyglerky/t3code-ls/actions/runs/45239390264)
+
 `tools/acceptance-checks.json` schedules these gates and their scoped
 typechecks, together with the existing transaction, import, event-log, database
 durability and differential component-outbox gates. Multiple native executable
@@ -697,6 +709,11 @@ database and inherited lease before emitting readiness. It refused changed
 identity, hash and lease inputs. The parent retained authority and restarted
 the check after a forced readiness write failure.
 [Staged helper readiness](https://github.com/glopyglerky/t3code-ls/actions/runs/45235858575)
+
+A subsequent Linux fixture bound readiness to the immutable running helper
+image. It refused mutable images and a changed installed source, along with
+the inherited-lease and readiness-output controls. The parent held ownership
+throughout. [Sealed image proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45238021254)
 
 Promotion to the target runtime, catalog unsealing and ordinary native update
 admission still require production recovery proof.

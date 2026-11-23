@@ -33,18 +33,32 @@ async fn run(endpoint: SocketAddr) -> Result<(), String> {
     let mut input = io::stdin().lock();
     let mut output = io::stdout().lock();
     let open = request(&mut input)?;
-    if open["operation"] != "create" || !open["options"].is_object() {
-        return Err("expected create".into());
+    if !open["options"].is_object() {
+        return Err("expected agent options".into());
     }
-    let agent = client
-        .create_agent(open["options"].clone())
-        .await
-        .map_err(|_| "create failed")?;
+    let agent = match open["operation"].as_str() {
+        Some("create") => client
+            .create_agent(open["options"].clone())
+            .await
+            .map_err(|_| "create failed")?,
+        Some("resume") => {
+            let id = open["agentId"].as_str().ok_or("expected agent identity")?;
+            client
+                .resume_agent(id, open["options"].clone())
+                .await
+                .map_err(|_| "resume failed")?;
+            id.to_owned()
+        }
+        _ => return Err("expected create or resume".into()),
+    };
     let result: Result<_, String> = async {
         emit(&mut output, json!({"version":1,"agentId":agent})).map_err(|_| "output")?;
         let send = request(&mut input)?;
+        if send["operation"] == "close" {
+            return Ok(None);
+        }
         if send["operation"] != "send" {
-            return Err("expected send".into());
+            return Err("expected send or close".into());
         }
         let prompt = send["text"].as_str().ok_or("expected text")?;
         let mut output_failed = false;
@@ -59,13 +73,16 @@ async fn run(endpoint: SocketAddr) -> Result<(), String> {
         if output_failed {
             return Err("output".into());
         }
-        Ok(terminal)
+        Ok(Some(terminal))
     }
     .await;
     // Always attempt the bridge's explicit lifecycle close before acknowledging completion.
     let closed = client.close_agent(&agent).await;
     let terminal = result?;
     closed.map_err(|_| "close failed")?;
+    let Some(terminal) = terminal else {
+        return Ok(());
+    };
     let status = match terminal.status {
         RunStatus::Finished => "finished",
         RunStatus::Failed => "error",

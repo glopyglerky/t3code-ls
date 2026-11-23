@@ -55,7 +55,7 @@ function envelope(value: unknown, flags = 0): Buffer {
   return Buffer.concat([header, bytes]);
 }
 
-async function peer(mode: "complete" | "truncated" | "cancel" | "wrong-run") {
+async function peer(mode: "complete" | "truncated" | "cancel" | "wrong-run" | "resume" | "wrong-agent") {
   let arrived!: () => void;
   const sending = new Promise<void>((resolve) => { arrived = resolve; });
   let finish!: () => void;
@@ -80,6 +80,12 @@ async function peer(mode: "complete" | "truncated" | "cancel" | "wrong-run") {
         NodeAssert.equal(message.options.model.id, "composer-2.5");
         response.setHeader("content-type", "application/json");
         response.end(JSON.stringify({ agentId }));
+      } else if (operation === "ResumeAgent") {
+        NodeAssert.equal(message.agentId, agentId);
+        NodeAssert.equal(message.options.model.id, "composer-2.5");
+        NodeAssert.deepEqual(requests, ["CreateAgent", "CloseAgent", "ResumeAgent"]);
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ agentId: mode === "wrong-agent" ? "unrelated-agent" : agentId }));
       } else if (operation === "Send") {
         NodeAssert.equal(body[0], 0);
         NodeAssert.equal(body.readUInt32BE(1), body.length - 5);
@@ -133,7 +139,7 @@ function runner(endpoint: string, receivedText: string[], outcomes: string[], ch
     assertComplete: Effect.void,
     open: (input) => Effect.tryPromise({
       try: async () => {
-        NodeAssert.equal(input.operation, "create");
+        if (input.operation === "resume") NodeAssert.equal(input.agentId, agentId);
         const child = NodeChildProcess.spawn(executable!, [endpoint], {
           env: {},
           stdio: ["pipe", "pipe", "pipe"],
@@ -150,8 +156,9 @@ function runner(endpoint: string, receivedText: string[], outcomes: string[], ch
         // Attach rejection immediately, including startup failure before the first frame.
         void exited.catch(() => undefined);
         const lines = NodeReadline.createInterface({ input: child.stdout, crlfDelay: Infinity })[Symbol.asyncIterator]();
-        child.stdin.write(`${JSON.stringify({ operation: "create", options: input.options })}\n`);
+        child.stdin.write(`${JSON.stringify({ operation: input.operation, agentId: input.agentId, options: input.options })}\n`);
         const opened = await lines.next();
+        if (opened.done) await exited;
         NodeAssert.equal(opened.done, false);
         NodeAssert.deepEqual(JSON.parse(opened.value!), { version: 1, agentId });
         return cursorAgentSdkSession(child, lines, exited, receivedText, endpoint, outcomes, children);
@@ -174,8 +181,9 @@ function cursorAgentSdkSession(
     agentId,
     listMessages: Effect.succeed([]),
     close: Effect.promise(async () => {
-      child.stdin.end();
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      if (child.stdin.writable && !child.stdin.writableEnded) {
+        child.stdin.end(`${JSON.stringify({ operation: "close" })}\n`);
+      }
       await exited;
     }),
     send: (input) => Effect.sync(() => {
@@ -234,7 +242,7 @@ function cursorAgentSdkSession(
 }
 
 describe.skipIf(!executable)("Cursor adapter through the Rust Connect host", () => {
-  it.live.each(["complete", "truncated", "cancel", "wrong-run"] as const)("preserves the controlled turn, mode=%s", (mode) =>
+  it.live.each(["complete", "truncated", "cancel", "wrong-run", "resume", "wrong-agent"] as const)("preserves the controlled turn, mode=%s", (mode) =>
     Effect.gen(function* () {
       const bridge = yield* Effect.acquireRelease(Effect.promise(() => peer(mode)), (peer) => Effect.promise(peer.close));
       const fs = yield* FileSystem.FileSystem;
@@ -254,13 +262,35 @@ describe.skipIf(!executable)("Cursor adapter through the Rust Connect host", () 
         Effect.provideService(CursorAgentSdk.CursorAgentSdkRunner, runner(bridge.endpoint, receivedText, outcomes, children)),
         Effect.provide(TestProviderHost.layer({ cwd: workspace })),
       );
-      const runtime = yield* adapter.openSession({
+      const openSession = (session: string) => adapter.openSession({
         threadId,
-        providerSessionId: ProviderSessionId.make("cursor-rust-session"),
+        providerSessionId: ProviderSessionId.make(session),
         modelSelection,
         runtimePolicy,
       });
-      const providerThread = yield* runtime.ensureThread({ threadId, modelSelection, runtimePolicy });
+      const needsResume = mode === "resume" || mode === "wrong-agent";
+      const threadInput = { threadId, modelSelection, runtimePolicy };
+      const prior = needsResume ? yield* Effect.scoped(Effect.gen(function* () {
+        const runtime = yield* openSession("cursor-rust-prior-session");
+        return yield* runtime.ensureThread(threadInput);
+      })) : undefined;
+      const runtime = yield* openSession("cursor-rust-session");
+      if (mode === "wrong-agent" && prior !== undefined) {
+        yield* Effect.flip(runtime.resumeThread({ providerThread: prior }));
+        assert.deepEqual(bridge.requests, ["CreateAgent", "CloseAgent", "ResumeAgent"]);
+        assert.deepEqual(bridge.errors, []);
+        assert.equal(children.length, 2);
+        assert.deepEqual(children.map((child) => child.exitCode), [0, 2]);
+        return;
+      }
+      const providerThread = prior === undefined
+        ? yield* runtime.ensureThread(threadInput)
+        : yield* runtime.resumeThread({ providerThread: prior });
+      if (prior !== undefined) {
+        assert.equal(providerThread.id, prior.id);
+        assert.deepEqual(providerThread.nativeThreadRef, prior.nativeThreadRef);
+        assert.equal(providerThread.providerSessionId, runtime.providerSessionId);
+      }
       const now = yield* DateTime.now;
       yield* runtime.startTurn({
         threadId,
@@ -337,9 +367,12 @@ describe.skipIf(!executable)("Cursor adapter through the Rust Connect host", () 
       assert.equal(new Set(events.flatMap((event) =>
         event.type === "message.updated" && event.message.role === "assistant" ? [event.message.id] : [],
       )).size, 1);
-      assert.deepEqual(outcomes, mode === "cancel" ? ["cancelled"] : mode === "complete" ? ["finished"] : []);
+      assert.deepEqual(outcomes, mode === "cancel" ? ["cancelled"] : mode === "complete" || mode === "resume" ? ["finished"] : []);
       assert.ok(children.every((child) => child.exitCode !== null || child.signalCode !== null));
-      assert.deepEqual(bridge.requests, interrupted ? ["CreateAgent", "Send", "CancelRun", "CloseAgent"] : ["CreateAgent", "Send", "CloseAgent"]);
+      assert.deepEqual(bridge.requests, [
+        "CreateAgent", ...(needsResume ? ["CloseAgent", "ResumeAgent"] : []),
+        "Send", ...(interrupted ? ["CancelRun"] : []), "CloseAgent",
+      ]);
       assert.deepEqual(bridge.errors, []);
     }).pipe(
       Effect.scoped,
