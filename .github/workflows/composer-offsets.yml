@@ -207,6 +207,7 @@ jobs:
         env:
           T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
           T3_CODE_LS_BUNDLED_PTY_PROOF: ${{ env.NATIVE_PTY_PROOF }}
+          T3_CODE_LS_PTY_RESTART_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-restart-') }}
           T3_CODE_LS_SPLICE_NEGOTIATION_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-splice-') }}
           T3_CODE_LS_SPLIT_PTY_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-') }}
           T3_CODE_LS_MULTI_TAB_DRAFT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-') }}
@@ -260,6 +261,10 @@ jobs:
             done
           fi
           node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
+          if [[ "$T3_CODE_LS_PTY_RESTART_PROOF" == true ]]; then
+            jq -e '.status == "passed" and .bundledNativePtyOwner and .terminalRestart.oldOwnerExited and .terminalRestart.foregroundExited and .terminalRestart.newShell and .terminalRestart.previousThreadReopened' \
+              "$proof/native/proof.json"
+          fi
           if [[ "$INTEGRATED_NATIVE" == true || "$GITHUB_REF_NAME" == candidate/t3code-ls-t02-bundled-native-t13-voice-* ]]; then
             mkdir "$proof/voice"
             sudo -n unshare --net -- bash -euc '
