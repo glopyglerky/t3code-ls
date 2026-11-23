@@ -63,6 +63,17 @@ The integrated source can advance to an immutable default-branch commit before a
 
 The nightly checker compares Git ancestry as well as trees. An equal revision is current; an ancestor nightly is already integrated and creates no reverse-import or removal work. A newer or divergent nightly requires review. Complete tree differences remain in the report, and missing shallow ancestry fails explicitly. Nightly source locks retain their moved-tag and publication rollback checks. None of these reports changes the source pin or qualification.
 
+## Browser assistant text
+
+The opt-in Dioxus row renders bounded strong and emphasis spans from the
+selected thread. In the packaged Linux x64 Chromium run, the Unicode text
+was visible at stream sequence 27 and had the same assistant message ID
+after interruption and reopen at sequence 44. The unsent draft survived.
+The blocked-Wasm run rendered the same formatted text through the retained
+client. The hosted component check also covers selection and citations,
+replacement, and whole-message fallback for unsupported syntax.
+[Formatted timeline run](https://github.com/glopyglerky/t3code-ls/actions/runs/45233550668)
+
 ## Packaged peer-link recovery
 
 The Linux archive fixture starts two servers with disposable omdb stores on
