@@ -661,6 +661,12 @@ the forward target. A mislabeled copy with otherwise valid digests and receipts
 was refused without changes to the trial files, checkpoint or selected service.
 [Packaged version check](https://github.com/glopyglerky/t3code-ls/actions/runs/45191901057)
 
+The forward-catalog fixture preserved the post-decision restore fence against
+both the compatible and predecessor helpers. Both refused generic restore
+across the original, staged, and renamed retry layouts. The predecessor also
+rejected the marker when reading the catalog.
+[Forward catalog and restore proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45212311659)
+
 Promotion to the target runtime, catalog unsealing and ordinary native update
 admission still require production recovery proof.
 
@@ -687,3 +693,14 @@ was 340.2 ms later and server CPU was 2,245 ms higher. Observations use one Linu
 x64 runner, unmanaged filesystem cache, sampled process RSS, and distinct
 stock SQLite WAL/NORMAL and omdb Immediate durability profiles.
 [Paired workspace reopen](https://github.com/glopyglerky/t3code-ls/actions/runs/45177228845)
+
+The checked-open candidate reuses verified normal-table pages during allocator
+reconstruction. Five alternating pairs used the same native application and
+32-thread, 6,400-message workload with the engine feature disabled and enabled.
+Median descriptor readiness was 1,536 ms with the feature disabled and
+1,369 ms with it enabled. The median paired reduction was 154 ms (10.2%), with
+individual reductions from 111 to 180 ms. The median paired HTML readiness
+reduction was 155 ms. The Linux x64 run used an unmanaged filesystem cache.
+CPU and RSS samples were contextual. The product engine pin stays unchanged
+while stock comparison and recovery qualification continue.
+[Paired checked-open results](https://github.com/glopyglerky/t3code-ls/actions/runs/45210184960)
