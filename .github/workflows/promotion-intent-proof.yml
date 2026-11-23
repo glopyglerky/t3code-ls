@@ -163,7 +163,7 @@ jobs:
                   -- --ignored --exact --nocapture 2>&1 | tee "$proof/forward-packaged.log"
                 grep -F "test $packaged_test ... ok" "$proof/forward-packaged.log"
                 if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-catalog-integrated-writer-process-installed-startup-forward-owner-* ]]; then
-                  test "$(grep -Fc 'T05 forward owner: immutable image, live-owner refusal, continuing selection checks, EOF release and reacquisition; never serving' "$proof/forward-packaged.log")" = 2
+                  test "$(grep -Fc 'T05 forward owner: immutable helper and selected-entry binding, wrong-entry refusal, continuing selection/entry/helper checks, EOF release and reacquisition; no entry launch or serving' "$proof/forward-packaged.log")" = 2
                 fi
               fi
             fi

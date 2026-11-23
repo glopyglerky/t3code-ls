@@ -22,7 +22,7 @@ fn image_seals() -> SealFlags {
     SealFlags::WRITE | SealFlags::GROW | SealFlags::SHRINK | SealFlags::EXEC | SealFlags::SEAL
 }
 
-fn verify_image(file: &File, expected: &str) -> Result<()> {
+pub(crate) fn verify_image(file: &File, expected: &str) -> Result<()> {
     let metadata = file.metadata().map_err(|_| Error::IncompatibleStore)?;
     if !fcntl_get_seals(file)
         .map_err(|_| Error::IncompatibleStore)?
@@ -43,14 +43,14 @@ pub(crate) fn verify_running_image(expected: &str) -> Result<()> {
     )
 }
 
-/// Fixture-only staging. The copy is private until seals and the exact expected
-/// digest have been checked. No descriptor, path or digest transfers authority.
-#[cfg(test)]
+/// Bounded immutable staging. The copy is private until seals and the exact
+/// expected digest have been checked. No descriptor, path or digest transfers
+/// authority, proves a package format or grants execution authority.
 pub(crate) fn stage_image(source: &Path, expected: &str) -> Result<File> {
     use rustix::fs::{MemfdFlags, fcntl_add_seals, memfd_create};
     use std::io::Seek;
     use std::os::fd::AsRawFd;
-    let source = File::open(source).map_err(|_| Error::IncompatibleStore)?;
+    let source = crate::backend::open_regular_file(source, fs::OpenOptions::new().read(true))?;
     let limit = crate::application_storage::MAX_TRIAL_EXECUTABLE_BYTES;
     let metadata = source.metadata().map_err(|_| Error::IncompatibleStore)?;
     if !metadata.is_file() || metadata.len() == 0 || metadata.len() > limit {
@@ -58,7 +58,7 @@ pub(crate) fn stage_image(source: &Path, expected: &str) -> Result<File> {
     }
     let mut image = File::from(
         memfd_create(
-            "t3-synthetic-readiness",
+            "t3-forward-image",
             MemfdFlags::EXEC | MemfdFlags::ALLOW_SEALING | MemfdFlags::CLOEXEC,
         )
         .map_err(|_| Error::IncompatibleStore)?,
@@ -374,6 +374,13 @@ mod image_tests {
         assert!(verify_image(&File::open(&mutable_path).unwrap(), &digest).is_err());
         assert!(verify_image(&File::open(&path).unwrap(), &"0".repeat(64)).is_err());
         assert!(stage_image(source.path(), &"0".repeat(64)).is_err());
+        let empty = tempfile::NamedTempFile::new().unwrap();
+        assert!(stage_image(empty.path(), &digest).is_err());
+        let directory = tempfile::tempdir().unwrap();
+        assert!(stage_image(directory.path(), &digest).is_err());
+        let link = directory.path().join("image-link");
+        std::os::unix::fs::symlink(source.path(), &link).unwrap();
+        assert!(stage_image(&link, &digest).is_err());
         // The source can change without changing the copied sealed content.
         source.as_file().write_at(b"X", 0).unwrap();
         assert!(stage_image(source.path(), &digest).is_err());
