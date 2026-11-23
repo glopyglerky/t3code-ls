@@ -31,14 +31,11 @@ export function isQualifiedNativeHost(
 }
 
 function packageUsesUpstream(
-  component: string,
+  executable: string,
   platform: NodeJS.Platform,
   architecture: string,
 ): boolean {
-  const manifestPath = NodePath.join(
-    NodePath.dirname(nativeExecutable(component)),
-    "manifest.json",
-  );
+  const manifestPath = NodePath.join(NodePath.dirname(executable), "manifest.json");
   if (!NodeFS.existsSync(manifestPath)) return false;
   const manifest: unknown = JSON.parse(NodeFS.readFileSync(manifestPath, "utf8"));
   if (typeof manifest !== "object" || manifest === null)
@@ -72,9 +69,10 @@ export function selectNativeExecutable(
   override?: string,
   platform: NodeJS.Platform = NodeOS.platform(),
   architecture: string = NodeOS.arch(),
-  implementation: string | undefined = process.env.T3_CODE_LS_IMPLEMENTATION,
+  implementation: string | null | undefined = process.env.T3_CODE_LS_IMPLEMENTATION,
+  bundledDirectory?: string,
 ): string | undefined {
-  if (implementation !== undefined && implementation !== "upstream" && implementation !== "native")
+  if (implementation != null && implementation !== "upstream" && implementation !== "native")
     throw new Error("T3_CODE_LS_IMPLEMENTATION must be upstream or native");
   // The adapter validates an explicit selection through its own error contract.
   if (override !== undefined) return override;
@@ -84,12 +82,17 @@ export function selectNativeExecutable(
       throw new Error("The native implementation is not qualified for this host");
     return undefined;
   }
-  if (implementation !== "native" && packageUsesUpstream(component, platform, architecture))
+  const executable = nativeExecutable(component, undefined, bundledDirectory);
+  if (implementation !== "native" && packageUsesUpstream(executable, platform, architecture))
     return undefined;
-  return nativeExecutable(component);
+  return executable;
 }
 
-export function nativeExecutable(component: string, override?: string): string {
+export function nativeExecutable(
+  component: string,
+  override?: string,
+  bundledDirectory?: string,
+): string {
   if (override !== undefined) {
     if (!NodePath.isAbsolute(override) || override.trim() !== override)
       throw new Error("Native executable override must be an absolute path");
@@ -101,8 +104,7 @@ export function nativeExecutable(component: string, override?: string): string {
   );
   const source = directory.endsWith(NodePath.join("packages", "shared", "src"));
   return NodePath.resolve(
-    directory,
-    source ? "../../../bin" : "native-bin",
+    bundledDirectory ?? NodePath.resolve(directory, source ? "../../../bin" : "native-bin"),
     `t3-code-ls-${component}${NodeOS.platform() === "win32" ? ".exe" : ""}`,
   );
 }
