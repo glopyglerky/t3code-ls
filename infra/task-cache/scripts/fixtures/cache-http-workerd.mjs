@@ -23,6 +23,14 @@ export class InboxProbe {
       state.storage.transactionSync(() => statements.map(statement => statement.execute())) };
     const artifacts = {
       put: async (key, bytes) => {
+        if (this.failNextPut) {
+          const failure = this.failNextPut;
+          this.failNextPut = undefined;
+          this.pendingPut = failure;
+          await failure.promise;
+          this.pendingPut = undefined;
+          return null;
+        }
         this.objects.set(key, new Uint8Array(bytes).slice());
         return { key };
       },
@@ -49,10 +57,23 @@ export class InboxProbe {
       this.state.storage.sql.exec(`INSERT INTO scopes
         (scope_id, endpoint, repository, repository_id, repository_owner_id, branch)
         VALUES ('t3code','https://cache.example','fixture/cache','1','2','refs/heads/main')`);
-      return Response.json({ protocol: "t3-relay-inbox-workerd-v1" });
+      return Response.json({ protocol: "t3-cache-http-workerd-v1" });
     }
     if (path === "/fixture/refuse") {
       this.state.storage.sql.exec("UPDATE scopes SET writes_enabled = 0");
+      return new Response(null, { status: 204 });
+    }
+    if (path === "/fixture/fail-next-put" && request.method === "POST") {
+      if (this.failNextPut || this.pendingPut) return new Response(null, { status: 409 });
+      this.failNextPut = Promise.withResolvers();
+      return new Response(null, { status: 204 });
+    }
+    if (path === "/fixture/pending-put") {
+      return Response.json({ pending: this.pendingPut !== undefined });
+    }
+    if (path === "/fixture/release-put" && request.method === "POST") {
+      if (!this.pendingPut) return new Response(null, { status: 409 });
+      this.pendingPut.resolve();
       return new Response(null, { status: 204 });
     }
     if (path === "/fixture/inspect") {
