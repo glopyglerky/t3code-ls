@@ -29,6 +29,7 @@ jobs:
       WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
       BUNDLED_NATIVE: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-') || startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
       INTEGRATED_NATIVE: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') }}
+      FORK_HISTORY_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t04-coherent-history-') }}
       NATIVE_PTY_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-') }}
       PAIRING_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t01-dioxus-pairing-') }}
       GUEST_NAME_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t11-dioxus-guest-') }}
@@ -293,7 +294,9 @@ jobs:
             done
           fi
           if [[ "$GITHUB_REF_NAME" != candidate/t3code-ls-t02-bundled-native-t13-pdf-external-* ]]; then
+          if [[ "$FORK_HISTORY_PROOF" != true ]]; then
             node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
+          fi
           fi
           if [[ "$INTEGRATED_NATIVE" == true || "$GITHUB_REF_NAME" == candidate/t3code-ls-t02-bundled-native-t13-pdf-external-* ]]; then
             pdf_external_proof="$proof"
@@ -372,6 +375,20 @@ jobs:
               .orderedRowsSha256 == "ad56e3b7b21ad9b478f23aa8ce0ca9026133ebe33d258d19e8502f0eb44e4570" and
               .chatPendingAfterReattach and .chatCompletedBeforeForegroundExit and .chat.reopened and
               .chat.exactReply == "Created the requested probe file.")' "$proof/native/proof.json"
+      - name: Exercise one live inherited-history view in the bundled native application
+        if: env.FORK_HISTORY_PROOF == 'true'
+        run: |
+          proof="$RUNNER_TEMP/built-composer-proof/fork-history"
+          mkdir -p apps/server/dist/client
+          cp -R apps/web/dist/. apps/server/dist/client/
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- "$2" apps/web/scripts/verify-packaged-fork-history.mjs "$3"
+          ' _ "$(id -un)" "$(command -v node)" "$proof"
+          jq -e '.status == "passed" and (.live.childSequences | length) == 2 and
+            .live.olderRows > 0 and .live.scrollDelta <= 4 and .retained.identity.engine == "omdb" and
+            .live.refreshedHistoryViewRevision > .live.initialHistoryViewRevision and
+            .retained.historyViewRevision >= .live.refreshedHistoryViewRevision' "$proof/proof.json"
       - name: Check the controlled HTML publisher and production MCP session
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-html-')
         env:
