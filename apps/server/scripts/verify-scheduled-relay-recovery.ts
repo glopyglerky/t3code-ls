@@ -13,6 +13,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ScheduledTaskWebhookDeliveryId,
+  ThreadId,
   WS_METHODS,
 } from "@t3tools/contracts";
 import {
@@ -35,9 +36,15 @@ const root = FS.realpathSync(Path.resolve(import.meta.dirname, "../../.."));
 const outputPath = process.argv[2];
 const boundary = process.argv[3] ?? "before-claim";
 Assert.ok(outputPath && Path.isAbsolute(outputPath) && process.argv.length <= 4);
-Assert.ok(boundary === "before-claim" || boundary === "after-claim" ||
-  boundary === "after-dispatch" || boundary === "after-provider-prompt");
+Assert.ok([
+  "before-claim", "after-claim", "after-dispatch", "after-provider-prompt",
+  "after-fresh-message", "after-fresh-start",
+].includes(boundary));
 const afterProviderPrompt = boundary === "after-provider-prompt";
+const afterFreshMessage = boundary === "after-fresh-message";
+const afterFreshStart = boundary === "after-fresh-start";
+const freshLaunch = afterFreshMessage || afterFreshStart;
+const expectUnresolved = boundary === "after-claim" || afterFreshMessage;
 const proof = Path.join(FS.realpathSync(Path.dirname(outputPath)), Path.basename(outputPath));
 Assert.ok(Path.relative(root, proof).startsWith(`..${Path.sep}`));
 Assert.equal(process.platform, "linux");
@@ -163,7 +170,7 @@ try {
     return owned;
   };
 
-  checkpoint("create idle replay thread and webhook through authenticated RPC");
+  checkpoint("create webhook through authenticated RPC");
   const initial = await start("initial", afterProviderPrompt ? undefined : gate);
   const client = await authenticatePackagedServer(initial, abort.signal);
   const projectId = ProjectId.make("fixture-relay-recovery");
@@ -177,21 +184,25 @@ try {
     interactionMode: "default",
     workspaceStrategy: { type: "root" },
   } as const;
-  const { threadId, projection } = await client.rpc((rpc) =>
-    rpc[ORCHESTRATION_V2_WS_METHODS.launchThread]({
-      ...shared,
-      commandId: CommandId.make("fixture-relay-thread"),
-      generateTitle: false,
-    }),
-  );
-  Assert.equal(projection.messages.length, 0);
-  Assert.equal(projection.runs.length, 0);
+  let threadId: ThreadId | null = null;
+  if (!freshLaunch) {
+    const launched = await client.rpc((rpc) =>
+      rpc[ORCHESTRATION_V2_WS_METHODS.launchThread]({
+        ...shared,
+        commandId: CommandId.make("fixture-relay-thread"),
+        generateTitle: false,
+      }),
+    );
+    threadId = launched.threadId;
+    Assert.equal(launched.projection.messages.length, 0);
+    Assert.equal(launched.projection.runs.length, 0);
+  }
   const { task } = await client.rpc((rpc) => rpc[WS_METHODS.scheduledTasksUpsert]({
     ...shared,
     commandId: CommandId.make("fixture-relay-task"),
     enabled: true,
     threadId,
-    threadMode: "continue",
+    threadMode: freshLaunch ? "new_thread" : "continue",
     prompt: "Synthetic relay body {{body.marker}}",
     schedule: { type: "webhook" },
   }));
@@ -243,7 +254,11 @@ try {
     }));
     Assert.ok(delivery.renderedPrompt?.includes(marker));
     promptSha256 = hash(delivery.renderedPrompt);
-    const active = await client.rpc((rpc) => rpc[ORCHESTRATION_V2_WS_METHODS.getThreadProjection]({ threadId }));
+    Assert.ok(threadId);
+    const activeThreadId = threadId;
+    const active = await client.rpc((rpc) =>
+      rpc[ORCHESTRATION_V2_WS_METHODS.getThreadProjection]({ threadId: activeThreadId }),
+    );
     Assert.equal(active.runs.length, 1);
     Assert.ok(!["completed", "failed", "cancelled", "interrupted"].includes(active.runs[0]!.status));
     report.providerProgressReceived = true;
@@ -252,20 +267,53 @@ try {
     Assert.equal(witness.deliveryId, deliveryId);
     Assert.equal(witness.admissionCommitted, true);
     Assert.equal(witness.workerClaimCommitted, boundary !== "before-claim");
-    Assert.equal(witness.dispatchCommitted, boundary === "after-dispatch");
+    Assert.equal(witness.dispatchCommitted, boundary === "after-dispatch" || freshLaunch);
     Assert.match(witness.promptSha256, /^[0-9a-f]{64}$/u);
     promptSha256 = witness.promptSha256;
+    if (freshLaunch) {
+      Assert.equal(typeof witness.launchThreadId, "string");
+      threadId = ThreadId.make(witness.launchThreadId);
+      Assert.equal(witness.startSettled, afterFreshStart);
+      Assert.equal(witness.completionSuppressed, afterFreshStart);
+      report.freshLaunch = {
+        initialMessageCommitted: witness.dispatchCommitted,
+        startEffectSettled: witness.startSettled,
+        schedulerCompletionSuppressed: witness.completionSuppressed,
+      };
+    }
+  }
+  Assert.ok(threadId);
+  const runThreadId = threadId;
+  const readProjection = (session: typeof client) => session.rpc((rpc) =>
+    rpc[ORCHESTRATION_V2_WS_METHODS.getThreadProjection]({ threadId: runThreadId }),
+  );
+  if (afterFreshStart) {
+    let current = await readProjection(client);
+    for (let i = 0; current.runs[0]?.status !== "completed" && i < 40; i++) {
+      await delay(250, undefined, { signal: abort.signal });
+      current = await readProjection(client);
+    }
+    Assert.equal(current.runs[0]?.status, "completed");
+    Assert.equal(current.attempts[0]?.reason, "initial");
+    Assert.equal(current.attempts[0]?.status, "completed");
+    const snapshot = await client.rpc((rpc) =>
+      rpc[WS_METHODS.scheduledTasksSubscribe]({}).pipe(Stream.runHead),
+    );
+    Assert.ok(Option.isSome(snapshot));
+    const unsettled = snapshot.value.tasks.find(({ id }) => id === task.id);
+    Assert.equal(unsettled?.runCount, 0);
+    Assert.equal(unsettled?.lastRunStatus, "running");
   }
   const exit = await initial.stop("SIGKILL");
   owned = undefined;
   Assert.deepEqual(exit, { code: null, signal: "SIGKILL" });
   report.processExit = exit;
   const promptsBeforeReopen = promptsObserved();
-  if (afterProviderPrompt) Assert.equal(promptsBeforeReopen, 1);
+  if (afterProviderPrompt || afterFreshStart) Assert.equal(promptsBeforeReopen, 1);
   else Assert.ok(promptsBeforeReopen <= (boundary === "after-dispatch" ? 1 : 0));
 
-  const expectedRunCount = boundary === "after-claim" ? 0 : 1;
-  const expectedTaskStatus = boundary === "after-claim" ? "failed" : "succeeded";
+  const expectedRunCount = expectUnresolved ? 0 : 1;
+  const expectedTaskStatus = expectUnresolved ? "failed" : "succeeded";
   checkpoint("reopen without the gate and settle the durable delivery");
   const reopened = await start("reopened");
   const resumed = await authenticatePackagedServer(reopened, abort.signal);
@@ -277,12 +325,12 @@ try {
     Stream.runHead,
   ));
   Assert.ok(Option.isSome(settled) && settled.value);
-  const retryOutcome = boundary === "after-claim" ? "unresolved" : "duplicate";
+  const retryOutcome = expectUnresolved ? "unresolved" : "duplicate";
   report.retryStatuses = await Promise.all([post(reopened.origin, retryOutcome), post(reopened.origin, retryOutcome)]);
   const { delivery } = await resumed.rpc((rpc) => rpc[WS_METHODS.scheduledTasksGetWebhookDelivery]({
     id: task.id, deliveryId, acceptAnyOutcome: true,
   }));
-  if (boundary !== "after-claim") {
+  if (!expectUnresolved) {
     Assert.equal(delivery.outcome, "accepted");
     Assert.equal(delivery.error, null);
   } else {
@@ -294,15 +342,17 @@ try {
   Assert.equal(hash(delivery.renderedPrompt), promptSha256);
 
   checkpoint("verify the thread matches the durable delivery disposition");
-  const readProjection = () => resumed.rpc((rpc) => rpc[ORCHESTRATION_V2_WS_METHODS.getThreadProjection]({ threadId }));
-  let final = await readProjection();
+  let final = await readProjection(resumed);
   if (boundary === "before-claim") {
     for (let i = 0; final.runs[0]?.status !== "completed" && i < 40; i++) {
       await delay(250, undefined, { signal: abort.signal });
-      final = await readProjection();
+      final = await readProjection(resumed);
     }
+  }
+  if (boundary === "before-claim" || afterFreshStart) {
     Assert.equal(final.runs[0]?.status, "completed");
-    Assert.ok(final.messages.some((message) => message.role === "assistant" && message.text.includes("todo list fixture complete")));
+    Assert.ok(final.messages.some((message) => message.role === "assistant" &&
+      message.text.includes("todo list fixture complete")));
   }
   if (boundary === "after-claim") {
     Assert.deepEqual(final.messages, []);
@@ -314,7 +364,8 @@ try {
     Assert.equal(user[0]!.text, delivery.renderedPrompt);
     Assert.equal(final.runs[0]?.userMessageId, user[0]!.id);
   }
-  Assert.equal(final.runs.length, expectedRunCount);
+  Assert.equal(final.runs.length, afterFreshMessage ? 1 : expectedRunCount);
+  if (afterFreshMessage) Assert.notEqual(final.runs[0]?.status, "completed");
   if (afterProviderPrompt) {
     Assert.ok(["failed", "cancelled", "interrupted"].includes(final.runs[0]!.status));
     report.reopenedRunStatus = final.runs[0]!.status;

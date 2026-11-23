@@ -67,6 +67,7 @@ import {
 import * as SqliteScheduledRows from "./SqliteScheduledRows.ts";
 
 import { CommandReceiptStoreV2 } from "../orchestration-v2/CommandReceiptStore.ts";
+import { EffectOutboxV2 } from "../orchestration-v2/EffectOutbox.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as Metrics from "../observability/Metrics.ts";
@@ -528,6 +529,7 @@ export const layerWithRows = Layer.effect(
     const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
     const commandReceipts = yield* Effect.serviceOption(CommandReceiptStoreV2);
+    const effectOutbox = yield* Effect.serviceOption(EffectOutboxV2);
     const serviceScope = yield* Effect.scope;
     const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
     const secretRequests = yield* SecretRequests.SecretRequests;
@@ -805,23 +807,34 @@ export const layerWithRows = Layer.effect(
       );
     });
 
-    // The run already started the thread, so a failed write only costs the binding.
-    // A thread deleted before the binding landed already ran its task cleanup, so apply that
-    // cleanup here; a later deletion finds the binding. An unconfirmed lookup keeps the binding.
-    const bindThread = Effect.fn("ScheduledTaskService.bindThread")(
-      function* (task: ScheduledTask, threadId: ThreadId) {
-        yield* patchTask(
-          task.id,
-          { thread_id: threadId },
-          { created_at: task.createdAt, project_id: task.projectId, thread_id: null },
-          { thread_mode: "new_thread" },
-        );
+    const writeFirstThreadBinding = (task: ScheduledTask, threadId: ThreadId) =>
+      patchTask(
+        task.id,
+        { thread_id: threadId },
+        { created_at: task.createdAt, project_id: task.projectId, thread_id: null },
+        { thread_mode: "new_thread" },
+      );
+
+    // A thread deleted before the binding landed already ran its task cleanup.
+    const cleanUpDeletedThreadBinding = (threadId: ThreadId) =>
+      Effect.gen(function* () {
         const shell = yield* threadManagement.getThreadShell(threadId);
         if (shell === null || shell.deletedAt != null) yield* deleteForThread(threadId);
-      },
-      Effect.catchCause((cause) =>
-        Effect.logWarning("Could not bind a scheduled task to its first thread.", cause),
-      ),
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Could not check the scheduled task's first thread.", cause),
+        ),
+      );
+
+    // The run already started the thread, so a failed write only costs the binding.
+    const bindThread = Effect.fn("ScheduledTaskService.bindThread")(
+      (task: ScheduledTask, threadId: ThreadId) =>
+        writeFirstThreadBinding(task, threadId).pipe(
+          Effect.andThen(cleanUpDeletedThreadBinding(threadId)),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Could not bind a scheduled task to its first thread.", cause),
+          ),
+        ),
     );
 
     // A dispatch is recorded once the message is accepted; the provider can still
@@ -2105,6 +2118,84 @@ export const layerWithRows = Layer.effect(
         }),
       );
 
+    const confirmFreshRelayLaunch = Effect.fn("ScheduledTaskService.confirmFreshRelayLaunch")(
+      function* (task: ScheduledTask, commandId: CommandId, messageId: MessageId) {
+        if (Option.isNone(commandReceipts) || Option.isNone(effectOutbox)) return null;
+        const receipts = commandReceipts.value;
+        const launch = yield* receipts.getByCommandId(commandId);
+        if (
+          Option.isNone(launch) ||
+          launch.value.commandType !== "thread.create" ||
+          launch.value.status !== "accepted"
+        ) {
+          return null;
+        }
+
+        const threadId = launch.value.threadId;
+        const initial = yield* receipts.getByCommandId(CommandId.make(`${commandId}:initial-message`));
+        if (
+          Option.isNone(initial) ||
+          initial.value.commandType !== "message.dispatch" ||
+          initial.value.status !== "accepted" ||
+          initial.value.threadId !== threadId
+        ) {
+          return null;
+        }
+
+        const releaseCommandId = CommandId.make(`${commandId}:release`);
+        const release = yield* receipts.getByCommandId(releaseCommandId);
+        if (
+          Option.isNone(release) ||
+          release.value.commandType !== "prepared-run.release" ||
+          release.value.status !== "accepted" ||
+          release.value.threadId !== threadId
+        ) {
+          return null;
+        }
+
+        const { thread, messages, runs, attempts } = yield* threadManagement.getThreadRecords(
+          threadId,
+          ["messages", "runs", "attempts"],
+          { messageIds: [messageId] },
+        );
+        const message = messages.find(
+          (candidate) =>
+            candidate.id === messageId &&
+            candidate.role === "user" &&
+            candidate.scheduledTaskId === task.id,
+        );
+        const run = runs.find(
+          (candidate) => candidate.id === message?.runId && candidate.userMessageId === messageId,
+        );
+        if (
+          thread.projectId !== task.projectId ||
+          run?.status !== "completed" ||
+          !attempts.some(
+            (attempt) =>
+              attempt.id === run.activeAttemptId &&
+              attempt.runId === run.id &&
+              attempt.reason === "initial" &&
+              attempt.status === "completed",
+          )
+        ) {
+          return null;
+        }
+
+        // Release commits workspace readiness with the start effect. Worker success alone
+        // does not prove a turn ran: the start handler can return after a no-op or provider error.
+        const effects = yield* effectOutbox.value.listByCommandId(releaseCommandId);
+        const [start] = effects;
+        return effects.length === 1 &&
+          start?.threadId === threadId &&
+          start.request.type === "provider-turn.start" &&
+          start.request.runId === run.id &&
+          start.status === "succeeded"
+          ? threadId
+          : null;
+      },
+      Effect.orElseSucceed(() => null),
+    );
+
     const reconcileRunningRelay = Effect.fn("ScheduledTaskService.reconcileRunningRelay")(
       function* (
         entry: (typeof PendingRows.Type)[number],
@@ -2114,11 +2205,12 @@ export const layerWithRows = Layer.effect(
         const deliveryId = entry.delivery_id;
         const attempted = yield* decodePendingTask(entry.task_json).pipe(Effect.option);
         const fireKey = webhookFireKey(taskId, deliveryId);
+        const commandId = CommandId.make(`scheduled-task:${fireKey}`);
         const messageId = MessageId.make(`scheduled-task-message:${fireKey}`);
         let confirmed = observedThreadId;
+        let recoveredBinding: { task: ScheduledTask; threadId: ThreadId } | null = null;
         let rejected = false;
         // A bound send can be proven by its accepted command and durable message/run.
-        // Fresh launches also need workspace preparation after their message receipt.
         if (
           confirmed === null &&
           Option.isSome(commandReceipts) &&
@@ -2127,7 +2219,7 @@ export const layerWithRows = Layer.effect(
         ) {
           const threadId = ThreadId.make(attempted.value.threadId);
           const receipt = yield* commandReceipts.value
-            .getByCommandId(CommandId.make(`scheduled-task:${fireKey}`))
+            .getByCommandId(commandId)
             .pipe(Effect.orElseSucceed(() => Option.none()));
           if (
             Option.isSome(receipt) &&
@@ -2153,6 +2245,12 @@ export const layerWithRows = Layer.effect(
             }
           }
         }
+        if (confirmed === null && Option.isSome(attempted) && attempted.value.threadId === null) {
+          confirmed = yield* confirmFreshRelayLaunch(attempted.value, commandId, messageId);
+          if (confirmed !== null && scheduledTaskThreadMode(attempted.value) !== "new_thread") {
+            recoveredBinding = { task: attempted.value, threadId: confirmed };
+          }
+        }
         const failure = rejected ? "The run failed to start." : RELAY_UNRESOLVED_ERROR;
         const now = yield* localNow;
         const startedAtIso = yield* transactions.withTransaction(
@@ -2169,6 +2267,9 @@ export const layerWithRows = Layer.effect(
               row.last_run_status === "running" &&
               (Option.isNone(attempted) || row.created_at === attempted.value.createdAt);
             if (ownsRun) {
+              if (recoveredBinding !== null) {
+                yield* writeFirstThreadBinding(recoveredBinding.task, recoveredBinding.threadId);
+              }
               yield* patchTask(
                 taskId,
                 {
@@ -2207,6 +2308,9 @@ export const layerWithRows = Layer.effect(
             return ownsRun ? row.last_run_at : null;
           }),
         );
+        if (recoveredBinding !== null && startedAtIso !== null) {
+          yield* cleanUpDeletedThreadBinding(recoveredBinding.threadId);
+        }
         yield* notifyChanged;
         if (confirmed !== null && startedAtIso !== null && Option.isSome(attempted)) {
           yield* recordRunFailure(
