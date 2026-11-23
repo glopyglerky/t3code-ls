@@ -1,0 +1,68 @@
+name: Packaged native desktop reopen
+
+on:
+  push:
+    branches: ["candidate/t3code-ls-t14-native-desktop-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  linux-desktop:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 25
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+      NODE_OPTIONS: --max-old-space-size=6144
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install locked dependencies and the verified compiler
+        run: |
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/desktop-toolchain"
+      - name: Build and exercise the packaged Linux desktop entrypoint
+        shell: bash
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/desktop-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/desktop-target"
+          export TMPDIR="$RUNNER_TEMP/desktop-stage"
+          evidence="$RUNNER_TEMP/desktop-reopen-evidence"
+          mkdir "$TMPDIR" "$evidence"
+          trap 'rm -r "$TMPDIR"' EXIT
+          export T3_CODE_LS_IMPLEMENTATION=native
+          export T3_CODE_LS_NATIVE_DIR="$PWD/bin"
+          node tools/build-native.mjs
+          node tools/check-hybrid.mjs --verify-binaries
+          pnpm exec node scripts/build-desktop-artifact.ts --platform linux --arch x64 \
+            --target AppImage --keep-stage --output-dir "$TMPDIR/artifacts" --verbose
+          mapfile -t bundles < <(find "$TMPDIR" -type d -name linux-unpacked)
+          test "${#bundles[@]}" -eq 1
+          payload="${bundles[0]}"
+          test -x "$payload/t3code"
+          git show -s --format='%H %T' > "$evidence/source.txt"
+          getconf GNU_LIBC_VERSION > "$evidence/platform.txt"
+          sha256sum "$payload/t3code" "$payload/resources/app.asar" bin/manifest.json \
+            "$TMPDIR"/artifacts/*.AppImage > "$evidence/artifacts.sha256"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- env -u T3_CODE_LS_IMPLEMENTATION -u T3_CODE_LS_NATIVE_DIR \
+              xvfb-run -a "$2" scripts/smoke-desktop-app.ts --executable "$3" --expect-native --artifacts-dir "$4"
+          ' _ "$(id -un)" "$(command -v node)" "$payload/t3code" "$evidence"
+      - name: Retain the packaged startup and reopen receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: desktop-reopen-evidence
+          path: ${{ runner.temp }}/desktop-reopen-evidence/
+          if-no-files-found: warn
+          retention-days: 14
