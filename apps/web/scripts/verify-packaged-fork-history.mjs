@@ -330,9 +330,15 @@ try {
   Assert.ok(Number.isSafeInteger(firstPage.historyViewRevision), "The first history page must identify its view");
   assertQuestion(firstPage.items, 1, "waiting", "inherited");
   assertChildRows(firstPage.items);
+  // A programmatic offset alone keeps the live-end follower armed. Use a real
+  // history navigation gesture and wait for it to settle before measuring.
+  await scroll.evaluate((element) => { element.scrollTop = 48; });
+  await scroll.focus();
+  await scroll.press("Home");
+  await page.waitForFunction(() => document.activeElement?.classList.contains("messages-timeline-scroll") &&
+    document.activeElement.scrollTop === 0);
   await scroll.evaluate((element) => { element.scrollTop = 48; });
   await olderTurn.waitFor({ state: "visible" });
-  await scroll.focus();
   const anchor = async (name) => {
     const [top, viewport] = await Promise.all([
       olderTurn.boundingBox(),
