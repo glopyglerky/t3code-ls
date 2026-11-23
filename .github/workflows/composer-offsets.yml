@@ -94,6 +94,14 @@ jobs:
             apps/web/dist/client-text-wasm/composer_offsets_bg.wasm apps/server/dist/bin.mjs \
             > "$proof/application.sha256"
           node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
+      - name: Recover a partial Codex import over the packaged WebSocket
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t08-import-')
+        run: |
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- "$2" \
+              apps/server/scripts/verify-provider-import-recovery.ts "$3"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/built-composer-proof/provider-import"
       - name: Retain the bundled browser evidence
         if: always() && (env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-'))
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
