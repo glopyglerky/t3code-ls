@@ -2151,6 +2151,39 @@
       "retired_paths": [],
       "notes": "T07 Linux PTY host using portable-pty 0.9.0 and nix 0.28.0. The Linux x64 server opts in with T3_CODE_LS_PTY_HOST_EXECUTABLE. The default selection uses NodePtyAdapter. The native owner uses bounded nonblocking byte input, exact output acknowledgement and kill/reap for the initial process group. Restart, signal behavior, interactive foreground jobs, session-escaping descendants and performance remain unqualified.",
       "rust_crates": ["apps/server/rust/pty-host"]
+    },
+    {
+      "id": "static-download-catalog",
+      "state": "candidate",
+      "domain_owner": "apps/marketing",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/marketing/src/pages/[...locale]/download.astro",
+          "blob": "1bf425a6d015166dbf36f58fe6e24b24ba4207da"
+        }
+      ],
+      "rust_paths": ["tools/src/download_catalog.rs"],
+      "adapter_paths": [
+        "apps/marketing/src/pages/[...locale]/download.astro",
+        ".github/workflows/marketing-download-proof.yml"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["linux-x64"],
+          "state": "candidate",
+          "implementation": "static-build-component",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": ["apps/marketing/scripts/verify-download-links.mjs"],
+      "hosted_acceptance": {
+        "apps/marketing/scripts/verify-download-links.mjs": ".github/workflows/marketing-download-proof.yml"
+      },
+      "retired_paths": [],
+      "notes": "T14 static download links from a bounded Rust release catalog. The Astro build uses the optional generated snapshot for localized HTML and retains the release index fallback. The progressive live release refresh remains in the browser. Hosted release publication and platform installation require separate evidence.",
+      "rust_crates": ["tools"]
     }
   ],
   "backend_selection": "Select before execution. Compatible Linux GNU x86_64 defaults to Rust; other hosts use the retained upstream implementation. Explicit per-component native overrides fail visibly. T3_CODE_LS_IMPLEMENTATION=upstream provides a controlled original baseline. No retry through another implementation."

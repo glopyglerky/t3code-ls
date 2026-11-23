@@ -2,7 +2,9 @@ name: Static download catalog proof
 
 on:
   push:
-    branches: ["candidate/t3code-ls-t14-static-download-*"]
+    branches:
+      - "candidate/t3code-ls-t14-static-download-*"
+      - "candidate/t3code-ls-t02-bundled-native-integrated-*"
 
 permissions:
   contents: read
@@ -57,29 +59,10 @@ jobs:
           }
           JSON
           T3_CODE_LS_MARKETING_RELEASE_CATALOG="$proof/catalog.json" pnpm --filter @t3tools/marketing build
-          assert_href() {
-            local target="$1" href="$2" page="$3"
-            grep -Eo '<a[[:space:]][^>]*>' "$page" |
-              grep -F "data-asset=\"$target\"" |
-              grep -F "href=\"$href\"" > /dev/null
-          }
-          downloads=()
-          for locale in "" es/ zh/ pt-br/ fr/ de/ ja/ ko/ ru/; do
-            page="apps/marketing/dist/${locale}download/index.html"
-            assert_href arm64.dmg https://github.com/pingdotgg/t3code/releases/download/v42.0.0/fixture-arm64.dmg "$page"
-            assert_href amd64.deb https://github.com/pingdotgg/t3code/releases/download/v42.0.0/fixture-amd64.deb "$page"
-            assert_href x64.exe https://github.com/pingdotgg/t3code/releases "$page"
-            grep -Fq 'data-nightly-download="https://github.com/pingdotgg/t3code/releases/download/v43.0.0-nightly.1/fixture-arm64.dmg"' "$page"
-            if grep -Fq 'https://fixture.invalid/wrong' "$page"; then exit 1; fi
-            downloads+=("$page")
-          done
-          sha256sum "${downloads[@]}" > "$proof/html.sha256"
+          node apps/marketing/scripts/verify-download-links.mjs apps/marketing/dist catalog > "$proof/html.sha256"
           printf '{}' | "$catalog" download-catalog > "$proof/unavailable.json"
           T3_CODE_LS_MARKETING_RELEASE_CATALOG="$proof/unavailable.json" pnpm --filter @t3tools/marketing build
-          for page in "${downloads[@]}"; do
-            assert_href arm64.dmg https://github.com/pingdotgg/t3code/releases "$page"
-            if grep -Fq 'fixture-arm64.dmg' "$page"; then exit 1; fi
-          done
+          node apps/marketing/scripts/verify-download-links.mjs apps/marketing/dist unavailable > "$proof/fallback-html.sha256"
       - name: Retain generated catalog and artifact identities
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
