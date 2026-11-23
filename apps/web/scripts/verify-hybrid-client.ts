@@ -3043,8 +3043,9 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       // Hash before Stop reload discards the response body.
       let wasmSha256: string | null = null;
       if (compositionProof === "dioxus") {
-        Assert.ok(composerWasm?.ok());
-        wasmSha256 = NodeCrypto.createHash("sha256").update(await composerWasm.body()).digest("hex");
+        const wasmResponse = composerWasm;
+        Assert.ok(wasmResponse !== undefined && wasmResponse.ok());
+        wasmSha256 = NodeCrypto.createHash("sha256").update(await wasmResponse.body()).digest("hex");
         Assert.equal(wasmSha256, NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(
           NodePath.join(repoRoot, "apps/web/dist/pairing-wasm/local_pairing_bg.wasm"))).digest("hex"));
       } else Assert.ok(refusedComposerWasmRequests > 0);
