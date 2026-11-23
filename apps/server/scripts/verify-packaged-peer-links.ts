@@ -45,9 +45,12 @@ const checkpoint = (phase: string) => {
   FS.writeFileSync(Path.join(proof, "proof.json"), JSON.stringify(report, null, 2) + "\n");
 };
 const post = async (origin: string, path: string, body: unknown, headers = {}) => {
+  const form = body instanceof URLSearchParams;
   const response = await fetch(origin + path, {
-    method: "POST", redirect: "error", headers: { "Content-Type": "application/json", ...headers },
-    body: JSON.stringify(body), signal: AbortSignal.any([abort.signal, AbortSignal.timeout(45_000)]),
+    method: "POST", redirect: "error",
+    headers: form ? headers : { "Content-Type": "application/json", ...headers },
+    body: form ? body : JSON.stringify(body),
+    signal: AbortSignal.any([abort.signal, AbortSignal.timeout(45_000)]),
   });
   const expectedStatus = path === "/oauth/mcp/register" ? 201 : 200;
   if (response.status !== expectedStatus) {
@@ -78,10 +81,10 @@ async function mcpReader(server: Server, owner: Client) {
   Assert.equal(target.searchParams.get("state"), state);
   const code = target.searchParams.get("code");
   Assert.ok(code);
-  const token = await (await post(server.origin, "/oauth/mcp/token", {
+  const token = await (await post(server.origin, "/oauth/mcp/token", new URLSearchParams({
     grant_type: "authorization_code", code, redirect_uri: redirect,
     client_id: registered.client_id, code_verifier: verifier, resource,
-  })).json() as { access_token: string };
+  }))).json() as { access_token: string };
   const headers: Record<string, string> = {
     authorization: `Bearer ${token.access_token}`, accept: "application/json, text/event-stream",
   };
