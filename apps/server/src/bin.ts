@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off -- The service launcher starts before the CLI runtime.
 import * as NodeModule from "node:module";
 import * as NodeSea from "node:sea";
+import * as NodeTimers from "node:timers";
 import * as NodeURL from "node:url";
 
 import packageJson from "../package.json" with { type: "json" };
@@ -67,7 +68,7 @@ async function holdSeaIdentityObservation(frame: string): Promise<void> {
     const finish = (ok: boolean) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      NodeTimers.clearTimeout(timer);
       input.removeListener("data", data);
       input.removeListener("end", end);
       input.removeListener("error", fail);
@@ -100,7 +101,7 @@ async function holdSeaIdentityObservation(frame: string): Promise<void> {
     };
     // Separate from the future parent's deadline. Even a lost finish or blocked
     // output callback refuses without loading the application. Not a reap proof.
-    const timer = setTimeout(fail, 5000);
+    const timer = NodeTimers.setTimeout(fail, 5000);
     input.on("data", data);
     input.once("end", end);
     input.once("error", fail);
