@@ -28,6 +28,7 @@ interface StreamObservation {
   readonly threadId: string;
   readonly tabId: string;
   frames: number;
+  pointerButtons: number;
   closed: boolean;
   viewport: { width: number; height: number } | null;
   controller: string | null;
@@ -78,10 +79,17 @@ export async function verifyPreviewLifetime(page: Page, threadId: string, screen
     Assert.equal(url.host, new URL(page.url()).host);
     Assert.equal(url.searchParams.get("threadId"), threadId);
     Assert.ok(streams.length < 24, "Preview reconnects must stay bounded");
-    const stream: StreamObservation = { socket, threadId, tabId: url.searchParams.get("tabId") ?? "", frames: 0, closed: false, viewport: null, controller: null };
+    const stream: StreamObservation = { socket, threadId, tabId: url.searchParams.get("tabId") ?? "", frames: 0, pointerButtons: 0, closed: false, viewport: null, controller: null };
     Assert.ok(stream.tabId);
     streams.push(stream);
     socket.on("close", () => { stream.closed = true; });
+    socket.on("framesent", ({ payload }) => {
+      if (typeof payload !== "string") return;
+      const value = JSON.parse(payload) as { type?: string; action?: string };
+      if (value.type === "mouse" && (value.action === "down" || value.action === "up")) {
+        stream.pointerButtons++;
+      }
+    });
     socket.on("framereceived", ({ payload }) => {
       if (typeof payload !== "string") { stream.frames++; return; }
       const value = JSON.parse(payload) as { type?: string; width?: number; height?: number; controller?: string };
@@ -117,11 +125,11 @@ export async function verifyPreviewLifetime(page: Page, threadId: string, screen
     await waitFor(() => streams.some((s) => !s.closed && s.frames > 0 && s.controller === "you" && s.viewport !== null), "The real preview must stream a controllable page");
     return streams.findLast((s) => !s.closed && s.frames > 0)!;
   };
-  const clickPage = async (x: number, y: number) => {
+  const clickPage = async (x: number, y: number, controller: "you" | "unclaimed" = "you") => {
     const before = streams.reduce((n, stream) => n + stream.frames, 0);
     await waitFor(() => streams.reduce((n, stream) => n + stream.frames, 0) > before,
       "The synthetic animation must produce a fresh real preview frame before input");
-    const stream = streams.findLast((s) => !s.closed && s.frames > 0 && s.viewport && s.controller === "you");
+    const stream = streams.findLast((s) => !s.closed && s.frames > 0 && s.viewport && s.controller === controller);
     Assert.ok(stream?.viewport);
     const bounds = await canvas.boundingBox();
     Assert.ok(bounds);
@@ -184,6 +192,29 @@ export async function verifyPreviewLifetime(page: Page, threadId: string, screen
     const priorCount = events.filter((e) => e === "count:1").length;
     await clickPage(80, 50);
     await waitFor(() => events.filter((e) => e === "count:1").length === priorCount + 1, "The reopened tab must have fresh page state");
+    const surface = page.locator("[data-server-browser-surface]");
+    const release = surface.getByRole("button", { name: "Release control", exact: true });
+    await release.press("Enter");
+    await waitFor(() => !reopened.closed && reopened.controller === "unclaimed",
+      "The same viewer must observe control release");
+    const take = surface.getByRole("button", { name: "Take control", exact: true });
+    await take.waitFor({ state: "visible" });
+    const statesBeforeRelease = pageStates.length;
+    const buttonsBeforeRelease = reopened.pointerButtons;
+    await clickPage(80, 50, "unclaimed");
+    const framesAfterClick = reopened.frames;
+    await waitFor(() => reopened.frames >= framesAfterClick + 2,
+      "The released viewer must continue to receive frames on the same socket");
+    Assert.equal(reopened.pointerButtons, buttonsBeforeRelease, "The released viewer forwarded a pointer button");
+    Assert.equal(pageStates.length, statesBeforeRelease, "The released viewer changed the preview page");
+
+    await take.press("Enter");
+    await waitFor(() => !reopened.closed && reopened.controller === "you",
+      "The same viewer must regain control");
+    await clickPage(80, 50);
+    await waitFor(() => pageStates.length > statesBeforeRelease,
+      "Pointer input must regain its page effect after taking control");
+    Assert.equal(reopened.pointerButtons, buttonsBeforeRelease + 2);
     await canvas.screenshot({ path: screenshot });
     await (await activeClose(reopened.tabId)).click();
     await waitFor(() => streams.every((s) => s.closed), "Final close must detach every fixture viewer");
@@ -194,10 +225,12 @@ export async function verifyPreviewLifetime(page: Page, threadId: string, screen
       { count: 1, label: "Count: 1", page: "first" },
       { count: 2, label: "Count: 2", page: "first" },
       { count: 1, label: "Count: 1", page: "first" },
+      { count: 2, label: "Count: 2", page: "first" },
     ], "The observed DOM must retain state on reconnect and reset for a fresh tab");
     return { runtime: "server", loopbackOnly: true, navigationOwned: true, pointerRoundTrip: true,
       floatingViewerRetained: true, hiddenViewerDetached: true, sameTabReconnected: true,
       closedViewerDetached: true, reopenedFresh: true,
+      releasedControlBlockedInput: true, reacquiredControlAcceptedInput: true,
       pageEvents: events, pageStates, frames: streams.reduce((n, s) => n + s.frames, 0), streamConnections: streams.length,
       sandbox: process.env.T3CODE_SERVER_BROWSER_SANDBOX === "0" ? "disabled-for-isolated-fixture" : "enabled" };
   } finally {
