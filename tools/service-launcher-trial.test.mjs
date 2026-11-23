@@ -342,6 +342,9 @@ test("compiled Rust helper restores a sealed native trial before launcher startu
     const candidate = path.join(target, "t3");
     const preparationLauncher = f.launcher(pending, { T3_CODE_LS_SEALED_TRIAL_RECOVERY: "1" });
     let witness;
+    let observationBytes;
+    const observationPath = path.join(f.userdata, `.statev2-trial-${id}.receipt-v1.json`);
+    const beforeObservation = await fs.readFile(observationPath);
     for (const attempt of ["mismatched-update", "corrupt-receipt", "first", "retry"]) {
       const input = { request: attempt === "mismatched-update" ? {
         ...request, activation: { ...activation, target_version: "1.2.0" },
@@ -360,6 +363,16 @@ test("compiled Rust helper restores a sealed native trial before launcher startu
         });
         if (witness !== undefined) assert.deepEqual(actual, witness);
         witness = actual;
+        const bytes = await fs.readFile(observationPath);
+        const saved = JSON.parse(bytes);
+        assert.deepEqual(saved.candidate_observation, {
+          verification_json: JSON.stringify(input), witness: actual,
+        });
+        if (observationBytes !== undefined) assert.deepEqual(bytes, observationBytes);
+        observationBytes = bytes;
+      }
+      if (attempt === "mismatched-update" || attempt === "corrupt-receipt") {
+        assert.deepEqual(await fs.readFile(observationPath), beforeObservation);
       }
       assert.equal((await fs.stat(dbPath, { bigint: true })).ino, sourceIdentity.ino);
       assert.equal((await fs.stat(trial, { bigint: true })).ino, stageIdentity.ino);
@@ -370,6 +383,16 @@ test("compiled Rust helper restores a sealed native trial before launcher startu
       await assert.rejects(fs.stat(f.starts), { code: "ENOENT" });
       await assert.rejects(fs.stat(path.join(f.userdata, "server-runtime.json")), { code: "ENOENT" });
     }
+    const corrupted = JSON.parse(observationBytes);
+    corrupted.candidate_observation.witness.verificationSha256 = "0".repeat(64);
+    await fs.writeFile(observationPath, JSON.stringify(corrupted));
+    await assert.rejects(preparationLauncher.prepareIsolatedCandidate({ request, preparation: prepared }), /Command failed/u);
+    assert.deepEqual(JSON.parse(await fs.readFile(observationPath)), corrupted);
+    await fs.writeFile(observationPath, observationBytes);
+    // A fresh launcher replays the actual candidate and revalidates the durable observation.
+    assert.deepEqual(await f.launcher(pending, { T3_CODE_LS_SEALED_TRIAL_RECOVERY: "1" })
+      .prepareIsolatedCandidate({ request, preparation: prepared }), witness);
+    assert.deepEqual(await fs.readFile(observationPath), observationBytes);
     for (const valid of [false, true]) {
       const input = { request, preparation: valid ? prepared : {
         ...prepared, file_sha256: "0".repeat(64),

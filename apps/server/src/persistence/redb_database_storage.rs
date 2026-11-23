@@ -114,6 +114,44 @@ pub struct IsolatedTrialPreparation {
 pub struct IsolatedTrialVerification {
     pub request: IsolatedTrialRequest,
     pub preparation: IsolatedTrialPreparation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_observation: Option<CandidatePreparationObservation>,
+}
+
+/// Exact input and response observed by the stopped launcher caller.
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CandidatePreparationObservation {
+    pub verification_json: String,
+    pub witness: CandidatePreparationWitness,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CandidatePreparationWitness {
+    pub protocol: u32,
+    pub status: String,
+    pub update_id: String,
+    pub target_version: String,
+    pub entry_sha256: String,
+    pub helper_sha256: String,
+    pub verification_sha256: String,
+}
+
+pub async fn record_isolated_candidate_preparation(
+    home: PathBuf,
+    update_id: String,
+    observation: CandidatePreparationObservation,
+) -> Result<serde_json::Value> {
+    if !home.is_absolute() || !valid_update_id(&update_id) {
+        return Err(Error::IncompatibleStore);
+    }
+    #[cfg(target_os = "linux")]
+    return tokio::spawn(isolated::record_observation(home, update_id, observation))
+        .await
+        .map_err(|_| Error::IncompatibleStore)?;
+    #[cfg(not(target_os = "linux"))]
+    Err(Error::IncompatibleStore)
 }
 
 #[derive(Debug, Serialize)]
@@ -272,9 +310,12 @@ pub async fn verify_isolated_service_trial(
     update_id: String,
     verification: IsolatedTrialVerification,
 ) -> Result<()> {
+    #[cfg(target_os = "linux")]
+    isolated::validate_observation(&verification)?;
     let IsolatedTrialVerification {
         request,
         preparation,
+        ..
     } = verification;
     validate_isolated_trial_request(&home, &update_id, &request)?;
     validate_isolated_trial_preparation(&request, &preparation)?;

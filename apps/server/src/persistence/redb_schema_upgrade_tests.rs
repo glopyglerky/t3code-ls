@@ -596,7 +596,19 @@ async fn isolated_trial_publish_interrupt_fixture() {
             .is_some_and(|name| name.to_string_lossy().starts_with("t3-redb-test-"))
     );
     let boundary = std::env::var("T3_TEST_INTERRUPT_TRIAL_PUBLICATION").unwrap();
-    if boundary.starts_with("isolated-rollback-") {
+    if boundary.starts_with("candidate-observation-") {
+        let observation = serde_json::from_slice(
+            &std::fs::read(home.join("candidate-observation.json")).unwrap(),
+        )
+        .unwrap();
+        crate::application_storage::record_isolated_candidate_preparation(
+            home,
+            ISOLATED_UPDATE.into(),
+            observation,
+        )
+        .await
+        .unwrap();
+    } else if boundary.starts_with("isolated-rollback-") {
         rollback_isolated_service_trial(home, ISOLATED_UPDATE.into())
             .await
             .unwrap();
@@ -814,6 +826,78 @@ async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
                         String::from_utf8_lossy(&child.stdout)
                     );
                 };
+                let verification_json = serde_json::to_string(&serde_json::json!({
+                    "request": request(), "preparation": prepared,
+                }))
+                .unwrap();
+                let bound = activation.as_ref().unwrap();
+                let observation = serde_json::json!({
+                    "verification_json": verification_json,
+                    "witness": {
+                        "protocol": 1, "status": "prepared-isolated", "updateId": UPDATE,
+                        "targetVersion": bound.target_version,
+                        "entrySha256": bound.target_entry_sha256,
+                        "helperSha256": bound.target_helper_sha256,
+                        "verificationSha256": hash(verification_json.as_bytes()),
+                    },
+                });
+                fs::write(
+                    home.join("candidate-observation.json"),
+                    serde_json::to_vec(&observation).unwrap(),
+                )
+                .unwrap();
+                let receipt = trial.with_extension("receipt-v1.json");
+                let original_receipt = fs::read(&receipt).unwrap();
+                interrupt("candidate-observation-written");
+                assert_eq!(fs::read(&receipt).unwrap(), original_receipt);
+                assert_eq!(fs::read(&live).unwrap(), live_bytes);
+                interrupt("candidate-observation-durable");
+                let durable_receipt = fs::read(&receipt).unwrap();
+                assert_ne!(durable_receipt, original_receipt);
+                let record = || {
+                    crate::application_storage::record_isolated_candidate_preparation(
+                        home.clone(),
+                        UPDATE.into(),
+                        serde_json::from_value(observation.clone()).unwrap(),
+                    )
+                };
+                assert_eq!(record().await.unwrap()["reused"], true);
+                assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+                let mut stale = observation.clone();
+                let alternate = format!(" {}", verification_json);
+                stale["verification_json"] = serde_json::json!(alternate);
+                stale["witness"]["verificationSha256"] =
+                    serde_json::json!(hash(alternate.as_bytes()));
+                assert!(matches!(
+                    crate::application_storage::record_isolated_candidate_preparation(
+                        home.clone(),
+                        UPDATE.into(),
+                        serde_json::from_value(stale).unwrap()
+                    )
+                    .await,
+                    Err(Error::IncompatibleStore)
+                ));
+                assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+                let mut corrupt: serde_json::Value =
+                    serde_json::from_slice(&durable_receipt).unwrap();
+                corrupt["candidate_observation"]["witness"]["verificationSha256"] =
+                    serde_json::json!("0".repeat(64));
+                let corrupt_bytes = serde_json::to_vec(&corrupt).unwrap();
+                fs::write(&receipt, &corrupt_bytes).unwrap();
+                assert!(matches!(inspect().await, Err(Error::IncompatibleStore)));
+                assert!(matches!(record().await, Err(Error::IncompatibleStore)));
+                assert_eq!(fs::read(&receipt).unwrap(), corrupt_bytes);
+                fs::write(&receipt, &durable_receipt).unwrap();
+                fs::write(&helper, b"changed after observation").unwrap();
+                assert!(matches!(record().await, Err(Error::IncompatibleStore)));
+                assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+                fs::write(&helper, b"fixture helper").unwrap();
+                assert_eq!(
+                    inspect().await.unwrap().prepared_database,
+                    prepared.database
+                );
+                assert_eq!(fs::read(&live).unwrap(), live_bytes);
+                assert_eq!(fs::read(&trial).unwrap(), trial_bytes);
                 let preserved = state.join(format!(".statev2-source-{UPDATE}.omdb"));
                 interrupt("isolated-preserved");
                 assert_eq!(fs::read(&live).unwrap(), live_bytes);
