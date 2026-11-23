@@ -106,13 +106,7 @@ impl Session {
         {
             return self.completed(&before).map(Progress::Completed);
         }
-        if before["projection"]["messages"]
-            .as_array()
-            .is_none_or(|rows| !rows.is_empty())
-            || before["projection"]["runs"]
-                .as_array()
-                .is_none_or(|rows| !rows.is_empty())
-        {
+        if !self.ready_for_dispatch(&before) {
             return Err(FAILED);
         }
         self.check_cancelled(cancelled)?;
@@ -218,26 +212,44 @@ impl Session {
         self.connection.snapshot_from(snapshot).map_err(|_| FAILED)
     }
 
+    fn ready_for_dispatch(&self, snapshot: &Value) -> bool {
+        let projection = &snapshot["projection"];
+        projection["messages"].as_array().is_some_and(|messages| {
+            messages.iter().all(|message| {
+                checked_identity(&message["id"]).is_some_and(|id| id != self.message_id)
+            })
+        }) && projection["runs"].as_array().is_some_and(|runs| {
+            runs.iter().all(|run| {
+                matches!(
+                    run["status"].as_str(),
+                    Some("completed" | "interrupted" | "failed" | "cancelled" | "rolled_back")
+                )
+            })
+        })
+    }
+
     fn selected_run<'a>(&self, snapshot: &'a Value, text: &str) -> Option<&'a Value> {
         let projection = &snapshot["projection"];
-        let [run] = projection["runs"].as_array()?.as_slice() else {
-            return None;
-        };
-        let run_id = checked_identity(&run["id"])?;
-        if run["threadId"].as_str() != Some(self.connection.thread_id()) {
-            return None;
-        }
-        let mut users = projection["messages"]
+        let mut messages = projection["messages"]
             .as_array()?
             .iter()
-            .filter(|message| message["role"].as_str() == Some("user"));
-        let message = users.next()?;
-        (users.next().is_none()
-            && message["id"].as_str() == Some(self.message_id.as_str())
-            && message["text"].as_str() == Some(text)
-            && message["threadId"].as_str() == Some(self.connection.thread_id())
-            && message["runId"].as_str() == Some(run_id))
-        .then_some(run)
+            .filter(|message| message["id"].as_str() == Some(self.message_id.as_str()));
+        let message = messages.next()?;
+        if messages.next().is_some()
+            || message["role"].as_str() != Some("user")
+            || message["text"].as_str() != Some(text)
+            || message["threadId"].as_str() != Some(self.connection.thread_id())
+        {
+            return None;
+        }
+        let run_id = checked_identity(&message["runId"])?;
+        let mut runs = projection["runs"]
+            .as_array()?
+            .iter()
+            .filter(|run| run["id"].as_str() == Some(run_id));
+        let run = runs.next()?;
+        (runs.next().is_none() && run["threadId"].as_str() == Some(self.connection.thread_id()))
+            .then_some(run)
     }
 
     fn pending_approval(&self, snapshot: &Value, run: &Value) -> Option<Approval> {
@@ -495,6 +507,26 @@ mod tests {
         }})
     }
 
+    fn with_previous_turn(mut value: Value) -> Value {
+        value["projection"]["runs"].as_array_mut().unwrap().insert(
+            0,
+            json!({
+                "id": "earlier-run", "threadId": THREAD, "status": "completed"
+            }),
+        );
+        value["projection"]["messages"]
+            .as_array_mut()
+            .unwrap()
+            .insert(
+                0,
+                json!({
+                    "id": "earlier-message", "threadId": THREAD, "runId": "earlier-run",
+                    "role": "user", "text": PROMPT
+                }),
+            );
+        value
+    }
+
     fn accept(listener: &TcpListener) -> TcpStream {
         let end = Instant::now() + Duration::from_secs(5);
         let stream = loop {
@@ -575,14 +607,25 @@ mod tests {
 
     #[test]
     fn dispatches_once_and_reconciles_the_same_identity_after_a_lost_ack_or_reopen() {
-        for send_ack in [true, false] {
+        for (send_ack, populated) in [(true, false), (false, true)] {
             let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
             listener.set_nonblocking(true).unwrap();
             let port = listener.local_addr().unwrap().port();
             let count = Arc::new(AtomicUsize::new(0));
             let observed = Arc::clone(&count);
             let peer = thread::spawn(move || {
-                read_projection(&listener, false);
+                let read = |accepted| {
+                    let value = projection(accepted);
+                    read_projection_value(
+                        &listener,
+                        if populated {
+                            with_previous_turn(value)
+                        } else {
+                            value
+                        },
+                    );
+                };
+                read(false);
                 let mut socket = command_socket(&listener);
                 let command: Value =
                     serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
@@ -604,9 +647,9 @@ mod tests {
                     socket.send(Message::Text(json!({"_tag":"Exit","requestId":"1","exit":{"_tag":"Success","value":{"sequence":7}}}).to_string().into())).unwrap();
                 }
                 drop(socket);
-                read_projection(&listener, true);
+                read(true);
                 // A fresh view with the caller's original identities reads the receipt's projected result.
-                read_projection(&listener, true);
+                read(true);
             });
             let bytes = input(port);
             let session = Session::read(bytes.as_slice()).unwrap();
@@ -621,6 +664,22 @@ mod tests {
             peer.join().unwrap();
             assert_eq!(count.load(Ordering::Acquire), 1);
         }
+    }
+
+    #[test]
+    fn unresolved_or_duplicate_identity_refuses_dispatch() {
+        let session = Session::read(input(1).as_slice()).unwrap();
+        let mut current = with_previous_turn(projection(false));
+        assert!(session.ready_for_dispatch(&current));
+        current["projection"]["runs"][0]["status"] = json!("waiting");
+        assert!(!session.ready_for_dispatch(&current));
+        current["projection"]["runs"][0]["status"] = json!("completed");
+        current["projection"]["messages"][0]["id"] = json!("fixture-message-1");
+        assert!(!session.ready_for_dispatch(&current));
+
+        let mut ambiguous = with_previous_turn(projection(true));
+        ambiguous["projection"]["runs"][0]["id"] = json!("fixture-run");
+        assert!(session.selected_run(&ambiguous, PROMPT).is_none());
     }
 
     fn approval_projection(resolved: bool) -> Value {

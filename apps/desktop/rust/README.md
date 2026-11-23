@@ -158,7 +158,10 @@ the draft and confirmation exposes the selected thread as a read-only
 document. Four rejected environment/token/project/thread cases must leave
 zero messages and runs. The accepted case must produce one exact user
 message and one completed run through the normal bounded projection route.
-Repeated submit is checked without allocating new identities.
+Repeated submit is checked without allocating new identities. A new GPUI
+window sends a follow-up to the same idle thread with separate command and
+message identities. The check requires both completed runs and the original
+visible messages.
 
 After the exact desktop and packaged native server are built, run the
 existing loopback-only X11/D-Bus lane with:
@@ -173,7 +176,7 @@ ACP approval replay. AT-SPI checks the button name, role, and request
 details. X11 activates the button, then the check reads the resolved request
 and completed reply from the same fresh native server profile.
 
-Streaming, other approval actions, live providers, populated threads,
+Streaming, other approval actions, live providers, writes to busy threads,
 durable desktop drafts, and normal launcher integration remain open.
 Project matching is a preflight read. The recorded showcase and read-only
 snapshot routes remain independently executable. The stock pin

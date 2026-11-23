@@ -82,6 +82,7 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   Assert.ok(descriptor && typeof descriptor.environmentId === "string", "Synthetic server never became ready");
+  const { environmentId } = descriptor;
   const exchanged = await fetch(origin + "/oauth/token", {
     method: "POST", redirect: "error", signal: AbortSignal.timeout(15_000),
     body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -127,10 +128,10 @@ try {
   Assert.equal(data.projection.runs.length, 0);
   Assert.ok(FS.existsSync(Path.join(userdata, "statev2.omdb")));
   Assert.ok(!FS.existsSync(Path.join(userdata, "statev2.sqlite")));
-  await new Promise<void>((resolve, reject) => {
+  const submitThroughWindow = (mode: string, command: CommandId, message: string) => new Promise<void>((resolve, reject) => {
     const view = ChildProcess.spawn("/usr/bin/python3", [
       Path.join(root, "tools/check-gpui-showcase.py"), executable,
-      approval ? "--thread-compose-approval" : "--thread-compose",
+      mode,
     ], {
       env: process.env, stdio: ["pipe", "inherit", "inherit"],
     });
@@ -138,40 +139,65 @@ try {
     view.once("error", () => { clearTimeout(deadline); reject(new Error("GPUI submit harness could not start")); });
     view.once("close", (code) => { clearTimeout(deadline); code === 0 ? resolve() : reject(new Error("GPUI submit view check failed")); });
     view.stdin.on("error", () => {});
-    view.stdin.end(JSON.stringify({ port, token, environmentId: descriptor.environmentId, threadId, projectId, commandId, messageId, approvalCommandId }));
+    view.stdin.end(JSON.stringify({ port, token, environmentId, threadId, projectId,
+      commandId: command, messageId: message, approvalCommandId }));
   });
-  const final = await fetch(origin + `/api/orchestration/threads/${encodeURIComponent(threadId)}/bounded`, { headers, signal: AbortSignal.timeout(15_000) });
-  Assert.ok(final.ok);
-  const accepted = await final.json() as { projection: {
+  type SubmissionProjection = {
     thread: { id: string; projectId: string };
     messages: { id: string; role: string; text: string; runId: string }[];
     runs: { id: string; status: string }[];
     runtimeRequests: { kind: string; status: string; decision?: string }[];
-  } };
-  Assert.equal(accepted.projection.thread.id, threadId);
-  Assert.equal(accepted.projection.thread.projectId, projectId);
-  Assert.equal(accepted.projection.runs.length, 1);
-  Assert.equal(accepted.projection.runs[0]?.status, "completed");
-  const user = accepted.projection.messages.filter((message) => message.role === "user");
-  Assert.equal(user.length, 1);
-  Assert.equal(user[0]?.id, messageId);
-  Assert.equal(user[0]?.text, "GPUI sends one recorded prompt.");
-  Assert.equal(user[0]?.runId, accepted.projection.runs[0]?.id);
+  };
+  const currentProjection = async () => {
+    const response = await fetch(origin + `/api/orchestration/threads/${encodeURIComponent(threadId)}/bounded`,
+      { headers, signal: AbortSignal.timeout(15_000) });
+    Assert.ok(response.ok);
+    const { projection } = await response.json() as { projection: SubmissionProjection };
+    Assert.equal(projection.thread.id, threadId);
+    Assert.equal(projection.thread.projectId, projectId);
+    return projection;
+  };
   const replyText = approval ? "Created the requested probe file." : "todo list fixture complete";
-  Assert.ok(accepted.projection.messages.some((message) =>
-    message.role === "assistant" && message.runId === accepted.projection.runs[0]?.id && message.text.includes(replyText),
-  ));
+  const findCompletedRun = (projection: SubmissionProjection, id: string, prompt: string) => {
+    const users = projection.messages.filter((message) => message.role === "user" && message.id === id);
+    Assert.equal(users.length, 1);
+    Assert.equal(users[0]?.text, prompt);
+    const runs = projection.runs.filter((run) => run.id === users[0]?.runId);
+    Assert.equal(runs.length, 1);
+    Assert.equal(runs[0]?.status, "completed");
+    Assert.ok(projection.messages.some((message) =>
+      message.role === "assistant" && message.runId === runs[0]?.id && message.text.includes(replyText),
+    ));
+    return runs[0]!.id;
+  };
+  await submitThroughWindow(approval ? "--thread-compose-approval" : "--thread-compose", commandId, messageId);
+  const accepted = await currentProjection();
+  const initialRun = findCompletedRun(accepted, messageId, "GPUI sends one recorded prompt.");
+  Assert.equal(accepted.runs.length, 1);
+  Assert.equal(accepted.messages.filter((message) => message.role === "user").length, 1);
   if (approval) {
-    Assert.equal(accepted.projection.runtimeRequests.length, 1);
-    const request = accepted.projection.runtimeRequests[0];
+    Assert.equal(accepted.runtimeRequests.length, 1);
+    const request = accepted.runtimeRequests[0];
     Assert.equal(request?.kind, "command");
     Assert.equal(request?.status, "resolved");
     Assert.equal(request?.decision, "accept");
     Assert.ok(!FS.existsSync(Path.join(workspace, ".codex-probe-write-action.txt")));
+  } else {
+    const secondMessage = Crypto.randomUUID();
+    await submitThroughWindow("--thread-compose-follow-up", CommandId.make(Crypto.randomUUID()), secondMessage);
+    const reopened = await currentProjection();
+    Assert.equal(reopened.runs.length, 2);
+    Assert.equal(reopened.messages.filter((message) => message.role === "user").length, 2);
+    Assert.equal(findCompletedRun(reopened, messageId, "GPUI sends one recorded prompt."), initialRun);
+    Assert.notEqual(findCompletedRun(reopened, secondMessage, "GPUI sends a follow-up in the same thread."), initialRun);
+    for (const message of accepted.messages) {
+      Assert.deepEqual(reopened.messages.find((row) => row.id === message.id), message);
+    }
   }
   console.log(JSON.stringify({ toolkit: "gpui", serverImplementation: "native", transport: "WebSocket JSON RPC",
     commands: approval ? ["message.dispatch", "runtime-request.respond"] : ["message.dispatch"],
-    runCount: 1, userMessageCount: 1, refusalWindows: approval ? 0 : 4, normalCommandAndProjectionRoute: true,
+    runCount: approval ? 1 : 2, userMessageCount: approval ? 1 : 2, refusalWindows: approval ? 0 : 4,
+    normalCommandAndProjectionRoute: true, followUpInSameThread: !approval,
     ...(approval ? { approvalDecision: "accept", resolvedRequestCount: 1 } : {}),
     unqualified: ["live providers", "streaming", "durable client identity allocation"],
   }));

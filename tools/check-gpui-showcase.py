@@ -119,9 +119,9 @@ def check_thread_snapshot(executable):
     print("GPUI authenticated snapshot passed AT-SPI content and identity, credential and missing-thread refusal checks")
 
 
-def check_thread_compose(executable, approval=False):
+def check_thread_compose(executable, approval=False, follow_up=False):
     connection = json.load(sys.stdin)
-    prompt = "GPUI sends one recorded prompt."
+    prompt = "GPUI sends a follow-up in the same thread." if follow_up else "GPUI sends one recorded prompt."
     failure = "Could not confirm submission. Draft kept. Check the thread before retrying."
 
     def projection():
@@ -133,7 +133,11 @@ def check_thread_compose(executable, approval=False):
         with urllib.request.urlopen(request, timeout=5) as reply:
             return json.load(reply)["projection"]
 
-    cases = [(connection, True)] if approval else [
+    previous = projection() if follow_up else None
+    if previous is not None:
+        assert len(previous["runs"]) == 1 and previous["runs"][0]["status"] == "completed"
+        assert len([message for message in previous["messages"] if message["role"] == "user"]) == 1
+    cases = [(connection, True)] if approval or follow_up else [
         ({**connection, "environmentId": "wrong-environment"}, False),
         ({**connection, "token": "invalid.fixture.token"}, False),
         ({**connection, "projectId": "wrong-project"}, False),
@@ -220,13 +224,17 @@ def check_thread_compose(executable, approval=False):
             observed = projection()
             assert observed["thread"]["id"] == connection["threadId"]
             assert observed["thread"]["projectId"] == connection["projectId"]
-            assert len(observed["runs"]) == (1 if success else 0)
+            assert len(observed["runs"]) == (int(success) + int(follow_up))
             users = [message for message in observed["messages"] if message["role"] == "user"]
-            assert len(users) == (1 if success else 0)
+            assert len(users) == (int(success) + int(follow_up))
             if success:
-                assert users[0]["id"] == connection["messageId"]
-                assert users[0]["text"] == prompt
-                assert users[0]["runId"] == observed["runs"][0]["id"]
+                message, = [user for user in users if user["id"] == connection["messageId"]]
+                assert message["text"] == prompt
+                run, = [run for run in observed["runs"] if run["id"] == message["runId"]]
+                assert run["status"] == "completed"
+            if previous is not None:
+                assert previous["runs"][0] in observed["runs"]
+                assert all(message in observed["messages"] for message in previous["messages"])
             if approval:
                 request, = observed["runtimeRequests"]
                 assert request["id"] == approval_id and request["status"] == "resolved"
@@ -243,6 +251,8 @@ def check_thread_compose(executable, approval=False):
                     application.wait(timeout=3)
     if approval:
         print("GPUI approval passed named AT-SPI button, X11 decision and same-request completion checks")
+    elif follow_up:
+        print("GPUI follow-up passed keyboard submission and preserved the earlier completed turn")
     else:
         print("GPUI composer passed X11 input, AT-SPI acceptance/refusal and exactly-one projected run checks")
 
@@ -266,6 +276,9 @@ def main():
         return
     if sys.argv[2:] == ["--thread-compose-approval"]:
         check_thread_compose(executable, approval=True)
+        return
+    if sys.argv[2:] == ["--thread-compose-follow-up"]:
+        check_thread_compose(executable, follow_up=True)
         return
     if sys.argv[2:] == ["--thread-snapshot"]:
         check_thread_snapshot(executable)
