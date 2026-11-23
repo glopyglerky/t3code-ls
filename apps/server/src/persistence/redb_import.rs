@@ -436,6 +436,7 @@ impl Store {
             generation,
             event_layout: None,
             prepared_service_activation_v1: None,
+            forward_service_activation_v1: None,
         };
         let mut tx = self.db.begin().await?;
         if tx.get(&schema_key()).await?.is_some() {

@@ -57,6 +57,7 @@ fn target_89(source: &ApplicationCatalog, current: &Definition) -> ApplicationCa
         schema: current.schema.clone(),
         event_layout: None,
         prepared_service_activation_v1: source.prepared_service_activation_v1.clone(),
+        forward_service_activation_v1: source.forward_service_activation_v1.clone(),
     }
 }
 
@@ -175,9 +176,22 @@ pub(crate) async fn validate_import_lineage(
         serde_json::from_slice(&bytes).map_err(|_| Error::IncompatibleStore)?;
     let previous = definition_88()?;
     let current = definition()?;
+    let mut target = target_89(&lineage.source, &current);
+    // Activation can change after the import upgrade. The active generation
+    // identity verifies that change independently of the historical lineage.
+    if let Some(binding) = &catalog.forward_service_activation_v1
+        && target.forward_service_activation_v1.is_none()
+        && target
+            .prepared_service_activation_v1
+            .as_ref()
+            .is_none_or(|seal| seal.update_id == binding.update_id)
+    {
+        target.prepared_service_activation_v1 = None;
+        target.forward_service_activation_v1 = Some(binding.clone());
+    }
     if lineage.version != 1
         || lineage.source.schema != previous.schema
-        || *catalog != target_89(&lineage.source, &current)
+        || *catalog != target
         || lineage.source.generation == catalog.generation
     {
         return Err(Error::IncompatibleStore);
@@ -419,6 +433,7 @@ impl Store {
             schema: current.schema.clone(),
             event_layout: None,
             prepared_service_activation_v1: source.prepared_service_activation_v1.clone(),
+            forward_service_activation_v1: source.forward_service_activation_v1.clone(),
         };
         for stage in [
             Stage::Clear,
