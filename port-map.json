@@ -2097,6 +2097,56 @@
       ]
     },
     {
+      "id": "browser-thread-link-dioxus",
+      "state": "candidate",
+      "domain_owner": "apps/web/src/components/chat",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/web/src/components/chat/TimelineWorkEntryRow.tsx",
+          "blob": "dfefdedeed52930e8b8e2f29976177b8c838c893"
+        }
+      ],
+      "rust_paths": [
+        "apps/web/rust/pairing/src/thread_link.rs"
+      ],
+      "adapter_paths": [
+        "apps/web/rust/pairing/src/lib.rs",
+        "apps/web/src/components/chat/TimelineWorkEntryRow.tsx",
+        "apps/web/src/components/chat/DioxusThreadLink.tsx",
+        "apps/web/src/onboarding/dioxusBindings.ts",
+        "apps/web/src/vite-env.d.ts",
+        "apps/web/scripts/hybrid-client-thread-navigation.ts",
+        ".github/workflows/composer-offsets.yml"
+      ],
+      "platform_routes": [
+        {
+          "targets": [
+            "browser"
+          ],
+          "state": "candidate",
+          "implementation": "dioxus-wasm",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "apps/web/scripts/verify-hybrid-client.ts",
+        "apps/web/src/components/chat/DioxusThreadLink.browser.test.tsx",
+        "apps/web/src/components/chat/DioxusThreadLink.fallback.browser.test.tsx"
+      ],
+      "hosted_acceptance": {
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/chat/DioxusThreadLink.browser.test.tsx": ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/chat/DioxusThreadLink.fallback.browser.test.tsx": ".github/workflows/composer-offsets.yml"
+      },
+      "retired_paths": [],
+      "notes": "T11/J36. The opt-in Dioxus thread-read title uses the existing authenticated route and browser link behavior. The retained renderer handles loading and unavailable Wasm. Packaged and component qualification remain open.",
+      "rust_crates": [
+        "apps/web/rust/pairing"
+      ]
+    },
+    {
       "id": "browser-approval-action-dioxus",
       "state": "candidate",
       "domain_owner": "apps/web/src/components/chat",

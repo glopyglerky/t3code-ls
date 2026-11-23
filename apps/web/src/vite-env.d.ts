@@ -20,6 +20,7 @@ interface ImportMetaEnv {
   readonly VITE_T3_CODE_LS_GUEST_NAME_RENDERER?: "dioxus";
   readonly VITE_T3_CODE_LS_THREAD_FIND_RENDERER?: "dioxus";
   readonly VITE_T3_CODE_LS_ASSISTANT_TEXT_RENDERER?: "dioxus";
+  readonly VITE_T3_CODE_LS_THREAD_LINK_RENDERER?: "dioxus";
   readonly T3CODE_DESKTOP_UPDATE_REPOSITORY: string;
   readonly T3CODE_FEATURE_SECRETS: string;
   readonly APP_VERSION: string;

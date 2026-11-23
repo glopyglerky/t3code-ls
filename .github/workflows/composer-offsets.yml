@@ -278,6 +278,8 @@ jobs:
           if [[ "$DIOXUS_NAVIGATION_PROOF" == true ]]; then
             cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
             export VITE_T3_CODE_LS_THREAD_LINK_RENDERER=dioxus
+            # apps/web/src/components/chat/DioxusThreadLink.browser.test.tsx
+            # apps/web/src/components/chat/DioxusThreadLink.fallback.browser.test.tsx
             pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
               src/components/chat/DioxusThreadLink.browser.test.tsx \
               src/components/chat/DioxusThreadLink.fallback.browser.test.tsx
