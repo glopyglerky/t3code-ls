@@ -53,16 +53,16 @@ fn inline_paragraph(text: &str) -> Option<Vec<(InlineKind, &str)>> {
     if text.len() > 4096 {
         return None;
     }
-    if plain_paragraph(text) {
-        return Some(vec![(InlineKind::Text, text)]);
-    }
-    // The retained direction algorithm handles mixed scripts. Qualify those
-    // separately rather than substituting browser dir=auto for its majority rule.
+    // The retained paragraph renderer determines direction for other scripts,
+    // including mixed text whose first word and majority have different directions.
     if !text
         .chars()
         .all(|c| c.is_ascii() || ('\u{4e00}'..='\u{9fff}').contains(&c))
     {
         return None;
+    }
+    if plain_paragraph(text) {
+        return Some(vec![(InlineKind::Text, text)]);
     }
     let mut parts = Vec::new();
     let mut rest = text;
@@ -190,8 +190,7 @@ fn assistant_text(model: Rc<Model>) -> Element {
     let parts = inline_paragraph(&current.text);
     let supported = parts.is_some();
     let source_stamp = if supported { current.text.as_str() } else { "" };
-    let formatted = supported && current.text.contains('*');
-    let direction = (formatted && current.text.chars().any(char::is_alphabetic)).then_some("ltr");
+    let direction = (supported && current.text.chars().any(char::is_alphabetic)).then_some("ltr");
     rsx! {
         div {
             class: "chat-markdown w-full min-w-0 [overflow-wrap:anywhere] [word-break:break-word] text-sm leading-relaxed text-foreground/[calc(90%+var(--appearance-contrast-boost)/10)]",
