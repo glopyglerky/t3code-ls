@@ -14,8 +14,9 @@ jobs:
     env:
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
       STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
-      CANDIDATE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '7216183e0c013c7f5d7e9975d8aee7beda42b880' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '08eadccbff571219466f7bc35e982730295f15d8' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
-      CANDIDATE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '675636c7feb22a55179fa726af94e5cfa49212b8' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '38ff3e9ac680e4defe3d06fcfb3e79d0b94b841c' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '78647c8e507b6b677fa6f1585839bd8bdc12bc55' || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
+      COMPOSED_J06: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') }}
+      CANDIDATE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') && 'd3217d6c0176faad753f8ce2525cc2552fe502d7' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '7216183e0c013c7f5d7e9975d8aee7beda42b880' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '08eadccbff571219466f7bc35e982730295f15d8' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
+      CANDIDATE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') && '0bf400e6b6884ce602e9cb1cd094abe437e1c62f' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '675636c7feb22a55179fa726af94e5cfa49212b8' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '38ff3e9ac680e4defe3d06fcfb3e79d0b94b841c' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '78647c8e507b6b677fa6f1585839bd8bdc12bc55' || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
       CATALOG_COMMIT: 2bb6ae9e57559bde6cff0feeddcff8ddf02de009
       CATALOG_TREE: 55e2c8aba6fc06642b06a8d60861c7bdaf3c67f9
       ROOT_RELEASE_COMMIT: a7ca741bd4c4d508fef316e164fb1ae897301965
@@ -147,6 +148,7 @@ jobs:
           export CARGO_HOME="$RUNNER_TEMP/conversation-cargo-home"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/conversation-target"
           cd measurement
+          if [[ "$COMPOSED_J06" == true ]]; then node tools/src/startup_probe/browser/conversation-probe.test.mjs; fi
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
             --release --locked -p t3code-ls-tools
           cd ..
@@ -198,10 +200,14 @@ jobs:
             --arg chrome "$("$chrome" --version)" --arg driver "$("$driver" --version)" \
             --arg image "${ImageOS:-unknown}/${ImageVersion:-unknown}" --arg kernel "$(uname -r)" \
             --arg cpu "$(LC_ALL=C lscpu | sed -n 's/^Model name:[[:space:]]*//p')" --argjson trace "$TRACE_CONVERSATION" \
+            --argjson composedJ06 "$COMPOSED_J06" \
             --arg systemLoad "$(uptime)" --argjson cpus "$(nproc)" \
-            '{stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},catalog:(if $compareCatalog then {commit:$catalog,tree:$catalogTree,durability:"omdb Immediate"} else null end),rootRelease:(if $compareRootRelease then {commit:$rootRelease,tree:$rootReleaseTree,durability:"omdb Immediate"} else null end),singleProjectionReads:$compareSingleReads,independentReads:$compareIndependentReads,independentLookups:$compareIndependentLookups,forkSqliteControl:$trace,providerTrace:$trace,probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
+            '{composedJ06:$composedJ06,acceptBoundary:(if $composedJ06 then "browser launch acknowledgement upper bound; observer overhead included" else null end),stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},catalog:(if $compareCatalog then {commit:$catalog,tree:$catalogTree,durability:"omdb Immediate"} else null end),rootRelease:(if $compareRootRelease then {commit:$rootRelease,tree:$rootReleaseTree,durability:"omdb Immediate"} else null end),singleProjectionReads:$compareSingleReads,independentReads:$compareIndependentReads,independentLookups:$compareIndependentLookups,forkSqliteControl:$trace,providerTrace:$trace,probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
             > "$evidence/inputs.json"
           printf 'pair\tposition\tprofile\tfirst_visible_ms\tterminal_ms\tmax_frame_gap_ms\n' > "$evidence/trials.tsv"
+          if [[ "$COMPOSED_J06" == true ]]; then
+            printf 'pair\tposition\tprofile\taccept_ack_ms\tfirst_visible_ms\tterminal_ms\tmax_frame_gap_ms\tbrowser_reload_us\n' > "$evidence/j06.tsv"
+          fi
           for ((pair=1; pair<=pairs; pair++)); do
             profiles=(stock candidate)
             if (( pair % 2 == 0 )); then profiles=(candidate stock); fi
@@ -224,6 +230,9 @@ jobs:
               if [[ "$profile" == single-reads ]]; then mode=native-single-reads; bundle_profile=candidate; fi
               if [[ "$profile" == independent-reads ]]; then mode=native-independent-reads; bundle_profile=candidate; fi
               if [[ "$profile" == independent-lookups ]]; then mode=native-independent-lookups; bundle_profile=candidate; fi
+              if [[ "$COMPOSED_J06" == true ]]; then
+                if [[ "$profile" == stock ]]; then mode=stock-j06; else mode=native-j06; fi
+              fi
               sudo -n unshare --net -- bash -euc '
                 ip link set dev lo up
                 user="$1"
@@ -232,11 +241,31 @@ jobs:
               ' _ "$(id -un)" "$probe" probe-conversation "$node_path" \
                 "$PWD/$bundle_profile/apps/server/dist/bin.mjs" "$RUNNER_TEMP/conversation-trial-$trial" \
                 "$driver" "$chrome" "$replay" "$mode" "${trace[@]}" | tee "$result" > /dev/null
+              if [[ "$COMPOSED_J06" == true ]]; then
+                jq -er --argjson pair "$pair" --argjson position "$((position + 1))" --arg profile "$profile" '
+                  select(.scoped_j06 and (.single_projection_reads | not) and (.independent_reads | not) and .accept_observer == "browser-websocket-launch-ack-upper-bound" and
+                    .browser.loaded_rust_composer == ($profile != "stock") and
+                    .browser.conversation.snapshot.valid and
+                    .browser.conversation.acceptance.requests == 1 and
+                    .browser.conversation.acceptance.error == null and
+                    .browser.conversation.acceptance.result.sequence > 0 and
+                    .browser.conversation.submit_to_accept_ack_millis > 0 and
+                    .browser.conversation.browser_reload_micros > 0 and
+                    .browser.conversation.stored_work == .browser.conversation.reopened_work) |
+                  .browser.conversation | [$pair,$position,$profile,.submit_to_accept_ack_millis,
+                    .timing.firstVisibleMillis,.timing.terminalMillis,.timing.maxFrameGapMillis,.browser_reload_micros] | @tsv' \
+                  "$result" >> "$evidence/j06.tsv"
+              else
               jq -er --argjson pair "$pair" --argjson position "$((position + 1))" --arg profile "$profile" \
                 'select(.single_projection_reads == ($profile == "single-reads" or $profile == "independent-lookups") and .independent_reads == ($profile == "independent-reads" or $profile == "independent-lookups") and .browser.loaded_rust_composer == ($profile != "stock") and .browser.conversation.snapshot.valid) | .browser.conversation.timing | [$pair,$position,$profile,.firstVisibleMillis,.terminalMillis,.maxFrameGapMillis] | @tsv' \
                 "$result" >> "$evidence/trials.tsv"
+              fi
               rm -r "$RUNNER_TEMP/conversation-trial-$trial"
             done
+            if [[ "$COMPOSED_J06" == true ]]; then
+              diff <(jq -c '.browser.conversation.stored_work' "$evidence/sample-$pair-stock.json") \
+                <(jq -c '.browser.conversation.stored_work' "$evidence/sample-$pair-candidate.json")
+            fi
             for profile in "${profiles[@]}"; do
               if [[ "$profile" == stock ]]; then continue; fi
               diff <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-stock.json") \

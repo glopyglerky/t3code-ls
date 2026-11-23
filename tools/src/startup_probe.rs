@@ -31,8 +31,8 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
             if conversation && (trace.len() <= 1 || (trace.len() == 2 && trace[1] == "server-spans")) => (
             node, bundle, trial, Some((driver, chrome)),
             match mode.to_str() {
-                Some("stock") => None,
-                Some("native" | "native-single-reads" | "native-independent-reads" | "native-independent-lookups") => Some("native"),
+                Some("stock" | "stock-j06") => None,
+                Some("native-j06" | "native" | "native-single-reads" | "native-independent-reads" | "native-independent-lookups") => Some("native"),
                 Some("fork-sqlite") => Some("upstream"),
                 _ => return Err("unknown conversation profile".into()),
             },
@@ -41,7 +41,7 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
                 Ok::<_, std::io::Error>((fs::canonicalize(wrapper)?, trace.len() == 2))
             }).transpose()?,
         ),
-        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|native|native-single-reads|native-independent-reads|native-independent-lookups|fork-sqlite [TRACE_WRAPPER [server-spans]]".into()),
+        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|stock-j06|native-j06|native|native-single-reads|native-independent-reads|native-independent-lookups|fork-sqlite [TRACE_WRAPPER [server-spans]]".into()),
         _ => return Err("usage: t3code-ls-tools probe-startup NODE BUNDLE NEW_TRIAL_DIRECTORY [CHROMEDRIVER CHROME [fork-sqlite]]".into()),
     };
     let node = fs::canonicalize(node)?;
@@ -49,6 +49,7 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
         .get(6)
         .and_then(|mode| mode.to_str())
         .filter(|_| conversation);
+    let scoped_j06 = matches!(profile, Some("stock-j06" | "native-j06"));
     let single_projection_reads = matches!(
         profile,
         Some("native-single-reads" | "native-independent-lookups")
@@ -158,7 +159,7 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
             .attach(&link, start, conversation)
             .and_then(|mut result| {
                 if conversation {
-                    result["conversation"] = browser.conversation(&workspace)?;
+                    result["conversation"] = browser.conversation(&workspace, scoped_j06)?;
                 }
                 Ok(result)
             });
@@ -214,6 +215,8 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
         json!({
             "schema_version": 1,
             "profile": profile,
+            "scoped_j06": scoped_j06,
+            "accept_observer": if scoped_j06 { "browser-websocket-launch-ack-upper-bound" } else { "none" },
             "single_projection_reads": single_projection_reads,
             "independent_reads": independent_reads,
             "poll_interval_micros": POLL_INTERVAL.as_micros(),
