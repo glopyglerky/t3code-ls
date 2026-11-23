@@ -2879,6 +2879,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "t3-code-ls-cursor-bridge"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "t3-code-ls-cursor-bridge-host"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "serde_json",
+ "t3-code-ls-cursor-bridge",
+ "tokio",
+]
+
+[[package]]
 name = "t3-code-ls-storage"
 version = "0.1.0"
 dependencies = [

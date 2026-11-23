@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/core", "crates/transport", "crates/storage", "crates/app", "packages/client-runtime/rust", "packages/client-runtime/rust/web", "tools"]
+members = ["crates/core", "crates/transport", "crates/storage", "crates/app", "packages/client-runtime/rust", "packages/client-runtime/rust/web", "packages/provider-cursor/rust", "packages/provider-cursor/rust/host", "tools"]
 default-members = ["crates/core", "crates/transport", "crates/app"]
 exclude = ["native/hyprland-snap-shot", "native/kde-snap-shot", "native/resource-monitor"]
 resolver = "3"
