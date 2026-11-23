@@ -242,6 +242,7 @@ test("ordinary launcher refuses isolated candidate preparation before any child 
 const launcherPromotionProof = process.env.T3_TEST_LAUNCHER_PROMOTION_INTENT === "1";
 const launcherPublicationProof = process.env.T3_TEST_LAUNCHER_SEALED_PUBLICATION === "1";
 const launcherCancelProof = process.env.T3_TEST_LAUNCHER_CANCEL_BEFORE_PUBLICATION === "1";
+const launcherSealedServingProof = process.env.T3_TEST_LAUNCHER_SEALED_SERVING === "1";
 
 test(launcherPromotionProof
   ? "compiled Rust helper records an installed launcher's native promotion intent"
@@ -251,6 +252,7 @@ test(launcherPromotionProof
 }, async (t) => {
   const executable = process.env.T3_TEST_SEALED_TRIAL_HELPER;
   assert.ok(!launcherCancelProof || (launcherPromotionProof && !launcherPublicationProof));
+  assert.ok(!launcherSealedServingProof || (launcherPromotionProof && launcherPublicationProof));
   assert.ok(isQualifiedNativeHost(), "The compiled-helper proof requires qualified Linux x64");
   assert.ok(path.isAbsolute(executable), "Pass the exact compiled helper by absolute path");
   const helperBytes = (await fs.stat(executable)).size;
@@ -318,7 +320,7 @@ test(launcherPromotionProof
     t.diagnostic(JSON.stringify({ runtimeEntryBytes, installedRuntimeLimitBytes: 256 * 1024 * 1024 }));
     assert.ok(runtimeEntryBytes <= 256 * 1024 * 1024,
       "The installed runtime must fit its independent 256 MiB artifact hash limit");
-    if (launcherCancelProof) {
+    if (launcherCancelProof || launcherSealedServingProof) {
       await fs.cp(path.dirname(preparationEntry), target, { recursive: true });
       await fs.cp(path.dirname(preparationEntry), previous, { recursive: true });
     } else {
@@ -333,7 +335,7 @@ test(launcherPromotionProof
   const helperSha256 = digest(await fs.readFile(executable));
   for (const directory of [previous, target]) {
     const nativeDirectory = path.join(directory, "native-bin");
-    if (launcherCancelProof) {
+    if (launcherCancelProof || launcherSealedServingProof) {
       assert.equal(digest(await fs.readFile(path.join(nativeDirectory, "t3-code-ls-db"))), helperSha256);
       continue;
     }
@@ -494,6 +496,27 @@ test(launcherPromotionProof
           assert.equal(JSON.parse(result.stdout).error.kind, "incompatible_store");
         };
         assertRefused(["read-only-local", dbPath], '{"operation":"application_schema"}\n');
+        if (launcherSealedServingProof) {
+          const served = spawnSync(path.join(target, "t3"), ["serve", "--host", "127.0.0.1", "--port", "48124", "--no-browser"], {
+            cwd: target,
+            env: { HOME: home, TMPDIR: home, PATH: "/usr/bin:/bin", T3CODE_HOME: home,
+              T3_CODE_LS_IMPLEMENTATION: "native", T3CODE_TELEMETRY_ENABLED: "false" },
+            input: "", encoding: "utf8", timeout: 30_000, maxBuffer: 64 * 1024, killSignal: "SIGKILL",
+          });
+          assert.equal(served.error?.code, undefined, "Sealed serve must exit before the process deadline");
+          assert.equal(served.status, 1, "The packaged serve path must refuse the published sealed database");
+          assert.ok(`${served.stdout}${served.stderr}`.includes("Native database rejected the request with incompatible_store."),
+            "The packaged process must reject the sealed store through native startup");
+          await assert.rejects(fs.stat(path.join(f.userdata, "server-runtime.json")), { code: "ENOENT" });
+          await assert.rejects(fs.stat(path.join(f.userdata, "statev2.sqlite")), { code: "ENOENT" });
+          assert.equal((await fs.stat(dbPath, { bigint: true })).ino, stageIdentity.ino);
+          assert.deepEqual(await fs.readFile(dbPath), stageBytes);
+          assert.deepEqual(await fs.readFile(previousPath), sourceBytes);
+          assert.deepEqual(await fs.readFile(checkpoint), checkpointBytes);
+          assert.deepEqual(await fs.readFile(f.statePath), stateBytes);
+          assert.deepEqual(JSON.parse(await fs.readFile(observationPath, "utf8")), receipt);
+          t.diagnostic("Packaged serve refused the sealed catalog without publishing runtime state or modifying the database.");
+        }
         const [retry] = runHelper(publish, undefined, installedHelper);
         assert.deepEqual(retry, { ...publication, reused: true });
 

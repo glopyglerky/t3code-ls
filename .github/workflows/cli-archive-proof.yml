@@ -61,6 +61,7 @@ jobs:
           LAUNCHER_PROMOTION_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-') }}
           T3_TEST_LAUNCHER_SEALED_PUBLICATION: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-sealed-') && '1' || '0' }}
           LAUNCHER_CANCEL_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-cancel-') }}
+          LAUNCHER_SEALED_SERVING_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-sealed-serving-') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -89,6 +90,17 @@ jobs:
                 --test-name-pattern "compiled Rust helper records" tools/service-launcher-trial.test.mjs
             ' _ "$(id -un)" "$(command -v node)" "$entry" "$helper" "$version" | tee "$RUNNER_TEMP/cli-proof/preparation.log"
             grep -F 'Cancelled the unstarted promotion and reopened the exact previous packaged server.' \
+              "$RUNNER_TEMP/cli-proof/preparation.log"
+          elif [[ "$LAUNCHER_SEALED_SERVING_PROOF" == true ]]; then
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- env T3_TEST_LAUNCHER_PROMOTION_INTENT=1 \
+                T3_TEST_LAUNCHER_SEALED_PUBLICATION=1 T3_TEST_LAUNCHER_SEALED_SERVING=1 \
+                T3_TEST_PREPARE_ENTRY="$3" T3_TEST_SEALED_TRIAL_HELPER="$4" \
+                "$2" --test --test-reporter tap \
+                --test-name-pattern "compiled Rust helper records" tools/service-launcher-trial.test.mjs
+            ' _ "$(id -un)" "$(command -v node)" "$entry" "$helper" | tee "$RUNNER_TEMP/cli-proof/preparation.log"
+            grep -F 'Packaged serve refused the sealed catalog without publishing runtime state or modifying the database.' \
               "$RUNNER_TEMP/cli-proof/preparation.log"
           else
             T3_TEST_PREPARE_ENTRY="$entry" T3_TEST_SEALED_TRIAL_HELPER="$helper" \
