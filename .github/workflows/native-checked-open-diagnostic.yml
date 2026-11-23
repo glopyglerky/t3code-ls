@@ -10,7 +10,7 @@ permissions:
 jobs:
   reopen:
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
-    timeout-minutes: 35
+    timeout-minutes: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-') && 45 || 35 }}
     env:
       NATIVE_COMMIT: 98726c9640a0c45f58310ce4180ac3e2d125f11c
       NATIVE_TREE: 8c92451b40f5f7266596d446ab8e306541f4390e
@@ -22,6 +22,7 @@ jobs:
       OMDB_PHASE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-') && 'e5981a1ec8958420e6061db4390b5f41e87986bb' || '2028c97c9301f4164a5bb812bdc404f9c3245e8d' }}
       ENGINE_PHASE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-') }}
       ENGINE_REUSE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-') }}
+      PAIRED_REUSE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-') }}
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
       WASM_BINDGEN_VERSION: "0.2.130"
       WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
@@ -206,7 +207,7 @@ jobs:
               "$plain" "$trace" >> "$evidence/overhead.tsv"
           done
       - name: Attribute checked-open reads inside the packaged database helper
-        if: env.ENGINE_PHASE_PROOF == 'true'
+        if: env.ENGINE_PHASE_PROOF == 'true' && env.PAIRED_REUSE_PROOF != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -256,6 +257,113 @@ jobs:
               }
             ' "$evidence/engine-phases.tsv"
           fi
+      - name: Package the control with verified page reuse disabled
+        if: env.PAIRED_REUSE_PROOF == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$DIAGNOSTIC_WORK/native"
+          evidence="$RUNNER_TEMP/checked-open-evidence"
+          mkdir -p apps/server/dist/client
+          cp -a apps/web/dist/. apps/server/dist/client/
+          cp -a apps/server/dist apps/server/dist-checked-open-control
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("crates/storage/Cargo.toml")
+          text = path.read_text()
+          candidate = 'features = ["checked_open_diagnostics", "checked_open_reuse_verified_pages"]'
+          assert text.count(candidate) == 1
+          path.write_text(text.replace(candidate, 'features = ["checked_open_diagnostics"]'))
+          PY
+          git diff --check
+          git diff --binary > "$evidence/control.patch"
+          sha256sum "$evidence/control.patch" > "$evidence/control.sha256"
+          built="$DIAGNOSTIC_WORK/control-build"
+          T3_CODE_LS_IMPLEMENTATION=native node tools/build-native.mjs "$built"
+          node --input-type=module - "$built" <<'JS'
+          import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
+          import { join } from "node:path";
+          import { nativeArtifactFiles, nativeHash } from "./tools/native-artifacts.mjs";
+          const built = process.argv[2];
+          const stage = "apps/server/dist-checked-open-control/native-bin";
+          const file = "t3-code-ls-db";
+          for (const directory of [built, stage]) nativeArtifactFiles(directory, "linux-x64");
+          const manifestPath = join(stage, "manifest.json");
+          const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+          copyFileSync(join(built, file), join(stage, file));
+          manifest.files[file] = nativeHash(join(stage, file));
+          writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+          nativeArtifactFiles(stage, "linux-x64");
+          JS
+          for variant in dist dist-checked-open-control; do
+            (
+              cd "apps/server/$variant"
+              sha256sum bin.mjs native-bin/t3-code-ls-db native-bin/manifest.json client/index.html
+            ) > "$evidence/$variant.sha256"
+          done
+          cmp apps/server/dist/bin.mjs apps/server/dist-checked-open-control/bin.mjs
+          cmp apps/server/dist/client/index.html apps/server/dist-checked-open-control/client/index.html
+          ! cmp -s apps/server/dist/native-bin/t3-code-ls-db apps/server/dist-checked-open-control/native-bin/t3-code-ls-db
+          diff -u \
+            <(jq -S 'del(.files["t3-code-ls-db"])' apps/server/dist/native-bin/manifest.json) \
+            <(jq -S 'del(.files["t3-code-ls-db"])' apps/server/dist-checked-open-control/native-bin/manifest.json)
+      - name: Compare paired packaged reopen readiness and resource use
+        if: env.PAIRED_REUSE_PROOF == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          scratch="$DIAGNOSTIC_WORK"
+          evidence="$RUNNER_TEMP/checked-open-evidence"
+          probe="$CARGO_TARGET_DIR/release/t3code-ls-tools"
+          chrome="$(command -v google-chrome)"
+          driver="$(command -v chromedriver || printf '%s/chromedriver' "$CHROMEWEBDRIVER")"
+          test -x "$driver"
+          {
+            uname -srmo
+            lscpu
+            df -T "$RUNNER_TEMP"
+            uptime
+            "$chrome" --version
+            "$driver" --version
+          } > "$evidence/paired-host.txt"
+          printf 'round\tposition\tvariant\tdescriptor_us\thtml_us\tsampled_server_cpu_ms\tsampled_server_rss_bytes\tdb_bytes\n' > "$evidence/paired-reopen.tsv"
+          for round in 1 2 3 4 5; do
+            variants=(control reuse)
+            if (( round % 2 == 0 )); then variants=(reuse control); fi
+            for position in 0 1; do
+              variant="${variants[$position]}"
+              directory=dist
+              if [[ "$variant" == control ]]; then directory=dist-checked-open-control; fi
+              trial="$scratch/trials/paired-$round-$variant"
+              sample="$evidence/paired-$round-$variant.json"
+              sudo -n unshare --net --pid --fork --mount-proc --kill-child -- bash -euc '
+                ip link set dev lo up
+                user="$1"; shift
+                exec runuser -u "$user" -- "$@"
+              ' _ "$(id -un)" env -u REDB_CHECKED_OPEN_DIAGNOSTICS -u T3_CODE_LS_DIAGNOSTIC_DB \
+                "$probe" probe-reopen "$(command -v node)" "$scratch/native/apps/server/$directory/bin.mjs" \
+                "$trial" "$driver" "$chrome" native | tee "$sample" > /dev/null
+              jq -er --argjson round "$round" --argjson position "$((position + 1))" --arg variant "$variant" '
+                select(.journey == "J02" and .profile == "native" and .native_lookups == false and .persistence_spans == null
+                  and .snapshot.valid and .snapshot.threadCount == 32 and .snapshot.messageCount == 200
+                  and .fixture.total_messages == 6400 and .database_migration > 0 and .database_bytes_at_reopen > 0
+                  and .descriptor_micros > 0 and .html_micros > 0
+                  and .migration_evidence.source == "stopped-native-catalog"
+                  and any(.resources.server.processes[]; .role == "native-database-helper"))
+                | [$round,$position,$variant,.descriptor_micros,.html_micros,.resources.server.observed_cpu_millis,
+                   .resources.server.sampled_peak_sum_rss_bytes,.database_bytes_at_reopen] | @tsv' \
+                "$sample" >> "$evidence/paired-reopen.tsv"
+              test ! -e "$trial/checked-open-trace"
+              test ! -e "$trial/checked-open-phases.log"
+              rm -r -- "$trial"
+            done
+            match='{fixture,database_migration,saved_thread_sequence,snapshot:(.snapshot | {valid,threadCount,messageCount,selectedThreadId})}'
+            diff -u <(jq -c "$match" "$evidence/paired-$round-control.json") \
+              <(jq -c "$match" "$evidence/paired-$round-reuse.json")
+          done
+          test "$(wc -l < "$evidence/paired-reopen.tsv")" -eq 11
+          uptime >> "$evidence/paired-host.txt"
       - name: Remove task-owned generated files and record available space
         if: always() && env.DIAGNOSTIC_WORK != ''
         shell: bash
