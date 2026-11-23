@@ -7,6 +7,7 @@ import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
 import * as OS from "node:os";
 import * as Path from "node:path";
+import * as Zlib from "node:zlib";
 import {
   ProjectId,
   ProviderInstanceId,
@@ -24,7 +25,9 @@ import { inspectNativeImport, sha256 } from "./provider-import-native-inspection
 
 const root = FS.realpathSync(Path.resolve(import.meta.dirname, "../../.."));
 const argument = process.argv[2];
-Assert.ok(argument && Path.isAbsolute(argument) && process.argv.length === 3);
+const encoding = process.argv[3] ?? "plain";
+Assert.ok(argument && Path.isAbsolute(argument) && process.argv.length <= 4);
+Assert.ok(encoding === "plain" || encoding === "zstd");
 const proof = Path.join(FS.realpathSync(Path.dirname(argument)), Path.basename(argument));
 const relative = Path.relative(root, proof);
 Assert.ok(relative.startsWith(`..${Path.sep}`), "Evidence must be outside the checkout");
@@ -39,7 +42,7 @@ const executable = Path.join(dist, "native-bin", "t3-code-ls-db");
 const stock = "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f";
 const git = (...args: string[]) =>
   ChildProcess.execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
-const report: Record<string, unknown> = { status: "running", checkpoint: "preflight" };
+const report: Record<string, unknown> = { status: "running", checkpoint: "preflight", encoding };
 const save = () => FS.writeFileSync(Path.join(proof, "proof.json"), JSON.stringify(report, null, 2) + "\n");
 const checkpoint = (name: string) => {
   report.checkpoint = name;
@@ -183,7 +186,8 @@ try {
       },
     },
   }));
-  const rollout = Path.join(sessions, `rollout-${day}T00-00-00-${sessionId}.jsonl`);
+  const suffix = encoding === "zstd" ? ".jsonl.zst" : ".jsonl";
+  const rollout = Path.join(sessions, `rollout-${day}T00-00-00-${sessionId}${suffix}`);
   const writeRollout = (reply: string, mtime: Date): AgentSessionImportSource => {
     const records = [
       { type: "session_meta", payload: { id: sessionId, cwd: workspace, source: "cli" } },
@@ -193,9 +197,10 @@ try {
         payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: reply }] },
       },
     ];
-    FS.writeFileSync(rollout, records.map((record, index) =>
+    const contents = records.map((record, index) =>
       JSON.stringify({ timestamp: new Date(stamp.getTime() + index * 1000).toISOString(), ...record }),
-    ).join("\n") + "\n");
+    ).join("\n") + "\n";
+    FS.writeFileSync(rollout, encoding === "zstd" ? Zlib.zstdCompressSync(contents) : contents);
     FS.utimesSync(rollout, mtime, mtime);
     // The scanner converts bigint file times to whole milliseconds before
     // constructing dates. Node's numeric Stats dates round fractions instead.
@@ -351,7 +356,7 @@ try {
   checkpoint("import a changed rollout with the same session ID");
   const changed = writeRollout(changedResponse, new Date(stamp.getTime() + 30_000));
   Assert.equal(changed.providerSessionId, original.providerSessionId);
-  Assert.notEqual(changed.size, original.size);
+  if (encoding === "plain") Assert.notEqual(changed.size, original.size);
   Assert.notEqual(changed.mtimeMs, original.mtimeMs);
   const changedImport = await reopened.rpc((client) => Effect.gen(function* () {
     yield* scanAndCheck(client, true);
