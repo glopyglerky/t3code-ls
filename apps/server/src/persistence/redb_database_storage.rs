@@ -22,6 +22,10 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 const MAX_TRIAL_FILE_BYTES: u64 = 128 * 1024 * 1024;
 
+#[cfg(target_os = "linux")]
+#[path = "redb_isolated_trial.rs"]
+mod isolated;
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct StorageStatistics {
     pub database_bytes: u64,
@@ -68,6 +72,58 @@ pub struct TrialSnapshot {
     pub catalog_sha256: String,
     pub rows: u64,
     pub checksum: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct IsolatedTrialRequest {
+    pub update_id: String,
+    /// Identity returned by the original checkpoint command.
+    pub database: TrialFileIdentity,
+    /// Both the stopped live store and the original checkpoint must match.
+    pub checkpoint: TrialSnapshot,
+    /// SHA-256 of the expected candidate's bundled omdb-schema.json.
+    pub target_schema_sha256: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct IsolatedTrialPreparation {
+    pub update_id: String,
+    pub database: TrialFileIdentity,
+    pub snapshot: TrialSnapshot,
+    pub file_sha256: String,
+    pub target_schema_sha256: String,
+}
+
+/// Exercise the candidate's native bootstrap on a private copy of an offline
+/// checkpoint. A successful result identifies a disposable trial database.
+pub async fn prepare_isolated_service_trial(
+    home: PathBuf,
+    update_id: String,
+    request: IsolatedTrialRequest,
+) -> Result<IsolatedTrialPreparation> {
+    if !home.is_absolute()
+        || !valid_update_id(&update_id)
+        || update_id != request.update_id
+        || request.database.created.is_none()
+        || !valid_digest(&request.checkpoint.catalog_sha256)
+        || !valid_digest(&request.checkpoint.checksum)
+        || !valid_digest(&request.target_schema_sha256)
+    {
+        return Err(Error::Invalid("invalid isolated trial identity".into()));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // The worker owns the home and database leases through completion,
+        // even if the caller drops its future.
+        tokio::spawn(isolated::prepare(home, request))
+            .await
+            .map_err(|_| Error::UnknownCommit)?
+    }
+    #[cfg(not(target_os = "linux"))]
+    Err(Error::Invalid(
+        "isolated trial preparation is unsupported on this platform".into(),
+    ))
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
