@@ -85,6 +85,8 @@ export const TimelinePendingApprovalRow = memo(function TimelinePendingApprovalR
                   </span>
                   <ComposerPendingApprovalActions
                     presentation="inline"
+                    dioxusCommandApproval={approval.requestKind === "command" &&
+                      import.meta.env.VITE_T3_CODE_LS_APPROVAL_RENDERER === "dioxus"}
                     requestId={approval.requestId}
                     disabled={!canOperateThread}
                     isResponding={respondingRequestIds.includes(approval.requestId)}
