@@ -43,6 +43,7 @@ const startupTimeoutMs = 180_000;
 const replayPrompt = "Replay: showcase";
 const replayMarker = "This turn is a replay.";
 const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
+const multiTabDraftProof = process.env.T3_CODE_LS_MULTI_TAB_DRAFT_PROOF === "true";
 const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
 const capturedApproval = {
   path: "apps/server/src/orchestration-v2/testkit/fixtures/tool_call_read_only_on_request/registry_transcript.ndjson",
@@ -412,6 +413,72 @@ async function interruptShowcase(page: Page): Promise<InterruptedShowcase> {
   return evidence;
 }
 
+async function verifyDraftMerge(page: Page) {
+  const originalPrompt = "Fixture prompt before editing";
+  const newerPrompt = "Newer unsent text from the first tab";
+  const storageKey = "t3code:composer-drafts:v1";
+  const editor = (tab: Page) => tab.getByTestId("composer-editor");
+  const chooseModel = async (tab: Page, label: string) => {
+    const picker = tab.locator('[data-chat-provider-model-picker="true"]:visible');
+    const search = tab.getByPlaceholder("Search models...");
+    await picker.click();
+    await search.fill(label);
+    await tab.getByRole("option", { name: label }).click();
+    if (await search.isVisible()) await search.press("Escape");
+    await search.waitFor({ state: "hidden" });
+  };
+  await page.getByRole("button", { name: "New thread in hybrid-fixture", exact: true }).click();
+  await page.waitForURL((url) => url.pathname.startsWith("/draft/"));
+  const draftUrl = page.url();
+  const draftId = decodeURIComponent(new URL(draftUrl).pathname.split("/").at(-1)!);
+  const waitSaved = async (tab: Page, model: string, prompt?: string) => {
+    const state = await tab.waitForFunction(
+      ({ storageKey, draftId, model, prompt }) => {
+        const saved = localStorage.getItem(storageKey);
+        if (saved === null) return null;
+        const { version, state } = JSON.parse(saved);
+        const row = state.draftsByThreadKey?.[draftId];
+        if (
+          version !== 9 ||
+          row?.modelSelectionByProvider?.devReplay?.model !== model ||
+          (prompt !== undefined && row.prompt !== prompt)
+        ) return null;
+        return { prompt: row.prompt, model };
+      },
+      { storageKey, draftId, model, prompt },
+      { timeout: 15_000 },
+    );
+    return await state.jsonValue();
+  };
+  await chooseModel(page, "Showcase");
+  await editor(page).fill(originalPrompt);
+  await waitSaved(page, "showcase", originalPrompt);
+
+  const second = await page.context().newPage();
+  second.setDefaultTimeout(timeoutMs);
+  try {
+    await second.goto(draftUrl, { waitUntil: "domcontentloaded" });
+    await editor(second).waitFor({ state: "visible" });
+    Assert.equal(await editor(second).innerText(), originalPrompt);
+    await editor(page).fill(newerPrompt);
+    await waitSaved(page, "showcase", newerPrompt);
+
+    Assert.equal(await editor(second).innerText(), originalPrompt, "The second tab must be stale");
+    await chooseModel(second, "Write approval");
+    const stored = await waitSaved(second, "approval");
+    Assert.equal(stored?.prompt, newerPrompt, "A stale model save erased another tab's draft text");
+
+    await second.reload({ waitUntil: "domcontentloaded" });
+    await editor(second).waitFor({ state: "visible" });
+    Assert.equal(await editor(second).innerText(), newerPrompt);
+    await second.getByRole("button", { name: "Write approval", exact: true })
+      .waitFor({ state: "visible" });
+    return { visiblePrompt: newerPrompt, model: "approval", sameDraft: true };
+  } finally {
+    await second.close();
+  }
+}
+
 async function verifyInterruptedShowcase(page: Page, expected: InterruptedShowcase): Promise<void> {
   await page.waitForURL((url) => url.href === expected.threadUrl);
   await page.getByText("The project has a single math module.", { exact: false }).waitFor({ state: "visible" });
@@ -719,6 +786,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     capturedApproval: null as Awaited<ReturnType<typeof acceptCapturedApproval>> | null,
     cancelledQuestion: null as Awaited<ReturnType<typeof cancelCapturedQuestion>> | null,
     historyFind: null as { query: string; count: string; draftPreserved: boolean } | null,
+    draftMerge: null as Awaited<ReturnType<typeof verifyDraftMerge>> | null,
     messageAppends: null as {
       requests: number;
       frames: number;
@@ -854,6 +922,11 @@ async function exercise(implementation: Implementation): Promise<void> {
     await dialog.waitFor({ state: "hidden" });
     await page.getByText("hybrid-fixture", { exact: true }).first().waitFor({ state: "visible" });
     completed("Created local project through the normal client");
+    if (multiTabDraftProof) {
+      starting("two-tab unsent draft and model merge");
+      proof.draftMerge = await verifyDraftMerge(page);
+      completed("Kept the newer draft from the first tab and the model selected in the second");
+    }
 
     starting("normal composer submission and controlled approval");
     const threadId = await submitReplay(page);

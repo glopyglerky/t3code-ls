@@ -158,15 +158,83 @@ function mergeDraftRecord<V>(
   stored: Readonly<Record<string, V>> | undefined,
   local: Readonly<Record<string, V>>,
   baseline: Readonly<Record<string, V>>,
+  mergeValue?: (stored: V, local: V, baseline: V | undefined) => V | undefined,
 ): Record<string, V> {
   const merged = { ...stored };
   for (const key of new Set([...Object.keys(local), ...Object.keys(baseline)])) {
-    if (Equal.equals(local[key], baseline[key])) continue;
-    const value = local[key];
+    const localValue = local[key];
+    const baselineValue = baseline[key];
+    if (Equal.equals(localValue, baselineValue)) continue;
+    const storedValue = merged[key];
+    const value =
+      mergeValue && storedValue !== undefined && localValue !== undefined
+        ? mergeValue(storedValue, localValue, baselineValue)
+        : localValue;
     if (value === undefined) delete merged[key];
     else merged[key] = value;
   }
   return merged;
+}
+
+const EMPTY_PERSISTED_COMPOSER_THREAD_DRAFT: PersistedComposerThreadDraftState = {
+  prompt: "",
+  attachments: [],
+};
+
+function splitComposerThreadDraft({
+  modelSelectionByProvider,
+  activeProvider,
+  modelSelectionExplicit,
+  runtimeMode,
+  interactionMode,
+  ...body
+}: PersistedComposerThreadDraftState) {
+  return {
+    body,
+    modelSelection: {
+      ...(modelSelectionByProvider !== undefined ? { modelSelectionByProvider } : {}),
+      ...(activeProvider !== undefined ? { activeProvider } : {}),
+      ...(modelSelectionExplicit !== undefined ? { modelSelectionExplicit } : {}),
+    },
+    runtimeMode,
+    interactionMode,
+  };
+}
+
+function mergeComposerThreadDraft(
+  storedDraft: PersistedComposerThreadDraftState,
+  localDraft: PersistedComposerThreadDraftState,
+  baselineDraft = EMPTY_PERSISTED_COMPOSER_THREAD_DRAFT,
+): PersistedComposerThreadDraftState | undefined {
+  if (
+    storedDraft === baselineDraft ||
+    typeof storedDraft?.prompt !== "string" ||
+    !Array.isArray(storedDraft.attachments)
+  ) {
+    return localDraft;
+  }
+
+  const stored = splitComposerThreadDraft(storedDraft);
+  const local = splitComposerThreadDraft(localDraft);
+  const baseline = splitComposerThreadDraft(baselineDraft);
+  // Inline references in the prompt and their context records come from the same tab.
+  const body = Equal.equals(local.body, baseline.body) ? stored.body : local.body;
+  const modelSelection = Equal.equals(local.modelSelection, baseline.modelSelection)
+    ? stored.modelSelection
+    : local.modelSelection;
+  const runtimeMode =
+    local.runtimeMode === baseline.runtimeMode ? stored.runtimeMode : local.runtimeMode;
+  const interactionMode =
+    local.interactionMode === baseline.interactionMode
+      ? stored.interactionMode
+      : local.interactionMode;
+  const merged = {
+    ...body,
+    ...modelSelection,
+    ...(runtimeMode !== undefined ? { runtimeMode } : {}),
+    ...(interactionMode !== undefined ? { interactionMode } : {}),
+  };
+  return Equal.equals(merged, EMPTY_PERSISTED_COMPOSER_THREAD_DRAFT) ? undefined : merged;
 }
 
 /** Writes only what this tab changed since its last write over what other tabs saved since. */
@@ -184,6 +252,7 @@ function mergeComposerDraftStates(
       stored.draftsByThreadKey,
       local.draftsByThreadKey,
       baseline.draftsByThreadKey,
+      mergeComposerThreadDraft,
     ),
     draftThreadsByThreadKey: mergeDraftRecord(
       stored.draftThreadsByThreadKey,
