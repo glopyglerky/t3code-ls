@@ -81,6 +81,11 @@ jobs:
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
           node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+      - name: Exercise a blocked IndexedDB upgrade in Chromium
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-indexeddb-blocked-')
+        run: |
+          pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
+            src/connection/storage.blocked.browser.test.ts
       - name: Install Chromium with microphone support
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-voice-')
         run: node apps/web/node_modules/playwright/cli.js install --with-deps --no-shell chromium
