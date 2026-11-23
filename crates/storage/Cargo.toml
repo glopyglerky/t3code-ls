@@ -19,6 +19,12 @@ tokio = { version = "=1.54.1", features = ["macros", "rt-multi-thread", "sync", 
 t3-code-ls-core = { path = "../core" }
 unicode-segmentation = "=1.13.3"
 
+[target.'cfg(unix)'.dependencies]
+libc = "=0.2.191"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 getrandom = "=0.4.3"
 tempfile = "=3.27.0"

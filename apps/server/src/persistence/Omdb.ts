@@ -63,11 +63,16 @@ export const make = Effect.fn("Omdb.make")(
       ),
     );
     const exists = yield* fs.exists(options.databasePath);
-    const needsUpgrade =
-      exists &&
-      (yield* Effect.scoped(
+    const inspect = (mode: "read-only-local" | "exclusive-local") =>
+      Effect.scoped(
         Effect.gen(function* () {
-          const inspection = yield* NativeDatabase.make({ ...options, mode: "read-only-local" });
+          const inspection = yield* NativeDatabase.make({
+            ...options,
+            mode,
+            ...(mode === "exclusive-local"
+              ? { reconnect: false, requestTimeout: "60 minutes" as const }
+              : {}),
+          });
           const schema = yield* inspection.request(
             { operation: "application_schema" },
             Schema.NullOr(RedbClient.ApplicationSchema),
@@ -86,13 +91,22 @@ export const make = Effect.fn("Omdb.make")(
             )
           );
         }),
-      ));
+      );
+    const inspection = exists
+      ? yield* inspect("read-only-local").pipe(
+          Effect.catchTag("NativeDatabaseRejected", (cause) =>
+            cause.kind === "recovery_required"
+              ? Effect.succeed("recovery-required" as const)
+              : Effect.fail(cause),
+          ),
+        )
+      : false;
     const leaseScope = yield* Effect.acquireRelease(Scope.make(), (scope) =>
       Scope.close(scope, Exit.void),
     );
     let activate = suppliedOwnership?.activate;
     let awaitLost: Effect.Effect<never, ServerOwnership.ServerOwnershipError> | undefined;
-    if (activate === undefined && (marker !== ACTIVE_MARKER || needsUpgrade)) {
+    if (activate === undefined && (marker !== ACTIVE_MARKER || inspection !== false)) {
       // CLI cutover must use the same pre-lock PID and old boot-service checks as
       // server startup. A byte-range lock alone cannot exclude older releases
       // which never acquired that lock and can still write the SQLite source.
@@ -115,6 +129,10 @@ export const make = Effect.fn("Omdb.make")(
       awaitLost = ownership.awaitLost;
     }
     const bootstrap = Effect.gen(function* () {
+      // Only an application owner and an exclusive database handle may recover
+      // the file. Recheck the recovered catalog before proceeding to migrations.
+      const needsUpgrade =
+        inspection === "recovery-required" ? yield* inspect("exclusive-local") : inspection;
       if (!exists && marker === ACTIVE_MARKER)
         return yield* new OmdbStartupError({
           path: options.databasePath,

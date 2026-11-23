@@ -149,6 +149,7 @@ enum Request {
         request: RuntimeStateOperation,
     },
     ApplicationSchema {},
+    ApplicationGenerationIdentity {},
     ApplicationInit {
         schema: ApplicationSchema,
     },
@@ -528,6 +529,7 @@ impl Request {
             | Self::ArchiveSqlite { .. } => true,
             Self::Shutdown { .. }
             | Self::ApplicationSchema { .. }
+            | Self::ApplicationGenerationIdentity { .. }
             | Self::ApplicationProjectionsContext { .. }
             | Self::ApplicationProjectionsRecovery { .. }
             | Self::ApplicationProjectionsShell { .. }
@@ -711,6 +713,9 @@ async fn evaluate(
             .projections_control(&transaction_id, query)
             .await?),
         Request::ApplicationSchema {} => serde_json::to_value(transactions.schema().await?),
+        Request::ApplicationGenerationIdentity {} => {
+            serde_json::to_value(transactions.generation_identity().await?)
+        }
         Request::ApplicationInit { schema } => {
             Ok(json!({"initialized": transactions.initialize(schema).await?}))
         }
@@ -1505,6 +1510,7 @@ fn error_response(error: &Error) -> Value {
     let kind = match error {
         Error::Invalid(_) | Error::ResourceLimit(_) => "invalid_request",
         Error::IncompatibleStore => "incompatible_store",
+        Error::RecoveryRequired => "recovery_required",
         Error::StaleRevision { .. } => "stale_revision",
         Error::CommandConflict => "command_conflict",
         Error::DuplicateRecord => "duplicate_record",
