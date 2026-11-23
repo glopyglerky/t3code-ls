@@ -345,6 +345,17 @@ pub(crate) async fn record_fixture_forward_commit(
     isolated::record_forward_commit(home, update_id).await
 }
 
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) async fn record_fixture_forward_selection(
+    home: PathBuf,
+    update_id: String,
+) -> Result<bool> {
+    if !home.is_absolute() || !valid_update_id(&update_id) {
+        return Err(Error::IncompatibleStore);
+    }
+    isolated::record_forward_selection(home, update_id).await
+}
+
 fn validate_isolated_trial_request(
     home: &Path,
     update_id: &str,
@@ -549,7 +560,17 @@ fn sync_publication(_: &Path, _: &Path) -> io::Result<()> {
 
 #[cfg(unix)]
 fn read_trial_receipt<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>> {
-    const MAX_RECEIPT_BYTES: u64 = 8 * 1024;
+    read_trial_file(path)?
+        .map(|bytes| serde_json::from_slice(&bytes).map_err(|_| Error::IncompatibleStore))
+        .transpose()
+}
+
+#[cfg(unix)]
+const MAX_TRIAL_RECEIPT_BYTES: usize = 8 * 1024;
+
+#[cfg(unix)]
+fn read_trial_file(path: &Path) -> Result<Option<Vec<u8>>> {
+    let limit = MAX_TRIAL_RECEIPT_BYTES as u64;
     let file = match fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
@@ -563,19 +584,17 @@ fn read_trial_receipt<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Opt
         Err(error) => return Err(io_error(error)),
     };
     let metadata = file.metadata().map_err(io_error)?;
-    if !metadata.is_file() || metadata.nlink() != 1 || metadata.len() > MAX_RECEIPT_BYTES {
+    if !metadata.is_file() || metadata.nlink() != 1 || metadata.len() > limit {
         return Err(Error::IncompatibleStore);
     }
     let mut bytes = Vec::new();
-    file.take(MAX_RECEIPT_BYTES + 1)
+    file.take(limit + 1)
         .read_to_end(&mut bytes)
         .map_err(io_error)?;
-    if bytes.len() as u64 > MAX_RECEIPT_BYTES {
+    if bytes.len() > MAX_TRIAL_RECEIPT_BYTES {
         return Err(Error::IncompatibleStore);
     }
-    serde_json::from_slice(&bytes)
-        .map(Some)
-        .map_err(|_| Error::IncompatibleStore)
+    Ok(Some(bytes))
 }
 
 #[cfg(unix)]

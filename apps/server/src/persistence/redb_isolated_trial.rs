@@ -6,9 +6,9 @@ use super::{
     IsolatedTrialPreparation, IsolatedTrialPublication, IsolatedTrialRequest,
     IsolatedTrialSelection, IsolatedTrialVerification, MAX_TRIAL_FILE_BYTES, TrialBackupReceipt,
     TrialFileIdentity, TrialRestoreDirectories, TrialSnapshot, checked_generation, io_error,
-    read_trial_receipt, trial_executable_digest, trial_file_digest, trial_file_identity,
-    validate_isolated_trial_preparation, validate_isolated_trial_request, verify_restore_snapshot,
-    write_trial_receipt,
+    read_trial_file, read_trial_receipt, trial_executable_digest, trial_file_digest,
+    trial_file_identity, validate_isolated_trial_preparation, validate_isolated_trial_request,
+    verify_restore_snapshot, write_trial_receipt,
 };
 use crate::application::{
     ApplicationTransactions, PreparedServiceActivation, exact_service_version,
@@ -81,6 +81,13 @@ fn disposable_file_exists(path: &Path) -> Result<bool> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(io_error(error)),
     }
+}
+
+fn trial_document_sha256(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn preserved_path(state: &Path, update_id: &str) -> PathBuf {
@@ -262,22 +269,7 @@ impl TrialLease {
             TrialRestoreDirectories::pinned(&self.directories.runtime).join("service-state.json");
         let selection =
             read_trial_receipt::<ServiceSelection>(&state_path)?.ok_or(Error::IncompatibleStore)?;
-        let supported_protocol = if bound {
-            selection.protocol == 5
-        } else {
-            matches!(selection.protocol, 3 | 4)
-        };
-        if !supported_protocol
-            || selection.active_version != from
-            || selection.update.id != update_id
-            || selection.update.from_version != from
-            || selection.update.target_version != target
-            || selection.update.status != "pending"
-            || selection.update.db_path != self.home.join("userdata/statev2.omdb")
-            || !exact_service_version(from)
-            || !exact_service_version(target)
-            || compare_service_versions(target, from) != std::cmp::Ordering::Greater
-        {
+        if !selection.is_pending_for(&self.home, update_id, from, target, bound) {
             return Err(Error::IncompatibleStore);
         }
         Ok(selection)
@@ -351,8 +343,23 @@ impl TrialLease {
     }
 
     async fn verify_promotion_bindings(&self, saved: &IsolatedTrialVerification) -> Result<()> {
+        if let Some(activation) = self.verify_promotion_runtimes(saved).await? {
+            self.pending_selection(
+                &activation.update_id,
+                &activation.from_version,
+                &activation.target_version,
+                true,
+            )?;
+        }
+        Ok(())
+    }
+
+    async fn verify_promotion_runtimes<'a>(
+        &self,
+        saved: &'a IsolatedTrialVerification,
+    ) -> Result<Option<&'a PreparedServiceActivation>> {
         let Some(intent) = &saved.promotion_intent else {
-            return Ok(());
+            return Ok(None);
         };
         let activation = saved
             .request
@@ -396,28 +403,15 @@ impl TrialLease {
             &intent.source_entry_sha256,
             &intent.source_helper_sha256,
         )?;
-        self.verify_activation(&saved.request)
+        self.verify_installed_target(activation)?;
+        Ok(Some(activation))
     }
 
     fn selection_digest(&self) -> Result<String> {
         let path =
             TrialRestoreDirectories::pinned(&self.directories.runtime).join("service-state.json");
-        let mut options = fs::OpenOptions::new();
-        options.read(true);
-        let file = crate::backend::open_regular_file(&path, &mut options)?;
-        let metadata = file.metadata().map_err(io_error)?;
-        if metadata.len() > 8192 || metadata.nlink() != 1 {
-            return Err(Error::IncompatibleStore);
-        }
-        let mut bytes = Vec::new();
-        file.take(8193).read_to_end(&mut bytes).map_err(io_error)?;
-        if bytes.len() > 8192 {
-            return Err(Error::IncompatibleStore);
-        }
-        Ok(Sha256::digest(&bytes)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect())
+        let bytes = read_trial_file(&path)?.ok_or(Error::IncompatibleStore)?;
+        Ok(trial_document_sha256(&bytes))
     }
 
     fn verify_sealed_binding(&self, saved: &IsolatedTrialVerification) -> Result<()> {
@@ -442,6 +436,17 @@ impl TrialLease {
             &intent.source_helper_sha256,
         )?;
         self.verify_installed_target(activation)
+    }
+
+    #[cfg(test)]
+    fn verify_published_candidate(&self, update_id: &str, candidate: &TrialInput) -> Result<()> {
+        let state = TrialRestoreDirectories::pinned(&self.directories.state);
+        let failed = state.join(format!(".statev2-failed-sealed-{update_id}.omdb"));
+        if super::trial_entry_exists(&self.trial)? || super::trial_entry_exists(&failed)? {
+            return Err(Error::IncompatibleStore);
+        }
+        self.live.verify_at(&preserved_path(&state, update_id), 1)?;
+        candidate.verify()
     }
 
     fn sync_publication(&self) -> Result<()> {
@@ -744,8 +749,6 @@ pub(super) async fn record_forward_commit(home: PathBuf, update_id: String) -> R
         return Err(Error::IncompatibleStore);
     }
     let state = TrialRestoreDirectories::pinned(&lease.directories.state);
-    let original = preserved_path(&state, &update_id);
-    let failed = state.join(format!(".statev2-failed-sealed-{update_id}.omdb"));
     let candidate = lease
         .open_candidate(
             state.join("statev2.omdb"),
@@ -755,13 +758,7 @@ pub(super) async fn record_forward_commit(home: PathBuf, update_id: String) -> R
             true,
         )
         .await?;
-    let verify_files = || {
-        if super::trial_entry_exists(&lease.trial)? || super::trial_entry_exists(&failed)? {
-            return Err(Error::IncompatibleStore);
-        }
-        lease.live.verify_at(&original, 1)?;
-        candidate.verify()
-    };
+    let verify_files = || lease.verify_published_candidate(&update_id, &candidate);
 
     let mut proposed = saved.clone();
     proposed.sealed_publication = Some(SealedPromotionPublication {
@@ -781,6 +778,143 @@ pub(super) async fn record_forward_commit(home: PathBuf, update_id: String) -> R
     } else {
         persist_sealed_receipt(&lease, &receipt, &saved, &proposed, verify_files)?;
     }
+    Ok(reused)
+}
+
+#[cfg(test)]
+pub(super) async fn record_forward_selection(home: PathBuf, update_id: String) -> Result<bool> {
+    use super::MAX_TRIAL_RECEIPT_BYTES;
+
+    let directories = TrialRestoreDirectories::open(&home)?;
+    let receipt = TrialRestoreDirectories::pinned(&directories.state)
+        .join(format!(".statev2-trial-{update_id}.receipt-v1.json"));
+    let receipt_bytes = read_trial_file(&receipt)?.ok_or(Error::IncompatibleStore)?;
+    let saved: IsolatedTrialVerification =
+        serde_json::from_slice(&receipt_bytes).map_err(|_| Error::IncompatibleStore)?;
+    validate_observation(&saved)?;
+    validate_isolated_trial_request(&home, &update_id, &saved.request)?;
+    validate_isolated_trial_preparation(&saved.request, &saved.preparation)?;
+    let publication = saved
+        .sealed_publication
+        .as_ref()
+        .filter(|publication| publication.phase == SealedPromotionPhase::ForwardCommitted)
+        .ok_or(Error::IncompatibleStore)?;
+    if serde_json::to_vec(&saved).map_err(|_| Error::IncompatibleStore)? != receipt_bytes {
+        return Err(Error::IncompatibleStore);
+    }
+
+    let lease = TrialLease::open_for(
+        home.clone(),
+        &saved.request,
+        Some(SealedMove::PublishIntended),
+    )
+    .await?;
+    directories.verify(&home)?;
+    let state = TrialRestoreDirectories::pinned(&lease.directories.state);
+    let candidate = lease
+        .open_candidate(
+            state.join("statev2.omdb"),
+            &saved.request,
+            &saved.preparation,
+            1,
+            true,
+        )
+        .await?;
+    let activation = lease
+        .verify_promotion_runtimes(&saved)
+        .await?
+        .ok_or(Error::IncompatibleStore)?;
+    let runtime = &lease.directories.runtime;
+    let selection = TrialRestoreDirectories::pinned(runtime).join("service-state.json");
+    let current = read_trial_file(&selection)?.ok_or(Error::IncompatibleStore)?;
+    // Older installers honor the pending status even though their launchers
+    // reject the forward-only shape.
+    let proposed = serde_json::to_vec(&serde_json::json!({
+        "protocol": 5,
+        "phase": "forward-selected",
+        "activeVersion": activation.target_version,
+        "forwardReceiptSha256": trial_document_sha256(&receipt_bytes),
+        "update": {
+            "id": update_id,
+            "fromVersion": activation.from_version,
+            "targetVersion": activation.target_version,
+            "dbPath": home.join("userdata/statev2.omdb"),
+            "status": "pending",
+        }
+    }))
+    .map_err(|_| Error::IncompatibleStore)?;
+    if proposed.len() > MAX_TRIAL_RECEIPT_BYTES {
+        return Err(Error::IncompatibleStore);
+    }
+    if current != proposed {
+        let pending: ServiceSelection =
+            serde_json::from_slice(&current).map_err(|_| Error::IncompatibleStore)?;
+        if !pending.is_pending_for(
+            &home,
+            &update_id,
+            &activation.from_version,
+            &activation.target_version,
+            true,
+        ) || trial_document_sha256(&current) != publication.selection_sha256
+        {
+            return Err(Error::IncompatibleStore);
+        }
+    }
+    persist_forward_selection(runtime, &selection, &current, &proposed, || {
+        lease.verify_ownership()?;
+        lease.checkpoint.verify()?;
+        lease.verify_published_candidate(&update_id, &candidate)?;
+        // Order the durable receipt before the selection, including on a crash retry.
+        lease.sync_publication()?;
+        if read_trial_file(&receipt)?.as_deref() != Some(receipt_bytes.as_slice()) {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    })
+}
+
+#[cfg(test)]
+fn persist_forward_selection(
+    runtime: &fs::File,
+    selection: &Path,
+    current: &[u8],
+    proposed: &[u8],
+    verify: impl FnOnce() -> Result<()>,
+) -> Result<bool> {
+    use super::tests::interrupt_trial_publication;
+
+    let reused = current == proposed;
+    let stage = if reused {
+        None
+    } else {
+        let mut stage = tempfile::Builder::new()
+            .prefix(".native-forward-selection-")
+            .tempfile_in(TrialRestoreDirectories::pinned(runtime))
+            .map_err(io_error)?;
+        stage.write_all(proposed).map_err(io_error)?;
+        stage.as_file().sync_all().map_err(io_error)?;
+        Some(stage)
+    };
+    verify()?;
+    if read_trial_file(selection)?.as_deref() != Some(current) {
+        return Err(Error::IncompatibleStore);
+    }
+    if let Some(stage) = stage {
+        interrupt_trial_publication("forward-selection-written");
+        stage
+            .persist(selection)
+            .map_err(|error| io_error(error.error))?;
+        interrupt_trial_publication("forward-selection-renamed");
+    }
+    runtime.sync_all().map_err(|_| Error::UnknownCommit)?;
+    if read_trial_file(selection)
+        .map_err(|_| Error::UnknownCommit)?
+        .as_deref()
+        != Some(proposed)
+    {
+        return Err(Error::UnknownCommit);
+    }
+    interrupt_trial_publication("forward-selection-durable");
     Ok(reused)
 }
 
@@ -1146,6 +1280,33 @@ struct ServiceSelection {
     protocol: u32,
     active_version: String,
     update: PendingSelection,
+}
+
+impl ServiceSelection {
+    fn is_pending_for(
+        &self,
+        home: &Path,
+        update_id: &str,
+        from: &str,
+        target: &str,
+        bound: bool,
+    ) -> bool {
+        let supported_protocol = if bound {
+            self.protocol == 5
+        } else {
+            matches!(self.protocol, 3 | 4)
+        };
+        supported_protocol
+            && self.active_version == from
+            && self.update.id == update_id
+            && self.update.from_version == from
+            && self.update.target_version == target
+            && self.update.status == "pending"
+            && self.update.db_path == home.join("userdata/statev2.omdb")
+            && exact_service_version(from)
+            && exact_service_version(target)
+            && compare_service_versions(target, from) == std::cmp::Ordering::Greater
+    }
 }
 
 pub(super) async fn inspect_selection(

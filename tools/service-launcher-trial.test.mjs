@@ -11,6 +11,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   compareExactServiceVersions,
   isExactServiceVersion,
+  serviceStateHasPendingUpdate,
   SERVICE_LAUNCHER_PROTOCOL,
 } from "../apps/server/src/cloud/serviceProtocol.ts";
 import { isQualifiedNativeHost } from "../packages/shared/src/nativeExecutable.ts";
@@ -27,7 +28,7 @@ const hooks = registerHooks({
     return next(specifier, context);
   },
 });
-const { Launcher, readServiceState, writeServiceState } =
+const { Launcher, main, readServiceState, writeServiceState } =
   await import("../apps/server/src/serviceLauncher.ts");
 hooks.deregister();
 
@@ -228,6 +229,29 @@ for (const mode of ["missing capability", "wrong digest", "wrong receipt", "chan
     }
   });
 }
+
+test("a forward-selected native trial remains fenced across launcher startup", async (t) => {
+  const f = await sealedFixture(t);
+  const home = path.dirname(f.runtime);
+  await fs.writeFile(path.join(home, "service.env"), "T3_CODE_LS_SEALED_TRIAL_RECOVERY=1\n");
+  const receipt = await fs.readFile(f.receipt);
+  const selected = {
+    ...f.pending,
+    phase: "forward-selected",
+    activeVersion: f.pending.update.targetVersion,
+    forwardReceiptSha256: createHash("sha256").update(receipt).digest("hex"),
+  };
+  const contents = JSON.stringify(selected);
+  await fs.writeFile(f.statePath, contents);
+  assert.equal(serviceStateHasPendingUpdate(contents), true);
+  await assert.rejects(readServiceState(f.statePath), /invalid or unsupported/u);
+  await assert.rejects(main({ baseDir: home }), /sealed and requires forward recovery/u);
+  assert.equal(await fs.readFile(f.statePath, "utf8"), contents);
+  assert.deepEqual(await fs.readFile(f.receipt), receipt);
+  assert.equal(await fs.readFile(f.dbPath, "utf8"), "sealed candidate fixture");
+  await assert.rejects(fs.stat(f.calls), { code: "ENOENT" });
+  await assert.rejects(fs.stat(f.starts), { code: "ENOENT" });
+});
 
 test("ordinary launcher refuses isolated candidate preparation before any child starts", async (t) => {
   const f = await fixture(t);
