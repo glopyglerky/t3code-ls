@@ -20,9 +20,9 @@ use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
-const MAX_TRIAL_FILE_BYTES: u64 = 128 * 1024 * 1024;
+pub(crate) const MAX_TRIAL_FILE_BYTES: u64 = 128 * 1024 * 1024;
 #[cfg(unix)]
-const MAX_TRIAL_EXECUTABLE_BYTES: u64 = 256 * 1024 * 1024;
+pub(crate) const MAX_TRIAL_EXECUTABLE_BYTES: u64 = 256 * 1024 * 1024;
 
 #[cfg(target_os = "linux")]
 #[path = "redb_isolated_trial.rs"]
@@ -677,7 +677,7 @@ async fn checked_generation(store: &Store) -> Result<ApplicationGenerationIdenti
 }
 
 #[cfg(unix)]
-fn trial_file_identity(file: &fs::File) -> Result<(TrialFileIdentity, u64)> {
+pub(crate) fn trial_file_identity(file: &fs::File) -> Result<(TrialFileIdentity, u64)> {
     let metadata = file.metadata().map_err(io_error)?;
     let created = metadata
         .created()

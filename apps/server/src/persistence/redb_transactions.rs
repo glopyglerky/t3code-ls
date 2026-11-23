@@ -676,7 +676,7 @@ impl ApplicationTransactions {
         transaction.commit().await
     }
 
-    #[cfg(all(test, target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     pub(crate) async fn verify_forward_catalog(
         &self,
         prepared: &PreparedServiceActivation,

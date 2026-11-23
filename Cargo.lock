@@ -3823,6 +3823,7 @@ dependencies = [
  "redb 4.5.0",
  "redb-bench-compare",
  "regex",
+ "rustix",
  "same-file",
  "serde",
  "serde_json",

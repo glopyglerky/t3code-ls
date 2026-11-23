@@ -31,6 +31,9 @@ tokio = { version = "=1.54.1", features = ["macros", "rt-multi-thread", "sync", 
 t3-code-ls-core = { path = "../core" }
 unicode-segmentation = "=1.13.3"
 
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "=1.1.6", default-features = false, features = ["fs", "std"] }
+
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.191"
 
