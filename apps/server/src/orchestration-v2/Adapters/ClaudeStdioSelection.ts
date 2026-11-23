@@ -26,6 +26,23 @@ export function controlledClaudeStdioDisablesMcp(
   return true;
 }
 
+// The no-MCP app fixture uses these process values to build its exact options.
+// It cannot incorporate ambient provider tokens or unrelated host configuration.
+const syntheticEnvironmentNames = new Set([
+  "HOME", "PATH", "TMPDIR", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME",
+  "T3_CODE_LS_IMPLEMENTATION", "T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD",
+  "T3CODE_TELEMETRY_ENABLED", "T3CODE_OTEL_SDK_DISABLED", "NO_COLOR", "CLAUDE_CODE_ENTRYPOINT",
+]);
+
+export function controlledClaudeStdioQueryEnvironment(
+  runner: ClaudeAgentSdkQueryRunnerShape,
+  environment: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const restricted = noMcpOwners.has(runner);
+  return Object.fromEntries(Object.entries(environment).filter(([name]) =>
+    name !== "T3_CODE_LS_CLAUDE_STDIO_SYNTHETIC" && (!restricted || syntheticEnvironmentNames.has(name))));
+}
+
 /** Explicit synthetic selection only. This is not a vendor-provider replacement. */
 export async function selectControlledClaudeStdioRunner(
   instanceId: string,

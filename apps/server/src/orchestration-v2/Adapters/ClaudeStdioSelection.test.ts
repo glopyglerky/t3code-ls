@@ -5,7 +5,11 @@ import * as OS from "node:os";
 import * as Path from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { isQualifiedNativeHost } from "@t3tools/shared/nativeExecutable";
-import { controlledClaudeStdioDisablesMcp as disablesMcp, selectControlledClaudeStdioRunner as select } from "./ClaudeStdioSelection.ts";
+import {
+  controlledClaudeStdioDisablesMcp as disablesMcp,
+  controlledClaudeStdioQueryEnvironment as controlledEnvironment,
+  selectControlledClaudeStdioRunner as select,
+} from "./ClaudeStdioSelection.ts";
 
 const directories: string[] = [];
 afterEach(async () => { for (const path of directories.splice(0)) await FS.rm(path, { recursive: true, force: true }); });
@@ -57,6 +61,9 @@ it.skipIf(!isQualifiedNativeHost())("binds no-MCP to the verified selected runne
   expect(selected).toBeDefined();
   expect(disablesMcp(normal!, instanceId, instanceId, directory)).toBe(false);
   expect(disablesMcp(selected!, instanceId, instanceId, directory)).toBe(true);
+  const processEnvironment = { HOME: directory, SYNTHETIC_UNRELATED_VALUE: "ignored" };
+  expect(controlledEnvironment(normal!, processEnvironment)).toEqual(processEnvironment);
+  expect(controlledEnvironment(selected!, processEnvironment)).toEqual({ HOME: directory });
   expect(() => disablesMcp(selected!, "foreign", instanceId, directory)).toThrow(/mismatch/);
   expect(() => disablesMcp(selected!, instanceId, "foreign", directory)).toThrow(/mismatch/);
   expect(() => disablesMcp(selected!, instanceId, instanceId, directory + "/other")).toThrow(/mismatch/);

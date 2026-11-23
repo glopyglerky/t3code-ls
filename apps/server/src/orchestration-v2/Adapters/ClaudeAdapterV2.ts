@@ -1,4 +1,8 @@
-import { controlledClaudeStdioDisablesMcp, selectControlledClaudeStdioRunner } from "./ClaudeStdioSelection.ts";
+import {
+  controlledClaudeStdioDisablesMcp,
+  controlledClaudeStdioQueryEnvironment,
+  selectControlledClaudeStdioRunner,
+} from "./ClaudeStdioSelection.ts";
 import * as DocumentText from "../../provider/DocumentText.ts";
 import {
   compactDynamicToolOutput,
@@ -13743,10 +13747,9 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
       environment,
       hostEnvironment,
     );
-    const queryEnvironment = controlledQueryRunner === undefined ? baseEnvironment :
-      Object.fromEntries(Object.entries(baseEnvironment).filter(
-        ([name]) => name !== "T3_CODE_LS_CLAUDE_STDIO_SYNTHETIC",
-      ));
+    const queryEnvironment = controlledQueryRunner === undefined
+      ? baseEnvironment
+      : controlledClaudeStdioQueryEnvironment(controlledQueryRunner, baseEnvironment);
     const claudeEnvironment = yield* makeClaudeEnvironment(config, queryEnvironment);
     const path = yield* Path.Path;
     const random = yield* SecureRandom.SecureRandom;
