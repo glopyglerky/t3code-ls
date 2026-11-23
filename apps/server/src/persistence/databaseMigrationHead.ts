@@ -10,8 +10,9 @@ import { migrationManifest } from "./Migrations.ts";
 export const BUILD_MIGRATION_HEAD = Math.max(...migrationManifest.map(([id]) => id));
 
 type RecordedMigrations = ReadonlyArray<{ readonly id: number; readonly name: string }>;
+type MigrationInspection = RecordedMigrations | "recovery_required" | null;
 
-function recordedNativeMigrations(databasePath: string): RecordedMigrations | null {
+function recordedNativeMigrations(databasePath: string): MigrationInspection {
   try {
     const selection = applicationDatabase();
     if (selection.kind !== "omdb" || !NodePath.isAbsolute(selection.executable)) return null;
@@ -32,6 +33,19 @@ function recordedNativeMigrations(databasePath: string): RecordedMigrations | nu
     const frames = result.stdout.trim().split("\n");
     if (frames.length !== 1) return null;
     const response: unknown = JSON.parse(frames[0]!);
+    if (
+      typeof response === "object" &&
+      response !== null &&
+      "ok" in response &&
+      response.ok === false &&
+      "error" in response &&
+      typeof response.error === "object" &&
+      response.error !== null &&
+      "kind" in response.error &&
+      response.error.kind === "recovery_required"
+    ) {
+      return "recovery_required";
+    }
     if (
       typeof response !== "object" ||
       response === null ||
@@ -89,9 +103,8 @@ function format(databasePath: string): "missing" | "sqlite" | "native" | "unread
   }
 }
 
-/** Migrations the database records, read-only. A missing or new database records none; one that
- * exists but cannot be read is null, since its history is unknown. */
-export function recordedMigrations(databasePath: string): RecordedMigrations | null {
+/** Inspect migrations without opening a writer. Preserve the native recovery reason. */
+export function inspectRecordedMigrations(databasePath: string): MigrationInspection {
   const source = format(databasePath);
   if (source === "missing") return [];
   if (source === "unreadable") return null;
@@ -122,6 +135,12 @@ export function recordedMigrations(databasePath: string): RecordedMigrations | n
       // A read-only handle has nothing to flush; the result above already stands.
     }
   }
+}
+
+/** A missing database records no migrations. An unreadable history is unknown. */
+export function recordedMigrations(databasePath: string): RecordedMigrations | null {
+  const inspected = inspectRecordedMigrations(databasePath);
+  return inspected === "recovery_required" ? null : inspected;
 }
 
 /** Highest migration the database holds once this build's startup migrations have run. A newer
