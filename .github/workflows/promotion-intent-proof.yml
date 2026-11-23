@@ -30,11 +30,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "CARGO_HOME=$RUNNER_TEMP/promotion-cargo-home" >> "$GITHUB_ENV"
-          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/promotion-target" >> "$GITHUB_ENV"
-          echo "T3_CODE_LS_TEST_TMPDIR=$RUNNER_TEMP/promotion-profiles" >> "$GITHUB_ENV"
+          {
+            echo "CARGO_HOME=$RUNNER_TEMP/promotion-cargo-home"
+            echo "CARGO_TARGET_DIR=$RUNNER_TEMP/promotion-target"
+            echo "T3_CODE_LS_TEST_TMPDIR=$RUNNER_TEMP/promotion-profiles"
+          } >> "$GITHUB_ENV"
           mkdir "$RUNNER_TEMP/promotion-proof" "$RUNNER_TEMP/promotion-profiles"
-          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/promotion-proof/source-identity.txt"
+          git rev-parse HEAD "HEAD^{tree}" > "$RUNNER_TEMP/promotion-proof/source-identity.txt"
           cp Cargo.lock database.lock.json toolchain.lock.json "$RUNNER_TEMP/promotion-proof/"
       - name: Verify the pinned compiler
         run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/promotion-toolchain"
@@ -48,12 +50,13 @@ jobs:
           old_commit=3d0ac7e1ad6e4a86e17cba84e3b6d154d39cb3c1
           old_tree=e06b4f6a965a33f6d9277fdcee02cb74f3c82109
           red_commit=fc4b3f9aca8dd88ed9afcb3d62bec9c69ed780f8
+          git fetch --no-tags --depth=2 origin "$red_commit"
           test "$(git rev-parse "$red_commit^" "$old_commit^{tree}")" = "$(printf '%s\n%s' "$old_commit" "$old_tree")"
           git worktree add --detach "$old_checkout" "$old_commit"
           trap 'git worktree remove --force "$old_checkout"' EXIT
           cmp toolchain.lock.json "$old_checkout/toolchain.lock.json"
           cmp Cargo.lock "$old_checkout/Cargo.lock"
-          git -C "$old_checkout" rev-parse HEAD HEAD^{tree} > "$proof/prior-source.txt"
+          git -C "$old_checkout" rev-parse HEAD "HEAD^{tree}" > "$proof/prior-source.txt"
           lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/promotion-prior-target"
           (
