@@ -10,6 +10,7 @@ on:
       - "candidate/t3code-ls-t12-outbox-native-*"
       - "candidate/t3code-ls-t12-outbox-package-*"
       - "candidate/t3code-ls-t15-task-cache-*"
+      - "candidate/t3code-ls-t15-maintenance-snapshot-*"
       - "candidate/t3code-ls-t02-bundled-native-integrated-*"
       - "candidate/t3code-ls-acceptance-types-*"
       - "candidate/t3code-ls-t16-independent-reads-*"
@@ -21,7 +22,8 @@ jobs:
   thread-recovery:
     if: >-
       !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-') &&
-      !startsWith(github.ref_name, 'candidate/t3code-ls-acceptance-types-')
+      !startsWith(github.ref_name, 'candidate/t3code-ls-acceptance-types-') &&
+      !startsWith(github.ref_name, 'candidate/t3code-ls-t15-maintenance-snapshot-')
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
@@ -300,6 +302,37 @@ jobs:
         with:
           name: outbox-android-proof
           path: ${{ runner.temp }}/outbox-android-proof/
+          if-no-files-found: warn
+          retention-days: 14
+
+  maintenance-snapshot:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-maintenance-snapshot-')
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install the pinned compiler for the snapshot proof
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/maintenance-toolchain"
+      - name: Qualify the stored snapshot against the foreground transaction
+        run: |
+          export T3_CODE_LS_TEST_RUNTIME="$RUNNER_TEMP/maintenance-runtime"
+          export CARGO_HOME="$RUNNER_TEMP/maintenance-cargo"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/maintenance-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          node tools/install-server-tests.mjs
+          node tools/check-acceptance.mjs --tests '["tools/check-redb-storage-maintenance.mjs"]' \
+            --proof-directory "$RUNNER_TEMP/maintenance-proof"
+      - name: Retain snapshot qualification
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: maintenance-proof
+          path: ${{ runner.temp }}/maintenance-proof/
           if-no-files-found: warn
           retention-days: 14
 

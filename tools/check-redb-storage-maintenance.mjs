@@ -413,6 +413,12 @@ try {
   const unchangedKey = [{ type: "text", value: "row:191" }];
   await withNative(executable, fixture, (client) =>
     Effect.gen(function* () {
+      // Match the selected live reader's startup. Opening a second engine handle itself
+      // can be refused while another helper owns an active write transaction.
+      const reader = yield* NativeDatabase.make({
+        executable, databasePath: fixture.databasePath, mode: "current-read-local",
+      });
+      yield* reader.request({ operation: "application_schema" }, Schema.Unknown);
       const staged = yield* Deferred.make();
       const release = yield* Deferred.make();
       const writer = yield* Effect.forkScoped(client.withTransaction(
@@ -425,9 +431,6 @@ try {
       ));
       yield* Effect.gen(function* () {
         yield* Deferred.await(staged);
-        const reader = yield* NativeDatabase.make({
-          executable, databasePath: fixture.databasePath, mode: "current-read-local",
-        });
         const backup = yield* reader.request(
           { operation: "storage_backup", destination: concurrentBackup },
           Schema.Struct({ rows: Schema.Number, bytes: Schema.Number, checksum: Schema.String }),
