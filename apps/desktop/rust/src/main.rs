@@ -1,4 +1,5 @@
 mod replay;
+#[path = "../../../../packages/client-runtime/rust/host/server_snapshot.rs"]
 mod server_snapshot;
 mod server_submit;
 
@@ -684,8 +685,9 @@ fn main() -> ExitCode {
         None
     } else if first.as_deref() == Some(OsStr::new("--thread-snapshot")) && args.next().is_none() {
         Some(
-            server_snapshot::Connection::read(std::io::stdin().lock())
-                .and_then(|connection| connection.snapshot()),
+            server_snapshot::Connection::read(std::io::stdin().lock()).and_then(|connection| {
+                connection.snapshot(server_snapshot::SnapshotFormat::WithMessageIds)
+            }),
         )
     } else if first.as_deref() == Some(OsStr::new("--fixture"))
         && args.next().as_deref() == Some(OsStr::new("showcase"))
