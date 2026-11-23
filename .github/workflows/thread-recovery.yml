@@ -60,6 +60,14 @@ jobs:
           # apps/server/src/serverRuntimeStartup.autoPull.test.ts
           pnpm exec vp test run --maxWorkers 2 \
             src/serverRuntimeStartup.test.ts src/serverRuntimeStartup.autoPull.test.ts
+      - name: Exercise an active child stream during an ancestor commit
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-live-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm exec vp test run --maxWorkers 2 \
+            apps/server/src/orchestration-v2/boundedSnapshotTransport.test.ts \
+            -t 'an open run-fork grandchild'
       - name: Exercise thread replay and recovery
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t03-text-revision-') || startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
         run: |
