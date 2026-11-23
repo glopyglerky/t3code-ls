@@ -138,7 +138,20 @@ const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* (
     }
     try {
       const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+      let blocked = false;
+      request.addEventListener("blocked", () => {
+        blocked = true;
+        resume(Effect.fail(catalogError(
+          "open",
+          "An open connection in another tab is blocking the database upgrade",
+        )));
+      }, { once: true });
       request.addEventListener("upgradeneeded", () => {
+        if (blocked) {
+          // IndexedDB cannot cancel the pending open. Refuse its eventual upgrade.
+          request.transaction?.abort();
+          return;
+        }
         if (!request.result.objectStoreNames.contains(CATALOG_STORE_NAME)) {
           request.result.createObjectStore(CATALOG_STORE_NAME);
         }
@@ -161,9 +174,15 @@ const openDatabase = Effect.fn("web.connectionStorage.openDatabase")(function* (
         }
       });
       request.addEventListener("error", () => {
-        resume(Effect.fail(catalogError("open", request.error ?? "Unknown IndexedDB error")));
+        if (!blocked) {
+          resume(Effect.fail(catalogError("open", request.error ?? "Unknown IndexedDB error")));
+        }
       });
       request.addEventListener("success", () => {
+        if (blocked) {
+          request.result.close();
+          return;
+        }
         resume(Effect.succeed(request.result));
       });
     } catch (cause) {
