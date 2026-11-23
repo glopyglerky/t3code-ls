@@ -204,7 +204,7 @@ def check_thread_workspace(executable):
     def observation(node):
         # Never emit raw accessible names, document text, URLs or credentials.
         states = node.getState()
-        bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+        bounds = node.queryComponent().getExtents(pyatspi.WINDOW_COORDS)
         own_process = node.getApplication().get_process_id() == application.pid
         showing = states.contains(pyatspi.STATE_SHOWING)
         visible = states.contains(pyatspi.STATE_VISIBLE)
@@ -253,9 +253,17 @@ def check_thread_workspace(executable):
         assert observed["ownProcess"] and observed["showing"] and observed["visible"], "Click target is not current and visible"
         assert bounds[2] > 0 and bounds[3] > 0, "Click target has empty bounds"
         x, y = bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2
-        x11("mousemove", str(x), str(y))
+        geometry = dict(
+            line.split("=", 1)
+            for line in x11("getwindowgeometry", "--shell", window).splitlines()
+            if line.startswith(("WIDTH=", "HEIGHT="))
+        )
+        width, height = int(geometry["WIDTH"]), int(geometry["HEIGHT"])
+        assert 0 <= x < width and 0 <= y < height, "Click target is outside the X11 client window"
+        # Resolve accessibility bounds in the centered window through X11.
+        x11("mousemove", "--window", window, str(x), str(y))
         x11("click", "1")
-        return {**observed, "point": [x, y]}
+        return {**observed, "windowPoint": [x, y], "windowSize": [width, height]}
     def select(thread):
         try:
             clicked = click(current("Open thread " + thread))
