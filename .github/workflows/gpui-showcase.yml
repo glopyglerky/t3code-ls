@@ -86,6 +86,15 @@ jobs:
             exec runuser -u "$1" -- xvfb-run -a -s "-screen 0 1280x1024x24" dbus-run-session -- \
               "$2" apps/server/scripts/verify-gpui-thread-snapshot.ts "$3"
           ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/gpui-target/debug/t3-code-ls-desktop-gpui"
+      - name: Keep a late thread response with its original GPUI workspace
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t14-gpui-showcase-navigation-')
+        timeout-minutes: 3
+        run: |
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- xvfb-run -a -s "-screen 0 1280x1024x24" dbus-run-session -- \
+              /usr/bin/python3 tools/check-gpui-showcase.py "$2" --thread-workspace-race
+          ' _ "$(id -un)" "$RUNNER_TEMP/gpui-target/debug/t3-code-ls-desktop-gpui"
       - name: Submit and reopen for a follow-up through the real GPUI composer
         timeout-minutes: 5
         run: |

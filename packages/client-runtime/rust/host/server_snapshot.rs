@@ -19,6 +19,7 @@ const DEADLINE: Duration = Duration::from_secs(5);
 pub const LABEL: &str = "Server thread snapshot";
 pub const FAILED: &str = "Could not read the selected server thread.";
 
+#[derive(Clone)]
 pub struct Connection {
     port: u16,
     token: String,
@@ -94,6 +95,23 @@ impl Connection {
         History::open(self)
     }
 
+    pub fn environment_id(&self) -> &str {
+        &self.environment_id
+    }
+
+    pub fn for_thread(&self, id: &str) -> Self {
+        Self {
+            thread_id: id.to_owned(),
+            ..self.clone()
+        }
+    }
+
+    // The server owns membership and authorization. Do not turn user input into rows.
+    pub fn threads(&self) -> Result<Vec<ThreadRow>, &'static str> {
+        self.verify_environment()?;
+        parse_threads(&self.get("/api/orchestration/shell?omitOlderSettled=1", true)?)
+    }
+
     pub(super) fn port(&self) -> u16 {
         self.port
     }
@@ -163,6 +181,44 @@ impl Connection {
         }
         decode_response(&bytes)
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThreadRow {
+    pub id: String,
+    pub title: String,
+}
+
+fn parse_threads(value: &Value) -> Result<Vec<ThreadRow>, &'static str> {
+    if value["schemaVersion"].as_u64() != Some(2)
+        || value["snapshotSequence"].as_u64().is_none()
+        || value.get("idTable").is_some()
+    {
+        return Err(FAILED);
+    }
+    let rows = value["threads"]
+        .as_array()
+        .filter(|rows| rows.len() <= 64)
+        .ok_or(FAILED)?;
+    let mut result: Vec<ThreadRow> = Vec::new();
+    for row in rows {
+        let id = row["id"]
+            .as_str()
+            .filter(|id| !id.is_empty() && id.len() <= 1024 && !id.chars().any(char::is_control))
+            .ok_or(FAILED)?;
+        let title = row["title"]
+            .as_str()
+            .filter(|title| title.len() <= 4096 && !title.chars().any(char::is_control))
+            .ok_or(FAILED)?;
+        if result.iter().any(|row| row.id == id) {
+            return Err(FAILED);
+        }
+        result.push(ThreadRow {
+            id: id.to_owned(),
+            title: title.to_owned(),
+        });
+    }
+    Ok(result)
 }
 
 fn encode_component(value: &str) -> String {
@@ -380,5 +436,116 @@ mod tests {
                 .is_err()
         );
         assert!(decode_response(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\n{}").is_err());
+    }
+}
+
+#[cfg(test)]
+mod navigation_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn shell_refuses_versions_duplicates_and_over_budget_without_truncation() {
+        let shell = json!({"schemaVersion":2,"snapshotSequence":4,"threads":[
+            {"id":"a","title":"First"},{"id":"b","title":"Second"}]});
+        assert_eq!(parse_threads(&shell).unwrap().len(), 2);
+        let mut bad = shell.clone();
+        bad["schemaVersion"] = json!(1);
+        assert!(parse_threads(&bad).is_err());
+        bad = shell.clone();
+        bad["threads"][1]["id"] = json!("a");
+        assert!(parse_threads(&bad).is_err());
+        bad = shell.clone();
+        bad["threads"] = json!(vec![shell["threads"][0].clone(); 65]);
+        assert!(parse_threads(&bad).is_err());
+    }
+
+    #[test]
+    fn authenticated_shell_and_two_exact_thread_routes_use_one_environment() {
+        use std::{net::TcpListener, thread};
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let peer = thread::spawn(move || {
+            for (path, body, auth) in [
+                (
+                    "/.well-known/t3/environment",
+                    json!({"environmentId":"env"}),
+                    false,
+                ),
+                (
+                    "/api/orchestration/shell?omitOlderSettled=1",
+                    json!({"schemaVersion":2,"snapshotSequence":1,
+                    "threads":[{"id":"a","title":"First"},{"id":"b","title":"Second"}]}),
+                    true,
+                ),
+                (
+                    "/.well-known/t3/environment",
+                    json!({"environmentId":"env"}),
+                    false,
+                ),
+                (
+                    "/api/orchestration/threads/a/bounded",
+                    json!({"snapshotSequence":2,"projection":{
+                    "thread":{"id":"a","title":"First"},"messages":[]}}),
+                    true,
+                ),
+                (
+                    "/.well-known/t3/environment",
+                    json!({"environmentId":"env"}),
+                    false,
+                ),
+                (
+                    "/api/orchestration/threads/b/bounded",
+                    json!({"snapshotSequence":3,"projection":{
+                    "thread":{"id":"b","title":"Second"},"messages":[]}}),
+                    true,
+                ),
+            ] {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    socket.read_exact(&mut byte).unwrap();
+                    request.push(byte[0]);
+                    assert!(request.len() < MAX_HEADERS);
+                }
+                let request = String::from_utf8(request).unwrap();
+                assert!(request.starts_with(&format!("GET {path} HTTP/1.0\r\n")));
+                assert!(request.contains("x-t3-orchestration-protocol: 2\r\n"));
+                assert_eq!(
+                    request.contains("Authorization: Bearer fixture.token\r\n"),
+                    auth
+                );
+                let body = serde_json::to_vec(&body).unwrap();
+                write!(
+                    socket,
+                    "HTTP/1.0 200 OK\r\nContent-Length: {}\r\n\r\n",
+                    body.len()
+                )
+                .unwrap();
+                socket.write_all(&body).unwrap();
+            }
+        });
+        let input = serde_json::to_vec(
+            &json!({"port":port,"token":"fixture.token","environmentId":"env","threadId":"a"}),
+        )
+        .unwrap();
+        let connection = Connection::read(input.as_slice()).unwrap();
+        let rows = connection.threads().unwrap();
+        for row in rows {
+            let selected = connection.for_thread(&row.id);
+            assert_eq!(selected.environment_id(), "env");
+            assert!(
+                selected
+                    .snapshot()
+                    .unwrap()
+                    .text
+                    .contains(&format!("Thread {}", row.id))
+            );
+        }
+        peer.join().unwrap();
     }
 }
