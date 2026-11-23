@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "candidate/t3code-ls-t14-cli-contract-*"
+      - "candidate/t3code-ls-t14-windows-cli-*"
       - "candidate/t3code-ls-t05-packaged-preparation-*"
       - "candidate/t3code-ls-t06-gix-packaged-*"
       - "candidate/t3code-ls-t02-bundled-native-integrated-*"
@@ -14,6 +15,7 @@ permissions:
 
 jobs:
   archive:
+    if: ${{ !startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-cli-') }}
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
     timeout-minutes: 25
     env:
@@ -116,3 +118,210 @@ jobs:
           name: cli-archive-proof
           path: ${{ runner.temp }}/cli-proof/
           retention-days: 14
+
+  windows-amd64-monitor:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-cli-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['windows-2025'] || 'windows-2025' }}
+    timeout-minutes: 12
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      RUSTUP_TOOLCHAIN: "1.99.1"
+      GIT_TERMINAL_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Compile the locked resource monitor on Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $env:CARGO_HOME = "$env:RUNNER_TEMP/cli-windows-cargo-home"
+          $env:CARGO_TARGET_DIR = "$env:RUNNER_TEMP/cli-windows-target"
+          $proof = "$env:RUNNER_TEMP/cli-windows-monitor"
+          New-Item -ItemType Directory $proof | Out-Null
+          rustup toolchain install 1.99.1 --profile minimal
+          rustc +1.99.1 -Vv | Tee-Object "$proof/compiler.log"
+          cargo +1.99.1 build --locked --release --manifest-path native/resource-monitor/Cargo.toml
+          Copy-Item "$env:CARGO_TARGET_DIR/release/t3-resource-monitor.exe" $proof
+          (Get-FileHash "$proof/t3-resource-monitor.exe" -Algorithm SHA256).Hash.ToLowerInvariant() |
+            Set-Content -Encoding ascii "$proof/monitor.sha256"
+          git rev-parse HEAD 'HEAD^{tree}' | Set-Content -Encoding ascii "$proof/source.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: cli-windows-amd64-monitor
+          path: ${{ runner.temp }}/cli-windows-monitor/
+          if-no-files-found: error
+          retention-days: 1
+      - name: Remove owned native intermediate output
+        if: always()
+        shell: pwsh
+        run: |
+          foreach ($child in @('cli-windows-cargo-home', 'cli-windows-target', 'cli-windows-monitor')) {
+            $owned = Join-Path $env:RUNNER_TEMP $child
+            if (Test-Path $owned) { Remove-Item -Recurse -Force $owned }
+          }
+
+  windows-amd64-bundle:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-cli-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
+    needs: windows-amd64-monitor
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      GIT_TERMINAL_PROMPT: "0"
+      NODE_OPTIONS: --max-old-space-size=6144
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+      T3_CODE_LS_IMPLEMENTATION: upstream
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: cli-windows-amd64-monitor
+          path: ${{ runner.temp }}/cli-windows-monitor/
+      - name: Cross-build the SEA and assemble the Windows ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          monitor="$RUNNER_TEMP/cli-windows-monitor"
+          diff <(git rev-parse HEAD HEAD^{tree}) <(tr -d '\r' < "$monitor/source.txt")
+          expected="$(tr -d '\r\n' < "$monitor/monitor.sha256")"
+          printf '%s  %s\n' "$expected" "$monitor/t3-resource-monitor.exe" | sha256sum --check
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          pnpm --dir apps/web run build
+          pnpm exec node apps/server/scripts/cli.ts build --verbose
+          pnpm exec node apps/server/scripts/cli.ts build-exe --verbose --target win-x64
+          version="$(node -p 'require("./apps/server/package.json").version')"
+          payload="$RUNNER_TEMP/cli-windows-archive"
+          install -Dm644 "$monitor/t3-resource-monitor.exe" "$RUNNER_TEMP/cli-windows-resources/t3-resource-monitor.exe"
+          unset AZURE_TRUSTED_SIGNING_ENDPOINT AZURE_TRUSTED_SIGNING_ACCOUNT_NAME AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME
+          pnpm exec node scripts/build-cli-archive.ts --platform win --arch x64 --version "$version" \
+            --resource-monitor-dir "$RUNNER_TEMP/cli-windows-resources" --output-dir "$payload"
+          archive="$payload/t3-$version-win32-x64.zip"
+          sha256sum "$archive" | cut -d ' ' -f 1 > "$payload/archive.sha256"
+          sha256sum apps/server/dist-exe/t3-win-x64.exe | cut -d ' ' -f 1 > "$payload/executable.sha256"
+          git rev-parse HEAD HEAD^{tree} > "$payload/source.txt"
+          cp "$monitor/compiler.log" "$monitor/monitor.sha256" "$payload/"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: cli-windows-amd64-archive
+          path: ${{ runner.temp }}/cli-windows-archive/
+          if-no-files-found: error
+          retention-days: 1
+      - name: Remove the owned archive staging directories
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/cli-windows-monitor" "$RUNNER_TEMP/cli-windows-resources" "$RUNNER_TEMP/cli-windows-archive"
+
+  windows-amd64:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-cli-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
+    needs: windows-amd64-bundle
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['windows-2025'] || 'windows-2025' }}
+    timeout-minutes: 15
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      GIT_TERMINAL_PROMPT: "0"
+      NODE_OPTIONS: --max-old-space-size=6144
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+      T3_CODE_LS_IMPLEMENTATION: upstream
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: cli-windows-amd64-archive
+          path: ${{ runner.temp }}/cli-windows-archive/
+      - name: Install the pinned Windows pnpm command
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          node -e 'if(process.platform!=="win32"||process.arch!=="x64"||process.versions.node!=="26.12.1") process.exit(1)'
+          npm.cmd install --prefix "$env:RUNNER_TEMP/cli-windows-pnpm" --ignore-scripts --no-package-lock --no-audit --no-fund "@pnpm/exe.win32-x64@12.14.0"
+      - name: Install and verify the frozen smoke harness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $pnpm = "$env:RUNNER_TEMP/cli-windows-pnpm/node_modules/@pnpm/exe.win32-x64/pnpm.exe"
+          if ((& $pnpm --version) -ne '12.14.0') { throw 'Unexpected pnpm version' }
+          & $pnpm install --frozen-lockfile
+          node scripts/smoke-cli-archive.ts --help
+      - name: Validate and exercise the transferred archive on Windows
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $payload = "$env:RUNNER_TEMP/cli-windows-archive"
+          $proof = "$env:RUNNER_TEMP/cli-windows-proof"
+          New-Item -ItemType Directory $proof | Out-Null
+          Copy-Item "$payload/compiler.log" $proof
+          $source = Get-Content "$payload/source.txt"
+          if ($source.Count -ne 2 -or $source[0] -ne (git rev-parse HEAD) -or $source[1] -ne (git rev-parse 'HEAD^{tree}')) { throw 'Transferred archive source mismatch' }
+          $version = node -p 'require("./apps/server/package.json").version'
+          $stem = "t3-$version-win32-x64"
+          $archive = "$payload/$stem.zip"
+          $archiveHash = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($archiveHash -ne (Get-Content "$payload/archive.sha256" -Raw).Trim()) { throw 'Transferred archive checksum mismatch' }
+          $stream = [System.IO.File]::OpenRead($archive)
+          try {
+            $signature = [byte[]]::new(4)
+            if ($stream.Read($signature, 0, 4) -ne 4 -or [BitConverter]::ToUInt32($signature, 0) -ne 0x04034b50) { throw 'Expected a real ZIP archive' }
+          } finally { $stream.Dispose() }
+          tar.exe -xf $archive -C $payload "$stem/t3.exe" "$stem/resource-monitor/t3-resource-monitor.exe" "$stem/native-bin/manifest.json"
+          $executable = "$payload/$stem/t3.exe"
+          $bytes = [System.IO.File]::ReadAllBytes($executable)
+          if ($bytes.Length -lt 66 -or $bytes[0] -ne 0x4d -or $bytes[1] -ne 0x5a) { throw 'Expected a real PE executable' }
+          $offset = [BitConverter]::ToInt32($bytes, 0x3c)
+          if ($offset -lt 0 -or $offset -gt ($bytes.Length - 6) -or [BitConverter]::ToUInt32($bytes, $offset) -ne 0x4550) { throw 'Expected PE header' }
+          if ([BitConverter]::ToUInt16($bytes, $offset + 4) -ne 0x8664) { throw 'Expected amd64 PE machine' }
+          $exeHash = (Get-FileHash $executable -Algorithm SHA256).Hash.ToLowerInvariant()
+          $monitorHash = (Get-FileHash "$payload/$stem/resource-monitor/t3-resource-monitor.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($exeHash -ne (Get-Content "$payload/executable.sha256" -Raw).Trim()) { throw 'Packaged executable checksum mismatch' }
+          if ($monitorHash -ne (Get-Content "$payload/monitor.sha256" -Raw).Trim()) { throw 'Packaged monitor checksum mismatch' }
+          $selection = Get-Content "$payload/$stem/native-bin/manifest.json" -Raw | ConvertFrom-Json
+          if ($selection.implementation -ne 'upstream' -or $selection.selection -ne 'explicit-upstream' -or $selection.target -ne 'win32-x64') { throw 'Incorrect Windows implementation selection' }
+          [ordered]@{
+            sourceCommit = $source[0]
+            sourceTree = $source[1]
+            platform = 'win32-x64'
+            implementation = 'upstream'
+            compilerRoute = 'bootstrap-cargo-resource-monitor'
+            packagingHost = 'ubuntu-24.04'
+            nodeVersion = (node --version)
+            archiveSha256 = $archiveHash
+            executableSha256 = $exeHash
+            monitorSha256 = $monitorHash
+            monitorLockSha256 = (Get-FileHash native/resource-monitor/Cargo.lock -Algorithm SHA256).Hash.ToLowerInvariant()
+            nativeSelection = $selection
+            signedRelease = $false
+          } | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 "$proof/artifact.json"
+          node scripts/smoke-cli-archive.ts --archive $archive --expect-version $version --expect-upstream | Tee-Object "$proof/smoke.log"
+      - name: Retain exact Windows archive evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: cli-windows-amd64-proof
+          path: ${{ runner.temp }}/cli-windows-proof/
+          retention-days: 14
+      - name: Remove the transferred archive and pinned pnpm staging
+        if: always()
+        shell: pwsh
+        run: |
+          foreach ($name in @('cli-windows-archive', 'cli-windows-pnpm')) {
+            $owned = Join-Path $env:RUNNER_TEMP $name
+            if (Test-Path $owned) { Remove-Item -Recurse -Force $owned }
+          }
