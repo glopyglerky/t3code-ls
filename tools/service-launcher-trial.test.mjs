@@ -231,6 +231,10 @@ test("compiled Rust helper restores a sealed native trial before launcher startu
   const executable = process.env.T3_TEST_SEALED_TRIAL_HELPER;
   assert.ok(isQualifiedNativeHost(), "The compiled-helper proof requires qualified Linux x64");
   assert.ok(path.isAbsolute(executable), "Pass the exact compiled helper by absolute path");
+  const helperBytes = (await fs.stat(executable)).size;
+  t.diagnostic(JSON.stringify({ helperBytes, installedArtifactLimitBytes: 128 * 1024 * 1024 }));
+  assert.ok(helperBytes <= 128 * 1024 * 1024,
+    "The installed helper must fit the native trial's 128 MiB artifact hash limit");
   const f = await fixture(t);
   const home = path.dirname(f.userdata);
   const id = "63b13571-13c5-411b-ad39-35db4071a854";
@@ -243,7 +247,7 @@ test("compiled Rust helper restores a sealed native trial before launcher startu
       input: requests === undefined ? "" : `${requests.map((row) => JSON.stringify(row)).join("\n")}\n`,
     });
     const replies = stdout.trim().split("\n").map((line) => JSON.parse(line));
-    for (const reply of replies) assert.equal(reply.ok, true, JSON.stringify(reply));
+    for (const reply of replies) assert.equal(reply.ok, true, `${args[0]}: ${JSON.stringify(reply)}`);
     return replies.map((reply) => reply.result);
   };
   const commandId = "sealed-launcher-source";
@@ -356,7 +360,7 @@ test("compiled Rust helper restores a sealed native trial before launcher startu
     { operation: "receipt", command_id: commandId }, { operation: "shutdown" },
   ]);
   assert.deepEqual(restoredReceipt, seeded[3]);
-  t.diagnostic(JSON.stringify({ helperSha256, sourceSha256: digest(sourceBytes),
+  t.diagnostic(JSON.stringify({ helperBytes, helperSha256, sourceSha256: digest(sourceBytes),
     sealedSha256: digest(sealedBytes), checkpointSha256: digest(checkpointBytes),
     restoredOriginalInode: true, selectedPreviousRuntime: true, restartPreservedSelection: true }));
 });

@@ -57,6 +57,7 @@ jobs:
           export CARGO_HOME="$RUNNER_TEMP/trial-cargo-home"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/trial-target"
           export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
             -p t3-code-ls-storage --test store isolated_trial_cli
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
