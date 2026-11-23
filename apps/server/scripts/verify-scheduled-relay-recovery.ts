@@ -252,7 +252,7 @@ try {
     const { delivery } = await client.rpc((rpc) => rpc[WS_METHODS.scheduledTasksGetWebhookDelivery]({
       id: task.id, deliveryId, acceptAnyOutcome: true,
     }));
-    Assert.ok(delivery.renderedPrompt?.includes(marker));
+    Assert.ok(delivery.renderedPrompt !== null && delivery.renderedPrompt.includes(marker));
     promptSha256 = hash(delivery.renderedPrompt);
     Assert.ok(threadId);
     const activeThreadId = threadId;
@@ -338,7 +338,7 @@ try {
     Assert.equal(delivery.error, "Dispatch could not be confirmed. This delivery will not run again automatically.");
     Assert.equal(settled.value.lastRunError, delivery.error);
   }
-  Assert.ok(delivery.renderedPrompt?.includes(marker));
+  Assert.ok(delivery.renderedPrompt !== null && delivery.renderedPrompt.includes(marker));
   Assert.equal(hash(delivery.renderedPrompt), promptSha256);
 
   checkpoint("verify the thread matches the durable delivery disposition");
@@ -397,5 +397,5 @@ try {
   process.removeListener("SIGINT", interrupt);
   process.removeListener("SIGTERM", interrupt);
   write(Path.join(proof, "proof.json"), report);
-  if (report.status !== "passed") console.error(report.failure ?? report.cleanupFailure);
+  if (report.status !== "passed") process.stderr.write(String(report.failure ?? report.cleanupFailure) + "\n");
 }

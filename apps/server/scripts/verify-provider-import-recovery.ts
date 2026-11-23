@@ -15,6 +15,7 @@ import {
   type AgentSessionImportSource,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import type { WsRpcProtocolClient } from "../../../packages/client-runtime/src/rpc/protocol.ts";
 import {
   authenticatePackagedServer,
@@ -126,7 +127,7 @@ try {
   };
   report.artifacts = {
     bundleSha256: Object.fromEntries(
-      FS.readdirSync(dist, { recursive: true })
+      FS.readdirSync(dist, { recursive: true, encoding: "utf8" })
         .filter((file) => /\.[cm]?js$/u.test(file))
         .sort()
         .map((file) => [file, sha256(Path.join(dist, file))]),
@@ -260,7 +261,7 @@ process.stdout.write(output);
   };
 
   const inspect = (closed = false) => inspectNativeImport({ executable, baseDir, threadId, closed });
-  const scanAndCheck = (client: WsRpcProtocolClient, existing: boolean) => Effect.gen(function* () {
+  const scanAndCheck = Effect.fn("scanAndCheck")(function* (client: WsRpcProtocolClient, existing: boolean) {
     const scan = yield* client[WS_METHODS.agentSessionsScan]({});
     Assert.equal(scan.truncated ?? false, false);
     Assert.equal(scan.candidates.length, 1);
@@ -284,7 +285,10 @@ process.stdout.write(output);
   report.command = active.argv;
   const initial = await authenticate(active);
   report.initialCandidate = await initial.rpc((client) => scanAndCheck(client, false));
-  Assert.equal((await initial.createProject({ projectId, title: "Synthetic Codex import", workspaceRoot: workspace })).id, projectId);
+  const created = Schema.decodeUnknownSync(Schema.Struct({ id: ProjectId }))(
+    await initial.createProject({ projectId, title: "Synthetic Codex import", workspaceRoot: workspace }),
+  );
+  Assert.equal(created.id, projectId);
   const baseline = inspect();
   Assert.equal(baseline.history.threadSequence, 0);
   Assert.equal(baseline.history.threads.length, 0);
@@ -356,7 +360,9 @@ process.stdout.write(output);
   Assert.equal(history.itemCounts.length, 1);
   Assert.deepEqual(history.itemCounts[0]?.item_count, { type: "integer", value: "2" });
   Assert.deepEqual(
-    history.metadata.find((row) => row.projection_name?.value === "thread-projections")?.last_sequence,
+    history.metadata.find((row) =>
+      row.projection_name?.type === "text" && row.projection_name.value === "thread-projections",
+    )?.last_sequence,
     { type: "integer", value: String(history.threadSequence) },
   );
   Assert.equal(history.runCount, 0);

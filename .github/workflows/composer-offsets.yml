@@ -100,6 +100,15 @@ jobs:
         run: |
           pnpm --dir apps/server exec vp test run --maxWorkers 2 \
             src/orchestration-v2/ThreadLaunchService.test.ts src/orchestration-v2/ThreadPullRequestService.test.ts
+      - name: Type check the server and exercise the selected runtime service graph
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t16-root-release-server-types-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm --dir apps/server run typecheck
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 \
+            src/cli/app.test.ts src/cli/connect.test.ts src/cli/deferredImports.test.ts src/cli/pair.test.ts \
+            src/ws.test.ts src/relay/AgentAwarenessRelay.test.ts src/workspace/WorkspaceFileSystem.test.ts
       - name: Exercise local pairing in the retained and Dioxus browser builds
         if: env.PAIRING_PROOF == 'true'
         env:

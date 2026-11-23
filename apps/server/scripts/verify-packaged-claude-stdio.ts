@@ -97,7 +97,7 @@ try {
     ? makeClaudeQueryOptions({
         modelSelection, nativeThreadId: "fixture", title, resume: false, cwd: workspace,
         attachmentsDir: Path.join(userdata, "attachments"),
-        settings: Schema.decodeUnknownSync(ClaudeSettings)({}),
+        settings: Schema.decodeSync(ClaudeSettings)({}),
         environment: { ...childEnvironment, CLAUDE_CODE_ENTRYPOINT: "t3-code" },
         tools: { type: "preset", preset: "claude_code" }, permissionMode: "default",
         supportedDialogKinds: ["resume_return"],
