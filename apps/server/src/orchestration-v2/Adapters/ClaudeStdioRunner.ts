@@ -7,6 +7,7 @@ import * as NodeUtil from "node:util";
 
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import {
@@ -34,13 +35,34 @@ type FixtureEvent =
 const failure = (method: string, cause: unknown) =>
   new ClaudeAgentSdkQueryRunnerError({ method, cause });
 
+const encodeOptionsRefusal = Schema.encodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      version: Schema.Literal(1),
+      type: Schema.Literal("options-refused"),
+      differing: Schema.Array(Schema.String),
+    }),
+  ),
+);
+
+async function writeOptionsRefusal(directory: string, differing: readonly string[]) {
+  const witness = await Effect.runPromise(
+    encodeOptionsRefusal({ version: 1, type: "options-refused", differing }),
+  );
+  await NodeFS.writeFile(
+    NodePath.join(directory, "claude-stdio-options-refused.json"),
+    witness + "\n",
+    { flag: "wx", mode: 0o600 },
+  );
+}
+
 function within<A>(pending: Promise<A>, milliseconds: number): Promise<A> {
   // The child process is driven by wall time, independently of the caller's clock.
   return Effect.runPromise(
-    Effect.tryPromise({ try: () => pending, catch: (cause) => cause }).pipe(
+    Effect.tryPromise({ try: () => pending, catch: (cause) => failure("wait", cause) }).pipe(
       Effect.timeoutOrElse({
         duration: milliseconds,
-        orElse: () => Effect.fail(new Error("Claude stdio helper timed out.")),
+        orElse: () => Effect.fail(failure("wait", new Error("Claude stdio helper timed out."))),
       }),
     ),
   );
@@ -94,7 +116,7 @@ function startHelper(executable: string, peer: string, directory: string) {
     }
   });
   let tail: Promise<unknown> = ready;
-  const command = (frame: { readonly type: string }) => {
+  const command = <Frame extends { readonly type: string }>(frame: Frame) => {
     const reply = tail.then(() => exchange(frame, "ok"));
     tail = reply;
     return reply;
@@ -194,9 +216,7 @@ export function makeControlledClaudeStdioRunner(
             );
             // Bounded synthetic witness, names only. Never retain callback settings,
             // authenticated MCP headers or the inherited query environment.
-            await NodeFS.writeFile(NodePath.join(directory, "claude-stdio-options-refused.json"),
-              JSON.stringify({ version: 1, type: "options-refused", differing }) + "\n",
-              { flag: "wx", mode: 0o600 });
+            await writeOptionsRefusal(directory, differing);
             throw new Error(`Unsupported Claude fixture options: ${differing.join(", ")}`);
           }
           const started = startHelper(executable, peer, directory);
