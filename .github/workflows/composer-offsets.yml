@@ -293,6 +293,24 @@ jobs:
             jq -e '.status == "passed" and .composer == "rust-wasm" and .parallelTurns.stillPendingAfterOtherApproval and .parallelTurns.completedReopened and .parallelTurns.interruptedReopened' \
               "$proof/parallel/native/proof.json"
           fi
+      - name: Exercise the bundled Rust PTY during a separate browser replay turn
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-contention-')
+        run: |
+          proof="$RUNNER_TEMP/built-composer-proof/pty-contention"
+          mkdir "$proof"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- env T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 \
+              T3_CODE_LS_BUNDLED_PTY_PROOF=true T3_CODE_LS_PTY_CONTENTION_PROOF=true \
+              VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
+              "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
+          ' _ "$(id -un)" "$(command -v node)" "$proof"
+          jq -e '.status == "passed" and .bundledNativePtyOwner and
+            (.terminalContention | .sameShell and .rowsPerBurst == 128 and
+              .orderedWireRows == 256 and .orderedRenderedRows == 256 and .inputEcho == "j45-echo:世界" and
+              .orderedRowsSha256 == "ad56e3b7b21ad9b478f23aa8ce0ca9026133ebe33d258d19e8502f0eb44e4570" and
+              .chatPendingAfterReattach and .chatCompletedBeforeForegroundExit and .chat.reopened and
+              .chat.exactReply == "Created the requested probe file.")' "$proof/native/proof.json"
       - name: Check the controlled HTML publisher and production MCP session
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-html-')
         env:

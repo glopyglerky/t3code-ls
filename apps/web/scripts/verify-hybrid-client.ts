@@ -13,9 +13,12 @@ import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import {
+  DEFAULT_TERMINAL_ID,
   ORCHESTRATION_PROTOCOL_HEADER,
   ORCHESTRATION_PROTOCOL_VERSION_TEXT,
   OrchestrationV2ThreadDetailSnapshot,
+  type TerminalAttachStreamEvent,
+  type TerminalSessionSnapshot,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
@@ -59,6 +62,7 @@ const dioxusFindProof = process.env.T3_CODE_LS_DIOXUS_FIND_PROOF;
 const expectsDioxusFind = process.env.VITE_T3_CODE_LS_THREAD_FIND_RENDERER === "dioxus";
 const bundledPtyProof = process.env.T3_CODE_LS_BUNDLED_PTY_PROOF === "true";
 const ptyRestartProof = process.env.T3_CODE_LS_PTY_RESTART_PROOF === "true";
+const ptyContentionProof = process.env.T3_CODE_LS_PTY_CONTENTION_PROOF === "true";
 const nativePtyHost = bundledPtyProof
   ? NodePath.join(repoRoot, "apps/server/dist/native-bin/t3-code-ls-pty-host")
   : process.env.T3_CODE_LS_PTY_PROOF_EXECUTABLE;
@@ -106,6 +110,15 @@ if (process.platform !== "linux") {
     "This acceptance runner qualifies Linux only; other platforms require their own gate.",
   );
 }
+Assert.ok(
+  !ptyContentionProof ||
+    (process.arch === "x64" &&
+      mode === "native" &&
+      bundledClient &&
+      bundledPtyProof &&
+      !ptyRestartProof),
+  "Terminal contention requires a dedicated run with the bundled Linux x64 PTY host",
+);
 if (pairingProof !== undefined && (!bundledClient || !isPairingRenderer(pairingProof))) {
   throw new Error("The pairing proof requires the bundled client and renderer retained or dioxus.");
 }
@@ -995,6 +1008,16 @@ function assertNativePtyOwner(shell: string, executable: string, serverPid: numb
   Assert.fail("The interactive shell must descend from the selected Rust PTY host");
 }
 
+function assertBundledPtyIdentity(executable: string): string {
+  const manifest = JSON.parse(
+    NodeFS.readFileSync(NodePath.join(NodePath.dirname(executable), "manifest.json"), "utf8"),
+  );
+  const sha256 = NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(executable)).digest("hex");
+  Assert.equal(manifest.target, "linux-x64");
+  Assert.equal(manifest.files["t3-code-ls-pty-host"], sha256);
+  return sha256;
+}
+
 async function waitForTerminalReceipt(page: Page, path: string) {
   const deadline = Date.now() + 10_000;
   do {
@@ -1034,10 +1057,11 @@ function liveLinuxProcess(pid: number) {
     throw error;
   }
   const fields = status.slice(status.lastIndexOf(")") + 2).trim().split(/\s+/u);
-  const [state, parent] = fields;
+  const [state, parent, group, , , foregroundGroup] = fields;
   const started = fields[19];
-  Assert.ok(started && parent, "Expected Linux start-time and parent witnesses");
-  return state === "Z" || state === "X" ? null : { pid, parent: Number(parent), started };
+  Assert.ok(started && parent && group && foregroundGroup, "Expected a Linux process identity");
+  if (state === "Z" || state === "X") return null;
+  return { pid, parent: Number(parent), started, group: Number(group), foregroundGroup: Number(foregroundGroup) };
 }
 
 async function verifyOwnedPtyShutdown(page: Page, workspace: string, shell: string, helper: number,
@@ -1343,7 +1367,7 @@ async function assertCompleted(
   };
 }
 
-async function acceptCapturedApproval(page: Page) {
+async function startCapturedApproval(page: Page) {
   const contents = NodeFS.readFileSync(NodePath.join(repoRoot, capturedApproval.path));
   const sha256 = NodeCrypto.createHash("sha256").update(contents).digest("hex");
   Assert.equal(sha256, capturedApproval.sha256, "The recorded ACP approval fixture changed");
@@ -1364,15 +1388,225 @@ async function acceptCapturedApproval(page: Page) {
     ),
     "The recorded-approval turn must contain the submitted prompt",
   );
+  return { threadId, identity, requestId: request.id, button, sha256 };
+}
+
+async function acceptCapturedApproval(page: Page) {
+  const { threadId, identity, requestId, button, sha256 } = await startCapturedApproval(page);
   await button.click();
   const completed = await assertCompleted(page, threadId, identity, capturedApproval.reply);
   Assert.equal(
     (await readThreadSnapshot(page, threadId)).projection.runtimeRequests.find(
-      (item) => item.id === request.id,
+      (item) => item.id === requestId,
     )?.status,
     "resolved",
   );
-  return { ...completed, requestId: request.id, source: capturedApproval.path, sha256 };
+  return { ...completed, requestId, source: capturedApproval.path, sha256 };
+}
+
+async function verifyTerminalContention(
+  page: Page,
+  threadId: string,
+  workspace: string,
+  application: OwnedApplication,
+  executable: string,
+) {
+  const rowsPerBurst = 128;
+  const rowPayload = "abcdefghijklmnopqrstuvwxyz-ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const expectedRows = Array.from({ length: rowsPerBurst * 2 }, (_, index) =>
+    `j45-row:${String(index + 1).padStart(3, "0")}:${rowPayload}`,
+  );
+  const rows = (text: string) => text.split(/\r?\n/u).filter((line) => line.startsWith("j45-row:"));
+  const firstRows = expectedRows.slice(0, rowsPerBurst);
+  const token = "j45-echo:世界";
+  const echoLine = /^j45-echo:世界\r?$/mu;
+  const script = NodePath.join(workspace, "fixture-pty-contention.sh");
+  const command = `/bin/bash '${script.replaceAll("'", "'\\''")}' "$$"`;
+  NodeFS.writeFileSync(script, [
+    `trap 'printf "%s\\n" "$?" > "$0.exited"' EXIT`,
+    "burst() {",
+    "  for ((row=$1; row<=$2; row++)); do",
+    `    printf 'j45-row:%03d:${rowPayload}\\n' "$row"`,
+    "  done",
+    "}",
+    'printf "%s %s\\n" "$1" "$$" > "$0.started"',
+    `burst 1 ${rowsPerBurst}`,
+    `printf 'j45-ready:%s\\n' "$1"`,
+    `IFS= read -r -t 60 input && [[ $input == '${token}' ]] || exit 1`,
+    `printf 'j45-accepted:%s\\n' "$input"`,
+    `burst ${rowsPerBurst + 1} ${expectedRows.length}`,
+    `printf 'j45-drained:%s\\n' "$1"`,
+    'IFS= read -r -t 60 release && [[ $release == j45-release ]] || exit 1',
+    "",
+  ].join("\n"), { mode: 0o600, flag: "wx" });
+
+  type WireView = { output: string; snapshot?: TerminalSessionSnapshot };
+  const before: WireView = { output: "" };
+  const after: WireView = { output: "" };
+  let reattaching = false;
+  const observeSocket = (socket: import("playwright").WebSocket) => {
+    const view = reattaching ? after : before;
+    socket.on("framereceived", ({ payload }) => {
+      const json = payload.toString();
+      if (!json.includes('"type":"output"') && !json.includes('"type":"snapshot"')) return;
+      const envelope = JSON.parse(json) as { values?: TerminalAttachStreamEvent[] };
+      for (const event of envelope.values ?? []) {
+        if (
+          event.type === "snapshot" &&
+          event.snapshot?.threadId === threadId &&
+          event.snapshot.terminalId === DEFAULT_TERMINAL_ID
+        ) {
+          view.snapshot = event.snapshot;
+        }
+        if (
+          event.type === "output" &&
+          event.threadId === threadId &&
+          event.terminalId === DEFAULT_TERMINAL_ID
+        ) {
+          view.output = (view.output + event.data).slice(-64 * 1024);
+        }
+      }
+    });
+  };
+  const paste = async (input: Locator, text: string) => {
+    await page.evaluate((line) => navigator.clipboard.writeText(line), text);
+    await input.press("Control+Shift+v");
+  };
+
+  const chat = await page.context().newPage();
+  chat.setDefaultTimeout(timeoutMs);
+  page.on("websocket", observeSocket);
+  try {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.context().grantPermissions(["clipboard-read", "clipboard-write"], {
+      origin: new URL(page.url()).origin,
+    });
+    await page.bringToFront();
+    const shell = await terminalMarker(page, "fixture-pty");
+    const sha256 = assertBundledPtyIdentity(executable);
+    const helper = assertNativePtyOwner(shell, executable, application.pid);
+    const shellProcess = liveLinuxProcess(Number(shell));
+    Assert.ok(shellProcess);
+    await chat.goto(new URL(page.url()).origin, { waitUntil: "domcontentloaded" });
+    const approval = await startCapturedApproval(chat);
+    Assert.notEqual(approval.threadId, threadId);
+    await page.bringToFront();
+    const input = await terminalInput(page);
+    await paste(input, command);
+    await waitForSelectedTerminalText(page, input, /fixture-pty-contention\.sh/u);
+    await input.press("Enter");
+    const [reportedShell, jobPid] = (await waitForTerminalReceipt(page, `${script}.started`)).split(" ");
+    Assert.equal(reportedShell, shell);
+    const job = liveLinuxProcess(Number(jobPid));
+    Assert.ok(
+      job && job.parent === shellProcess.pid && job.group === job.foregroundGroup,
+      "The burst process must own the shell's foreground PTY",
+    );
+    await waitForSelectedTerminalText(page, input, new RegExp(`^j45-ready:${shell}\\r?$`, "mu"));
+    await paste(input, token);
+    const firstScreen = await waitForSelectedTerminalText(page, input, echoLine);
+    Assert.deepEqual(rows(firstScreen), firstRows);
+    Assert.deepEqual(rows(before.output), firstRows);
+    const inputEcho = before.output.match(echoLine)?.[0]?.trimEnd();
+    Assert.equal(inputEcho, token);
+    Assert.ok(!before.output.includes("j45-accepted:"), "Echo must precede Enter and the script reply");
+
+    reattaching = true;
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const reattached = await terminalInput(page);
+    Assert.deepEqual(rows(await waitForSelectedTerminalText(page, reattached, echoLine)), firstRows);
+    const snapshot = after.snapshot;
+    Assert.ok(snapshot, "A fresh browser socket must receive a terminal snapshot");
+    Assert.equal(snapshot.status, "running");
+    Assert.equal(snapshot.pid, shellProcess.pid);
+    Assert.equal(NodeFS.realpathSync(snapshot.cwd), NodeFS.realpathSync(workspace));
+    Assert.deepEqual(rows(snapshot.history), firstRows);
+    Assert.match(snapshot.history, echoLine);
+    Assert.equal(liveLinuxProcess(shellProcess.pid)?.started, shellProcess.started);
+    Assert.equal(assertNativePtyOwner(shell, executable, application.pid), helper);
+    Assert.deepEqual(liveLinuxProcess(job.pid), job);
+    const pending = await readThreadSnapshot(chat, approval.threadId);
+    Assert.deepEqual(replayTurnIdentity(pending, capturedApproval.model), approval.identity);
+    Assert.equal(
+      pending.projection.runtimeRequests.find((item) => item.id === approval.requestId)?.status,
+      "pending",
+    );
+    Assert.ok(await approval.button.isVisible());
+
+    await reattached.press("Enter");
+    await approval.button.click();
+    const completed = await assertCompleted(
+      chat, approval.threadId, approval.identity, capturedApproval.reply,
+    );
+    const assertExactChat = async () => {
+      const { projection } = await readThreadSnapshot(chat, approval.threadId);
+      Assert.deepEqual(projection.attempts.map((item) => item.id), [approval.identity.attemptId]);
+      Assert.deepEqual(projection.providerTurns.map((item) => item.id), [approval.identity.providerTurnId]);
+      Assert.deepEqual(projection.runtimeRequests.map(({ id, status }) => ({ id, status })), [
+        { id: approval.requestId, status: "resolved" },
+      ]);
+      Assert.deepEqual(
+        projection.messages.filter((message) => message.role === "user").map(({ text }) => text),
+        [capturedApproval.prompt],
+      );
+      const assistant = projection.messages.filter((message) => message.role === "assistant");
+      Assert.deepEqual(assistant.map(({ id, text }) => ({ id, text })), [
+        { id: completed.assistantMessageId, text: capturedApproval.reply },
+      ]);
+    };
+    await assertExactChat();
+    await page.bringToFront();
+    const finalScreen = await waitForSelectedTerminalText(
+      page, reattached, new RegExp(`^j45-drained:${shell}\\r?$`, "mu"),
+    );
+    const renderedRows = rows(finalScreen);
+    Assert.deepEqual(renderedRows, expectedRows);
+    const accepted = `j45-accepted:${token}`;
+    Assert.ok(finalScreen.includes(accepted));
+    Assert.ok(after.output.includes(accepted));
+    const wireRows = [...rows(before.output), ...rows(after.output)];
+    Assert.deepEqual(wireRows, expectedRows);
+    Assert.deepEqual(liveLinuxProcess(job.pid), job, "Chat must finish before releasing the foreground job");
+
+    await paste(reattached, "j45-release");
+    await reattached.press("Enter");
+    Assert.equal(await waitForTerminalReceipt(page, `${script}.exited`), "0");
+    Assert.equal(await terminalMarker(page, "fixture-reattach"), shell);
+    Assert.equal(liveLinuxProcess(shellProcess.pid)?.started, shellProcess.started);
+    await chat.reload({ waitUntil: "domcontentloaded" });
+    const reopened = await assertCompleted(
+      chat, approval.threadId, approval.identity, capturedApproval.reply,
+    );
+    Assert.equal(reopened.assistantMessageId, completed.assistantMessageId);
+    await assertExactChat();
+    Assert.ok(!NodeFS.existsSync(NodePath.join(workspace, ".codex-probe-write-action.txt")));
+    return {
+      helper: { pid: helper, sha256 },
+      terminalThreadId: threadId,
+      terminalId: snapshot.terminalId,
+      shell: shellProcess,
+      foreground: job,
+      snapshotSequence: snapshot.sequence,
+      sameShell: true,
+      orderedWireRows: wireRows.length,
+      orderedRenderedRows: renderedRows.length,
+      orderedRowsSha256: NodeCrypto.createHash("sha256").update(wireRows.join("\n")).digest("hex"),
+      rowsPerBurst,
+      inputEcho,
+      chatPendingAfterReattach: true,
+      chatCompletedBeforeForegroundExit: true,
+      chat: {
+        ...reopened,
+        requestId: approval.requestId,
+        fixtureSha256: approval.sha256,
+        exactReply: capturedApproval.reply,
+        reopened: true,
+      },
+    };
+  } finally {
+    page.off("websocket", observeSocket);
+    await chat.close();
+  }
 }
 
 async function cancelCapturedQuestion(page: Page) {
@@ -1738,8 +1972,9 @@ async function exercise(implementation: Implementation): Promise<void> {
     textRevisionProfile: null as ReturnType<typeof textRevisionIdentity> | null,
     pdfLinks: null as Awaited<ReturnType<typeof verifyLinkedPdf>> | null,
     htmlInteraction: null as Awaited<ReturnType<typeof verifyInteractiveHtml>> | null,
-    scope:
-      "Linux original web client; local project; composer submission; free ACP showcase approval and interruption; reload; same-state server restart",
+    scope: ptyContentionProof
+      ? "Linux x64 bundled PTY; foreground burst, browser reattach, and a separate recorded ACP approval"
+      : "Linux original web client; local project; composer submission; free ACP showcase approval and interruption; reload; same-state server restart",
     startedAt: new Date().toISOString(),
     finishedAt: null as string | null,
     source,
@@ -1788,6 +2023,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     terminalReattach: null as { sameShell: boolean; unicodeOutput: boolean } | null,
     terminalSplit: null as Awaited<ReturnType<typeof verifySplitTerminalReconnect>> | null,
     terminalAlternate: null as Awaited<ReturnType<typeof verifyAlternateTerminalReconnect>> | null,
+    terminalContention: null as Awaited<ReturnType<typeof verifyTerminalContention>> | null,
     terminalRestart: null as {
       oldOwnerExited: boolean;
       foregroundExited: boolean;
@@ -2028,6 +2264,18 @@ async function exercise(implementation: Implementation): Promise<void> {
     proof.threadUrl = page.url();
     inspectPersistence("initial");
     completed("Received the completed replay turn on the original thread route");
+    if (ptyContentionProof) {
+      Assert.ok(nativePtyHost !== undefined);
+      starting("run a foreground terminal burst during an independent replay turn");
+      proof.terminalContention = await verifyTerminalContention(
+        page, threadId, workspace, application, nativePtyHost,
+      );
+      proof.nativePtyOwner = true;
+      proof.bundledNativePtyOwner = true;
+      completed("Verified ordered terminal output, echoed input, same-shell reattach, and exact replay completion");
+      proof.status = "passed";
+      return;
+    }
     if (pdfLinkProof) {
       starting("follow a same-document link in the PDF reader opened from Files");
       proof.pdfLinks = await verifyLinkedPdf(page);
@@ -2166,12 +2414,7 @@ async function exercise(implementation: Implementation): Promise<void> {
         const shell = await terminalMarker(page, "fixture-pty");
         let terminalOwner: number | undefined;
         if (nativePtyHost !== undefined) {
-          if (bundledPtyProof) {
-            const manifest = JSON.parse(NodeFS.readFileSync(NodePath.join(NodePath.dirname(nativePtyHost), "manifest.json"), "utf8"));
-            Assert.equal(manifest.target, "linux-x64");
-            Assert.equal(manifest.files["t3-code-ls-pty-host"],
-              NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(nativePtyHost)).digest("hex"));
-          }
+          if (bundledPtyProof) assertBundledPtyIdentity(nativePtyHost);
           terminalOwner = assertNativePtyOwner(shell, nativePtyHost, application.pid);
           proof.nativePtyOwner = true;
           proof.bundledNativePtyOwner = bundledPtyProof;
