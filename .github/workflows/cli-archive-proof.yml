@@ -12,6 +12,7 @@ on:
       - "candidate/t3code-ls-t05-packaged-preparation-*"
       - "candidate/t3code-ls-t06-gix-packaged-*"
       - "candidate/t3code-ls-t10-packaged-guest-*"
+      - "candidate/t3code-ls-t10-packaged-peer-*"
       - "candidate/t3code-ls-t02-bundled-native-integrated-*"
       - "candidate/t3code-ls-t05-launcher-promotion-*"
 
@@ -48,6 +49,11 @@ jobs:
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
           node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/cli-toolchain"
+      - name: Check the packaged peer proof and linked-environment rules
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t10-packaged-peer-')
+        run: |
+          node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/packaged-peer-links-tsconfig.json
+          pnpm exec vp test run --maxWorkers 2 apps/server/src/peer/PeerLinks.test.ts
       - name: Build and run the native archive
         shell: bash
         run: |
@@ -208,6 +214,27 @@ jobs:
               .browser.recoveredWithoutCredential and .browser.revokedAfterProcessReopen' \
               "$RUNNER_TEMP/cli-proof/guest-authorization/proof.json"
           fi
+      - name: Verify linked trust across two packaged server reopens
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t10-packaged-peer-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p 'require("./apps/server/package.json").version')
+          extracted=$(mktemp -d "$RUNNER_TEMP/peer-archive.XXXXXX")
+          trap 'rm -rf -- "$extracted"' EXIT
+          archive="$RUNNER_TEMP/cli-archive/t3-$version-linux-x64.tar.gz"
+          sha256sum "$archive" > "$RUNNER_TEMP/cli-proof/peer-archive.sha256"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/cli-proof/peer-source.txt"
+          tar -xzf "$archive" -C "$extracted"
+          entry="$extracted/t3-$version-linux-x64/t3"
+          test -x "$entry"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- "$2" apps/server/scripts/verify-packaged-peer-links.ts "$3" "$4"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/cli-proof/peer-links" "$entry"
+          jq -e '.status == "passed" and .observed.linkedRead and
+            .observed.durableRevocation and .observed.ineligibleEndpointCredentialRequests == 0' \
+            "$RUNNER_TEMP/cli-proof/peer-links/proof.json"
       - name: Retain the archive identity and smoke results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
