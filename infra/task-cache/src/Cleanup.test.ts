@@ -6,6 +6,9 @@ import { expect, it } from "@effect/vitest";
 import { cleanup } from "../vendor/vite-plus-remote-cache-cloudflare/src/database.ts";
 import * as Cache from "./Cache.ts";
 import * as Cleanup from "./Cleanup.ts";
+import { checkAssociationCleanup } from "./Cleanup.fixture.ts";
+
+it("keeps concurrent association sweeps and retries on their own pages", checkAssociationCleanup);
 
 it.effect("cleans three full disjoint batches within the D1 invocation budget", () =>
   Effect.gen(function* () {
