@@ -78,6 +78,18 @@ jobs:
             -- --nocapture 2>&1 | tee "$RUNNER_TEMP/promotion-proof/existing-trial.log"
           grep -F 'isolated_trial_refuses_generic_pre_activation_restore ... ok' \
             "$RUNNER_TEMP/promotion-proof/existing-trial.log"
+          timeout -k 5s 480s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            test --locked -j 2 -p t3-code-ls-storage --lib \
+            application_bootstrap::upgrade::tests::service_forward_commit_refuses_rollback_without_unsealing \
+            -- --ignored --exact --nocapture 2>&1 | tee "$RUNNER_TEMP/promotion-proof/forward-decision.log"
+          grep -F 'T05 forward decision interruption and rollback refusal verified with installed helpers' \
+            "$RUNNER_TEMP/promotion-proof/forward-decision.log"
+          timeout -k 5s 180s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            test --locked -j 2 -p t3-code-ls-storage --test store \
+            isolated_trial_cli_restarts_from_checkpoint_after_interruption \
+            -- --exact 2>&1 | tee "$RUNNER_TEMP/promotion-proof/isolated-cli-restart.log"
+          grep -F 'isolated_trial_cli_restarts_from_checkpoint_after_interruption ... ok' \
+            "$RUNNER_TEMP/promotion-proof/isolated-cli-restart.log"
           cp "$RUNNER_TEMP/promotion-toolchain/installation-proof.json" "$RUNNER_TEMP/promotion-proof/"
       - name: Retain bounded recovery evidence
         if: always()
