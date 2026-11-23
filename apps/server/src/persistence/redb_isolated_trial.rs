@@ -877,10 +877,10 @@ pub(super) fn validate_observation(saved: &IsolatedTrialVerification) -> Result<
         .as_ref()
         .ok_or(Error::IncompatibleStore)?;
     let witness = &observation.witness;
-    let digest = format!(
-        "{:x}",
-        Sha256::digest(observation.verification_json.as_bytes())
-    );
+    let digest: String = Sha256::digest(observation.verification_json.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
     if input.candidate_observation.is_some()
         || input.request != saved.request
         || input.preparation != saved.preparation
