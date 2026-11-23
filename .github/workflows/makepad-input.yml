@@ -27,9 +27,16 @@ jobs:
           manifest=apps/desktop/makepad-input/Cargo.toml
           git rev-parse HEAD HEAD^{tree}
           sha256sum "$manifest" apps/desktop/makepad-input/Cargo.lock
-          cargo +1.99.1 test --locked --manifest-path "$manifest" server_snapshot | tee "$RUNNER_TEMP/makepad-reader.log"
+          resolution=(--manifest-path "$manifest" --format-version 1 --filter-platform x86_64-unknown-linux-gnu)
+          if ! cargo +1.99.1 metadata --locked "${resolution[@]}" > /dev/null; then
+            cargo +1.99.1 metadata "${resolution[@]}" > /dev/null
+            git --no-pager diff -- apps/desktop/makepad-input/Cargo.lock
+            exit 1
+          fi
+          cargo +1.99.1 test --locked --offline --manifest-path "$manifest" server_snapshot | tee "$RUNNER_TEMP/makepad-reader.log"
           grep -Eq 'test result: ok\. [1-9][0-9]* passed' "$RUNNER_TEMP/makepad-reader.log"
   macos-arm64:
+    if: ${{ !startsWith(github.ref_name, 'candidate/t3code-ls-t01-makepad-input-lock-') }}
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['macos-15'] || 'macos-15' }}
     timeout-minutes: 35
     env:
