@@ -28,7 +28,7 @@ import {
   sameThreadStructure,
 } from "./threadDetail.ts";
 import { mergeOlderHistoryIntoProjection } from "./threadHistoryMerge.ts";
-import { EMPTY_ENVIRONMENT_THREAD_STATE } from "./threadState.ts";
+import { EMPTY_ENVIRONMENT_THREAD_STATE, type EnvironmentThreadState } from "./threadState.ts";
 
 const later = DateTime.makeUnsafe("2026-06-20T00:00:01.000Z");
 
@@ -210,9 +210,13 @@ describe("quietThreadAtom", () => {
 });
 
 it("keeps assistant text, timestamp and applied sequence together across stream, reset and resume", () => {
-  const state = Atom.make(AsyncResult.success({
-    ...EMPTY_ENVIRONMENT_THREAD_STATE, sequence: 7, data: Option.some(withItem(assistant)),
-  }));
+  const state = Atom.make(
+    AsyncResult.success<EnvironmentThreadState>({
+      ...EMPTY_ENVIRONMENT_THREAD_STATE,
+      sequence: 7,
+      data: Option.some(withItem(assistant)),
+    }),
+  );
   const details = createEnvironmentThreadDetailAtoms(() => state);
   const ref = { environmentId: EnvironmentId.make("env"), threadId: v2ThreadId };
   const snapshot = details.assistantMessageSnapshotAtom(ref, assistant.id);
