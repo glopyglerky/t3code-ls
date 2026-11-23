@@ -22,6 +22,7 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Write;
 use std::io::{self, BufRead, BufReader, Read};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 
@@ -374,16 +375,20 @@ impl TrialLease {
                 return Err(Error::IncompatibleStore);
             }
         }
+        let publication = saved.sealed_publication.as_ref().map(|sealed| sealed.phase);
+        let forward = publication == Some(SealedPromotionPhase::ForwardCommitted);
         verify_intent_helper(
             &source,
             &intent.source_helper_schema_sha256,
-            saved.sealed_publication.is_some(),
+            publication.is_some(),
+            forward.then_some(intent.source_helper_sha256.as_str()),
         )
         .await?;
         verify_intent_helper(
             &target,
             &activation.target_schema_sha256,
-            saved.sealed_publication.is_some(),
+            publication.is_some(),
+            forward.then_some(activation.target_helper_sha256.as_str()),
         )
         .await?;
         self.verify_installed_runtime(
@@ -652,19 +657,38 @@ async fn record_sealed_phase(
     validate_observation(&proposed)?;
     lease.verify_promotion_bindings(&proposed).await?;
     lease.verify_sealed_binding(&proposed)?;
-    let bytes = serde_json::to_vec(&proposed).map_err(|_| Error::IncompatibleStore)?;
+    persist_sealed_receipt(lease, receipt, saved, &proposed, || Ok(()))?;
+    *saved = proposed;
+    Ok(())
+}
+
+fn persist_sealed_receipt(
+    lease: &TrialLease,
+    receipt: &Path,
+    saved: &IsolatedTrialVerification,
+    proposed: &IsolatedTrialVerification,
+    verify_files: impl FnOnce() -> Result<()>,
+) -> Result<()> {
+    #[cfg(test)]
+    let phase = proposed.sealed_publication.as_ref().unwrap().phase;
+    let bytes = serde_json::to_vec(proposed).map_err(|_| Error::IncompatibleStore)?;
     if bytes.len() > 8192 {
         return Err(Error::IncompatibleStore);
+    }
+    #[cfg(test)]
+    if phase == SealedPromotionPhase::ForwardCommitted {
+        super::tests::interrupt_trial_publication("forward-commit-prewrite");
     }
     let mut stage =
         tempfile::NamedTempFile::new_in(TrialRestoreDirectories::pinned(&lease.directories.state))
             .map_err(io_error)?;
     stage.write_all(&bytes).map_err(io_error)?;
     stage.as_file().sync_all().map_err(io_error)?;
+    verify_files()?;
     lease.verify_ownership()?;
     lease.checkpoint.verify()?;
-    lease.verify_sealed_binding(&proposed)?;
-    if read_trial_receipt::<IsolatedTrialVerification>(receipt)?.as_ref() != Some(&*saved) {
+    lease.verify_sealed_binding(proposed)?;
+    if read_trial_receipt::<IsolatedTrialVerification>(receipt)?.as_ref() != Some(saved) {
         return Err(Error::IncompatibleStore);
     }
     #[cfg(test)]
@@ -675,18 +699,89 @@ async fn record_sealed_phase(
         .persist(receipt)
         .map_err(|error| io_error(error.error))?;
     lease.sync_publication()?;
-    if read_trial_receipt::<IsolatedTrialVerification>(receipt)?.as_ref() != Some(&proposed) {
+    if read_trial_receipt::<IsolatedTrialVerification>(receipt)?.as_ref() != Some(proposed) {
         return Err(Error::UnknownCommit);
     }
-    *saved = proposed;
     #[cfg(test)]
     super::tests::interrupt_trial_publication(match phase {
         SealedPromotionPhase::Publishing => "sealed-phase-publishing-durable",
         SealedPromotionPhase::Published => "sealed-phase-published-durable",
         SealedPromotionPhase::RollingBack => "sealed-phase-rolling-back-durable",
         SealedPromotionPhase::RolledBack => "sealed-phase-rolled-back-durable",
+        SealedPromotionPhase::ForwardCommitted => "forward-commit-durable",
     });
     Ok(())
+}
+
+#[cfg(test)]
+pub(super) async fn record_forward_commit(home: PathBuf, update_id: String) -> Result<bool> {
+    let directories = TrialRestoreDirectories::open(&home)?;
+    let receipt = TrialRestoreDirectories::pinned(&directories.state)
+        .join(format!(".statev2-trial-{update_id}.receipt-v1.json"));
+    let saved = read_trial_receipt::<IsolatedTrialVerification>(&receipt)?
+        .ok_or(Error::IncompatibleStore)?;
+    validate_observation(&saved)?;
+    validate_isolated_trial_request(&home, &update_id, &saved.request)?;
+    validate_isolated_trial_preparation(&saved.request, &saved.preparation)?;
+    let publication = saved
+        .sealed_publication
+        .as_ref()
+        .ok_or(Error::IncompatibleStore)?;
+    let reused = match publication.phase {
+        SealedPromotionPhase::Published => false,
+        SealedPromotionPhase::ForwardCommitted => true,
+        _ => return Err(Error::IncompatibleStore),
+    };
+
+    let lease = TrialLease::open_for(
+        home.clone(),
+        &saved.request,
+        Some(SealedMove::PublishIntended),
+    )
+    .await?;
+    directories.verify(&home)?;
+    if read_trial_receipt::<IsolatedTrialVerification>(&receipt)?.as_ref() != Some(&saved) {
+        return Err(Error::IncompatibleStore);
+    }
+    let state = TrialRestoreDirectories::pinned(&lease.directories.state);
+    let original = preserved_path(&state, &update_id);
+    let failed = state.join(format!(".statev2-failed-sealed-{update_id}.omdb"));
+    let candidate = lease
+        .open_candidate(
+            state.join("statev2.omdb"),
+            &saved.request,
+            &saved.preparation,
+            1,
+            true,
+        )
+        .await?;
+    let verify_files = || {
+        if super::trial_entry_exists(&lease.trial)? || super::trial_entry_exists(&failed)? {
+            return Err(Error::IncompatibleStore);
+        }
+        lease.live.verify_at(&original, 1)?;
+        candidate.verify()
+    };
+
+    let mut proposed = saved.clone();
+    proposed.sealed_publication = Some(SealedPromotionPublication {
+        phase: SealedPromotionPhase::ForwardCommitted,
+        ..publication.clone()
+    });
+    lease.verify_sealed_binding(&saved)?;
+    lease.verify_promotion_bindings(&proposed).await?;
+    if reused {
+        lease.sync_publication()?;
+        lease.verify_inputs()?;
+        verify_files()?;
+        lease.verify_sealed_binding(&saved)?;
+        if read_trial_receipt::<IsolatedTrialVerification>(&receipt)?.as_ref() != Some(&saved) {
+            return Err(Error::IncompatibleStore);
+        }
+    } else {
+        persist_sealed_receipt(&lease, &receipt, &saved, &proposed, verify_files)?;
+    }
+    Ok(reused)
 }
 
 pub(super) async fn move_sealed(
@@ -700,6 +795,13 @@ pub(super) async fn move_sealed(
     let mut saved = read_trial_receipt::<IsolatedTrialVerification>(&receipt)?
         .ok_or(Error::IncompatibleStore)?;
     validate_observation(&saved)?;
+    if saved
+        .sealed_publication
+        .as_ref()
+        .is_some_and(|sealed| sealed.phase == SealedPromotionPhase::ForwardCommitted)
+    {
+        return Err(Error::IncompatibleStore);
+    }
     if matches!(movement, SealedMove::Publish) && saved.promotion_intent.is_some() {
         // An intent must not enter the legacy database-only publication path.
         return Err(Error::IncompatibleStore);
@@ -1341,10 +1443,34 @@ pub(super) async fn record_observation(
 
 // The capability command is read-only. Bound both pipes and execution time before
 // extending a receipt that an older rollback helper would refuse to parse.
-async fn verify_intent_helper(path: &Path, schema: &str, publication: bool) -> Result<()> {
+async fn verify_intent_helper(
+    path: &Path,
+    schema: &str,
+    publication: bool,
+    fence_helper_sha256: Option<&str>,
+) -> Result<()> {
     use std::process::Stdio;
     use tokio::io::AsyncReadExt;
-    let mut child = tokio::process::Command::new(path)
+    let pinned = if let Some(sha256) = fence_helper_sha256 {
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        let file = crate::backend::open_regular_file(path, &mut options)?;
+        if trial_file_digest(&file)? != sha256 {
+            return Err(Error::IncompatibleStore);
+        }
+        Some(file)
+    } else {
+        None
+    };
+    // Resolve through our open file so the probe executes the artifact we hashed.
+    let pinned_path = pinned.as_ref().map(|file| {
+        PathBuf::from(format!(
+            "/proc/{}/fd/{}",
+            std::process::id(),
+            file.as_raw_fd()
+        ))
+    });
+    let mut child = tokio::process::Command::new(pinned_path.as_deref().unwrap_or(path))
         .arg("trial-capabilities")
         .env_clear()
         .stdin(Stdio::null())
@@ -1373,6 +1499,9 @@ async fn verify_intent_helper(path: &Path, schema: &str, publication: bool) -> R
             || frame["result"]["sealedTrialRollback"] != 1
             || frame["result"]["promotionIntent"] != 1
             || (publication && frame["result"]["sealedIntentPublication"] != 1)
+            || (fence_helper_sha256.is_some()
+                && frame["result"]["sealedGenericRestoreFence"]
+                    != super::SEALED_GENERIC_RESTORE_FENCE_VERSION)
             || frame["result"]["targetSchemaSha256"] != schema
         {
             return Err(Error::IncompatibleStore);

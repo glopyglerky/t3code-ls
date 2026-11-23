@@ -129,9 +129,10 @@ pub enum SealedPromotionPhase {
     Published,
     RollingBack,
     RolledBack,
+    ForwardCommitted,
 }
 
-/// Durable physical transition only; this never selects or unseals a runtime.
+/// Durable state of a sealed trial; this never selects or unseals a runtime.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SealedPromotionPublication {
@@ -307,6 +308,9 @@ pub async fn inspect_isolated_service_trial_selection(
     ))
 }
 
+#[cfg(target_os = "linux")]
+const SEALED_GENERIC_RESTORE_FENCE_VERSION: u32 = 1;
+
 /// The launcher reads this before stopping an active runtime for a native trial.
 pub fn service_trial_capabilities() -> Result<serde_json::Value> {
     #[cfg(target_os = "linux")]
@@ -319,12 +323,26 @@ pub fn service_trial_capabilities() -> Result<serde_json::Value> {
             "sealedTrialRollback": 1,
             "promotionIntent": 1,
             "sealedIntentPublication": 1,
+            "sealedGenericRestoreFence": SEALED_GENERIC_RESTORE_FENCE_VERSION,
         }))
     }
     #[cfg(not(target_os = "linux"))]
     Err(Error::Invalid(
         "isolated service trials are unsupported on this platform".into(),
     ))
+}
+
+// Only the process fixture can make an irreversible decision until a forward
+// completion path can reopen the same profile.
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) async fn record_fixture_forward_commit(
+    home: PathBuf,
+    update_id: String,
+) -> Result<bool> {
+    if !home.is_absolute() || !valid_update_id(&update_id) {
+        return Err(Error::IncompatibleStore);
+    }
+    isolated::record_forward_commit(home, update_id).await
 }
 
 fn validate_isolated_trial_request(

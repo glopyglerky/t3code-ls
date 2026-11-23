@@ -632,6 +632,7 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
                 "sealedTrialRollback": 1,
                 "promotionIntent": 1,
                 "sealedIntentPublication": 1,
+                "sealedGenericRestoreFence": 1,
             },
         })
     );
