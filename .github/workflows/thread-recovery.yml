@@ -158,6 +158,7 @@ jobs:
       - name: Exercise task-cache cleanup and savings transactions
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-task-cache-')
         run: |
+          pnpm --filter @t3tools/task-cache typecheck
           pnpm --filter @t3tools/task-cache test src/Cleanup.test.ts src/Cache.test.ts \
             src/NativeClients.test.ts src/Savings.test.ts
       - name: Exercise cache publication and reads through Workerd
