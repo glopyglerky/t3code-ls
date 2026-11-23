@@ -477,6 +477,120 @@ impl StorageBackend for LeasedTrialBackend {
     }
 }
 
+// Both fixture owners use the same native engine open. The adapter deliberately
+// never forwards close/unlock to the physical lease owner.
+#[cfg(all(test, target_os = "linux"))]
+fn open_leased_trial_writer(file: Arc<redb::backends::FileBackend>) -> Result<Database> {
+    let mut options = builder();
+    options.set_concurrency_mode(ConcurrencyMode::ExclusiveWriter);
+    options
+        .create_with_backend(LeasedTrialBackend {
+            file,
+            writable: true,
+        })
+        .map_err(storage_error)
+}
+
+#[cfg(all(test, target_os = "linux"))]
+fn verify_inherited_trial_lease(file: &File, max_bytes: u64) -> Result<()> {
+    use std::io::Read;
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = file.metadata().map_err(storage_error)?;
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || metadata.len() == 0
+        || metadata.len() > max_bytes
+    {
+        return Err(Error::IncompatibleStore);
+    }
+    // Inspect this exact description. F_GETLK cannot identify its own OFD lock,
+    // and reopening /proc/self/fd would create a different description.
+    let info =
+        File::open(format!("/proc/self/fdinfo/{}", file.as_raw_fd())).map_err(storage_error)?;
+    let mut bytes = Vec::new();
+    info.take(16 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(storage_error)?;
+    if bytes.len() > 16 * 1024 {
+        return Err(Error::IncompatibleStore);
+    }
+    let info = std::str::from_utf8(&bytes).map_err(storage_error)?;
+    if !info.lines().any(|line| {
+        let fields: Vec<_> = line.split_whitespace().collect();
+        fields.len() == 9
+            && fields[0] == "lock:"
+            && fields[2] == "OFDLCK"
+            && fields[3] == "ADVISORY"
+            && fields[4] == "WRITE"
+            && fields[5] == "-1"
+            && fields[7] == "0"
+            && fields[8] == "EOF"
+    }) {
+        return Err(Error::IncompatibleStore);
+    }
+    Ok(())
+}
+
+#[cfg(all(test, target_os = "linux"))]
+impl Backend {
+    /// Synthetic writer-open seam, not an activation or serving authority.
+    /// The supervisor must retain its owners and serialize ALL engine handles
+    /// sharing this OFD, including snapshots, until this handle shuts down.
+    /// `verify` must bind the exact file to current parent authority, receipt,
+    /// selection and catalog. Possession of a locked descriptor is insufficient.
+    async fn inherited_trial_checked_writer(
+        file: File,
+        max_bytes: u64,
+        verify: impl FnOnce(&File) -> Result<()> + Send + 'static,
+    ) -> Result<Self> {
+        use std::os::fd::AsRawFd;
+
+        tokio::task::spawn_blocking(move || {
+            verify_inherited_trial_lease(&file, max_bytes)?;
+            // Reject malformed/repair-required stores without permitting an
+            // engine-open repair write before the authority callback.
+            let preview = Self::inherited_trial_snapshot(&file)?;
+            validate_tables(&preview.begin_read().map_err(storage_error)?)?;
+            preview.close().map_err(storage_error)?;
+            verify(&file)?;
+            verify_inherited_trial_lease(&file, max_bytes)?;
+            let path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
+            // FileBackend::new only adopts the File at the pinned revision;
+            // no lock methods or close are forwarded to it by the adapter.
+            let file = Arc::new(redb::backends::FileBackend::new(file).map_err(storage_error)?);
+            let writer = Arc::new(open_leased_trial_writer(file)?);
+            let handles = Arc::new(DatabaseHandles {
+                path,
+                exclusive: true,
+                read_only: false,
+                identity: None,
+                reader: None,
+                writer: Mutex::new(Some(writer)),
+                opening: Mutex::new(()),
+            });
+            validate_tables(&handles.begin_read()?)?;
+            Ok(Self { handles })
+        })
+        .await
+        .map_err(worker_error)?
+    }
+
+    fn inherited_trial_snapshot(file: &File) -> Result<ReadOnlyDatabase> {
+        let mut options = builder();
+        options.set_concurrency_mode(ConcurrencyMode::ExclusiveWriter);
+        options
+            .open_read_only_with_backend(InheritedTrialReader(
+                file.try_clone().map_err(storage_error)?,
+            ))
+            .map_err(|error| match error {
+                redb::DatabaseError::RepairAborted => Error::RecoveryRequired,
+                other => storage_error(other),
+            })
+    }
+}
+
 #[cfg(all(test, target_os = "linux"))]
 impl ExclusiveTrialFile {
     pub(crate) fn acquire(path: PathBuf, max_bytes: u64) -> Result<Self> {
@@ -600,12 +714,7 @@ impl ExclusiveTrialFile {
                 TrialOpen::Writer(verify) => {
                     verify(&file)?;
                     lease.verified_file()?;
-                    let database = options
-                        .create_with_backend(LeasedTrialBackend {
-                            file: lease.file,
-                            writable: true,
-                        })
-                        .map_err(storage_error)?;
+                    let database = open_leased_trial_writer(lease.file)?;
                     (None, Some(Arc::new(database)))
                 }
             };
@@ -2350,6 +2459,216 @@ mod tests {
             .shutdown()
             .await
             .unwrap();
+    }
+
+    #[cfg(target_os = "linux")]
+    fn assert_trial_peers_excluded(path: &Path) {
+        assert!(matches!(
+            builder().open_read_only(path),
+            Err(redb::DatabaseError::DatabaseAlreadyOpen)
+        ));
+        let peer = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .unwrap();
+        assert!(matches!(
+            peer.try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn inherited_trial_writer_preserves_parent_lease_cursor_and_restart() {
+        use std::io::{Seek, SeekFrom};
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("candidate.omdb");
+        let backend = Backend::open(&path, true).await.unwrap();
+        let key = store_key("test/inherited-writer");
+        let mut tx = backend.begin().await.unwrap();
+        tx.put(key.clone(), b"before".to_vec()).await.unwrap();
+        tx.commit().await.unwrap();
+        backend.shutdown().await.unwrap();
+        let lease = ExclusiveTrialFile::acquire(path.clone(), 128 * 1024 * 1024).unwrap();
+        let mut cursor = lease.inherited_file().unwrap();
+        cursor.seek(SeekFrom::Start(173)).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        assert_trial_peers_excluded(&path);
+
+        // Neither a pathname reopen nor a failed admission may change bytes.
+        let reopened = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        assert!(matches!(
+            Backend::inherited_trial_checked_writer(reopened, 128 * 1024 * 1024, |_| Ok(())).await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert!(matches!(
+            Backend::inherited_trial_checked_writer(
+                lease.inherited_file().unwrap(),
+                128 * 1024 * 1024,
+                |_| Err(Error::IncompatibleStore),
+            )
+            .await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(cursor.stream_position().unwrap(), 173);
+        assert_trial_peers_excluded(&path);
+
+        let expected = path_identity(&path).unwrap();
+        let writer = Backend::inherited_trial_checked_writer(
+            lease.inherited_file().unwrap(),
+            128 * 1024 * 1024,
+            move |file| {
+                if file_identity(file)? != expected {
+                    return Err(Error::IncompatibleStore);
+                }
+                Ok(())
+            },
+        )
+        .await
+        .unwrap();
+        assert_trial_peers_excluded(&path);
+        let mut tx = writer.begin().await.unwrap();
+        tx.put(key.clone(), b"committed".to_vec()).await.unwrap();
+        tx.commit().await.unwrap();
+        let mut tx = writer.begin().await.unwrap();
+        tx.put(key.clone(), b"rolled-back".to_vec()).await.unwrap();
+        tx.rollback().await.unwrap();
+        writer.shutdown().await.unwrap();
+        assert_trial_peers_excluded(&path);
+        assert_eq!(cursor.stream_position().unwrap(), 173);
+
+        // Restart the real engine under the same lease, then verify durability
+        // again after the supervisor's final description is gone.
+        let writer = Backend::inherited_trial_checked_writer(
+            lease.inherited_file().unwrap(),
+            128 * 1024 * 1024,
+            |_| Ok(()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            writer.read(&key).await.unwrap(),
+            Some(b"committed".to_vec())
+        );
+        writer.shutdown().await.unwrap();
+        assert_trial_peers_excluded(&path);
+        assert_eq!(cursor.stream_position().unwrap(), 173);
+        drop(cursor);
+        drop(lease);
+        let reader = Backend::open_read_only(&path).await.unwrap();
+        assert_eq!(
+            reader.read(&key).await.unwrap(),
+            Some(b"committed".to_vec())
+        );
+        reader.shutdown().await.unwrap();
+        println!(
+            "T05 inherited writer: admission refusal, commit, rollback, engine restart, parent locks and cursor"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn inherited_trial_writer_refuses_foreign_oversize_and_corrupt_without_writes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("foreign.omdb");
+        Backend::open(&path, true)
+            .await
+            .unwrap()
+            .shutdown()
+            .await
+            .unwrap();
+        let lease = ExclusiveTrialFile::acquire(path.clone(), 128 * 1024 * 1024).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let foreign_identity = path_identity(&path).unwrap();
+        let other = directory.path().join("expected.omdb");
+        Backend::open(&other, true)
+            .await
+            .unwrap()
+            .shutdown()
+            .await
+            .unwrap();
+        let expected = path_identity(&other).unwrap();
+        assert_ne!(foreign_identity, expected);
+        assert!(matches!(
+            Backend::inherited_trial_checked_writer(
+                lease.inherited_file().unwrap(),
+                128 * 1024 * 1024,
+                move |file| {
+                    if file_identity(file)? != expected {
+                        return Err(Error::IncompatibleStore);
+                    }
+                    Ok(())
+                },
+            )
+            .await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert!(matches!(
+            Backend::inherited_trial_checked_writer(
+                lease.inherited_file().unwrap(),
+                1,
+                |_| panic!("oversize reached admission"),
+            )
+            .await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_trial_peers_excluded(&path);
+        drop(lease);
+
+        let path = directory.path().join("corrupt.omdb");
+        let before = vec![0x5a; 8192];
+        std::fs::write(&path, &before).unwrap();
+        let lease = ExclusiveTrialFile::acquire(path.clone(), 128 * 1024 * 1024).unwrap();
+        let reached_admission = Arc::new(AtomicBool::new(false));
+        let observed = reached_admission.clone();
+        assert!(
+            Backend::inherited_trial_checked_writer(
+                lease.inherited_file().unwrap(),
+                128 * 1024 * 1024,
+                move |_| {
+                    observed.store(true, Ordering::Release);
+                    Ok(())
+                },
+            )
+            .await
+            .is_err()
+        );
+        assert!(!reached_admission.load(Ordering::Acquire));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        // A failed engine open must not release either parent lock.
+        let peer = redb::backends::FileBackend::new(
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&path)
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !peer
+                .try_lock_range(Bound::Unbounded, Bound::Unbounded)
+                .unwrap()
+        );
+        assert!(matches!(
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .try_lock(),
+            Err(std::fs::TryLockError::WouldBlock)
+        ));
+        println!(
+            "T05 inherited writer: foreign, oversize and corrupt refusals preserve bytes and locks"
+        );
     }
 
     #[test]

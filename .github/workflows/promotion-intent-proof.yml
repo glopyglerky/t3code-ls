@@ -131,6 +131,12 @@ jobs:
                 -- --exact --nocapture 2>&1 | tee "$proof/sealed-image.log"
               grep -F "test $image_test ... ok" "$proof/sealed-image.log"
             fi
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-catalog-integrated-writer-* ]]; then
+              timeout -k 5s 180s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+                test --locked -j 2 -p t3-code-ls-storage --lib backend::tests::inherited_trial_writer_ \
+                -- --nocapture 2>&1 | tee "$proof/inherited-writer.log"
+              grep -F 'test result: ok. 2 passed; 0 failed' "$proof/inherited-writer.log"
+            fi
             sha256sum --check "$proof/prior-helper.sha256"
             timeout -k 5s 600s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
               test --locked -j 2 -p t3-code-ls-storage --lib \
