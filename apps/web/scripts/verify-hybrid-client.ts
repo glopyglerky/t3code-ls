@@ -18,17 +18,28 @@ import {
   ORCHESTRATION_PROTOCOL_HEADER,
   ORCHESTRATION_PROTOCOL_VERSION_TEXT,
   OrchestrationV2ThreadDetailSnapshot,
-  type TerminalAttachStreamEvent,
-  type TerminalSessionSnapshot,
+  WS_METHODS,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
-import { chromium, type Browser, type Locator, type Page, type Response as BrowserResponse } from "playwright";
+import {
+  chromium,
+  errors as playwrightErrors,
+  type Browser,
+  type Locator,
+  type Page,
+  type Response as BrowserResponse,
+} from "playwright";
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
+import { SOCKET_FRAME_PARTS_QUERY_PARAM } from "@t3tools/shared/socketFrameParts";
 import { verifyGuestNameForm } from "./hybrid-client-guest-name.ts";
 import { verifyBundledVoiceDraft } from "./hybrid-client-voice.ts";
 import { inspectNativeMessageUpdates, inspectNativeReplay } from "./hybrid-client-database.ts";
 import { stagePreviewFixtureBrowser, verifyPreviewLifetime } from "./hybrid-client-preview.ts";
+import {
+  installTerminalWireObserver,
+  type TerminalWireWindow,
+} from "./hybrid-client-terminal-wire.ts";
 import {
   assertReplayTurnLinks,
   replayTurnIdentity,
@@ -1526,66 +1537,67 @@ async function verifyTerminalContention(
     "",
   ].join("\n"), { mode: 0o600, flag: "wx" });
 
-  type WireView = {
-    output: string;
-    snapshot?: TerminalSessionSnapshot;
-    sockets: number;
-    parts: number;
-    outputs: number;
-    snapshots: number;
-  };
-  const newWireView = (): WireView => ({ output: "", sockets: 0, parts: 0, outputs: 0, snapshots: 0 });
-  const before = newWireView();
-  const after = newWireView();
+  const origin = new URL(page.url()).origin;
+  await page.addInitScript(installTerminalWireObserver, {
+    origin,
+    threadId,
+    terminalId: DEFAULT_TERMINAL_ID,
+    attachTag: WS_METHODS.terminalAttach,
+    observeTag: WS_METHODS.terminalObserve,
+    framePartsParam: SOCKET_FRAME_PARTS_QUERY_PARAM,
+  });
+
+  const driverCounters = () => ({ sockets: 0, sent: 0, received: 0, errors: 0 });
+  const beforeDriver = driverCounters();
+  const afterDriver = driverCounters();
   let reattaching = false;
   const observeSocket = (socket: import("playwright").WebSocket) => {
     const url = new URL(socket.url());
-    if (url.pathname !== "/ws") return;
-    const view = reattaching ? after : before;
-    view.sockets++;
-    let pending = "";
-    socket.on("framereceived", ({ payload }) => {
-      const frame = payload.toString();
-      // The negotiated RPC transport prefixes every nonfinal JSON part with RS.
-      if (url.searchParams.has("frameParts") && frame.startsWith("\u001e")) {
-        view.parts++;
-        pending += frame.slice(1);
-        return;
-      }
-      const json = pending + frame;
-      pending = "";
-      if (!json.includes('"type":"output"') && !json.includes('"type":"snapshot"')) return;
-      const envelope = JSON.parse(json) as { values?: TerminalAttachStreamEvent[] };
-      for (const event of envelope.values ?? []) {
-        if (
-          event.type === "snapshot" &&
-          event.snapshot?.threadId === threadId &&
-          event.snapshot.terminalId === DEFAULT_TERMINAL_ID
-        ) {
-          view.snapshots++;
-          view.snapshot = event.snapshot;
-        }
-        if (
-          event.type === "output" &&
-          event.threadId === threadId &&
-          event.terminalId === DEFAULT_TERMINAL_ID
-        ) {
-          view.outputs++;
-          view.output = (view.output + event.data).slice(-64 * 1024);
-        }
-      }
-    });
+    if (url.origin !== origin.replace(/^http/u, "ws") || url.pathname !== "/ws") return;
+    const counters = reattaching ? afterDriver : beforeDriver;
+    counters.sockets++;
+    socket.on("framesent", () => counters.sent++);
+    socket.on("framereceived", () => counters.received++);
+    socket.on("socketerror", () => counters.errors++);
   };
-  const waitForWire = async (view: WireView, checkpoint: string, received: () => boolean) => {
-    const deadline = Date.now() + 10_000;
-    while (!received() && Date.now() < deadline) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 25));
-    }
-    const { sockets, parts, outputs, snapshots } = view;
-    Assert.ok(received(), `${checkpoint} absent on the browser socket (${JSON.stringify({
-      sockets, parts, outputs, snapshots, rows: rows(view.output).length,
-      snapshotRows: rows(view.snapshot?.history ?? "").length,
-    })})`);
+  const waitForWire = async (checkpoint: "echo" | "snapshot" | "drain", shell: string) => {
+    const readWire = () => (window as TerminalWireWindow).__t3FixtureTerminalWire;
+    const handle = await page.waitForFunction(
+      ({ checkpoint, echoPattern, shell }) => {
+        const wire = (window as TerminalWireWindow).__t3FixtureTerminalWire;
+        if (wire === undefined) return false;
+        const { counters, output, snapshot } = wire;
+        if (counters.attachRequests > 1 || counters.mismatchedEvents > 0 || counters.overflow > 0) {
+          return wire;
+        }
+        const echo = new RegExp(echoPattern, "mu");
+        if (checkpoint === "echo" && echo.test(output)) return wire;
+        if (checkpoint === "snapshot" && echo.test(snapshot?.history ?? "")) return wire;
+        if (checkpoint === "drain" && output.includes(`j45-drained:${shell}`)) return wire;
+        return false;
+      },
+      { checkpoint, echoPattern: echoLine.source, shell },
+      { timeout: 10_000 },
+    ).catch((error: unknown) => {
+      if (error instanceof playwrightErrors.TimeoutError) return undefined;
+      throw error;
+    });
+    const wire = handle ? await handle.jsonValue() : await page.evaluate(readWire);
+    await handle?.dispose();
+    const diagnostics = {
+      driver: { ...(reattaching ? afterDriver : beforeDriver) },
+      browser: wire && {
+        ...wire.counters,
+        rows: rows(wire.output).length,
+        snapshotRows: rows(wire.snapshot?.history ?? "").length,
+      },
+    };
+    Assert.ok(
+      wire && handle && wire.counters.attachRequests === 1 &&
+        wire.counters.mismatchedEvents === 0 && wire.counters.overflow === 0,
+      `Terminal wire checkpoint ${checkpoint} failed (${JSON.stringify(diagnostics)})`,
+    );
+    return { ...wire, diagnostics };
   };
   const paste = async (input: Locator, text: string) => {
     await page.evaluate((line) => navigator.clipboard.writeText(line), text);
@@ -1606,7 +1618,7 @@ async function verifyTerminalContention(
     const helper = assertNativePtyOwner(shell, executable, application.pid);
     const shellProcess = liveLinuxProcess(Number(shell));
     Assert.ok(shellProcess);
-    await chat.goto(new URL(page.url()).origin, { waitUntil: "domcontentloaded" });
+    await chat.goto(origin, { waitUntil: "domcontentloaded" });
     const approval = await startCapturedApproval(chat);
     Assert.notEqual(approval.threadId, threadId);
     await page.bringToFront();
@@ -1625,7 +1637,7 @@ async function verifyTerminalContention(
     await paste(input, token);
     const firstScreen = await waitForSelectedTerminalText(page, input, echoLine);
     Assert.deepEqual(rows(firstScreen), firstRows, "The initial burst must render in order");
-    await waitForWire(before, "Initial terminal echo", () => echoLine.test(before.output));
+    const before = await waitForWire("echo", shell);
     Assert.deepEqual(rows(before.output), firstRows, "The initial wire burst must be complete and ordered");
     const inputEcho = before.output.match(echoLine)?.[0]?.trimEnd();
     Assert.equal(inputEcho, token);
@@ -1635,8 +1647,8 @@ async function verifyTerminalContention(
     await page.reload({ waitUntil: "domcontentloaded" });
     const reattached = await terminalInput(page);
     Assert.deepEqual(rows(await waitForSelectedTerminalText(page, reattached, echoLine)), firstRows);
-    await waitForWire(after, "Reattach snapshot", () => echoLine.test(after.snapshot?.history ?? ""));
-    const snapshot = after.snapshot;
+    const reattachWire = await waitForWire("snapshot", shell);
+    const snapshot = reattachWire.snapshot;
     Assert.ok(snapshot, "A fresh browser socket must receive a terminal snapshot");
     Assert.equal(snapshot.status, "running");
     Assert.equal(snapshot.pid, shellProcess.pid);
@@ -1684,7 +1696,7 @@ async function verifyTerminalContention(
     Assert.deepEqual(renderedRows, expectedRows);
     const accepted = `j45-accepted:${token}`;
     Assert.ok(finalScreen.includes(accepted));
-    await waitForWire(after, "Terminal drain marker", () => after.output.includes(`j45-drained:${shell}`));
+    const after = await waitForWire("drain", shell);
     Assert.ok(after.output.includes(accepted));
     const wireRows = [...rows(before.output), ...rows(after.output)];
     Assert.deepEqual(wireRows, expectedRows);
@@ -1711,6 +1723,7 @@ async function verifyTerminalContention(
       snapshotSequence: snapshot.sequence,
       sameShell: true,
       orderedWireRows: wireRows.length,
+      wire: { before: before.diagnostics, after: after.diagnostics },
       orderedRenderedRows: renderedRows.length,
       orderedRowsSha256: NodeCrypto.createHash("sha256").update(wireRows.join("\n")).digest("hex"),
       rowsPerBurst,
