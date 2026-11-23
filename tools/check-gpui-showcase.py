@@ -6,6 +6,7 @@ import sys
 import time
 
 import pyatspi
+from Xlib import X, display, protocol
 from gi.repository import GLib
 
 
@@ -58,6 +59,22 @@ def find_window():
         return None
 
 
+def request_window_close(window):
+    server = display.Display()
+    try:
+        target = server.create_resource_object("window", int(window))
+        delete = server.intern_atom("WM_DELETE_WINDOW")
+        assert delete in target.get_wm_protocols()
+        target.send_event(protocol.event.ClientMessage(
+            window=target,
+            client_type=server.intern_atom("WM_PROTOCOLS"),
+            data=(32, [delete, X.CurrentTime, 0, 0, 0]),
+        ))
+        server.sync()
+    finally:
+        server.close()
+
+
 def main():
     executable = sys.argv[1]
     assert os.path.isabs(executable)
@@ -87,7 +104,7 @@ def main():
         assert "This turn is a replay." in text.getText(0, text.characterCount)
         assert not reply.getState().contains(pyatspi.STATE_EDITABLE)
         find("Message", application, pyatspi.STATE_FOCUSED)
-        x11("windowclose", window)
+        request_window_close(window)
         assert application.wait(timeout=10) == 0
         print("GPUI showcase passed X11 keyboard input and AT-SPI text and focus checks")
     finally:
