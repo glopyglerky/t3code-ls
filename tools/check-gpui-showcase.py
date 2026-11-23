@@ -170,12 +170,38 @@ def check_thread_compose(executable, approval=False):
                 find(item["prompt"], application)
                 field = composer.queryText()
                 assert field.getText(0, field.characterCount) == prompt
-                bounds = button.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
-                assert bounds.width > 0 and bounds.height > 0
-                x11("mousemove", str(bounds.x + bounds.width // 2), str(bounds.y + bounds.height // 2))
-                x11("click", "--repeat", "2", "1")
+                for _ in range(6):
+                    if button.getState().contains(pyatspi.STATE_FOCUSED):
+                        break
+                    x11("key", "Tab")
+                    try:
+                        button = find("Allow once", application, pyatspi.STATE_FOCUSED, timeout=1)
+                    except AssertionError:
+                        continue
+                assert button.getState().contains(pyatspi.STATE_FOCUSED), "Allow once must accept keyboard focus"
+                x11("key", "space")
             if success:
-                find("Server submission confirmed.", application, timeout=60)
+                try:
+                    find("Server submission confirmed.", application, timeout=60)
+                except AssertionError:
+                    if approval:
+                        observed = projection()
+                        runtime_request = next((item for item in observed["runtimeRequests"]
+                                                if item["id"] == approval_id), {})
+                        unconfirmed = "Could not confirm approval and turn completion. Draft kept. Check the server thread."
+                        try:
+                            find(unconfirmed, application, timeout=1)
+                            unconfirmed_visible = True
+                        except AssertionError:
+                            unconfirmed_visible = False
+                        print(json.dumps({
+                            "approvalStillPending": runtime_request.get("status") == "pending",
+                            "approvalResolved": runtime_request.get("status") == "resolved",
+                            "decisionAccepted": runtime_request.get("decision") == "accept",
+                            "runCompleted": any(run["status"] == "completed" for run in observed["runs"]),
+                            "unconfirmedVisible": unconfirmed_visible,
+                        }), flush=True)
+                    raise
                 document = find("Server thread snapshot", application)
                 text = document.queryText()
                 body = text.getText(0, text.characterCount)
