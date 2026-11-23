@@ -2041,7 +2041,51 @@
         "apps/web/src/components/chat/ComposerPrimaryActions.browser.test.tsx": ".github/workflows/composer-offsets.yml"
       },
       "retired_paths": [],
-      "notes": "T01/T02/T11. VITE_T3_CODE_LS_COMPOSER_SUBMIT_RENDERER=dioxus selects the ordinary Send button. The browser submits the existing ChatComposer form, which retains draft, validation and command ownership. Specialized actions use their existing renderer. Run 45205232266 at 6742110c8042b03dad894d65c95d0a6daa5d7ca7 verified keyboard submission over the packaged native route, refusal with the draft retained, and the explicit standard control after a blocked Wasm load. The same opt-in selects the ordinary expanded Stop button beside a follow-up Send. The Stop candidate uses the existing interruption owner and has its own packaged proof selection.",
+      "notes": "T01/T02/T11. VITE_T3_CODE_LS_COMPOSER_SUBMIT_RENDERER=dioxus selects the ordinary Send button. The browser submits the existing ChatComposer form, which retains draft, validation and command ownership. Specialized actions use their existing renderer. Run 45205232266 at 6742110c8042b03dad894d65c95d0a6daa5d7ca7 verified keyboard submission over the packaged native route, refusal with the draft retained, and the explicit standard control after a blocked Wasm load. The same opt-in selects the ordinary expanded Stop button beside a follow-up Send. The Stop candidate uses the existing interruption owner. Run 45217145808 at 03dd40147cb8021a7530842f1ad0a49dbe5bdd43 verified one keyboard interruption, the same reopened run and draft, and a blocked-Wasm fallback.",
+      "rust_crates": ["apps/web/rust/pairing"]
+    },
+    {
+      "id": "browser-approval-action-dioxus",
+      "state": "candidate",
+      "domain_owner": "apps/web/src/components/chat",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/web/src/components/chat/ComposerPendingApprovalActions.tsx",
+          "blob": "67860e45ef2b1fd17b68632c22ffea60783c505f"
+        },
+        {
+          "path": "apps/web/src/components/chat/TimelinePendingApprovalRow.tsx",
+          "blob": "c425d560bf1316189ae9a4c3645d9c6ef46810d6"
+        }
+      ],
+      "rust_paths": ["apps/web/rust/pairing/src/approval_action.rs"],
+      "adapter_paths": [
+        ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/chat/ComposerPendingApprovalActions.tsx",
+        "apps/web/src/components/chat/DioxusApprovalAction.tsx",
+        "apps/web/src/components/chat/TimelinePendingApprovalRow.tsx",
+        "apps/web/src/onboarding/dioxusBindings.ts"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["browser"],
+          "state": "candidate",
+          "implementation": "dioxus-wasm",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "apps/web/scripts/hybrid-client-approval-action.ts",
+        "apps/web/scripts/verify-hybrid-client.ts"
+      ],
+      "hosted_acceptance": {
+        "apps/web/scripts/hybrid-client-approval-action.ts": ".github/workflows/composer-offsets.yml",
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
+      },
+      "retired_paths": [],
+      "notes": "T02/T11. VITE_T3_CODE_LS_APPROVAL_RENDERER=dioxus selects the ordinary Approve action in a command timeline card. The existing handler owns authorization and dispatch. Run 45216749217 at 53f71a71bf13eb2a978877a165cac3e75f657663 verified exact decision identity, duplicate and stale clicks, reopen, the accepted omdb receipt, and the explicit fallback after blocking Wasm.",
       "rust_crates": ["apps/web/rust/pairing"]
     },
     {
@@ -2277,7 +2321,7 @@
         "packages/provider-cursor/src/server/CursorBridge.integration.test.ts": ".github/workflows/cursor-bridge-adapter.yml"
       },
       "retired_paths": [],
-      "notes": "T01 Cursor Send stream candidate using the public sdk.v1 protocol at cursor/sdk-bridge 6c9101088c18fab95c73d2dd68ca11d6fbf7d483. The portable component covers uncompressed Connect JSON framing and terminal outcomes. The real Cursor adapter exercises CreateAgent, Send, and CloseAgent through a selected Rust host in the loopback fixture. Live sessions still use the SDK. The vendor bridge embeds the vendor SDK.",
+      "notes": "T01 Cursor Send stream candidate using the public sdk.v1 protocol at cursor/sdk-bridge 6c9101088c18fab95c73d2dd68ca11d6fbf7d483. The portable component covers uncompressed Connect JSON framing and terminal outcomes. The real Cursor adapter exercises CreateAgent, Send, and CloseAgent through a selected Rust host in the loopback fixture. Run 45217149483 at 5275f0f2173164af67c2b3ff9c0e0ee973dab621 also verified CancelRun with the matched terminal response and rejection of a terminal response for a different run. Live sessions still use the SDK. The vendor bridge embeds the vendor SDK.",
       "rust_crates": ["packages/provider-cursor/rust", "packages/provider-cursor/rust/host"]
     },
     {
