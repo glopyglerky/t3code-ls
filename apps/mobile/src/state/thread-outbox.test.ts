@@ -150,11 +150,15 @@ describe("thread outbox", () => {
         messageId: "message-2",
         createdAt: "2026-06-08T10:00:02.000Z",
       });
+      const encodedSecond = encodeQueuedThreadMessage(second);
+      if (encodedSecond === null || typeof encodedSecond !== "object") {
+        throw new Error("Expected an encoded outbox object");
+      }
       const malformedRecord = {
         read: new Error("storage unavailable"),
         json: "{",
         schema: JSON.stringify({ ...second, schemaVersion: 999 }),
-        identity: JSON.stringify({ ...encodeQueuedThreadMessage(second), messageId: first.messageId }),
+        identity: JSON.stringify({ ...encodedSecond, messageId: first.messageId }),
       }[failure];
       outboxFiles.set("message-2.json", malformedRecord);
       outboxFiles.set("message-1.json", JSON.stringify(encodeQueuedThreadMessage(first)));

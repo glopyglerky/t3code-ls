@@ -1,6 +1,7 @@
 // CI-only companion to the injected entry. Never imported by the normal application.
 import { CommandId, MessageId, ProjectId, ProviderInstanceId, ThreadId, type EnvironmentId } from "@t3tools/contracts";
 import * as Option from "effect/Option";
+import { AsyncResult } from "effect/reactivity";
 import { appAtomRegistry } from "./src/state/atom-registry";
 import { environmentThreads } from "./src/state/threads";
 import { createThreadOutboxDelivery } from "./src/state/threadOutboxDelivery";
@@ -64,13 +65,14 @@ export async function proveInstalledTaskDispatch(
       delivery = createThreadOutboxDelivery(selectOutboxDeliveryResolver({ requireNative: true }));
     }
     const atom = environmentThreads.stateAtom(environmentId, threadId);
-    release = appAtomRegistry.subscribe(atom, () => {});
+    release = appAtomRegistry.mount(atom);
     const deadline = Date.now() + 90_000;
     let snapshot: { runId: string; userMessageCount: number; runCount: number } | undefined;
     while (Date.now() < deadline) {
       const current = appAtomRegistry.get(atom);
-      if (current.status === "live" && Option.isSome(current.data)) {
-        const projection = current.data.value;
+      if (AsyncResult.isSuccess(current) && current.value.status === "live" &&
+          Option.isSome(current.value.data)) {
+        const projection = current.value.data.value;
         const users = projection.messages.filter((row) => row.role === "user");
         if (users.length === 1 && users[0]?.id === messageId && users[0].text === text &&
             projection.runs.length === 1 && projection.runs[0]?.status === "completed" &&

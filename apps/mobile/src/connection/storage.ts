@@ -63,9 +63,7 @@ export const layer = Layer.effectContext(
     const registrationStore = Persistence.ConnectionRegistrationStore.of({
       register: Effect.fn("Persistence.ConnectionRegistrationStore.register")(
         function* (registration, routes) {
-          yield* removalRecovery.beforeRegister(registration.target.environmentId).pipe(
-            Effect.mapError((error) => targetPersistenceError("register-connection", error)),
-          );
+          yield* removalRecovery.beforeRegister(registration.target.environmentId);
           yield* catalog.updateEffect((document) => {
             if (document.environmentRemovals?.pending.some((removal) => removal.environmentId === registration.target.environmentId)) {
               return Effect.fail(new ConnectionTransientError({ reason: "remote-unavailable",
@@ -73,8 +71,9 @@ export const layer = Layer.effectContext(
               }));
             }
             return Effect.succeed(registerConnectionInCatalog(document, registration, routes));
-          }).pipe(Effect.mapError((error) => targetPersistenceError("register-connection", error)));
+          });
         },
+        Effect.mapError((error) => targetPersistenceError("register-connection", error)),
       ),
       setRoutes: Effect.fn("Persistence.ConnectionRegistrationStore.setRoutes")(
         (environmentId, routes) =>
