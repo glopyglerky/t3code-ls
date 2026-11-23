@@ -52,6 +52,7 @@ import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.t
 import { subscribeOrchestrationV2Thread } from "../ws.ts";
 import * as EventSink from "./EventSink.ts";
 import * as EventStore from "./EventStore.ts";
+import { watchForkHistory } from "./ForkHistoryInvalidations.ts";
 import * as OrchestrationHttp from "./http.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProjectStore from "./ProjectStore.ts";
@@ -105,6 +106,7 @@ const management = Layer.unwrap(
         input?.threadId === BODIES
           ? Stream.fromIterable(bodiesLiveTail())
           : eventSink.stream({ ...input, bounded: true }).pipe(Stream.orDie),
+      watchForkHistory: (id) => watchForkHistory(id, projections, eventSink),
     });
   }),
 );
@@ -504,31 +506,57 @@ it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
         return row?.item.type === "system_notice" ? row.item.message : undefined;
       };
 
-      const received = yield* Queue.unbounded<OrchestrationV2ThreadStreamItem>();
-      const stream = yield* subscribeOrchestrationV2Thread({
+      const input = {
         threadId: GRANDCHILD,
         acceptBoundedSnapshot: true,
         acceptCompactTurnItems: true,
         acceptCompactIds: true,
         requestCompletionMarker: true,
+      };
+      const open = Effect.fnUntraced(function* (profile: typeof input & {
+        acceptHistoryInvalidation?: boolean;
+      }) {
+        const received = yield* Queue.unbounded<OrchestrationV2ThreadStreamItem>();
+        const stream = yield* subscribeOrchestrationV2Thread(profile);
+        yield* stream.pipe(
+          Stream.map((item) => decodeStreamItem(JSON.parse(JSON.stringify(encodeStreamItem(item))))),
+          Stream.runForEach((item) => Queue.offer(received, item)),
+          Effect.forkScoped,
+        );
+        const opening = yield* Queue.take(received);
+        if (opening.kind !== "snapshot") throw new Error("Expected the opening snapshot");
+        assert.deepStrictEqual(yield* Queue.take(received), { kind: "synchronized" });
+        return { opening, received };
       });
-      yield* stream.pipe(
-        Stream.map((item) => decodeStreamItem(JSON.parse(JSON.stringify(encodeStreamItem(item))))),
-        Stream.runForEach((item) => Queue.offer(received, item)),
-        Effect.forkScoped,
-      );
-      const opening = yield* Queue.take(received);
-      if (opening.kind !== "snapshot") throw new Error("Expected the opening snapshot");
+      const { opening, received } = yield* open({ ...input, acceptHistoryInvalidation: true });
+      const legacy = yield* open(input);
+      const full = yield* open({
+        ...input,
+        acceptBoundedSnapshot: false,
+        acceptHistoryInvalidation: true,
+      });
       assert.equal(opening.snapshotSequence, childSequence);
       assert.isTrue(opening.turnItemsOmitLocalVisible);
       assert.equal(inheritedText(boundedSnapshotProjection(opening)), original.payload.message);
-      assert.deepStrictEqual(yield* Queue.take(received), { kind: "synchronized" });
 
       yield* eventSink.write({
         events: [
-          amended,
           runCreated(PARENT, laterRun, at, 2),
           itemUpdated(PARENT, laterRun, "outside-fork-history", 5, at),
+          itemUpdated(LONG, longRun, "unrelated-history", 95, at),
+        ],
+      });
+      yield* TestClock.adjust("1 second");
+      assert.isTrue(Option.isNone(yield* Queue.poll(received)));
+
+      yield* eventSink.write({
+        events: [
+          {
+            ...amended,
+            id: EventId.make("event:compact-transport:ancestor-edit-interim"),
+            payload: { ...amended.payload, message: "Interim inherited notice" },
+          },
+          amended,
         ],
       });
       const current = yield* projections.getThreadSnapshotWindow(GRANDCHILD, { rowLimit: 20 });
@@ -538,15 +566,27 @@ it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
 
       yield* TestClock.adjust("1 second");
       const refresh = Option.getOrUndefined(yield* Queue.poll(received));
+      assert.deepStrictEqual(
+        refresh,
+        { kind: "history-invalidated" },
+        "The open stream missed the ancestor-only edit",
+      );
+      assert.deepStrictEqual(encodeStreamItem({ kind: "history-invalidated" }), refresh);
+      assert.isTrue(Option.isNone(yield* Queue.poll(received)));
+      assert.isTrue(Option.isNone(yield* Queue.poll(legacy.received)));
+      assert.isTrue(Option.isNone(yield* Queue.poll(full.received)));
 
-      const [childEvent] = yield* eventSink.write({
-        events: [itemUpdated(GRANDCHILD, null, "child-live-output", 2, at)],
+      const childEvents = yield* eventSink.write({
+        events: [
+          itemUpdated(GRANDCHILD, null, "child-live-output", 2, at),
+          itemUpdated(GRANDCHILD, null, "child-next-output", 3, at),
+        ],
       });
       yield* TestClock.adjust("1 second");
-      const next = Option.getOrUndefined(yield* Queue.poll(received));
-      assert.equal(next?.kind, "event", "The original subscription still receives child events");
-      if (next?.kind === "event") {
-        assert.equal(next.sequence, childEvent!.sequence);
+      for (const childEvent of childEvents) {
+        const next = Option.getOrUndefined(yield* Queue.poll(received));
+        if (next?.kind !== "event") throw new Error("Expected an ordered child event");
+        assert.equal(next.sequence, childEvent.sequence);
         assert.equal(next.event.threadId, GRANDCHILD);
         if (
           next.event.type !== "turn-item.updated" ||
@@ -557,13 +597,18 @@ it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
         assert.isUndefined(next.event.payload.output);
         assert.isTrue(next.event.payload.outputOmitted);
       }
-      assert.equal(refresh?.kind, "snapshot", "The open stream missed the ancestor-only edit");
-      if (refresh?.kind !== "snapshot") throw new Error("Expected a bounded refresh");
-      assert.equal(refresh.snapshotSequence, childSequence);
-      assert.isTrue(refresh.turnItemsOmitLocalVisible);
-      assert.equal(inheritedText(boundedSnapshotProjection(refresh)), amended.payload.message);
-      assert.notInclude(JSON.stringify(refresh), "outside-fork-history");
       assert.isTrue(Option.isNone(yield* Queue.poll(received)));
+
+      const replay = yield* subscribeOrchestrationV2Thread({
+        ...input,
+        acceptHistoryInvalidation: true,
+        afterSequence: childSequence,
+      });
+      const catchup = yield* replay.pipe(Stream.take(childEvents.length + 1), Stream.runCollect);
+      assert.deepStrictEqual(
+        catchup.map((item) => (item.kind === "event" ? item.sequence : item.kind)),
+        [...childEvents.map((event) => event.sequence), "synchronized"],
+      );
     }).pipe(Effect.scoped),
   );
 
