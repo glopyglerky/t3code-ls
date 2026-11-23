@@ -2,7 +2,7 @@ name: Native promotion intent recovery
 
 on:
   push:
-    branches: ["candidate/t3code-ls-t05-promotion-intent-*"]
+    branches: ["candidate/t3code-ls-t05-promotion-intent-*", "candidate/t3code-ls-t05-launcher-promotion-*"]
   workflow_dispatch:
 
 permissions:
@@ -75,6 +75,10 @@ jobs:
         run: |
           set -euo pipefail
           df -k "$RUNNER_TEMP"
+          toolchain="$RUNNER_TEMP/promotion-toolchain"
+          if [[ -d "$toolchain" ]]; then
+            find "$toolchain" -type d -exec chmod u+w {} +
+          fi
           rm -rf "$RUNNER_TEMP/promotion-cargo-home" "$RUNNER_TEMP/promotion-target" \
-            "$RUNNER_TEMP/promotion-profiles" "$RUNNER_TEMP/promotion-toolchain"
+            "$RUNNER_TEMP/promotion-profiles" "$toolchain"
           df -k "$RUNNER_TEMP"
