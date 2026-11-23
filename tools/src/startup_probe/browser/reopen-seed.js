@@ -14,6 +14,7 @@ const fail = (error) => done({ valid: false, error: String(error) });
   socketUrl.protocol = "ws:";
   socketUrl.searchParams.set("wsTicket", ticket);
   socketUrl.searchParams.set("orchestrationProtocol", "2");
+  let scannedThreadCount = 0;
   const imported = await new Promise((resolve, reject) => {
     const socket = new WebSocket(socketUrl);
     const timeout = setTimeout(() => { socket.close(); reject(new Error("Import timed out")); }, 90_000);
@@ -27,14 +28,29 @@ const fail = (error) => done({ valid: false, error: String(error) });
     socket.onerror = () => finish(new Error("Import socket failed"));
     socket.onclose = () => finish(new Error("Import socket closed before its receipt"));
     socket.onopen = () => socket.send(JSON.stringify({
-      _tag: "Request", id: "reopen-import", tag: "agentSessions.import",
-      payload: { projectId: "reopen-fixture", expectedWorkspaceRoot: workspaceRoot }, headers: [],
+      _tag: "Request", id: "reopen-scan", tag: "agentSessions.scan", payload: {}, headers: [],
     }));
     socket.onmessage = (event) => {
       try {
         const decoded = JSON.parse(event.data);
         for (const item of Array.isArray(decoded) ? decoded : [decoded]) {
           if (item._tag === "Ping") { socket.send(JSON.stringify({ _tag: "Pong" })); continue; }
+          // Welcome scanned before the fixture files existed. Import reuses the last scan.
+          if (item.requestId === "reopen-scan" && item._tag === "Exit") {
+            const scan = item.exit?._tag === "Success" ? item.exit.value : null;
+            const candidate = scan?.candidates?.find((row) => row.path === workspaceRoot);
+            if (scan?.truncated === true || candidate?.threadCount !== threadCount ||
+                !candidate.sources.includes("codex")) {
+              finish(new Error(`Fresh scan did not find ${threadCount} fixture threads`));
+              return;
+            }
+            scannedThreadCount = candidate.threadCount;
+            socket.send(JSON.stringify({
+              _tag: "Request", id: "reopen-import", tag: "agentSessions.import",
+              payload: { projectId: "reopen-fixture", expectedWorkspaceRoot: workspaceRoot }, headers: [],
+            }));
+            continue;
+          }
           if (item.requestId !== "reopen-import") continue;
           if (item._tag === "Exit") {
             if (item.exit?._tag === "Success") finish(null, item.exit.value);
@@ -54,5 +70,5 @@ const fail = (error) => done({ valid: false, error: String(error) });
   if (threads.length !== threadCount || !threads.some((thread) => thread.id === selectedThreadId)) {
     throw new Error("Authoritative shell is missing imported threads");
   }
-  done({ valid: true, imported, shellSequence: shell.snapshotSequence });
+  done({ valid: true, scannedThreadCount, imported, shellSequence: shell.snapshotSequence });
 })().catch(fail);
