@@ -4,15 +4,18 @@ import os
 import json
 import subprocess
 import sys
+import signal
 import time
+import urllib.request
+import urllib.parse
 
 import pyatspi
 from Xlib import X, display, protocol
 from gi.repository import GLib
 
 
-def wait_for(condition, message, application):
-    deadline = time.monotonic() + 20
+def wait_for(condition, message, application, timeout=20):
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if application.poll() is not None:
             raise AssertionError(f"Desktop process exited with status {application.returncode}")
@@ -36,7 +39,7 @@ def accessible_nodes(root):
             pass
 
 
-def find(name, application, state=None):
+def find(name, application, state=None, timeout=20):
     def matching_node():
         for node in accessible_nodes(pyatspi.Registry.getDesktop(0)):
             try:
@@ -46,7 +49,7 @@ def find(name, application, state=None):
                 pass
         return None
 
-    return wait_for(matching_node, f"No matching accessible node for {name}", application)
+    return wait_for(matching_node, f"No matching accessible node for {name}", application, timeout)
 
 
 def x11(*args):
@@ -116,7 +119,80 @@ def check_thread_snapshot(executable):
     print("GPUI authenticated snapshot passed AT-SPI content and identity, credential and missing-thread refusal checks")
 
 
+def check_thread_compose(executable):
+    connection = json.load(sys.stdin)
+    prompt = "GPUI sends one recorded prompt."
+    failure = "Could not confirm submission. Draft kept. Check the thread before retrying."
+
+    def projection():
+        path = urllib.parse.quote(connection["threadId"], safe="")
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{connection['port']}/api/orchestration/threads/{path}/bounded",
+            headers={"Authorization": f"Bearer {connection['token']}", "x-t3-orchestration-protocol": "2"},
+        )
+        with urllib.request.urlopen(request, timeout=5) as reply:
+            return json.load(reply)["projection"]
+
+    cases = [
+        ({**connection, "environmentId": "wrong-environment"}, False),
+        ({**connection, "token": "invalid.fixture.token"}, False),
+        ({**connection, "projectId": "wrong-project"}, False),
+        ({**connection, "threadId": "missing-fixture-thread"}, False),
+        (connection, True),
+    ]
+    for request, success in cases:
+        application = subprocess.Popen([executable, "--thread-compose"], stdin=subprocess.PIPE, text=True)
+        try:
+            application.stdin.write(json.dumps(request))
+            application.stdin.close()
+            window = wait_for(find_window, "The GPUI composer did not open", application)
+            x11("windowfocus", "--sync", window)
+            composer = find("Message", application, pyatspi.STATE_FOCUSED)
+            x11("type", "--clearmodifiers", prompt)
+            x11("key", "ctrl+Return")
+            if success:
+                find("Server submission confirmed.", application, timeout=60)
+                document = find("Server thread snapshot", application)
+                text = document.queryText()
+                body = text.getText(0, text.characterCount)
+                assert prompt in body and "todo list fixture complete" in body
+                assert connection["threadId"] in body
+                assert not document.getState().contains(pyatspi.STATE_EDITABLE)
+                field = composer.queryText()
+                assert field.getText(0, field.characterCount) == ""
+            else:
+                find(failure, application, timeout=60)
+                field = composer.queryText()
+                assert field.getText(0, field.characterCount) == prompt
+            # A second submit does not allocate a new command or message identity.
+            x11("key", "ctrl+Return")
+            observed = projection()
+            assert observed["thread"]["id"] == connection["threadId"]
+            assert observed["thread"]["projectId"] == connection["projectId"]
+            assert len(observed["runs"]) == (1 if success else 0)
+            users = [message for message in observed["messages"] if message["role"] == "user"]
+            assert len(users) == (1 if success else 0)
+            if success:
+                assert users[0]["id"] == connection["messageId"]
+                assert users[0]["text"] == prompt
+                assert users[0]["runId"] == observed["runs"][0]["id"]
+            request_window_close(window)
+            assert application.wait(timeout=10) == 0
+        finally:
+            if application.poll() is None:
+                application.terminate()
+                try:
+                    application.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    application.kill()
+                    application.wait(timeout=3)
+    print("GPUI composer passed X11 input, AT-SPI acceptance/refusal and exactly-one projected run checks")
+
+
 def main():
+    def terminate(_signal, _frame):
+        raise SystemExit(1)
+    signal.signal(signal.SIGTERM, terminate)
     executable = sys.argv[1]
     assert os.path.isabs(executable)
     subprocess.run(
@@ -127,6 +203,9 @@ def main():
         ],
         check=True,
     )
+    if sys.argv[2:] == ["--thread-compose"]:
+        check_thread_compose(executable)
+        return
     if sys.argv[2:] == ["--thread-snapshot"]:
         check_thread_snapshot(executable)
         return
