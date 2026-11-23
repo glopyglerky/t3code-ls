@@ -145,16 +145,10 @@ fn review_blob(cwd: &Path, revision: &str, path: &str) -> Option<String> {
     }
     let (_, repo) = open_repository(cwd)?;
     let refs = repo.references().ok()?;
-    // Include packed refs and refuse iterator failures as well as replacements.
-    for reference in refs.all().ok()? {
-        if reference
-            .ok()?
-            .name()
-            .as_bstr()
-            .starts_with(b"refs/replace/")
-        {
-            return None;
-        }
+    // One loose or packed replacement, or an unreadable replacement namespace,
+    // is enough to send an exact object read back to Git.
+    if refs.prefixed("refs/replace/").ok()?.next().is_some() {
+        return None;
     }
     let id = gix::hash::ObjectId::from_hex(revision.as_bytes()).ok()?;
     if id.kind() != repo.object_hash() {

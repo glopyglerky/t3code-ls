@@ -123,6 +123,10 @@ try {
   const dirtyReviewText = "\ufeffalpha\nunchanged\nnew tail";
   FS.writeFileSync(Path.join(workspace, reviewPath), originalReviewText);
   FS.writeFileSync(Path.join(workspace, "binary.dat"), Buffer.from([65, 0, 66]));
+  const replacementPath = "replace.txt";
+  const originalObjectText = "Original committed content.\n";
+  const replacedObjectText = "Replacement committed content.\n";
+  FS.writeFileSync(Path.join(workspace, replacementPath), originalObjectText);
   git(workspace, "add", ".");
   git(workspace, ...fixtureIdentity, "commit", "--quiet", "-m", "Fixture");
   git(workspace, "branch", "作業/修正");
@@ -131,6 +135,13 @@ try {
   FS.writeFileSync(Path.join(linked, reviewPath), dirtyReviewText);
   FS.unlinkSync(Path.join(linked, "binary.dat"));
   const reviewBase = git(linked, "rev-parse", "HEAD");
+  const writeGitObject = (args: string[], input: string) =>
+    ChildProcess.execFileSync("/usr/bin/git", ["-C", workspace, ...args], {
+      input, env: baseEnv, encoding: "utf8", timeout: 10_000,
+    }).trim();
+  const replacementBlob = writeGitObject(["hash-object", "-w", "--stdin"], replacedObjectText);
+  const replacementTree = writeGitObject(["mktree"], `100644 blob ${replacementBlob}\t${replacementPath}\n`);
+  const replacementCommit = git(workspace, ...fixtureIdentity, "commit-tree", replacementTree, "-m", "Replacement fixture");
   FS.mkdirSync(bare);
   git(bare, "init", "--quiet", "--bare", "--initial-branch=main");
   for (const checkout of [configuredWorktree, symlinkedWorktree]) {
@@ -265,6 +276,23 @@ try {
       reviewByMode.set(mode, observedReview);
       if (mode === "upstream") Assert.deepEqual(observedReview, reviewByMode.get("native"));
       report.review = Object.fromEntries(reviewByMode);
+      if (mode === "native") {
+        git(workspace, "replace", reviewBase, replacementCommit);
+        try {
+          git(workspace, "pack-refs", "--all");
+          Assert.ok(FS.readFileSync(Path.join(workspace, ".git", "packed-refs"), "utf8")
+            .includes(`${replacementCommit} refs/replace/${reviewBase}\n`));
+          Assert.equal(FS.existsSync(Path.join(workspace, ".git", "refs", "replace", reviewBase)), false);
+          Assert.equal(git(cwd, "show", "--end-of-options", `${reviewBase}:${replacementPath}`), replacedObjectText.trimEnd());
+          const replacement = await client.rpc((rpc) => rpc[WS_METHODS.reviewGetDiffFileContents]({
+            ...contentsInput, oldPath: replacementPath, newPath: replacementPath,
+          }));
+          Assert.deepEqual(replacement, { oldContents: replacedObjectText, newContents: originalObjectText });
+          report.packedReplacement = { usedReplacement: true, oldContents: replacement.oldContents };
+        } finally {
+          git(workspace, "replace", "-d", reviewBase);
+        }
+      }
     }
     checkpoint(`${mode}:execution-witness`);
     await active.stop(); active = undefined;
@@ -296,6 +324,10 @@ try {
         "Admitted text expansion must avoid retained Git show");
       Assert.ok(calls.some((call) => call.cwd === linked && call.line.includes('"show", "--end-of-options"') &&
         call.line.includes("binary.dat")), "Binary expansion must retain Git diagnostics");
+      Assert.ok(nativeCalls.some((call) => call.cwd === linked && call.line.includes('"review-blob"') &&
+        call.line.includes(JSON.stringify(replacementPath))), "The helper must examine the packed replacement case");
+      Assert.ok(calls.some((call) => call.cwd === linked && call.line.includes('"show", "--end-of-options"') &&
+        call.line.includes(replacementPath)), "The packed replacement must be read by Git");
       Assert.ok(nativeCalls.some((call) => call.cwd === linked && call.line.includes('"branch-head"')),
         "Authenticated status refresh must execute the native branch read");
       Assert.ok(!calls.some((call) => call.cwd === linked && call.line.includes('"--symbolic-full-name", "HEAD"')),
