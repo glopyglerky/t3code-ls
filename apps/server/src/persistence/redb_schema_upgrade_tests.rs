@@ -1339,7 +1339,7 @@ async fn service_intended_sealed_publication_recovers_without_activation() {
         ("sealed-phase-published-durable", false),
     ] {
         println!("T05 checking sealed publication interruption at {}", case.0);
-        promotion_intent_fixture(Some(case)).await;
+        promotion_intent_fixture(Some((Some(case.0), case.1))).await;
         println!(
             "T05 recovered sealed publication interruption at {}",
             case.0
@@ -1351,7 +1351,14 @@ async fn service_intended_sealed_publication_recovers_without_activation() {
 }
 
 #[cfg(target_os = "linux")]
-async fn promotion_intent_fixture(publication_case: Option<(&str, bool)>) {
+#[tokio::test]
+async fn service_intent_only_cancellation_recovers_before_publication() {
+    promotion_intent_fixture(Some((None, true))).await;
+    println!("T05 intent-only cancellation recovered without moving the source or the stage");
+}
+
+#[cfg(target_os = "linux")]
+async fn promotion_intent_fixture(publication_case: Option<(Option<&str>, bool)>) {
     use crate::application::PreparedServiceActivation;
     use crate::application_bootstrap::bootstrap_schema_sha256;
     use crate::application_server_ownership::OwnerLock;
@@ -1585,7 +1592,9 @@ async fn promotion_intent_fixture(publication_case: Option<(&str, bool)>) {
                 String::from_utf8_lossy(&output.stdout)
             );
         };
-        interrupt_move("publish", boundary);
+        if let Some(boundary) = boundary {
+            interrupt_move("publish", boundary);
+        }
         assert_eq!(fs::read(&selection).unwrap(), selection_bytes);
         assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);
         assert!(matches!(
@@ -1593,7 +1602,7 @@ async fn promotion_intent_fixture(publication_case: Option<(&str, bool)>) {
             Err(Error::IncompatibleStore)
         ));
         let phase_receipt = fs::read(&receipt).unwrap();
-        if boundary != "sealed-phase-publishing-written" {
+        if boundary.is_some_and(|value| value != "sealed-phase-publishing-written") {
             let mut alternate_selection = selection_bytes.clone();
             alternate_selection.push(b'\n');
             fs::write(&selection, &alternate_selection).unwrap();
@@ -1604,7 +1613,7 @@ async fn promotion_intent_fixture(publication_case: Option<(&str, bool)>) {
             assert_eq!(fs::read(&receipt).unwrap(), phase_receipt);
             fs::write(&selection, &selection_bytes).unwrap();
         }
-        if boundary != "sealed-phase-publishing-written" {
+        if boundary.is_some_and(|value| value != "sealed-phase-publishing-written") {
             let mut corrupted: Value = serde_json::from_slice(&phase_receipt).unwrap();
             corrupted["sealed_publication"]["version"] = json!(2);
             fs::write(&receipt, serde_json::to_vec(&corrupted).unwrap()).unwrap();
@@ -1627,10 +1636,14 @@ async fn promotion_intent_fixture(publication_case: Option<(&str, bool)>) {
         }
         if cancel_before_rename {
             interrupt_move("rollback", "sealed-phase-rolling-back-durable");
-            if boundary == "intended-preserved" {
+            if boundary == Some("intended-preserved") {
                 interrupt_move("rollback", "intended-rollback-unlinked");
             }
             interrupt_move("rollback", "sealed-phase-rolled-back-durable");
+            assert_eq!(fs::read(&trial).unwrap(), trial_bytes);
+            assert_eq!(fs::metadata(&trial).unwrap().ino(), trial_identity.ino());
+            assert!(!original.exists());
+            assert!(!failed.exists());
         } else {
             let publication = publish_intended_isolated_service_trial(home.clone(), UPDATE.into())
                 .await

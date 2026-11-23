@@ -89,10 +89,12 @@ jobs:
             tools/service-launcher-trial.test.mjs | tee "$RUNNER_TEMP/cli-proof/preparation.log"
           grep -E '^ok [1-9][0-9]* - compiled Rust helper restores ' "$RUNNER_TEMP/cli-proof/preparation.log"
           if [[ "$LAUNCHER_PROMOTION_PROOF" == true ]]; then
-            T3_TEST_LAUNCHER_PROMOTION_INTENT=1 \
+            T3_TEST_LAUNCHER_PROMOTION_INTENT=1 T3_TEST_LAUNCHER_SEALED_PUBLICATION=1 \
               node --test --test-reporter tap --test-name-pattern 'compiled Rust helper records' \
                 tools/service-launcher-trial.test.mjs | tee "$RUNNER_TEMP/cli-proof/promotion-intent.log"
             grep -E '^ok [1-9][0-9]* - compiled Rust helper records ' "$RUNNER_TEMP/cli-proof/promotion-intent.log"
+            grep -F 'Packaged native helper published, verified the serving fence, and restored the original sealed-trial source.' \
+              "$RUNNER_TEMP/cli-proof/promotion-intent.log"
           fi
       - name: Verify optional package manifests and normal Git reads from the archive
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t06-gix-packaged-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')

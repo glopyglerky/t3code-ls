@@ -624,10 +624,21 @@ After rename, rollback restores the original source inode and preserves the
 failed sealed database. The exact helper rejected changed packages, forged
 receipt phases and changed selection bytes. [Native interruption proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45173732320)
 
-The command is available for stopped Linux x64 profiles with a verified trial.
-The restart fixture uses synthetic runtime entry bytes. Launcher selection
-handoff, catalog unsealing and ordinary native update admission still require
-their production recovery proof.
+The installed-archive fixture used the packaged runtime and native helper with
+a synthetic stored event. It verified publication, catalog refusal, exact retry,
+original inode and command receipt after rollback, and a terminal refusal to
+republish. [Packaged trial proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45176710697)
+
+If a stopped trial has recorded its promotion intent and publication has yet
+to begin, rollback can record its terminal phase after verifying the original
+database and sealed stage at their original names. It leaves both files in
+place. The unchanged code refused this boundary. The fixed fixture interrupted
+the durable rollback phases and verified retry without moving either file.
+[Baseline](https://github.com/glopyglerky/t3code-ls/actions/runs/45178423071)
+· [Cancellation recovery](https://github.com/glopyglerky/t3code-ls/actions/runs/45178489482)
+
+Launcher selection handoff, catalog unsealing and ordinary native update
+admission still require production recovery proof.
 
 ## Native startup migration inspection
 

@@ -638,7 +638,10 @@ async fn record_sealed_phase(
         ) {
             return Err(Error::IncompatibleStore);
         }
-    } else if phase != SealedPromotionPhase::Publishing {
+    } else if !matches!(
+        phase,
+        SealedPromotionPhase::Publishing | SealedPromotionPhase::RollingBack
+    ) {
         return Err(Error::IncompatibleStore);
     }
     proposed.sealed_publication = Some(SealedPromotionPublication {
@@ -712,8 +715,6 @@ pub(super) async fn move_sealed(
         {
             return Err(Error::IncompatibleStore);
         }
-    } else if saved.promotion_intent.is_some() && saved.sealed_publication.is_none() {
-        return Err(Error::IncompatibleStore);
     }
     let activation = saved
         .request
@@ -730,13 +731,25 @@ pub(super) async fn move_sealed(
     let original = preserved_path(&state, &update_id);
     lease.verify_promotion_bindings(&saved).await?;
     lease.verify_sealed_binding(&saved)?;
-    // Roll back an interrupted publication that has not replaced the canonical name.
-    // Keep the sealed candidate and remove only our verified extra source link.
-    if matches!(movement, SealedMove::Rollback)
-        && saved.sealed_publication.is_some()
-        && disposable_file_exists(&lease.trial)?
+    let rollback_intent =
+        matches!(movement, SealedMove::Rollback) && saved.promotion_intent.is_some();
+    let rollback_staged = rollback_intent && disposable_file_exists(&lease.trial)?;
+    let phase = saved
+        .sealed_publication
+        .as_ref()
+        .map(|publication| publication.phase);
+    // Before publication starts, both files must still be at their original
+    // names and the source must have no extra preservation link.
+    if rollback_intent
+        && phase.is_none()
+        && (!rollback_staged || super::trial_entry_exists(&original)?)
     {
-        if saved.sealed_publication.as_ref().unwrap().phase == SealedPromotionPhase::Published {
+        return Err(Error::IncompatibleStore);
+    }
+    // Keep the staged candidate and remove only our verified extra source link
+    // when publication has not replaced the canonical name.
+    if rollback_staged {
+        if phase == Some(SealedPromotionPhase::Published) {
             return Err(Error::IncompatibleStore);
         }
         let candidate = lease
@@ -750,8 +763,7 @@ pub(super) async fn move_sealed(
             .await?;
         lease.live.verify_at(&canonical, lease.source_links)?;
         lease.verify_inputs()?;
-        let reused =
-            saved.sealed_publication.as_ref().unwrap().phase == SealedPromotionPhase::RolledBack;
+        let reused = phase == Some(SealedPromotionPhase::RolledBack);
         if !reused {
             record_sealed_phase(
                 &lease,

@@ -235,12 +235,13 @@ test("ordinary launcher refuses isolated candidate preparation before any child 
 });
 
 const launcherPromotionProof = process.env.T3_TEST_LAUNCHER_PROMOTION_INTENT === "1";
+const launcherPublicationProof = process.env.T3_TEST_LAUNCHER_SEALED_PUBLICATION === "1";
 
 test(launcherPromotionProof
   ? "compiled Rust helper records an installed launcher's native promotion intent"
   : "compiled Rust helper restores a sealed native trial before launcher startup", {
   skip: process.env.T3_TEST_SEALED_TRIAL_HELPER === undefined,
-  timeout: 120_000,
+  timeout: launcherPublicationProof ? 180_000 : 120_000,
 }, async (t) => {
   const executable = process.env.T3_TEST_SEALED_TRIAL_HELPER;
   assert.ok(isQualifiedNativeHost(), "The compiled-helper proof requires qualified Linux x64");
@@ -255,8 +256,8 @@ test(launcherPromotionProof
   const dbPath = path.join(f.userdata, "statev2.omdb");
   const ready = path.join(f.runtime, "compiled-helper-ready.json");
   const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
-  const runHelper = (args, requests) => {
-    const stdout = execFileSync(executable, args, {
+  const runHelper = (args, requests, helper = executable) => {
+    const stdout = execFileSync(helper, args, {
       env: {}, encoding: "utf8", timeout: 30_000, maxBuffer: 1_048_576,
       input: requests === undefined ? "" : `${requests.map((row) => JSON.stringify(row)).join("\n")}\n`,
     });
@@ -441,6 +442,55 @@ test(launcherPromotionProof
       assert.deepEqual(await fs.readFile(observationPath), persisted);
       await assert.rejects(fs.stat(f.starts), { code: "ENOENT" });
       await assert.rejects(fs.stat(path.join(f.userdata, "server-runtime.json")), { code: "ENOENT" });
+      if (launcherPublicationProof) {
+        assert.equal(capabilities.sealedIntentPublication, 1);
+        const installedHelper = path.join(previous, "native-bin", "t3-code-ls-db");
+        const previousPath = path.join(f.userdata, `.statev2-source-${id}.omdb`);
+        const failedPath = path.join(f.userdata, `.statev2-failed-sealed-${id}.omdb`);
+        const publish = ["trial-publish-intended-sealed", home, id];
+        const [publication] = runHelper(publish, undefined, installedHelper);
+        assert.deepEqual(publication, {
+          activation, database: prepared.database, preserved_database: request.database, reused: false,
+        });
+        assert.equal((await fs.stat(dbPath, { bigint: true })).ino, stageIdentity.ino);
+        assert.equal((await fs.stat(previousPath, { bigint: true })).ino, sourceIdentity.ino);
+        assert.deepEqual(await fs.readFile(dbPath), stageBytes);
+        assert.deepEqual(await fs.readFile(previousPath), sourceBytes);
+        const receipt = JSON.parse(await fs.readFile(observationPath, "utf8"));
+        assert.equal(receipt.sealed_publication.phase, "published");
+        assert.equal(receipt.sealed_publication.selection_sha256, digest(stateBytes));
+        assert.deepEqual(receipt.promotion_intent, expectedIntent);
+
+        const assertRefused = (args, input = "") => {
+          const result = spawnSync(installedHelper, args, {
+            env: {}, input, encoding: "utf8", timeout: 30_000, maxBuffer: 8192,
+          });
+          assert.equal(result.error, undefined);
+          assert.equal(result.status, 0);
+          assert.equal(JSON.parse(result.stdout).error.kind, "incompatible_store");
+        };
+        assertRefused(["read-only-local", dbPath], '{"operation":"application_schema"}\n');
+        const [retry] = runHelper(publish, undefined, installedHelper);
+        assert.deepEqual(retry, { ...publication, reused: true });
+
+        runHelper(["trial-rollback-sealed", home, id], undefined, installedHelper);
+        assert.equal((await fs.stat(dbPath, { bigint: true })).ino, sourceIdentity.ino);
+        assert.equal((await fs.stat(failedPath, { bigint: true })).ino, stageIdentity.ino);
+        assert.deepEqual(await fs.readFile(dbPath), sourceBytes);
+        assert.deepEqual(await fs.readFile(failedPath), stageBytes);
+        assert.deepEqual(await fs.readFile(f.statePath), stateBytes);
+        assert.deepEqual(await fs.readFile(checkpoint), checkpointBytes);
+        assert.deepEqual(await fs.readFile(backupReceipt), backupReceiptBytes);
+        assert.equal(JSON.parse(await fs.readFile(observationPath, "utf8")).sealed_publication.phase, "rolled_back");
+        const [sourceReceipt] = runHelper(["read-only-local", dbPath], [
+          { operation: "receipt", command_id: commandId },
+        ], installedHelper);
+        assert.deepEqual(sourceReceipt, seeded[3]);
+        assertRefused(publish);
+        await assert.rejects(fs.stat(f.starts), { code: "ENOENT" });
+        await assert.rejects(fs.stat(path.join(f.userdata, "server-runtime.json")), { code: "ENOENT" });
+        t.diagnostic("Packaged native helper published, verified the serving fence, and restored the original sealed-trial source.");
+      }
       return;
     }
     for (const valid of [false, true]) {
