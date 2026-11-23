@@ -926,6 +926,52 @@ impl Store {
     }
 }
 
+async fn read_latest(session: &mut Session, kind: &str, thread_id: Option<&str>) -> Result<u64> {
+    let suffix = match (kind, thread_id) {
+        ("application", None) => "latest/application".into(),
+        ("agent", None) => "latest/agent".into(),
+        ("agent", Some(thread)) => format!("latest/thread/{}", request_digest(&json!(thread))),
+        _ => return Err(invalid("invalid latest event scope")),
+    };
+    let sequence: u64 = session
+        .transaction
+        .get(&key(&session.catalog, &suffix))
+        .await?
+        .as_deref()
+        .map(decode)
+        .transpose()?
+        .unwrap_or(0);
+    if sequence > 0 {
+        let event = event_at(&mut session.transaction, &session.catalog, sequence)
+            .await?
+            .ok_or(Error::IncompatibleStore)?;
+        let matches_scope = if kind == "agent" {
+            event.agent()
+        } else {
+            event.application()
+        };
+        if !matches_scope || thread_id.is_some_and(|thread| thread != event.row.stream_id) {
+            return Err(Error::IncompatibleStore);
+        }
+    }
+    Ok(sequence)
+}
+
+pub(crate) async fn latest_agent_sequence_for_threads(
+    session: &mut Session,
+    threads: BTreeSet<String>,
+) -> Result<u64> {
+    if threads.is_empty() {
+        return Ok(0);
+    }
+    ready(session).await?;
+    let mut sequence = 0;
+    for thread in threads {
+        sequence = sequence.max(read_latest(session, "agent", Some(&thread)).await?);
+    }
+    Ok(sequence)
+}
+
 impl ApplicationTransactions {
     pub async fn events_append(
         &mut self,
@@ -1097,39 +1143,7 @@ impl ApplicationTransactions {
         let mut session = self.take(id)?;
         let result = async {
             ready(&mut session).await?;
-            let suffix = match input.kind.as_str() {
-                "application" if input.thread_id.is_none() => "latest/application".into(),
-                "agent" => input.thread_id.as_ref().map_or_else(
-                    || "latest/agent".into(),
-                    |thread| format!("latest/thread/{}", request_digest(&json!(thread))),
-                ),
-                _ => return Err(invalid("invalid latest event scope")),
-            };
-            let sequence: u64 = session
-                .transaction
-                .get(&key(&session.catalog, &suffix))
-                .await?
-                .as_deref()
-                .map(decode)
-                .transpose()?
-                .unwrap_or(0);
-            if sequence > 0 {
-                let event = event_at(&mut session.transaction, &session.catalog, sequence)
-                    .await?
-                    .ok_or(Error::IncompatibleStore)?;
-                if !(if input.kind == "agent" {
-                    event.agent()
-                } else {
-                    event.application()
-                }) || input
-                    .thread_id
-                    .as_ref()
-                    .is_some_and(|thread| *thread != event.row.stream_id)
-                {
-                    return Err(Error::IncompatibleStore);
-                }
-            }
-            Ok(sequence)
+            read_latest(&mut session, &input.kind, input.thread_id.as_deref()).await
         }
         .await;
         self.finish(id, session, result).await
