@@ -250,13 +250,19 @@ try {
     Assert.equal(initialTrace.split("\n").filter((line) => line.includes(prefix)).length, conversation ? 1 : 0);
     Assert.ok(!reopenedTrace.includes(prefix));
   }
-  Assert.ok(!/execve\("[^"\n]*\/(?:claude|claude-code)"/u.test(initialTrace + reopenedTrace));
+  // The normal installation status may probe --version. The synthetic PATH
+  // has no Claude CLI; require that exact probe to fail before any process runs.
+  const absentCli = `execve(${JSON.stringify(Path.join(bin, "claude"))}, ["claude", "--version"]`;
+  const unavailableInstallationProbes = (initialTrace + reopenedTrace).split("\n").filter((line) =>
+    /execve\("[^"\n]*\/(?:claude|claude-code)"/u.test(line));
+  Assert.ok(unavailableInstallationProbes.every((line) =>
+    line.includes(absentCli) && line.includes(" = -1 ENOENT ")));
   report.observed = { instanceId, commandId, messageId, runId: settled.runs[0]?.id, text,
     dispatchCount: 1, terminalStatus, terminalEvents: 1, assistantMessages: assistant.length,
     assistantMessageId: reply?.id, nativeStore: "omdb", reopened: true, receiptRetained: true,
     helperManifestVerified: true, controlledOpenRefusedMcpOptions: !noMcp,
     controlledNoMcpRefusedUnrelatedModel: noMcp && !conversation,
-    helperOrProviderExecuted: conversation };
+    helperOrProviderExecuted: conversation, unavailableInstallationProbes: unavailableInstallationProbes.length };
   report.conversationQualified = conversation;
   report.phase = "complete";
   report.status = "passed";
