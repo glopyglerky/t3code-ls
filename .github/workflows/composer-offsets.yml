@@ -256,10 +256,17 @@ jobs:
                 node apps/web/scripts/verify-hybrid-client.ts "$proof/$renderer" "$implementation"
             done
           fi
-          node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
           if [[ "$T3_CODE_LS_PARALLEL_TURNS_PROOF" == true ]]; then
-            jq -e '.parallelTurns.stillPendingAfterOtherApproval and .parallelTurns.completedReopened and .parallelTurns.interruptedReopened' \
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- env T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 \
+                VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust T3_CODE_LS_PARALLEL_TURNS_PROOF=true \
+                "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
+            ' _ "$(id -un)" "$(command -v node)" "$proof"
+            jq -e '.status == "passed" and .composer == "rust-wasm" and .parallelTurns.stillPendingAfterOtherApproval and .parallelTurns.completedReopened and .parallelTurns.interruptedReopened' \
               "$proof/native/proof.json"
+          else
+            node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
           fi
       - name: Exercise PDF link handling in the browser
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-')

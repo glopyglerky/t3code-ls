@@ -724,6 +724,9 @@ async function verifyParallelShowcases(page: Page, workspace: string) {
       open(completing, projectNames[0]),
       open(interrupting, projectNames[1]),
     ]);
+    for (const tab of [completing, interrupting]) {
+      Assert.equal(await tab.evaluate(() => performance.getEntriesByName("t3-composer-rust-offsets").length), 1);
+    }
     Assert.notEqual(complete.threadId, interrupt.threadId);
     Assert.notEqual(complete.projectId, interrupt.projectId);
     Assert.notEqual(complete.providerTurnId, interrupt.providerTurnId);
@@ -1779,10 +1782,13 @@ async function exercise(implementation: Implementation): Promise<void> {
     await addFixtureProject(page, workspace, "hybrid-fixture");
     completed("Created local project through the normal client");
     if (parallelTurnsProof) {
-      Assert.ok(bundledClient && implementation === "native");
+      Assert.ok(bundledClient && implementation === "native" && expectsRustComposer);
       starting("run independently controlled replay turns in two projects");
       proof.parallelTurns = await verifyParallelShowcases(page, workspace);
       completed("Reopened distinct completed and interrupted turns after concurrent approvals");
+      proof.composer = "rust-wasm";
+      proof.status = "passed";
+      return;
     }
     if (multiTabDraftProof) {
       starting("two-tab unsent draft and model merge");
