@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "candidate/t3code-ls-t14-cli-contract-*"
+      - "candidate/t3code-ls-t05-packaged-preparation-*"
       - "candidate/t3code-ls-t02-bundled-native-integrated-*"
 
 permissions:
@@ -36,6 +37,7 @@ jobs:
       - name: Build and run the native archive
         shell: bash
         run: |
+          set -euo pipefail
           export CARGO_HOME="$RUNNER_TEMP/cli-cargo-home"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/cli-target"
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
@@ -53,6 +55,26 @@ jobs:
           sha256sum "$archive" > "$RUNNER_TEMP/cli-proof/archive.sha256"
           node scripts/smoke-cli-archive.ts --archive "$archive" --expect-version "$version" \
             --expect-native | tee "$RUNNER_TEMP/cli-proof/smoke.log"
+      - name: Verify the isolated candidate through the packaged executable
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-packaged-preparation-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          extracted="$RUNNER_TEMP/preparation-archive"
+          mkdir "$extracted"
+          version=$(node -p 'require("./apps/server/package.json").version')
+          tar -xzf "$RUNNER_TEMP/cli-archive/t3-$version-linux-x64.tar.gz" -C "$extracted"
+          entry="$extracted/t3-$version-linux-x64/t3"
+          test -x "$entry"
+          stat --printf='{"runtimeEntryBytes":%s}\n' "$entry" | tee "$RUNNER_TEMP/cli-proof/preparation-artifact.json"
+          export CARGO_HOME="$RUNNER_TEMP/cli-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/cli-target"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-storage --lib service_trial_executable_hash_has_an_independent_bound
+          T3_TEST_PREPARE_ENTRY="$entry" \
+          T3_TEST_SEALED_TRIAL_HELPER="$(dirname "$entry")/native-bin/t3-code-ls-db" \
+            node --test --test-name-pattern 'compiled Rust helper restores' \
+              tools/service-launcher-trial.test.mjs | tee "$RUNNER_TEMP/cli-proof/preparation.log"
       - name: Retain the archive identity and smoke results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

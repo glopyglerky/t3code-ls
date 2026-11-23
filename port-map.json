@@ -1605,6 +1605,9 @@
         ".github/workflows/thread-recovery.yml",
         ".github/workflows/cli-archive-proof.yml",
         "apps/server/src/cli/install.ts",
+        "apps/server/src/cli/servicePrepareIsolated.ts",
+        "apps/server/src/binMain.ts",
+        "apps/server/src/serviceLauncher.ts",
         "apps/server/src/serverSettings.ts",
         "apps/server/src/sourceControl/threadPullRequests.ts",
         "apps/server/src/storageCleanup.ts",
@@ -1739,12 +1742,14 @@
         "tools/check-redb-cli.mjs",
         "apps/server/src/serverRuntimeStartup.test.ts",
         "apps/server/src/serverRuntimeStartup.autoPull.test.ts",
-        "scripts/smoke-cli-archive.ts"
+        "scripts/smoke-cli-archive.ts",
+        "tools/service-launcher-trial.test.mjs"
       ],
       "hosted_acceptance": {
         "apps/server/src/serverRuntimeStartup.test.ts": ".github/workflows/thread-recovery.yml",
         "apps/server/src/serverRuntimeStartup.autoPull.test.ts": ".github/workflows/thread-recovery.yml",
-        "scripts/smoke-cli-archive.ts": ".github/workflows/cli-archive-proof.yml"
+        "scripts/smoke-cli-archive.ts": ".github/workflows/cli-archive-proof.yml",
+        "tools/service-launcher-trial.test.mjs": ".github/workflows/cli-archive-proof.yml"
       },
       "retired_paths": [],
       "notes": "The selected production server and CLI use the complete omdb application boundary through one transaction owner. Native upgrades from the exact schema80 and schema88 histories to89 preserve activated data and import lineage. Schema80 backfills citation-aware message search, turn item counts and custom project titles; schema89 adds indexed worktree and family shell selection before payload decoding. Typed native APIs cover atomic event guards, outbox claims, compaction filters, fork visibility, shell and recovery state, attachment retention, scheduler compare-and-set, KeepAwake active-run existence and legacy subagent identifier retention. The active-run query stops at the first indexed match. Queue-only run filters use the existing global queued-run index and recheck thread ownership, avoiding completed history. Explicit run-ID filters read compact keys directly; includeLatestRun preserves full-thread candidates and original filtering/order semantics. Bootstrap and CLI preserve upgrade ownership and never reopen SQLite after native activation. SQLite remains the migration source, immutable behavior comparison and unqualified-platform implementation. Fresh exact-commit platform receipts remain required. The retained native project API and standalone plan-and-project executable share the core project projection reducer and remain independently compared with immutable ProjectStore behavior; the selected application graph uses shared ProjectStore semantics over native project rows.",

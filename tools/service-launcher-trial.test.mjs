@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import { registerHooks } from "node:module";
@@ -280,6 +280,16 @@ test("compiled Rust helper restores a sealed native trial before launcher startu
     setInterval(() => {}, 1000);
   `);
   const target = await f.install(targetVersion, "process.exit(7);");
+  const preparationEntry = process.env.T3_TEST_PREPARE_ENTRY;
+  if (preparationEntry !== undefined) {
+    assert.ok(path.isAbsolute(preparationEntry));
+    const runtimeEntryBytes = (await fs.stat(preparationEntry)).size;
+    t.diagnostic(JSON.stringify({ runtimeEntryBytes, installedRuntimeLimitBytes: 256 * 1024 * 1024 }));
+    assert.ok(runtimeEntryBytes <= 256 * 1024 * 1024,
+      "The installed runtime must fit its independent 256 MiB artifact hash limit");
+    await fs.copyFile(preparationEntry, path.join(target, "t3"));
+    await fs.chmod(path.join(target, "t3"), 0o700);
+  }
   const helperSha256 = digest(await fs.readFile(executable));
   for (const directory of [previous, target]) {
     const nativeDirectory = path.join(directory, "native-bin");
@@ -306,12 +316,57 @@ test("compiled Rust helper restores a sealed native trial before launcher startu
     target_entry_sha256: digest(await fs.readFile(path.join(target, "t3"))),
     target_helper_sha256: helperSha256, target_schema_sha256: capabilities.targetSchemaSha256,
   };
-  const [prepared] = runHelper(["trial-prepare-isolated", home, id], [{
+  const request = {
     update_id: id, database: backup.database,
     checkpoint: { catalog_sha256: seeded[2].catalog_sha256,
       rows: backup.backup.rows, checksum: backup.backup.checksum },
     target_schema_sha256: capabilities.targetSchemaSha256, activation,
-  }]);
+  };
+  const [prepared] = runHelper(["trial-prepare-isolated", home, id], [request]);
+  if (preparationEntry !== undefined) {
+    const trial = path.join(f.userdata, `.statev2-trial-${id}.omdb`);
+    const stageBytes = await fs.readFile(trial);
+    const stageIdentity = await fs.stat(trial, { bigint: true });
+    const stateBytes = await fs.readFile(f.statePath);
+    const stateIdentity = await fs.stat(f.statePath, { bigint: true });
+    const candidate = path.join(target, "t3");
+    for (const valid of [false, true]) {
+      const input = { request, preparation: valid ? prepared : {
+        ...prepared, file_sha256: "0".repeat(64),
+      } };
+      const outcome = spawnSync(candidate, ["__service-prepare-isolated", home, id], {
+        env: {}, input: JSON.stringify(input) + "\n", encoding: "utf8",
+        timeout: 65_000, maxBuffer: 8192, killSignal: "SIGKILL",
+      });
+      assert.equal(outcome.error, undefined);
+      assert.equal(outcome.status, valid ? 0 : 1, outcome.stderr);
+      if (valid) {
+        assert.equal(outcome.stderr, "");
+        assert.deepEqual(JSON.parse(outcome.stdout), {
+          protocol: 1, status: "prepared-isolated", updateId: id, preparation: prepared,
+        });
+      } else {
+        assert.equal(outcome.stdout, "");
+        assert.match(outcome.stderr, /failed verification/u);
+      }
+      const sourceAfter = await fs.stat(dbPath, { bigint: true });
+      const stageAfter = await fs.stat(trial, { bigint: true });
+      const stateAfter = await fs.stat(f.statePath, { bigint: true });
+      assert.equal(sourceAfter.ino, sourceIdentity.ino);
+      assert.equal(sourceAfter.mtimeNs, sourceIdentity.mtimeNs);
+      assert.equal(stageAfter.ino, stageIdentity.ino);
+      assert.equal(stageAfter.mtimeNs, stageIdentity.mtimeNs);
+      assert.equal(stateAfter.ino, stateIdentity.ino);
+      assert.equal(stateAfter.mtimeNs, stateIdentity.mtimeNs);
+      assert.deepEqual(await fs.readFile(dbPath), sourceBytes);
+      assert.deepEqual(await fs.readFile(trial), stageBytes);
+      assert.deepEqual(await fs.readFile(f.statePath), stateBytes);
+      assert.deepEqual(await fs.readFile(checkpoint), checkpointBytes);
+      assert.deepEqual(await fs.readFile(backupReceipt), backupReceiptBytes);
+      await assert.rejects(fs.stat(f.starts), { code: "ENOENT" });
+      await assert.rejects(fs.stat(path.join(f.userdata, "server-runtime.json")), { code: "ENOENT" });
+    }
+  }
   const [published] = runHelper(["trial-publish-sealed", home, id]);
   assert.deepEqual(published.activation, activation);
   assert.deepEqual(published.database, prepared.database);
@@ -362,6 +417,7 @@ test("compiled Rust helper restores a sealed native trial before launcher startu
   assert.deepEqual(restoredReceipt, seeded[3]);
   t.diagnostic(JSON.stringify({ helperBytes, helperSha256, sourceSha256: digest(sourceBytes),
     sealedSha256: digest(sealedBytes), checkpointSha256: digest(checkpointBytes),
+    preparedCandidateProcess: preparationEntry !== undefined,
     restoredOriginalInode: true, selectedPreviousRuntime: true, restartPreservedSelection: true }));
 });
 
