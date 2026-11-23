@@ -28,6 +28,7 @@ const WORKSPACE_CONTEXT: &str = "ShowcaseWorkspace";
 const TEXTAREA_CONTEXT: &str = "ShowcaseWorkspace > Input";
 const COMPOSER_LABEL: &str = "Message";
 const SUBMIT_LABEL: &str = "Submit message";
+const APPROVAL_LABEL: &str = "Allow once";
 const REPLY_LABEL: &str = "Recorded assistant reply";
 const USAGE: &str = "Usage: t3-code-ls-desktop-gpui --fixture showcase | --thread-snapshot | --thread-compose < CONNECTION_JSON";
 const SHORTCUT: &str = if cfg!(target_os = "macos") {
@@ -36,9 +37,13 @@ const SHORTCUT: &str = if cfg!(target_os = "macos") {
     "Ctrl+Enter"
 };
 
-#[derive(Clone, Copy)]
 enum SubmissionStatus {
     Pending,
+    AwaitingApproval {
+        approval: server_submit::Approval,
+        submitted: String,
+    },
+    Responding,
     Completed,
     Refused(&'static str),
 }
@@ -156,28 +161,23 @@ impl Workspace {
                 .spawn(async move { server.submit(&request, &cancelled) });
             self._submission = Some(cx.spawn_in(window, async move |workspace, cx| {
                 let result = task.await;
-                let _ = workspace.update_in(cx, |workspace, window, cx| {
-                    match result {
-                        Ok(snapshot) => {
-                            workspace.set_reply(snapshot.text, server_snapshot::LABEL, window, cx);
-                            workspace.composer.update(cx, |state, cx| {
-                                if state.marked_text_range(window, cx).is_none()
-                                    && state.value().as_ref() == submitted.as_str()
-                                {
-                                    state.set_value("", window, cx);
-                                }
-                            });
-                            workspace.status = Some(SubmissionStatus::Completed);
-                        }
-                        Err(_) => {
-                            workspace.status =
-                                Some(SubmissionStatus::Refused(server_submit::FAILED))
-                        }
+                let _ = workspace.update_in(cx, |workspace, window, cx| match result {
+                    Ok(server_submit::Progress::Completed(snapshot)) => {
+                        workspace.finish_submission(Ok(snapshot), &submitted, window, cx)
                     }
-                    workspace
-                        .composer
-                        .update(cx, |state, cx| state.focus(window, cx));
-                    cx.notify();
+                    Ok(server_submit::Progress::Approval(approval)) => {
+                        workspace.status = Some(SubmissionStatus::AwaitingApproval {
+                            approval,
+                            submitted,
+                        });
+                        cx.notify();
+                    }
+                    Err(_) => workspace.finish_submission(
+                        Err(server_submit::FAILED),
+                        &submitted,
+                        window,
+                        cx,
+                    ),
                 });
             }));
             cx.notify();
@@ -196,6 +196,61 @@ impl Workspace {
             .update(cx, |state, cx| state.focus(window, cx));
         cx.notify();
     }
+
+    fn allow_once(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(server) = self.server.as_ref().map(Arc::clone) else {
+            return;
+        };
+        let Some(SubmissionStatus::AwaitingApproval {
+            approval,
+            submitted,
+        }) = self
+            .status
+            .take_if(|status| matches!(status, SubmissionStatus::AwaitingApproval { .. }))
+        else {
+            return;
+        };
+        self.status = Some(SubmissionStatus::Responding);
+        let cancelled = Arc::clone(&self.cancelled);
+        let request = submitted.clone();
+        let task = cx
+            .background_executor()
+            .spawn(async move { server.allow_once(&approval, &request, &cancelled) });
+        self._submission = Some(cx.spawn_in(window, async move |workspace, cx| {
+            let result = task.await.map_err(|_| server_submit::APPROVAL_UNCONFIRMED);
+            let _ = workspace.update_in(cx, |workspace, window, cx| {
+                workspace.finish_submission(result, &submitted, window, cx);
+            });
+        }));
+        cx.notify();
+    }
+
+    fn finish_submission(
+        &mut self,
+        result: Result<server_snapshot::Snapshot, &'static str>,
+        submitted: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.status = Some(match result {
+            Ok(snapshot) => {
+                self.set_reply(snapshot.text, server_snapshot::LABEL, window, cx);
+                self.composer.update(cx, |state, cx| {
+                    if state.marked_text_range(window, cx).is_none()
+                        && state.value().as_ref() == submitted
+                    {
+                        state.set_value("", window, cx);
+                    }
+                });
+                SubmissionStatus::Completed
+            }
+            Err(message) => SubmissionStatus::Refused(message),
+        });
+        self.composer
+            .update(cx, |state, cx| state.focus(window, cx));
+        cx.notify();
+    }
+
     fn set_reply(
         &mut self,
         reply: String,
@@ -237,13 +292,23 @@ impl Drop for Workspace {
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let composer_focused = self.composer.read(cx).focus_handle(cx).is_focused(window);
-        let (status, status_color) = match self.status {
+        let approval = match &self.status {
+            Some(SubmissionStatus::AwaitingApproval { approval, .. }) => Some(approval),
+            _ => None,
+        };
+        let (status, status_color) = match &self.status {
             Some(SubmissionStatus::Pending) => ("Submitting to the selected thread…", 0x49596a),
+            Some(SubmissionStatus::AwaitingApproval { .. }) => {
+                ("Command permission requested.", 0x49596a)
+            }
+            Some(SubmissionStatus::Responding) => {
+                ("Confirming approval and turn completion…", 0x49596a)
+            }
             Some(SubmissionStatus::Completed) if self.server.is_some() => {
                 (server_submit::CONFIRMED, 0x126647)
             }
             Some(SubmissionStatus::Completed) => ("Recorded reply loaded.", 0x126647),
-            Some(SubmissionStatus::Refused(message)) => (message, 0xa32726),
+            Some(SubmissionStatus::Refused(message)) => (*message, 0xa32726),
             None if self.server.is_some() => ("Submit to the selected server thread.", 0x49596a),
             None => (
                 "Only the recorded showcase runs in this workspace.",
@@ -340,6 +405,39 @@ impl Render for Workspace {
                             .text_color(rgb(status_color))
                             .child(status),
                     )
+                    .when_some(approval, |view, approval| {
+                        let detail: gpui::SharedString = approval.detail.clone().into();
+                        view.child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .items_start()
+                                .gap_2()
+                                .child(
+                                    div()
+                                        .id("server-approval-detail")
+                                        .role(Role::Paragraph)
+                                        .aria_label(detail.clone())
+                                        .child(detail),
+                                )
+                                .child(
+                                    Button::new("server-approval-allow-once")
+                                        .accessibility_label(APPROVAL_LABEL)
+                                        .border_2()
+                                        .border_color(rgb(0x174887))
+                                        .focus(|style| style.border_color(rgb(0xfdd166)))
+                                        .rounded_md()
+                                        .bg(rgb(0x174887))
+                                        .text_color(rgb(0xffffff))
+                                        .px_4()
+                                        .py_2()
+                                        .child(APPROVAL_LABEL)
+                                        .on_click(cx.listener(|workspace, _, window, cx| {
+                                            workspace.allow_once(window, cx);
+                                        })),
+                                ),
+                        )
+                    })
                     .when_some(self.reply.as_ref(), |view, reply| {
                         let focused = reply.editor.read(cx).focus_handle(cx).is_focused(window);
                         view.child(
