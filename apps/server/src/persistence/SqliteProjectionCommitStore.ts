@@ -6,6 +6,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import {
   ProjectionCommitStore,
   toProjectionCommitStoreError,
+  userInputRequestMatchesCancellation,
   type ProjectionCommitStoreShape,
 } from "../orchestration-v2/ProjectionCommitStore.ts";
 import {
@@ -19,9 +20,11 @@ const encodeTime = Schema.encodeEffect(Schema.DateTimeUtcFromString);
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const projections = yield* ProjectionStoreV2;
+  const apply: ProjectionCommitStoreShape["apply"] = (event) =>
+    projections.apply(event).pipe(Effect.mapError(toProjectionCommitStoreError("apply")));
   return ProjectionCommitStore.of({
-    apply: (event) =>
-      projections.apply(event).pipe(Effect.mapError(toProjectionCommitStoreError("apply"))),
+    apply,
+    applyMany: (events) => Effect.forEach(events, apply, { concurrency: 1, discard: true }),
     getThread: (threadId) =>
       projections
         .getThread(threadId)
@@ -29,10 +32,13 @@ const make = Effect.gen(function* () {
           Effect.catchTags({ ProjectionStoreThreadNotFoundError: () => Effect.undefined }),
           Effect.mapError(toProjectionCommitStoreError("get-thread")),
         ),
-    getRuntimeRequest: (threadId, requestId) =>
+    userInputCancellationCurrent: ({ threadId, requestId, providerTurnId }) =>
       projections
         .getRuntimeRequest(threadId, requestId)
-        .pipe(Effect.mapError(toProjectionCommitStoreError("get-runtime-request"))),
+        .pipe(
+          Effect.map((current) => userInputRequestMatchesCancellation(current, providerTurnId)),
+          Effect.mapError(toProjectionCommitStoreError("get-runtime-request")),
+        ),
     getRun: (threadId, runId) =>
       projections.getThreadRecords(threadId, ["runs"], { runIds: [runId] }).pipe(
         Effect.map((records) => records.runs[0]),

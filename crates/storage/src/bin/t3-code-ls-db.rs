@@ -289,6 +289,10 @@ enum Request {
         transaction_id: String,
         event: ProjectionApply,
     },
+    ApplicationProjectionsApplyMany {
+        transaction_id: String,
+        events: Vec<ProjectionApply>,
+    },
     ApplicationProjectionsNormalization {
         transaction_id: String,
         event: ProjectionApply,
@@ -300,6 +304,12 @@ enum Request {
     ApplicationProjectionsGuard {
         transaction_id: String,
         guard: ProjectionGuard,
+    },
+    ApplicationProjectionsUserInputCancellation {
+        transaction_id: String,
+        thread_id: String,
+        request_id: String,
+        provider_turn_id: Option<String>,
     },
     ApplicationProjectionsMarkApplied {
         transaction_id: String,
@@ -569,9 +579,11 @@ impl Request {
             | Self::ApplicationViewedFilesList { .. }
             | Self::ApplicationViewedFilesSet { .. }
             | Self::ApplicationProjectionsApply { .. }
+            | Self::ApplicationProjectionsApplyMany { .. }
             | Self::ApplicationProjectionsNormalization { .. }
             | Self::ApplicationProjectionsRead { .. }
             | Self::ApplicationProjectionsGuard { .. }
+            | Self::ApplicationProjectionsUserInputCancellation { .. }
             | Self::ApplicationProjectionsMarkApplied { .. }
             | Self::ApplicationOutboxEnqueue { .. }
             | Self::ApplicationOutboxGet { .. }
@@ -1081,6 +1093,10 @@ async fn evaluate(
                 .await?;
             Ok(Value::Null)
         }
+        Request::ApplicationProjectionsApplyMany { transaction_id, events } => {
+            transactions.projections_apply_many(&transaction_id, events).await?;
+            Ok(Value::Null)
+        }
         Request::ApplicationProjectionsRead {
             transaction_id,
             read,
@@ -1091,6 +1107,21 @@ async fn evaluate(
         } => serde_json::to_value(
             transactions
                 .projections_guard(&transaction_id, guard)
+                .await?,
+        ),
+        Request::ApplicationProjectionsUserInputCancellation {
+            transaction_id,
+            thread_id,
+            request_id,
+            provider_turn_id,
+        } => serde_json::to_value(
+            transactions
+                .projections_user_input_cancellation(
+                    &transaction_id,
+                    thread_id,
+                    request_id,
+                    provider_turn_id.as_deref(),
+                )
                 .await?,
         ),
         Request::ApplicationProjectionsMarkApplied {
