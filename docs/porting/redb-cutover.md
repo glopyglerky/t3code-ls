@@ -612,6 +612,12 @@ subscription, same-cursor page rejection in the shared client, and a native
 anchored read. Packaged native live refresh and J04 performance remain open.
 [Live refresh check](https://github.com/glopyglerky/t3code-ls/actions/runs/45181752443)
 
+The history window and its older page include an ancestry revision read from
+the same transaction as their rows. An aware client restores expanded rows
+only when the view revisions and child replay watermarks agree. The native
+check verifies one revision request per versioned read.
+[Coherent history check](https://github.com/glopyglerky/t3code-ls/actions/runs/45188834743)
+
 ## T05 offline publication under the serving fence
 
 `trial-publish-intended-sealed HOME UPDATE_ID` requires the candidate's durable
@@ -644,8 +650,10 @@ The packaged launcher cancelled the unstarted publication and reopened the
 previous runtime with the original database inode and committed receipt. A
 separate packaged `serve` invocation refused the published sealed candidate.
 The refusal left runtime readiness unpublished and preserved the database,
-checkpoint and selection. [Packaged rollback](https://github.com/glopyglerky/t3code-ls/actions/runs/45183245968)
-· [Packaged serving refusal](https://github.com/glopyglerky/t3code-ls/actions/runs/45185612395)
+checkpoint and selection. The launcher subsequently restored the original inode
+after publication, preserved the failed candidate, and brought the previous
+runtime back to readiness. [Rollback before publication](https://github.com/glopyglerky/t3code-ls/actions/runs/45183245968)
+· [Rollback after publication](https://github.com/glopyglerky/t3code-ls/actions/runs/45188137463)
 
 Promotion to the target runtime, catalog unsealing and ordinary native update
 admission still require production recovery proof.
