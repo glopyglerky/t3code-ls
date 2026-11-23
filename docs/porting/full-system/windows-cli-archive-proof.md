@@ -210,3 +210,41 @@ Native realpath resolved them to the same path within the fixture home. Default
 synchronous realpath returned different paths. The fixture now uses native
 realpath for its same-file assertion, matching the installer. It also continues
 to require matching file identities and the original lifecycle assertions.
+
+## Uninstall exit observation after native realpath correction
+
+Exact run `45186197034` at
+`ccea992431b5d1146b1865b85b2da8a4892baa4f` passed every install invariant and
+executed the version shim. Its first failure was the uninstall result:
+`exitZero` and `stderrEmpty` were false, while both owned removal reports and
+launcher absence were true. The earlier failure stopped before observing the
+actual detached runtime removal. The native-realpath correction and its earned
+install evidence remain unchanged.
+
+This follow-up emits `WINDOWS_MANAGED_UNINSTALL_CHECKS` with the numeric exit code
+and booleans classifying the first 16 KiB of stderr, with a truncation flag, for missing-batch, system path/file, access,
+command syntax/lookup, runtime warning and unhandled/spawn-child error classes.
+An unclassified-stderr flag preserves the unknown case. It never prints captured
+stderr, tokens or full paths. The synchronous-only catch around production
+`spawnWindowsRemoval(...).unref()` is a possible asynchronous failure seam, but
+this run has not shown which stderr class occurred and no product change follows
+from that hypothesis.
+
+Before deciding the command result, the fixture now completes its original bounded
+observation of the owned runtime directory and reports whether it actually
+vanished. `WINDOWS_MANAGED_PRESERVATION_CHECKS` separately reports original state,
+AppData and unrelated-file equality. It does not retry uninstall or delete the
+runtime itself to satisfy the observation. Exit zero, empty stderr, actual removal
+and every preservation check are still required. A warning or failed command
+cannot become a passing lifecycle result merely because removal completed.
+
+Local syntax and diagnostic-class checks do not execute a Windows command. The
+exact hosted follow-up is still required to establish the failure mechanism and
+any subsequent product correction. The existing Windows archive workflow and
+`--expect-upstream` smoke invocation remain the qualification path.
+
+The exact classifier was checked with dependency-free synthetic missing-batch,
+unhandled spawn/ENOENT, runtime warning and unknown/truncated strings. These cases
+only validate the diagnostic distinctions. They neither reproduce the Windows
+failure nor qualify a production repair. Exact proof artifact `14824705843`
+was read and matched to source `ccea992431b5d1146b1865b85b2da8a4892baa4f`.

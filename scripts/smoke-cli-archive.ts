@@ -492,16 +492,44 @@ const smokeWindowsInstalledLifecycle = Effect.fn("smokeWindowsInstalledLifecycle
     ownedRuntimeCleanupReported: scheduled.some((target) => windowsPath(target) === windowsPath(canonicalRuntime) || windowsPath(target) === windowsPath(runtime)),
     launcherAbsent: !(yield* fs.exists(launcher)),
   };
-  yield* require(Object.values(uninstallChecks).every(Boolean), "scheduling owned Windows runtime removal after shim uninstall", uninstallChecks);
-  yield* fs.exists(runtime).pipe(
+  const stderrTruncated = uninstalled.stderr.length > 16 * 1024;
+  const diagnostic = uninstalled.stderr.slice(0, 16 * 1024).replace(/\r\n/gu, "\n").trim();
+  const stderrClasses = {
+    onlyMissingBatchFile: !stderrTruncated && /^The batch file cannot be found\.$/iu.test(diagnostic),
+    containsMissingBatchFile: /The batch file cannot be found\./iu.test(diagnostic),
+    systemFileNotFound: /The system cannot find the (?:file|path) specified\./iu.test(diagnostic),
+    accessDenied: /Access is denied\./iu.test(diagnostic),
+    unhandledChildErrorEvent: /Unhandled ['"]error['"] event|Emitted ['"]error['"] event/iu.test(diagnostic),
+    spawnEnoent: /\bspawn\b[\s\S]*\bENOENT\b/iu.test(diagnostic),
+    spawnEacces: /\bspawn\b[\s\S]*\b(?:EACCES|EPERM)\b/iu.test(diagnostic),
+    spawnEinval: /\bspawn\b[\s\S]*\bEINVAL\b/iu.test(diagnostic),
+    cleanupScheduleDiagnostic: /Could not schedule removal of/iu.test(diagnostic),
+    commandSyntaxError: /The syntax of the command is incorrect\.|was unexpected at this time\./iu.test(diagnostic),
+    commandNotRecognized: /not recognized as an internal or external command/iu.test(diagnostic),
+    batchTerminationPrompt: /Terminate batch job/iu.test(diagnostic),
+    runtimeWarning: /\b(?:DeprecationWarning|ExperimentalWarning|Warning):/u.test(diagnostic),
+  };
+  // Observe the actual detached result even when the enclosing cmd reports an
+  // error after t3 has printed its removal messages. Failure stays failure.
+  const removal = yield* fs.exists(runtime).pipe(
     Effect.flatMap((exists) => exists ? Effect.fail(new CliArchiveSmokeError({ step: "observing detached Windows runtime removal", detail: "The runtime still exists after the uninstall command exited." })) : Effect.void),
     Effect.retry({ times: 200, schedule: Schedule.spaced("100 millis") }),
+    Effect.option,
   );
+  const runtimeRemovalObserved = Option.isSome(removal);
+  yield* Effect.sync(() => { process.stdout.write(`WINDOWS_MANAGED_UNINSTALL_CHECKS ${JSON.stringify({
+    exitCode: uninstalled.exitCode, ...uninstallChecks, ...stderrClasses, stderrTruncated,
+    unclassifiedStderr: diagnostic.length > 0 && !Object.values(stderrClasses).some(Boolean),
+    runtimePresentAtExit, runtimeRemovalObserved,
+  })}\n`); });
   const preservationChecks = {
     unrelatedFileUnchanged: (yield* fs.readFileString(unrelated)) === "Synthetic unrelated binary-directory entry.\n",
     userDataByteIdentical: (yield* Effect.sync(() => snapshot(path.join(home, "userdata")))) === stateBefore,
     appDataByteIdentical: (yield* Effect.sync(() => snapshot(path.join(home, "AppData")))) === appDataBefore,
   };
+  yield* Effect.sync(() => { process.stdout.write(`WINDOWS_MANAGED_PRESERVATION_CHECKS ${JSON.stringify(preservationChecks)}\n`); });
+  yield* require(Object.values(uninstallChecks).every(Boolean), "scheduling owned Windows runtime removal after shim uninstall", uninstallChecks);
+  yield* require(runtimeRemovalObserved, "observing detached Windows runtime removal", { runtimeRemovalObserved });
   yield* require(Object.values(preservationChecks).every(Boolean), "preserving original Windows state and unrelated files through detached cleanup", preservationChecks);
   const reopened = yield* runExecutable(archiveExecutable, ["auth", "session", "list", "--base-dir", home, "--json"], home, undefined, environment);
   const reopenChecks = { exitZero: reopened.exitCode === 0, stderrEmpty: reopened.stderr === "", identicalSessionJson: reopened.stdout === sessionsBefore.stdout };
