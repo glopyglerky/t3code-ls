@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import * as NodeAssert from "node:assert/strict";
+import * as NodeChildProcess from "node:child_process";
+import { once } from "node:events";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as NodeReadline from "node:readline";
 import * as Effect from "effect/Effect";
 import * as Logger from "effect/Logger";
 import * as Schema from "effect/Schema";
@@ -141,6 +144,71 @@ try {
   );
 } finally {
   await migrated.close();
+}
+const crashed = await createFixture();
+try {
+  const reopen = (use) =>
+    Effect.runPromise(
+      isolated(
+        crashed,
+        Effect.flatMap(Omdb.make({ executable, databasePath: crashed.databasePath }), use),
+      ),
+    );
+  await reopen(() => Effect.void);
+  const beforeCrash = readIdentity(crashed);
+  const writer = NodeChildProcess.spawn(executable, crashed.cliArgs(), {
+    env: {},
+    stdio: ["pipe", "pipe", "inherit"],
+    signal: AbortSignal.timeout(15_000),
+  });
+  const exited = once(writer, "exit");
+  const lines = NodeReadline.createInterface({ input: writer.stdout });
+  const replies = lines[Symbol.asyncIterator]();
+  const request = async (operation) => {
+    writer.stdin.write(JSON.stringify(operation) + "\n");
+    const response = await replies.next();
+    NodeAssert.equal(response.done, false);
+    const envelope = JSON.parse(response.value);
+    NodeAssert.equal(envelope.ok, true, JSON.stringify(envelope));
+  };
+  const table = "orchestration_v2_projection_metadata";
+  const key = (name) => [{ type: "text", value: name }];
+  const stage = async (name) => {
+    await request({ operation: "application_begin", transaction_id: name, mode: "write" });
+    await request({
+      operation: "application_put",
+      transaction_id: name,
+      table,
+      key: key(name),
+      row: {
+        projection_name: key(name)[0],
+        schema_version: { type: "integer", value: "1" },
+        last_sequence: { type: "integer", value: "42" },
+        updated_at: { type: "text", value: "2026-01-01T00:00:00Z" },
+      },
+    });
+  };
+  try {
+    await stage("crash-committed");
+    await request({ operation: "application_commit", transaction_id: "crash-committed" });
+    await stage("crash-uncommitted");
+  } finally {
+    writer.kill("SIGKILL");
+    const [, signal] = await exited;
+    NodeAssert.equal(signal, "SIGKILL");
+    lines.close();
+  }
+  await reopen(({ client }) =>
+    Effect.gen(function* () {
+      const committed = yield* client.get(table, key("crash-committed"));
+      NodeAssert.equal(committed?.last_sequence.value, "42");
+      NodeAssert.equal(yield* client.get(table, key("crash-uncommitted")), null);
+    }),
+  );
+  NodeAssert.deepEqual(readIdentity(crashed), beforeCrash);
+  checks.push("Selected startup reopens the acknowledged generation after a killed native writer and discards its uncommitted rows");
+} finally {
+  await crashed.close();
 }
 const liveLegacy = await createFixture();
 try {
