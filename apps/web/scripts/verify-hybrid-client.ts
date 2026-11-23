@@ -564,11 +564,13 @@ async function verifySplitTerminalReconnect(page: Page, workspace: string, shell
   const gate = `${script}.resume`;
   const startedFile = `${script}.started`;
   const releasedFile = `${script}.released`;
+  const exitFile = `${script}.exited`;
   NodeFS.writeFileSync(
     script,
     [
-      'printf "%s\\n" "$1" > "$0.started"',
+      `trap 'printf "%s\\n" "$?" > "$0.exited"' EXIT`,
       `printf 'fixture-fragment-start:%s\\n\\033[3' "$1"`,
+      'printf "%s %s\\n" "$1" "$$" > "$0.started"',
       "attempt=0",
       'while [ ! -f "$0.resume" ] && [ "$attempt" -lt 600 ]; do',
       "  /usr/bin/sleep 0.1",
@@ -585,16 +587,29 @@ async function verifySplitTerminalReconnect(page: Page, workspace: string, shell
   );
   const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
   const command = `/bin/sh ${quote(script)} "$$"`;
-  const started = /(?:^|\n)fixture-fragment-start:(\d+)/u;
   const ended = /(?:^|\n)fixture-fragment-end:(\d+) 🦀(?:\r?\n|\s*$)/u;
   const input = await terminalInput(page);
   await page.evaluate((line) => navigator.clipboard.writeText(line), command);
   await input.press("Control+Shift+v");
   await waitForTerminalCopy(page, input, /fixture-terminal-fragments\.sh/u, "before submission");
   await input.press("Enter");
-  const [, before] = await waitForTerminalCopy(page, input, started, "before reconnect");
+  // Keep the live foreground process free of key events until it writes the end
+  // marker. A copy gesture without a selection can be delivered as terminal input.
+  const waitForFile = async (path: string) => {
+    const deadline = Date.now() + 10_000;
+    do {
+      if (NodeFS.existsSync(path)) {
+        const value = NodeFS.readFileSync(path, "utf8");
+        if (value.endsWith("\n")) return value.trim();
+      }
+      await page.waitForTimeout(100);
+    } while (Date.now() < deadline);
+    throw new Error(`The terminal script did not write its ${NodePath.extname(path)} receipt`);
+  };
+  const [before, scriptPid] = (await waitForFile(startedFile)).split(" ");
   Assert.equal(before, shell);
-  Assert.equal(NodeFS.readFileSync(startedFile, "utf8").trim(), shell);
+  Assert.match(scriptPid ?? "", /^\d+$/u);
+  let sawSnapshot = false;
   let resumeSnapshot = false;
   let attachRequests = 0;
   const output = new Set<string>();
@@ -613,6 +628,7 @@ async function verifySplitTerminalReconnect(page: Page, workspace: string, shell
       for (const item of envelope.values ?? []) {
         const history = item.snapshot?.history;
         if (history?.includes(`fixture-fragment-start:${shell}`)) {
+          sawSnapshot = true;
           resumeSnapshot ||= history.endsWith("\x1b[3");
         }
         if (item.type !== "output" || item.data === undefined || output.size >= 8) continue;
@@ -630,9 +646,12 @@ async function verifySplitTerminalReconnect(page: Page, workspace: string, shell
   try {
     await page.reload({ waitUntil: "domcontentloaded" });
     const reattached = await terminalInput(page);
-    const [, restored] = await waitForTerminalCopy(page, reattached, started, "after reconnect");
-    Assert.equal(restored, shell);
+    const attachDeadline = Date.now() + 10_000;
+    while (!sawSnapshot && Date.now() < attachDeadline) await page.waitForTimeout(100);
+    Assert.ok(sawSnapshot, "The reattach snapshot must contain the staged terminal marker");
     NodeFS.writeFileSync(gate, "resume\n", { flag: "wx" });
+    Assert.equal(await waitForFile(releasedFile), shell);
+    Assert.equal(await waitForFile(exitFile), "0");
     const [, after] = await waitForTerminalCopy(
       page,
       reattached,
@@ -646,14 +665,15 @@ async function verifySplitTerminalReconnect(page: Page, workspace: string, shell
       },
     );
     Assert.equal(after, shell);
-    Assert.equal(NodeFS.readFileSync(releasedFile, "utf8").trim(), shell);
     Assert.ok(resumeSnapshot, "The wire snapshot must include the staged control fragment");
     return { sameShell: true, controlSequenceResumed: true, splitUnicode: "🦀" };
   } catch (error) {
     const receipt = JSON.stringify({
       attachRequests,
+      sawSnapshot,
       resumeSnapshot,
       gateReleased: NodeFS.existsSync(releasedFile),
+      exit: NodeFS.existsSync(exitFile) ? NodeFS.readFileSync(exitFile, "utf8").trim() : null,
       output: [...output],
       rendered: [...rendered],
     });
