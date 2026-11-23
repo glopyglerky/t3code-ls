@@ -31,6 +31,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             cols: u16,
             rows: u16,
         },
+        Terminate,
         Close,
     }
 
@@ -93,6 +94,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
                     Request::Resize { cols, rows } => {
                         process.resize(cols, rows)?;
                         json!({"version":1,"resized":true})
+                    }
+                    Request::Terminate => {
+                        json!({"version":1,"signalled":process.terminate()?})
                     }
                     Request::Close => {
                         let status = process.close()?.ok_or("PTY already closed")?;

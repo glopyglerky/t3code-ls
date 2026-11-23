@@ -198,6 +198,18 @@ impl PtyOwner {
         Ok(())
     }
 
+    pub fn terminate(&self) -> io::Result<bool> {
+        if self.child.is_none() {
+            return Err(invalid("terminal is closed"));
+        }
+        // The leader is still owned and unreaped, so this group ID cannot be reused.
+        match killpg(Pid::from_raw(self.pid as i32), Signal::SIGTERM) {
+            Ok(()) => Ok(true),
+            Err(nix::errno::Errno::ESRCH) => Ok(false),
+            Err(error) => Err(host(error)),
+        }
+    }
+
     pub fn close(&mut self) -> io::Result<Option<ExitStatus>> {
         let Some(mut child) = self.child.take() else {
             return Ok(None);

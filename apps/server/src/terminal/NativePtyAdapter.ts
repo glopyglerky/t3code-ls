@@ -104,6 +104,7 @@ class NativePtyProcess implements PtyAdapter.PtyProcess {
   private tail: Promise<void> = Promise.resolve();
   private queued = 0;
   private closing = false;
+  private terminating = false;
   private cursor = 0;
   private exitEvent: PtyAdapter.PtyExitEvent | undefined;
   private terminalExitCode: number | undefined;
@@ -130,12 +131,13 @@ class NativePtyProcess implements PtyAdapter.PtyProcess {
   }
 
   write(data: string): Promise<{ readonly acceptedBytes: number }> {
+    if (this.terminating) return Promise.reject(new Error("The native PTY is terminating."));
     // The public terminal contract permits at most 65,536 UTF-16 units per request.
     if (data.length > 65_536) return Promise.reject(new Error("Terminal input is too large."));
     const bytes = Buffer.from(data, "utf8");
     return this.enqueue(async () => {
       let acceptedBytes = 0;
-      while (acceptedBytes < bytes.length && !this.closing) {
+      while (acceptedBytes < bytes.length && !this.closing && !this.terminating) {
         const chunk = bytes.subarray(acceptedBytes, acceptedBytes + MAX_CHUNK_BYTES);
         const { accepted } = await this.host.request({ operation: "write", bytes: Array.from(chunk) });
         if (!nonnegativeInteger(accepted) || accepted > chunk.length) {
@@ -158,8 +160,17 @@ class NativePtyProcess implements PtyAdapter.PtyProcess {
     }).catch((error: Error) => this.host.close(error));
   }
 
-  kill(): void {
+  kill(signal?: string): void {
     if (this.closing) return;
+    if (signal === "SIGTERM") {
+      if (this.terminating) return;
+      this.terminating = true;
+      void this.enqueue(async () => {
+        const { signalled } = await this.host.request({ operation: "terminate" });
+        if (typeof signalled !== "boolean") throw new Error("Invalid native PTY termination receipt.");
+      }).then(() => this.poll(0)).catch((error: Error) => this.host.close(error));
+      return;
+    }
     this.closing = true;
     clearTimeout(this.timer);
     void this.tail.then(async () => {
@@ -170,7 +181,8 @@ class NativePtyProcess implements PtyAdapter.PtyProcess {
   }
 
   private poll(delay: number): void {
-    if (this.closing || this.reading || this.timer !== undefined || this.dataListeners.size === 0) return;
+    if (this.closing || this.reading || this.timer !== undefined ||
+      (this.dataListeners.size === 0 && !this.terminating)) return;
     this.timer = setTimeout(() => {
       this.timer = undefined;
       if (this.queued >= MAX_PENDING_OPERATIONS) {
@@ -193,7 +205,7 @@ class NativePtyProcess implements PtyAdapter.PtyProcess {
       !bytes.every((byte) => nonnegativeInteger(byte) && byte <= 255)) {
       throw new Error("Invalid native PTY output cursor.");
     }
-    if (this.dataListeners.size === 0 || this.closing) return IDLE_POLL_MS;
+    if ((this.dataListeners.size === 0 && !this.terminating) || this.closing) return IDLE_POLL_MS;
     const text = this.decoder.decode(Uint8Array.from(bytes), { stream: !ended });
     if (text.length > 0) for (const listener of this.dataListeners) listener(text);
     if (bytes.length > 0) {
