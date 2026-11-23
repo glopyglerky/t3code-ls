@@ -525,12 +525,19 @@ async function terminalInput(page: Page) {
   return input;
 }
 
-async function waitForTerminalCopy(page: Page, input: Locator, pattern: RegExp, phase?: string) {
+async function waitForTerminalCopy(
+  page: Page,
+  input: Locator,
+  pattern: RegExp,
+  phase?: string,
+  observe?: (clipboard: string) => void,
+) {
   const deadline = Date.now() + 10_000;
   do {
     await input.press("Control+Shift+a");
     await input.press("Control+Shift+c");
     const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+    observe?.(clipboard);
     const match = clipboard.match(pattern);
     if (match !== null) return match;
     await page.waitForTimeout(100);
@@ -583,14 +590,61 @@ async function verifySplitTerminalReconnect(page: Page, workspace: string, shell
   await input.press("Enter");
   const [, before] = await waitForTerminalCopy(page, input, started, "before reconnect");
   Assert.equal(before, shell);
-  await page.reload({ waitUntil: "domcontentloaded" });
-  const reattached = await terminalInput(page);
-  const [, restored] = await waitForTerminalCopy(page, reattached, started, "after reconnect");
-  Assert.equal(restored, shell);
-  NodeFS.writeFileSync(gate, "resume\n", { flag: "wx" });
-  const [, after] = await waitForTerminalCopy(page, reattached, ended, "after releasing PTY output");
-  Assert.equal(after, shell);
-  return { sameShell: true, controlSequenceResumed: true, splitUnicode: "🦀" };
+  let resumeSnapshot = false;
+  const output = new Set<string>();
+  const rendered = new Set<string>();
+  const codePoints = (text: string) => Array.from(text, (character) => character.codePointAt(0));
+  const observeSocket = (socket: import("playwright").WebSocket) => {
+    socket.on("framereceived", ({ payload }) => {
+      const json = payload.toString();
+      if (!json.includes("fixture-fragment-") && !json.includes('"type":"output"')) return;
+      const envelope = JSON.parse(json) as {
+        values?: Array<{ type?: string; snapshot?: { history?: string }; data?: string }>;
+      };
+      for (const item of envelope.values ?? []) {
+        const history = item.snapshot?.history;
+        if (history?.includes(`fixture-fragment-start:${shell}`)) {
+          resumeSnapshot ||= history.endsWith("\x1b[3");
+        }
+        if (item.type !== "output" || item.data === undefined || output.size >= 8) continue;
+        const fixture = item.data.match(/^(2m)?fixture-fragment-end:\d+( [^\r\n\u001b]{0,8})/u);
+        if (fixture) {
+          output.add(JSON.stringify(codePoints(`${fixture[1] ?? ""}${fixture[2]}`)));
+        } else {
+          const continuation = item.data.match(/^(?:[🦀�]+|[🦀�]*\x1b\[0m)(?=\r?\n|$)/u);
+          if (continuation) output.add(JSON.stringify(codePoints(continuation[0])));
+        }
+      }
+    });
+  };
+  page.on("websocket", observeSocket);
+  try {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const reattached = await terminalInput(page);
+    const [, restored] = await waitForTerminalCopy(page, reattached, started, "after reconnect");
+    Assert.equal(restored, shell);
+    NodeFS.writeFileSync(gate, "resume\n", { flag: "wx" });
+    const [, after] = await waitForTerminalCopy(
+      page,
+      reattached,
+      ended,
+      "after releasing PTY output",
+      (clipboard) => {
+        const fixture = clipboard.match(/(?:^|\n)(.{0,3})fixture-fragment-end:\d+([^\r\n]{0,8})/u);
+        if (fixture && rendered.size < 8) {
+          rendered.add(JSON.stringify(codePoints(`${fixture[1]}${fixture[2]}`)));
+        }
+      },
+    );
+    Assert.equal(after, shell);
+    Assert.ok(resumeSnapshot, "The wire snapshot must include the staged control fragment");
+    return { sameShell: true, controlSequenceResumed: true, splitUnicode: "🦀" };
+  } catch (error) {
+    const receipt = JSON.stringify({ resumeSnapshot, output: [...output], rendered: [...rendered] });
+    throw new Error(`${error instanceof Error ? error.message : String(error)}. PTY fixture ${receipt}`);
+  } finally {
+    page.off("websocket", observeSocket);
+  }
 }
 
 function summarizeSnapshot(snapshot: OrchestrationV2ThreadDetailSnapshot) {
