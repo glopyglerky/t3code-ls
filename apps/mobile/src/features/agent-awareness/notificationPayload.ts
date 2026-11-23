@@ -100,19 +100,22 @@ export function extractAgentNotificationDeepLink(response: unknown): string | nu
 }
 
 export function routeAgentNotificationResponseOnce(input: {
-  readonly handledResponseIds: Set<string>;
+  readonly responses: Map<string, Promise<void>>;
   readonly response: unknown;
-  readonly navigate: (deepLink: string) => void;
-}): void {
+  readonly navigate: (deepLink: string) => void | Promise<void>;
+}): Promise<void> {
   const responseId = identifierFromNotificationResponse(input.response);
-  if (responseId && input.handledResponseIds.has(responseId)) {
-    return;
-  }
+  const existing = responseId ? input.responses.get(responseId) : undefined;
+  if (existing) return existing;
   const deepLink = extractAgentNotificationDeepLink(input.response);
-  if (deepLink) {
-    input.navigate(deepLink);
-  }
-  if (responseId) {
-    input.handledResponseIds.add(responseId);
-  }
+  const completion = Promise.resolve()
+    .then(async () => {
+      if (deepLink) await input.navigate(deepLink);
+    })
+    .catch((error: unknown) => {
+      if (responseId) input.responses.delete(responseId);
+      throw error;
+    });
+  if (responseId) input.responses.set(responseId, completion);
+  return completion;
 }
