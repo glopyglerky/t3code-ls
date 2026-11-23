@@ -2871,6 +2871,7 @@ name = "t3-code-ls-storage"
 version = "0.1.0"
 dependencies = [
  "getrandom 0.4.3",
+ "libc",
  "redb",
  "regex",
  "same-file",
@@ -2881,6 +2882,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "unicode-segmentation",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
