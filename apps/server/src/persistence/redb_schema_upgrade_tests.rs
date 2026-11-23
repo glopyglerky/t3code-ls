@@ -3694,7 +3694,7 @@ fn forward_owner_protocol_cases(home: &std::path::Path) {
             .unwrap();
         drop(input);
         let result = child.wait_with_output().unwrap();
-        assert_eq!(result.status.code(), Some(78));
+        assert_eq!(result.status.code(), Some(78), "lose_output={lose_output}");
         assert!(result.stdout.is_empty());
         let owner = crate::application_server_ownership::OwnerLock::acquire_existing_native(
             &state.join("server-owner.sqlite"),
