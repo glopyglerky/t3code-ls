@@ -725,14 +725,6 @@ async fn user_input_cancellation_uses_the_current_transaction_row() {
     app.rollback("write").await.unwrap();
 }
 
-async fn get(app: &mut ApplicationTransactions, table: &str, id: &str) -> Map<String, Value> {
-    app.get("write", table, &[text_cell(id)])
-        .await
-        .unwrap()
-        .unwrap()
-}
-
-
 #[tokio::test]
 async fn all_projection_entity_families_and_shadow_columns_are_persisted() {
     let fixture = TestFixture::start().await;
