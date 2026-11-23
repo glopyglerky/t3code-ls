@@ -3979,6 +3979,7 @@ export const OrchestrationV2SubscribeThreadInput = Schema.Struct({
   /** The client restores `*Omitted` bodies from records it already holds. */
   acceptDedupedBodies: Schema.optionalKey(Schema.Boolean),
   acceptCompactIds: Schema.optionalKey(Schema.Boolean),
+  /** Version 1 accepts appends. Version 2 also accepts UTF-16 splices. */
   messageTextAppends: Schema.optionalKey(NonNegativeInt),
 });
 export type OrchestrationV2SubscribeThreadInput = typeof OrchestrationV2SubscribeThreadInput.Type;
@@ -4107,6 +4108,14 @@ export const OrchestrationV2ThreadStreamItem = withRecordIdTable(
       kind: Schema.Literal("message-text-append"),
       baseSequence: NonNegativeInt,
       sequence: NonNegativeInt,
+      event: OrchestrationV2MessageUpdated,
+    }),
+    Schema.Struct({
+      kind: Schema.Literal("message-text-splice"),
+      baseSequence: NonNegativeInt,
+      sequence: NonNegativeInt,
+      startUtf16: NonNegativeInt,
+      endUtf16: NonNegativeInt,
       event: OrchestrationV2MessageUpdated,
     }),
     OrchestrationV2UnknownThreadStreamEvent,

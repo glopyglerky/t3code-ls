@@ -10,6 +10,13 @@ interface NativeMap {
 
 interface NativeMessageText {
   append(baseSequence: number, sequence: number, suffix: string): string | undefined;
+  splice?(
+    baseSequence: number,
+    sequence: number,
+    startUtf16: number,
+    endUtf16: number,
+    text: string,
+  ): string | undefined;
   free(): void;
 }
 
@@ -17,6 +24,7 @@ interface OffsetModule {
   default(): Promise<unknown>;
   ComposerOffsetMap: { from_words(words: Uint32Array, length: number): NativeMap | undefined };
   ThreadMessageText?: {
+    readonly prototype?: NativeMessageText;
     from_message(sequence: number, text: string, maxBytes: number): NativeMessageText | undefined;
   };
 }
@@ -38,21 +46,27 @@ export async function initializeComposerOffsets(): Promise<void> {
   offsetModule = module;
   const textBinding = module.ThreadMessageText;
   if (textBinding !== undefined) {
-    installThreadMessageText((sequence, text, maxBytes) => {
-      const base = textBinding.from_message(sequence, text, maxBytes);
-      if (base === undefined) return undefined;
-      return {
-        append(baseSequence, sequence, suffix) {
-          const text = base.append(baseSequence, sequence, suffix);
-          if (text !== undefined && !recordedTextAppend) {
-            performance.mark("t3-thread-rust-text-append");
-            recordedTextAppend = true;
-          }
-          return text;
-        },
-        free: () => base.free(),
-      };
-    });
+    const supportsSplices = typeof textBinding.prototype?.splice === "function";
+    installThreadMessageText(
+      (sequence, text, maxBytes) => {
+        const base = textBinding.from_message(sequence, text, maxBytes);
+        if (base === undefined) return undefined;
+        return {
+          append(baseSequence, sequence, suffix) {
+            const text = base.append(baseSequence, sequence, suffix);
+            if (text !== undefined && !recordedTextAppend) {
+              performance.mark("t3-thread-rust-text-append");
+              recordedTextAppend = true;
+            }
+            return text;
+          },
+          splice: (baseSequence, sequence, start, end, text) =>
+            base.splice?.(baseSequence, sequence, start, end, text),
+          free: () => base.free(),
+        };
+      },
+      supportsSplices ? 2 : 1,
+    );
   }
 }
 

@@ -33,7 +33,7 @@ const TRUNCATION_MARKER = "\n… output truncated for transport";
 const TRUNCATION_MARKER_BYTES = Buffer.byteLength(TRUNCATION_MARKER, "utf8");
 
 /** A subscription owns one bounded base. Replay and live events share it. */
-export function makeMessageTextAppendEncoder() {
+export function makeMessageTextAppendEncoder(allowSplices = false) {
   let base: { readonly id: MessageId; readonly sequence: number; readonly text: string } | undefined;
   return (item: OrchestrationV2ThreadStreamItem): OrchestrationV2ThreadStreamItem => {
     if (item.kind === "snapshot") base = undefined;
@@ -54,20 +54,57 @@ export function makeMessageTextAppendEncoder() {
       base === undefined ||
       previous === undefined ||
       previous.id !== base.id ||
-      previous.sequence >= sequence ||
-      previous.text.length < 64 ||
-      previous.text.length >= base.text.length ||
-      !base.text.startsWith(previous.text)
+      previous.sequence >= sequence
     ) {
       return item;
     }
+    if (
+      previous.text.length >= 64 &&
+      previous.text.length < base.text.length &&
+      base.text.startsWith(previous.text)
+    ) {
+      return {
+        kind: "message-text-append",
+        baseSequence: previous.sequence,
+        sequence,
+        event: { ...event, payload: { ...message, text: base.text.slice(previous.text.length) } },
+      };
+    }
+    if (!allowSplices || previous.text === base.text) return item;
+    const splice = describeTextSplice(previous.text, base.text);
+    if (!splice) return item;
     return {
-      kind: "message-text-append",
+      kind: "message-text-splice",
       baseSequence: previous.sequence,
       sequence,
-      event: { ...event, payload: { ...message, text: base.text.slice(previous.text.length) } },
+      startUtf16: splice.start,
+      endUtf16: splice.end,
+      event: { ...event, payload: { ...message, text: splice.inserted } },
     };
   };
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+function describeTextSplice(previous: string, next: string) {
+  let start = 0;
+  const sharedLength = Math.min(previous.length, next.length);
+  while (start < sharedLength && previous.charCodeAt(start) === next.charCodeAt(start)) start++;
+  if (isLowSurrogate(previous.charCodeAt(start))) start--;
+
+  let suffix = 0;
+  while (
+    suffix < sharedLength - start &&
+    previous.charCodeAt(previous.length - suffix - 1) === next.charCodeAt(next.length - suffix - 1)
+  ) suffix++;
+  if (isLowSurrogate(previous.charCodeAt(previous.length - suffix))) suffix--;
+
+  const inserted = next.slice(start, next.length - suffix);
+  // Reserve space for two indices and the rest of the splice envelope.
+  if (Buffer.byteLength(inserted, "utf8") + 64 >= Buffer.byteLength(next, "utf8")) return undefined;
+  return { start, end: previous.length - suffix, inserted };
 }
 
 function truncateDetail(

@@ -442,7 +442,7 @@ export const subscribeThread = (
   subscribeDynamicMapped(
     ORCHESTRATION_V2_WS_METHODS.subscribeThread,
     makeInput,
-    (_session, stream, input) => decodeThreadMessageText(stream, input.messageTextAppends === 1),
+    (_session, stream, input) => decodeThreadMessageText(stream, input.messageTextAppends),
     options,
   );
 

@@ -1,4 +1,6 @@
-use t3_code_ls_client_text::text_revision::{Applied, TextChange, TextEdit, TextRevision};
+use t3_code_ls_client_text::text_revision::{
+    Applied, TextChange, TextEdit, TextRevision, Utf16Offset,
+};
 use t3_code_ls_client_text::{
     FlatOffset, MarkdownOffset, OffsetMap, ProseMirrorPosition, Run, RunKind,
 };
@@ -66,6 +68,31 @@ impl ThreadMessageText {
     }
 
     pub fn append(&mut self, base_sequence: f64, sequence: f64, suffix: &str) -> Option<String> {
+        self.apply(base_sequence, sequence, TextEdit::Append(suffix))
+    }
+
+    pub fn splice(
+        &mut self,
+        base_sequence: f64,
+        sequence: f64,
+        start_utf16: u32,
+        end_utf16: u32,
+        text: &str,
+    ) -> Option<String> {
+        self.apply(
+            base_sequence,
+            sequence,
+            TextEdit::Splice {
+                start: Utf16Offset(start_utf16),
+                end: Utf16Offset(end_utf16),
+                text,
+            },
+        )
+    }
+}
+
+impl ThreadMessageText {
+    fn apply(&mut self, base_sequence: f64, sequence: f64, edit: TextEdit<'_>) -> Option<String> {
         if sequence_number(base_sequence)? != self.text.sequence() {
             return None;
         }
@@ -74,7 +101,7 @@ impl ThreadMessageText {
             base_revision,
             revision: base_revision.checked_add(1)?,
             sequence: sequence_number(sequence)?,
-            edit: TextEdit::Append(suffix),
+            edit,
         };
         match self.text.apply(change).ok()? {
             Applied::Updated => Some(self.text.text().to_owned()),
@@ -102,6 +129,18 @@ mod thread_message_tests {
         assert_eq!(text.append(10.0, 18.0, "!"), None);
         assert_eq!(text.append(17.0, 18.0, "!").as_deref(), Some("日本語!"));
         assert!(ThreadMessageText::from_message(f64::NAN, String::new(), 12).is_none());
+    }
+
+    #[test]
+    fn splices_keep_the_exact_base_when_the_utf16_range_is_invalid() {
+        let mut text = ThreadMessageText::from_message(10.0, "界🐟語".to_owned(), 12).unwrap();
+        assert_eq!(text.splice(10.0, 20.0, 2, 3, "🚀"), None);
+        assert_eq!(text.splice(9.0, 20.0, 1, 3, "🚀"), None);
+        assert_eq!(
+            text.splice(10.0, 20.0, 1, 3, "🚀").as_deref(),
+            Some("界🚀語")
+        );
+        assert_eq!(text.append(20.0, 21.0, "!").as_deref(), Some("界🚀語!"));
     }
 }
 

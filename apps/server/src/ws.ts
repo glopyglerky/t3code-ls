@@ -912,8 +912,10 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
     const withMessageTextAppends = <E, R>(
       stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>,
     ) =>
-      input.messageTextAppends === 1
-        ? Stream.suspend(() => Stream.map(stream, makeMessageTextAppendEncoder()))
+      input.messageTextAppends === 1 || input.messageTextAppends === 2
+        ? Stream.suspend(() =>
+            Stream.map(stream, makeMessageTextAppendEncoder(input.messageTextAppends === 2)),
+          )
         : stream;
     const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
 
@@ -1888,6 +1890,7 @@ export const layerWsRpc = (
           threadResumeCompletionMarker: true,
           threadSnapshotPagination: true,
           threadMessageTextAppends: 1 as const,
+          threadMessageTextSplices: 1 as const,
           threadFind: true,
           threadFindProgressive: true,
           secretProviderSettings: true,
