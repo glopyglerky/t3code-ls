@@ -169,7 +169,6 @@ async function startApplication(
         "--port",
         String(serverPort),
         "--no-browser",
-        "--no-auto-bootstrap-project-from-cwd",
       ]
     : [
         "scripts/dev-runner.ts",
