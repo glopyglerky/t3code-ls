@@ -141,6 +141,12 @@ jobs:
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-')
         working-directory: apps/mobile
         run: pnpm exec vp test run --project unit --maxWorkers 2 src/state/thread-outbox.test.ts
+      - name: Exercise mobile outbox convergence after reconnect
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-reconnect-')
+        working-directory: apps/mobile
+        run: |
+          pnpm exec vp test run --project unit --maxWorkers 2 \
+            src/state/threadOutboxDelivery.permissions.test.ts src/state/threadOutboxDelivery.test.ts
       - name: Exercise task-cache cleanup and savings transactions
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-task-cache-')
         run: |
