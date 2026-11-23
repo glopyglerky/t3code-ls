@@ -336,7 +336,7 @@ const select = Effect.fn("NativePtyAdapter.select")(function* () {
   if (bundled === "1") {
     yield* Effect.tryPromise({
       try: () => verifyBundledHost(executable),
-      catch: (cause) => cause,
+      catch: (cause) => new Error("Could not verify the bundled native PTY host.", { cause }),
     }).pipe(Effect.orDie);
   }
   return layer(executable);
