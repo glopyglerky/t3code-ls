@@ -94,3 +94,11 @@ jobs:
             exec runuser -u "$1" -- xvfb-run -a -s "-screen 0 1280x1024x24" dbus-run-session -- \
               "$2" apps/server/scripts/verify-gpui-thread-submit.ts "$3"
           ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/gpui-target/debug/t3-code-ls-desktop-gpui"
+      - name: Approve one recorded command through the real GPUI composer
+        timeout-minutes: 4
+        run: |
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- xvfb-run -a -s "-screen 0 1280x1024x24" dbus-run-session -- \
+              "$2" apps/server/scripts/verify-gpui-thread-submit.ts "$3" --approval
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/gpui-target/debug/t3-code-ls-desktop-gpui"

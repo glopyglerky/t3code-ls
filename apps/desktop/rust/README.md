@@ -124,6 +124,16 @@ submits in that view. Closing the view cancels unsent work and subsequent
 reads when observed; a write already sent still requires reconciliation.
 There is no automatic provider interrupt on window close.
 
+Supply a separate `approvalCommandId` to enable **Allow once** for one live
+command approval in that turn. The composer shows the request details from
+the server's bounded projection. It checks the same pending request and
+details again when you activate the button, then sends one
+`runtime-request.respond` with decision `accept` using the supplied command
+ID. The server owns request resolution and provider delivery. The composer
+only confirms the result after observing that decision and the same run
+complete. If the result is uncertain, the view keeps the draft and leaves
+the request for inspection in the server thread.
+
 Tungstenite 0.29.0 provides the WebSocket handshake and framing under its
 MIT/Apache-2.0 licenses. Only the handshake feature is enabled. The endpoint
 is fixed to IPv4 loopback with no TLS, redirect, proxy or DNS selection.
@@ -158,12 +168,15 @@ node apps/server/scripts/verify-gpui-thread-submit.ts \
   "$CARGO_TARGET_DIR/debug/t3-code-ls-desktop-gpui"
 ```
 
-This write increment awaits hosted compilation and execution. It does not
-qualify streaming or approval controls, live providers, populated threads,
-durable desktop drafts, automatic retry or normal launcher integration.
-Project matching is a preflight read; it adds no new atomic server
-precondition for concurrent project moves. The recorded showcase and
-read-only snapshot routes remain independently executable. The stock pin
+Repeat with `--approval` after the executable path to select the existing
+ACP approval replay. AT-SPI checks the button name, role, and request
+details. X11 activates the button, then the check reads the resolved request
+and completed reply from the same fresh native server profile.
+
+Streaming, other approval actions, live providers, populated threads,
+durable desktop drafts, and normal launcher integration remain open.
+Project matching is a preflight read. The recorded showcase and read-only
+snapshot routes remain independently executable. The stock pin
 remains `28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`. The mandatory method
 SHA-256 is `5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
 

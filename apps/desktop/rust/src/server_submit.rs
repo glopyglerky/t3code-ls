@@ -1,8 +1,8 @@
-//! One authenticated message dispatch through the retained application's JSON WebSocket RPC.
+//! One turn and one optional approval through the application's authenticated WebSocket RPC.
 use crate::server_snapshot::{Connection, Snapshot};
 use serde_json::{Value, json};
 use std::{
-    io::Read,
+    io::{self, Read, Write},
     net::{Ipv4Addr, SocketAddr, TcpStream},
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
@@ -12,17 +12,37 @@ use tungstenite::{Message, client::IntoClientRequest, protocol::WebSocketConfig}
 pub const FAILED: &str =
     "Could not confirm submission. Draft kept. Check the thread before retrying.";
 pub const CONFIRMED: &str = "Server submission confirmed.";
+pub const APPROVAL_UNCONFIRMED: &str =
+    "Could not confirm approval and turn completion. Draft kept. Check the server thread.";
 const MAX_INPUT: usize = 16 * 1024;
 const MAX_REPLY: usize = 1024 * 1024;
 const MAX_DRAFT: usize = 4096;
 const RPC_DEADLINE: Duration = Duration::from_secs(8);
+const ACCEPT_ONCE: &str = "accept";
+
+pub enum Progress {
+    Completed(Snapshot),
+    Approval(Approval),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Approval {
+    request_id: String,
+    run_id: String,
+    node_id: String,
+    provider_turn_id: String,
+    session_id: String,
+    pub detail: String,
+}
 
 pub struct Session {
     connection: Connection,
     project_id: String,
     command_id: String,
     message_id: String,
+    approval_command_id: Option<String>,
     attempted: AtomicBool,
+    approval_attempted: AtomicBool,
 }
 
 impl Session {
@@ -37,18 +57,14 @@ impl Session {
             return Err(FAILED);
         }
         let value: Value = serde_json::from_slice(&bytes).map_err(|_| FAILED)?;
-        if value.as_object().is_none_or(|object| object.len() != 7) {
+        let object = value.as_object().ok_or(FAILED)?;
+        let has_approval = object.contains_key("approvalCommandId");
+        let expected_fields = if has_approval { 8 } else { 7 };
+        if object.len() != expected_fields {
             return Err(FAILED);
         }
         let identity = |name: &str| {
-            value[name]
-                .as_str()
-                .filter(|id| {
-                    !id.is_empty()
-                        && id.trim() == *id
-                        && id.len() <= 1024
-                        && !id.chars().any(char::is_control)
-                })
+            checked_identity(&value[name])
                 .map(str::to_owned)
                 .ok_or(FAILED)
         };
@@ -57,16 +73,25 @@ impl Session {
             "environmentId":value["environmentId"], "threadId":value["threadId"],
         }))
         .map_err(|_| FAILED)?;
+        let command_id = identity("commandId")?;
+        let approval_command_id = has_approval
+            .then(|| identity("approvalCommandId"))
+            .transpose()?;
+        if approval_command_id.as_deref() == Some(command_id.as_str()) {
+            return Err(FAILED);
+        }
         Ok(Self {
             connection: Connection::read(connection.as_slice()).map_err(|_| FAILED)?,
             project_id: identity("projectId")?,
-            command_id: identity("commandId")?,
+            command_id,
             message_id: identity("messageId")?,
+            approval_command_id,
             attempted: AtomicBool::new(false),
+            approval_attempted: AtomicBool::new(false),
         })
     }
 
-    pub fn submit(&self, text: &str, cancelled: &AtomicBool) -> Result<Snapshot, &'static str> {
+    pub fn submit(&self, text: &str, cancelled: &AtomicBool) -> Result<Progress, &'static str> {
         if text.trim().is_empty() || text.len() > MAX_DRAFT {
             return Err(FAILED);
         }
@@ -76,8 +101,10 @@ impl Session {
         }
         self.check_cancelled(cancelled)?;
         let before = self.bound_projection()?;
-        if self.accepted(&before, text) {
-            return self.connection.snapshot_from(&before).map_err(|_| FAILED);
+        if let Some(run) = self.selected_run(&before, text)
+            && run["status"].as_str() == Some("completed")
+        {
+            return self.completed(&before).map(Progress::Completed);
         }
         if before["projection"]["messages"]
             .as_array()
@@ -97,13 +124,68 @@ impl Session {
         });
         // Even an RPC error can follow a committed dispatch. Reconcile only by reading this identity.
         let _receipt = self.dispatch(command, cancelled);
+        self.observe(cancelled, |snapshot| {
+            let run = self.selected_run(snapshot, text)?;
+            if run["status"].as_str() == Some("completed") {
+                return self.completed(snapshot).ok().map(Progress::Completed);
+            }
+            self.approval_command_id.as_ref()?;
+            self.pending_approval(snapshot, run).map(Progress::Approval)
+        })
+    }
+
+    pub fn allow_once(
+        &self,
+        approval: &Approval,
+        text: &str,
+        cancelled: &AtomicBool,
+    ) -> Result<Snapshot, &'static str> {
+        let command_id = self.approval_command_id.as_ref().ok_or(FAILED)?;
+        if self.approval_attempted.swap(true, Ordering::AcqRel) {
+            return Err(FAILED);
+        }
+        self.check_cancelled(cancelled)?;
+        let before = self.bound_projection()?;
+        let run = self.selected_run(&before, text).ok_or(FAILED)?;
+        if self.pending_approval(&before, run).as_ref() != Some(approval) {
+            return Err(FAILED);
+        }
+        // The server still validates that this request is pending when it commits the command.
+        let _receipt = self.dispatch(
+            json!({
+                "type": "runtime-request.respond", "commandId": command_id,
+                "threadId": self.connection.thread_id(), "requestId": approval.request_id,
+                "decision": ACCEPT_ONCE,
+            }),
+            cancelled,
+        );
+        self.observe(cancelled, |snapshot| {
+            let run = self.selected_run(snapshot, text)?;
+            let request = approval.request(snapshot)?;
+            if run["status"].as_str() != Some("completed")
+                || run["id"].as_str() != Some(approval.run_id.as_str())
+                || request["status"].as_str() != Some("resolved")
+                || request["decision"].as_str() != Some(ACCEPT_ONCE)
+            {
+                return None;
+            }
+            self.completed(snapshot).ok()
+        })
+    }
+
+    fn observe<T>(
+        &self,
+        cancelled: &AtomicBool,
+        observed: impl Fn(&Value) -> Option<T>,
+    ) -> Result<T, &'static str> {
         let started = Instant::now();
         while started.elapsed() < RPC_DEADLINE {
             self.check_cancelled(cancelled)?;
-            if let Ok(snapshot) = self.bound_projection() {
-                if self.accepted(&snapshot, text) {
-                    return self.connection.snapshot_from(&snapshot).map_err(|_| FAILED);
-                }
+            if let Ok(snapshot) = self.bound_projection()
+                && let Some(result) = observed(&snapshot)
+            {
+                self.check_cancelled(cancelled)?;
+                return Ok(result);
             }
             std::thread::sleep(Duration::from_millis(100));
         }
@@ -132,44 +214,102 @@ impl Session {
         Ok(snapshot)
     }
 
-    fn accepted(&self, snapshot: &Value, text: &str) -> bool {
+    fn completed(&self, snapshot: &Value) -> Result<Snapshot, &'static str> {
+        self.connection.snapshot_from(snapshot).map_err(|_| FAILED)
+    }
+
+    fn selected_run<'a>(&self, snapshot: &'a Value, text: &str) -> Option<&'a Value> {
         let projection = &snapshot["projection"];
-        let Some(messages) = projection["messages"].as_array() else {
-            return false;
+        let [run] = projection["runs"].as_array()?.as_slice() else {
+            return None;
         };
-        let Some(runs) = projection["runs"].as_array() else {
-            return false;
-        };
-        if runs.len() != 1
-            || runs[0]["threadId"].as_str() != Some(self.connection.thread_id())
-            || runs[0]["status"].as_str() != Some("completed")
-        {
-            return false;
+        let run_id = checked_identity(&run["id"])?;
+        if run["threadId"].as_str() != Some(self.connection.thread_id()) {
+            return None;
         }
-        let selected: Vec<_> = messages
+        let mut users = projection["messages"]
+            .as_array()?
             .iter()
-            .filter(|message| message["role"].as_str() == Some("user"))
-            .collect();
-        selected.len() == 1
-            && selected[0]["id"].as_str() == Some(self.message_id.as_str())
-            && selected[0]["text"].as_str() == Some(text)
-            && selected[0]["threadId"].as_str() == Some(self.connection.thread_id())
-            && selected[0]["runId"]
-                .as_str()
-                .is_some_and(|run| runs[0]["id"].as_str() == Some(run))
+            .filter(|message| message["role"].as_str() == Some("user"));
+        let message = users.next()?;
+        (users.next().is_none()
+            && message["id"].as_str() == Some(self.message_id.as_str())
+            && message["text"].as_str() == Some(text)
+            && message["threadId"].as_str() == Some(self.connection.thread_id())
+            && message["runId"].as_str() == Some(run_id))
+        .then_some(run)
+    }
+
+    fn pending_approval(&self, snapshot: &Value, run: &Value) -> Option<Approval> {
+        if !matches!(run["status"].as_str(), Some("running" | "waiting")) {
+            return None;
+        }
+        let run_id = checked_identity(&run["id"])?;
+        let projection = &snapshot["projection"];
+        let mut pending = projection["runtimeRequests"]
+            .as_array()?
+            .iter()
+            .filter(|request| request["status"].as_str() == Some("pending"));
+        let request = pending.next()?;
+        if pending.next().is_some()
+            || request["kind"].as_str() != Some("command")
+            || request["responseCapability"]["type"].as_str() != Some("live")
+        {
+            return None;
+        }
+        let request_id = checked_identity(&request["id"])?;
+        let node_id = checked_identity(&request["nodeId"])?;
+        let provider_turn_id = checked_identity(&request["providerTurnId"])?;
+        let session_id = checked_identity(&request["responseCapability"]["providerSessionId"])?;
+        let mut items = projection["turnItems"].as_array()?.iter().filter(|item| {
+            item["type"].as_str() == Some("approval_request")
+                && item["requestId"].as_str() == Some(request_id)
+        });
+        let item = items.next()?;
+        if items.next().is_some()
+            || item["status"].as_str() != Some("waiting")
+            || item["requestKind"].as_str() != Some("command")
+            || item["threadId"].as_str() != Some(self.connection.thread_id())
+            || item["runId"].as_str() != Some(run_id)
+            || item["nodeId"].as_str() != Some(node_id)
+            || item["providerTurnId"].as_str() != Some(provider_turn_id)
+            || item.get("reason").is_some()
+            || item.get("fullAccessOverride").is_some()
+        {
+            return None;
+        }
+        // Missing options use the stock client's default. Explicit options must offer accept.
+        if let Some(options) = item.get("options")
+            && !options.as_array()?.iter().any(|option| {
+                option["decision"].as_str() == Some(ACCEPT_ONCE) && option.get("warning").is_none()
+            })
+        {
+            return None;
+        }
+        let detail = item["prompt"]
+            .as_str()
+            .filter(|prompt| !prompt.trim().is_empty() && prompt.len() <= MAX_DRAFT)?;
+        Some(Approval {
+            request_id: request_id.to_owned(),
+            run_id: run_id.to_owned(),
+            node_id: node_id.to_owned(),
+            provider_turn_id: provider_turn_id.to_owned(),
+            session_id: session_id.to_owned(),
+            detail: detail.to_owned(),
+        })
     }
 
     fn dispatch(&self, command: Value, cancelled: &AtomicBool) -> Result<(), &'static str> {
-        let started = Instant::now();
+        self.check_cancelled(cancelled)?;
+        let deadline = Instant::now() + RPC_DEADLINE;
         let address = SocketAddr::from((Ipv4Addr::LOCALHOST, self.connection.port()));
         let stream =
             TcpStream::connect_timeout(&address, Duration::from_secs(2)).map_err(|_| FAILED)?;
-        stream
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .map_err(|_| FAILED)?;
-        stream
-            .set_write_timeout(Some(Duration::from_secs(2)))
-            .map_err(|_| FAILED)?;
+        let stream = DeadlineStream {
+            stream,
+            deadline,
+            read_slice: Duration::from_secs(2),
+        };
         let mut request = format!(
             "ws://127.0.0.1:{}/ws?orchestrationProtocol=2",
             self.connection.port()
@@ -191,6 +331,7 @@ impl Session {
         let (mut socket, _) =
             tungstenite::client::client_with_config(request, stream, Some(config))
                 .map_err(|_| FAILED)?;
+        socket.get_mut().read_slice = Duration::from_millis(250);
         self.check_cancelled(cancelled)?;
         socket.send(Message::Text(serde_json::to_string(&json!({
             "_tag":"Request", "id":"1", "tag":"orchestration.dispatchCommand", "payload":command, "headers":[],
@@ -198,11 +339,9 @@ impl Session {
         let mut received = 0;
         for _ in 0..128 {
             self.check_cancelled(cancelled)?;
-            let remaining = RPC_DEADLINE.checked_sub(started.elapsed()).ok_or(FAILED)?;
-            socket
-                .get_mut()
-                .set_read_timeout(Some(remaining.min(Duration::from_millis(250))))
-                .map_err(|_| FAILED)?;
+            if Instant::now() >= deadline {
+                return Err(FAILED);
+            }
             let message = match socket.read() {
                 Ok(message) => message,
                 Err(tungstenite::Error::Io(error))
@@ -260,13 +399,73 @@ impl Session {
     }
 }
 
+struct DeadlineStream {
+    stream: TcpStream,
+    deadline: Instant,
+    read_slice: Duration,
+}
+
+impl DeadlineStream {
+    fn remaining(&self, limit: Duration) -> io::Result<Duration> {
+        self.deadline
+            .checked_duration_since(Instant::now())
+            .filter(|time| !time.is_zero())
+            .map(|time| time.min(limit))
+            .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))
+    }
+}
+
+impl Read for DeadlineStream {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        self.stream
+            .set_read_timeout(Some(self.remaining(self.read_slice)?))?;
+        self.stream.read(buffer)
+    }
+}
+
+impl Write for DeadlineStream {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.stream
+            .set_write_timeout(Some(self.remaining(Duration::from_secs(2))?))?;
+        self.stream.write(buffer)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.stream.flush()
+    }
+}
+
+fn checked_identity(value: &Value) -> Option<&str> {
+    value.as_str().filter(|id| {
+        !id.is_empty() && id.trim() == *id && id.len() <= 1024 && !id.chars().any(char::is_control)
+    })
+}
+
+impl Approval {
+    fn request<'a>(&self, snapshot: &'a Value) -> Option<&'a Value> {
+        let mut matches = snapshot["projection"]["runtimeRequests"]
+            .as_array()?
+            .iter()
+            .filter(|request| request["id"].as_str() == Some(self.request_id.as_str()));
+        let request = matches.next()?;
+        (matches.next().is_none()
+            && request["kind"].as_str() == Some("command")
+            && request["nodeId"].as_str() == Some(self.node_id.as_str())
+            && request["providerTurnId"].as_str() == Some(self.provider_turn_id.as_str())
+            && request["responseCapability"]["type"].as_str() == Some("live")
+            && request["responseCapability"]["providerSessionId"].as_str()
+                == Some(self.session_id.as_str()))
+        .then_some(request)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::{
         io::Write,
         net::TcpListener,
-        sync::{Arc, atomic::AtomicUsize},
+        sync::{Arc, atomic::AtomicUsize, mpsc},
         thread,
     };
 
@@ -277,6 +476,12 @@ mod tests {
     fn input(port: u16) -> Vec<u8> {
         serde_json::to_vec(&json!({"port":port,"token":"fixture.token","environmentId":"fixture-env",
             "threadId":THREAD,"projectId":PROJECT,"commandId":"fixture-command-1","messageId":"fixture-message-1"})).unwrap()
+    }
+
+    fn approval_input(port: u16) -> Vec<u8> {
+        let mut value: Value = serde_json::from_slice(&input(port)).unwrap();
+        value["approvalCommandId"] = json!("fixture-approval-command");
+        serde_json::to_vec(&value).unwrap()
     }
 
     fn projection(accepted: bool) -> Value {
@@ -338,6 +543,10 @@ mod tests {
     }
 
     fn read_projection(listener: &TcpListener, accepted: bool) {
+        read_projection_value(listener, projection(accepted));
+    }
+
+    fn read_projection_value(listener: &TcpListener, value: Value) {
         http(
             listener,
             "/.well-known/t3/environment",
@@ -347,9 +556,21 @@ mod tests {
         http(
             listener,
             &format!("/api/orchestration/threads/{THREAD}/bounded"),
-            projection(accepted),
+            value,
             true,
         );
+    }
+
+    fn command_socket(listener: &TcpListener) -> tungstenite::WebSocket<TcpStream> {
+        tungstenite::accept_hdr(
+            accept(listener),
+            |request: &tungstenite::handshake::server::Request, response| {
+                assert_eq!(request.uri(), "/ws?orchestrationProtocol=2");
+                assert_eq!(request.headers()["Authorization"], "Bearer fixture.token");
+                Ok(response)
+            },
+        )
+        .unwrap()
     }
 
     #[test]
@@ -362,16 +583,7 @@ mod tests {
             let observed = Arc::clone(&count);
             let peer = thread::spawn(move || {
                 read_projection(&listener, false);
-                let stream = accept(&listener);
-                let mut socket = tungstenite::accept_hdr(
-                    stream,
-                    |request: &tungstenite::handshake::server::Request, response| {
-                        assert_eq!(request.uri(), "/ws?orchestrationProtocol=2");
-                        assert_eq!(request.headers()["Authorization"], "Bearer fixture.token");
-                        Ok(response)
-                    },
-                )
-                .unwrap();
+                let mut socket = command_socket(&listener);
                 let command: Value =
                     serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
                 assert_eq!(command["_tag"], "Request");
@@ -399,13 +611,10 @@ mod tests {
             let bytes = input(port);
             let session = Session::read(bytes.as_slice()).unwrap();
             let cancelled = AtomicBool::new(false);
-            assert!(
-                session
-                    .submit(PROMPT, &cancelled)
-                    .unwrap()
-                    .text
-                    .contains("Recorded reply")
-            );
+            let Progress::Completed(snapshot) = session.submit(PROMPT, &cancelled).unwrap() else {
+                panic!("Expected an immediately completed turn");
+            };
+            assert!(snapshot.text.contains("Recorded reply"));
             assert!(session.submit(PROMPT, &cancelled).is_err());
             let reopened = Session::read(bytes.as_slice()).unwrap();
             assert!(reopened.submit(PROMPT, &cancelled).is_ok());
@@ -414,12 +623,111 @@ mod tests {
         }
     }
 
+    fn approval_projection(resolved: bool) -> Value {
+        let mut value = projection(true);
+        let projection = &mut value["projection"];
+        if !resolved {
+            projection["runs"][0]["status"] = json!("running");
+            projection["messages"].as_array_mut().unwrap().pop();
+        }
+        projection["runtimeRequests"] = json!([{
+            "id": "fixture-request", "nodeId": "fixture-node", "providerTurnId": "fixture-turn",
+            "kind": "command", "status": if resolved { "resolved" } else { "pending" },
+            "responseCapability": { "type": "live", "providerSessionId": "fixture-session" },
+        }]);
+        if resolved {
+            projection["runtimeRequests"][0]["decision"] = json!("accept");
+        }
+        projection["turnItems"] = json!([{
+            "type": "approval_request", "requestId": "fixture-request", "requestKind": "command",
+            "threadId": THREAD, "runId": "fixture-run", "nodeId": "fixture-node", "providerTurnId": "fixture-turn",
+            "status": if resolved { "completed" } else { "waiting" },
+            "prompt": "Read a synthetic fixture",
+        }]);
+        value
+    }
+
+    #[test]
+    fn sends_one_approval_and_confirms_the_same_request_after_a_lost_ack() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let peer = thread::spawn(move || {
+            read_projection(&listener, false);
+            let mut socket = command_socket(&listener);
+            let first: Value =
+                serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
+            assert_eq!(first["payload"]["type"], "message.dispatch");
+            drop(socket);
+            read_projection_value(&listener, approval_projection(false));
+            read_projection_value(&listener, approval_projection(false));
+            let mut socket = command_socket(&listener);
+            let second: Value =
+                serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
+            assert_eq!(
+                second,
+                json!({
+                    "_tag": "Request", "id": "1", "tag": "orchestration.dispatchCommand", "headers": [],
+                    "payload": {
+                        "type": "runtime-request.respond", "commandId": "fixture-approval-command",
+                        "threadId": THREAD, "requestId": "fixture-request", "decision": "accept",
+                    },
+                })
+            );
+            drop(socket);
+            read_projection_value(&listener, approval_projection(true));
+        });
+        let session = Session::read(approval_input(port).as_slice()).unwrap();
+        let cancelled = AtomicBool::new(false);
+        let Progress::Approval(approval) = session.submit(PROMPT, &cancelled).unwrap() else {
+            panic!("Expected the selected run to wait for a decision");
+        };
+        assert_eq!(approval.detail, "Read a synthetic fixture");
+        assert!(session.submit(PROMPT, &cancelled).is_err());
+        let snapshot = session.allow_once(&approval, PROMPT, &cancelled).unwrap();
+        assert!(snapshot.text.contains("Recorded reply"));
+        assert!(session.allow_once(&approval, PROMPT, &cancelled).is_err());
+        peer.join().unwrap();
+    }
+
+    #[test]
+    fn changed_approval_detail_refuses_before_dispatch() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let session = Session::read(approval_input(port).as_slice()).unwrap();
+        let before = approval_projection(false);
+        let run = session.selected_run(&before, PROMPT).unwrap();
+        let approval = session.pending_approval(&before, run).unwrap();
+        let mut changed = before;
+        changed["projection"]["turnItems"][0]["prompt"] = json!("Different request details");
+        let (done, finished) = mpsc::channel();
+        let peer = thread::spawn(move || {
+            read_projection_value(&listener, changed);
+            finished.recv_timeout(Duration::from_secs(15)).unwrap();
+            assert_eq!(
+                listener.accept().unwrap_err().kind(),
+                std::io::ErrorKind::WouldBlock
+            );
+        });
+        assert!(
+            session
+                .allow_once(&approval, PROMPT, &AtomicBool::new(false))
+                .is_err()
+        );
+        done.send(()).unwrap();
+        peer.join().unwrap();
+    }
+
     #[test]
     fn refuses_normalized_identity_and_header_injection_before_network_io() {
         let mut value: Value = serde_json::from_slice(&input(1)).unwrap();
         value["commandId"] = json!(" padded-command ");
         assert!(Session::read(value.to_string().as_bytes()).is_err());
         value["commandId"] = json!("fixture-command-1");
+        value["approvalCommandId"] = json!("fixture-command-1");
+        assert!(Session::read(value.to_string().as_bytes()).is_err());
+        value["approvalCommandId"] = json!("fixture-approval-command");
         value["token"] = json!("fixture\r\nInjected: true");
         assert!(Session::read(value.to_string().as_bytes()).is_err());
         assert!(Session::read(vec![b' '; MAX_INPUT + 1].as_slice()).is_err());

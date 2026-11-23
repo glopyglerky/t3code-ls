@@ -119,7 +119,7 @@ def check_thread_snapshot(executable):
     print("GPUI authenticated snapshot passed AT-SPI content and identity, credential and missing-thread refusal checks")
 
 
-def check_thread_compose(executable):
+def check_thread_compose(executable, approval=False):
     connection = json.load(sys.stdin)
     prompt = "GPUI sends one recorded prompt."
     failure = "Could not confirm submission. Draft kept. Check the thread before retrying."
@@ -133,7 +133,7 @@ def check_thread_compose(executable):
         with urllib.request.urlopen(request, timeout=5) as reply:
             return json.load(reply)["projection"]
 
-    cases = [
+    cases = [(connection, True)] if approval else [
         ({**connection, "environmentId": "wrong-environment"}, False),
         ({**connection, "token": "invalid.fixture.token"}, False),
         ({**connection, "projectId": "wrong-project"}, False),
@@ -150,12 +150,37 @@ def check_thread_compose(executable):
             composer = find("Message", application, pyatspi.STATE_FOCUSED)
             x11("type", "--clearmodifiers", prompt)
             x11("key", "ctrl+Return")
+            approval_id = None
+            if approval:
+                find("Command permission requested.", application, timeout=45)
+                button = find("Allow once", application)
+                assert button.getRole() == pyatspi.ROLE_PUSH_BUTTON
+                pending = projection()
+                assert len(pending["runs"]) == 1
+                assert pending["runs"][0]["status"] in ("running", "waiting")
+                request, = pending["runtimeRequests"]
+                assert request["status"] == "pending" and request["kind"] == "command"
+                approval_id = request["id"]
+                item, = [
+                    item for item in pending["turnItems"]
+                    if item["type"] == "approval_request" and item["requestId"] == approval_id
+                ]
+                assert item["runId"] == pending["runs"][0]["id"]
+                assert "probe" in item["prompt"]
+                find(item["prompt"], application)
+                field = composer.queryText()
+                assert field.getText(0, field.characterCount) == prompt
+                bounds = button.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+                assert bounds.width > 0 and bounds.height > 0
+                x11("mousemove", str(bounds.x + bounds.width // 2), str(bounds.y + bounds.height // 2))
+                x11("click", "--repeat", "2", "1")
             if success:
                 find("Server submission confirmed.", application, timeout=60)
                 document = find("Server thread snapshot", application)
                 text = document.queryText()
                 body = text.getText(0, text.characterCount)
-                assert prompt in body and "todo list fixture complete" in body
+                expected_reply = "Created the requested probe file." if approval else "todo list fixture complete"
+                assert prompt in body and expected_reply in body
                 assert connection["threadId"] in body
                 assert not document.getState().contains(pyatspi.STATE_EDITABLE)
                 field = composer.queryText()
@@ -176,6 +201,10 @@ def check_thread_compose(executable):
                 assert users[0]["id"] == connection["messageId"]
                 assert users[0]["text"] == prompt
                 assert users[0]["runId"] == observed["runs"][0]["id"]
+            if approval:
+                request, = observed["runtimeRequests"]
+                assert request["id"] == approval_id and request["status"] == "resolved"
+                assert request["decision"] == "accept" and observed["runs"][0]["status"] == "completed"
             request_window_close(window)
             assert application.wait(timeout=10) == 0
         finally:
@@ -186,7 +215,10 @@ def check_thread_compose(executable):
                 except subprocess.TimeoutExpired:
                     application.kill()
                     application.wait(timeout=3)
-    print("GPUI composer passed X11 input, AT-SPI acceptance/refusal and exactly-one projected run checks")
+    if approval:
+        print("GPUI approval passed named AT-SPI button, X11 decision and same-request completion checks")
+    else:
+        print("GPUI composer passed X11 input, AT-SPI acceptance/refusal and exactly-one projected run checks")
 
 
 def main():
@@ -205,6 +237,9 @@ def main():
     )
     if sys.argv[2:] == ["--thread-compose"]:
         check_thread_compose(executable)
+        return
+    if sys.argv[2:] == ["--thread-compose-approval"]:
+        check_thread_compose(executable, approval=True)
         return
     if sys.argv[2:] == ["--thread-snapshot"]:
         check_thread_snapshot(executable)
