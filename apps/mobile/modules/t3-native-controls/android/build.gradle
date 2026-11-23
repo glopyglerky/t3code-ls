@@ -19,8 +19,9 @@ android {
   defaultConfig {
     minSdkVersion rootProject.ext.minSdkVersion
     targetSdkVersion rootProject.ext.targetSdkVersion
+    buildConfigField "boolean", "T3_OUTBOX_RUNTIME_PROOF", (findProperty("t3OutboxRuntimeProof") == "true").toString()
   }
-  buildFeatures { compose true }
+  buildFeatures { compose true; buildConfig true }
 }
 
 dependencies {
