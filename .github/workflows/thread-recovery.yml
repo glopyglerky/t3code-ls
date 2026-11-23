@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   thread-recovery:
-    if: "!startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')"
+    if: "!startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-macos26-')"
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
@@ -76,7 +76,7 @@ jobs:
             src/state/threadOutboxDelivery.permissions.test.ts
 
   mobile-outbox-android:
-    if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-') || startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')
+    if: "(startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-') || startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')) && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-macos26-')"
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-') && 35 || 10 }}
     steps:
@@ -153,7 +153,7 @@ jobs:
 
   mobile-outbox-ios:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
-    runs-on: macos-15
+    runs-on: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-macos26-') && 'macos-26' || 'macos-15' }}
     timeout-minutes: 75
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
@@ -164,6 +164,7 @@ jobs:
       - name: Build device and simulator libraries and link a Swift caller
         run: |
           test "$(uname -m)" = arm64
+          xcodebuild -version | grep -Fx "Build version 17C529"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-target"
           export IPHONEOS_DEPLOYMENT_TARGET=18.0
           export CARGO_PROFILE_RELEASE_LTO=false
