@@ -113,14 +113,18 @@ jobs:
           test "$(uname -m)" = arm64
           export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-target"
           export IPHONEOS_DEPLOYMENT_TARGET=18.0
+          export CARGO_PROFILE_RELEASE_LTO=false
+          export RUSTFLAGS="-Cembed-bitcode=no"
           rustup toolchain install 1.99.1 --profile minimal \
-            --target aarch64-apple-ios,aarch64-apple-ios-sim
+            --target aarch64-apple-ios,aarch64-apple-ios-sim --component llvm-tools-preview
+          rust_sysroot=$(rustc +1.99.1 --print sysroot)
+          llvm_nm="$rust_sysroot/lib/rustlib/aarch64-apple-darwin/bin/llvm-nm"
           headers=apps/mobile/modules/t3-native-controls/rust/include
           for target in aarch64-apple-ios aarch64-apple-ios-sim; do
             cargo +1.99.1 rustc --locked --release --target "$target" \
               -p t3-code-ls-mobile-outbox --crate-type staticlib
             library="$CARGO_TARGET_DIR/$target/release/libt3_outbox.a"
-            nm -gU "$library" > "$RUNNER_TEMP/$target-symbols.txt"
+            "$llvm_nm" --extern-only --defined-only "$library" > "$RUNNER_TEMP/$target-symbols.txt"
             grep -F '_t3_outbox_delivery_v1' "$RUNNER_TEMP/$target-symbols.txt"
             shasum -a 256 "$library"
           done
