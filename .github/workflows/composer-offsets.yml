@@ -28,6 +28,7 @@ jobs:
       WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
       BUNDLED_NATIVE: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-') || startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
       INTEGRATED_NATIVE: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') }}
+      FORK_HISTORY_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t04-live-history-') }}
       NATIVE_PTY_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-') }}
       PAIRING_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t01-dioxus-pairing-') }}
     steps:
@@ -261,7 +262,9 @@ jobs:
                 node apps/web/scripts/verify-hybrid-client.ts "$proof/$renderer" "$implementation"
             done
           fi
-          node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
+          if [[ "$FORK_HISTORY_PROOF" != true ]]; then
+            node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
+          fi
           if [[ "$T3_CODE_LS_HTML_INTERACTION_PROOF" == true ]]; then
             jq -e '.status == "passed" and .htmlInteraction.signedAssetStatus == 200 and .htmlInteraction.toolCalls == 1 and .htmlInteraction.opaqueOrigin and .htmlInteraction.ownFrameResize and .htmlInteraction.unrelatedFrameUnchanged and .htmlInteraction.modalDetached and .htmlInteraction.reopenedFresh' \
               "$proof/native/proof.json"
@@ -304,6 +307,18 @@ jobs:
             jq -e '.status == "passed" and .composer == "rust-wasm" and .parallelTurns.stillPendingAfterOtherApproval and .parallelTurns.completedReopened and .parallelTurns.interruptedReopened' \
               "$proof/parallel/native/proof.json"
           fi
+      - name: Exercise live inherited history in the bundled Linux x64 omdb application
+        if: env.FORK_HISTORY_PROOF == 'true'
+        run: |
+          proof="$RUNNER_TEMP/built-composer-proof/fork-history"
+          mkdir -p apps/server/dist/client
+          cp -R apps/web/dist/. apps/server/dist/client/
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- "$2" apps/web/scripts/verify-packaged-fork-history.mjs "$3"
+          ' _ "$(id -un)" "$(command -v node)" "$proof"
+          jq -e '.status == "passed" and (.live.childSequences | length) == 2 and .live.olderRows > 0 and .live.scrollDelta <= 4 and .retained.identity.engine == "omdb"' \
+            "$proof/proof.json"
       - name: Check the controlled HTML publisher and production MCP session
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-html-')
         env:
