@@ -372,7 +372,7 @@ pub(crate) async fn record_fixture_forward_catalog(
 
 // This is a process-fixture observation, never a serving or launcher permit.
 #[cfg(all(test, target_os = "linux"))]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct FixtureForwardActivationWitness {
     pub(crate) activation: PreparedServiceActivation,
     pub(crate) database: TrialFileIdentity,
@@ -390,6 +390,22 @@ pub(crate) async fn probe_fixture_forward_activation(
         return Err(Error::IncompatibleStore);
     }
     isolated::probe_forward_activation(home, update_id, probe).await
+}
+
+// Synthetic child only. Home/selection owners remain in the supervising parent.
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) async fn probe_fixture_forward_child(
+    home: PathBuf,
+    update_id: String,
+    probe: impl FnOnce(
+        &FixtureForwardActivationWitness,
+        &crate::backend::ExclusiveTrialFile,
+    ) -> Result<()>,
+) -> Result<FixtureForwardActivationWitness> {
+    if !home.is_absolute() || !valid_update_id(&update_id) {
+        return Err(Error::IncompatibleStore);
+    }
+    isolated::probe_forward_activation_with_file(home, update_id, probe).await
 }
 
 fn validate_isolated_trial_request(

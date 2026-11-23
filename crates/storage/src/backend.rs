@@ -319,6 +319,7 @@ impl StorageBackend for ExclusiveSnapshot {
 /// Owns the physical lock independently of redb's read and write handles.
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) struct ExclusiveTrialFile {
+    inherited: File,
     file: Arc<redb::backends::FileBackend>,
     path: PathBuf,
     identity: same_file::Handle,
@@ -414,6 +415,7 @@ impl ExclusiveTrialFile {
             Err(std::fs::TryLockError::WouldBlock) => return Err(Error::WriterBusy),
             Err(error) => return Err(storage_error(error)),
         }
+        let inherited = file.try_clone().map_err(storage_error)?;
         let file = redb::backends::FileBackend::new(file).map_err(storage_error)?;
         if !file
             .try_lock_range(Bound::Unbounded, Bound::Unbounded)
@@ -422,6 +424,7 @@ impl ExclusiveTrialFile {
             return Err(Error::WriterBusy);
         }
         let lease = Self {
+            inherited,
             file: Arc::new(file),
             path,
             identity,
@@ -429,6 +432,12 @@ impl ExclusiveTrialFile {
         };
         lease.verified_file()?;
         Ok(lease)
+    }
+
+    // Duplicate the locked open file description, never reopen the pathname.
+    pub(crate) fn inherited_file(&self) -> Result<File> {
+        self.verified_file()?;
+        self.inherited.try_clone().map_err(storage_error)
     }
 
     pub(crate) fn verified_file(&self) -> Result<File> {
@@ -1985,7 +1994,10 @@ mod tests {
         peer_excluded();
         writer.shutdown().await.unwrap();
         peer_excluded();
+        let inherited = lease.inherited_file().unwrap();
         drop(lease);
+        peer_excluded();
+        drop(inherited);
         Backend::open_read_only(&path)
             .await
             .unwrap()

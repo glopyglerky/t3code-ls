@@ -2331,6 +2331,20 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
                 forward_fixture_sha256(&selected.3)
             );
             assert_eq!(probe().await.unwrap(), activation);
+            assert_eq!(
+                crate::application_storage::probe_fixture_forward_child(
+                    home.to_owned(),
+                    ISOLATED_UPDATE.into(),
+                    |witness, candidate| forward_inherited_child_cases(home, witness, candidate),
+                )
+                .await
+                .unwrap(),
+                activation
+            );
+            assert_restore_refused();
+            assert_eq!(capture(&receipt), durable);
+            assert_eq!(capture(&selection), selected);
+
             assert_eq!(capture(&live), marked);
             assert_restore_refused();
             println!(
@@ -2617,4 +2631,227 @@ async fn forward_catalog_fixture(
     assert_eq!(read.db.read(&key).await.unwrap().unwrap(), later_guide);
     read.shutdown().await.unwrap();
     println!("T05 forward catalog fenced both installed helpers across generic restore retries");
+}
+
+// Fixture subprocess entry only. It cannot open a serving database or unseal it.
+#[cfg(target_os = "linux")]
+#[test]
+fn forward_inherited_child_fixture() {
+    let Ok(home) = std::env::var("T3_TEST_FORWARD_CHILD_HOME") else {
+        return;
+    };
+    let verify = || -> crate::Result<()> {
+        use crate::application_storage::{
+            FixtureForwardActivationWitness, IsolatedTrialVerification,
+        };
+        let home = std::path::Path::new(&home);
+        if !home.is_absolute()
+            || !home
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("t3-redb-test-"))
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        let witness: FixtureForwardActivationWitness =
+            serde_json::from_str(&std::env::var("T3_TEST_FORWARD_CHILD_WITNESS").unwrap())
+                .map_err(|_| Error::IncompatibleStore)?;
+        let read = |path| std::fs::read(path).map_err(|_| Error::IncompatibleStore);
+        let expected = |name| std::env::var(name).map_err(|_| Error::IncompatibleStore);
+        if expected("T3_TEST_FORWARD_CHILD_VERSION")? != env!("CARGO_PKG_VERSION")
+            || expected("T3_TEST_FORWARD_CHILD_EXE")?
+                != forward_fixture_sha256(&read(std::env::current_exe().unwrap())?)
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        let state = home.join("userdata");
+        let receipt = read(state.join(format!(
+            ".statev2-trial-{}.receipt-v1.json",
+            witness.activation.update_id
+        )))?;
+        let saved: IsolatedTrialVerification =
+            serde_json::from_slice(&receipt).map_err(|_| Error::IncompatibleStore)?;
+        if forward_fixture_sha256(&receipt) != witness.receipt_sha256
+            || saved.request.activation.as_ref() != Some(&witness.activation)
+            || saved.preparation.database != witness.database
+            || forward_fixture_sha256(&read(home.join("runtime/service-state.json"))?)
+                != witness.selection_sha256
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        let marker: Value = serde_json::from_slice(&read(state.join(format!(
+            ".statev2-forward-{}.json",
+            witness.activation.update_id
+        )))?)
+        .map_err(|_| Error::IncompatibleStore)?;
+        if marker["update_id"] != witness.activation.update_id
+            || marker["forward_selection_sha256"] != witness.selection_sha256
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        for (name, digest) in [
+            ("t3", &witness.activation.target_entry_sha256),
+            (
+                "native-bin/t3-code-ls-db",
+                &witness.activation.target_helper_sha256,
+            ),
+        ] {
+            if forward_fixture_sha256(&read(
+                home.join("runtime/versions")
+                    .join(&witness.activation.target_version)
+                    .join(name),
+            )?) != *digest
+            {
+                return Err(Error::IncompatibleStore);
+            }
+        }
+        // fdinfo reports locks attached to this open file description. A fresh
+        // open of the same inode does not inherit its OFD lock. Check the whole
+        // range, WRITE mode and OFD owner (-1), not an environment token.
+        let info =
+            std::fs::read_to_string("/proc/self/fdinfo/0").map_err(|_| Error::IncompatibleStore)?;
+        if !info.lines().any(|line| {
+            let fields: Vec<_> = line.split_whitespace().collect();
+            fields.len() == 9
+                && fields[0] == "lock:"
+                && fields[2] == "OFDLCK"
+                && fields[3] == "ADVISORY"
+                && fields[4] == "WRITE"
+                && fields[5] == "-1"
+                && fields[7] == "0"
+                && fields[8] == "EOF"
+        }) {
+            return Err(Error::IncompatibleStore);
+        }
+        use std::os::unix::fs::MetadataExt;
+        let inherited =
+            std::fs::File::open("/proc/self/fd/0").map_err(|_| Error::IncompatibleStore)?;
+        let named =
+            std::fs::metadata(state.join("statev2.omdb")).map_err(|_| Error::IncompatibleStore)?;
+        let held = inherited.metadata().map_err(|_| Error::IncompatibleStore)?;
+        let created = held
+            .created()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|time| time.as_nanos().to_string());
+        if created != witness.database.created
+            || held.dev() != named.dev()
+            || held.ino() != named.ino()
+            || held.nlink() != 1
+            || format!("{:016x}", held.dev()) != witness.database.device
+            || format!("{:016x}", held.ino()) != witness.database.inode
+            || forward_fixture_sha256(&read(std::path::PathBuf::from("/proc/self/fd/0"))?)
+                != expected("T3_TEST_FORWARD_CHILD_DB")?
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        if !matches!(
+            crate::application_server_ownership::OwnerLock::acquire_existing_native(
+                &state.join("server-owner.sqlite")
+            ),
+            Err(Error::WriterBusy)
+        ) {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    };
+    let code = if verify().is_err() {
+        78
+    } else if std::env::var("T3_TEST_FORWARD_CHILD_FAIL").is_ok() {
+        73
+    } else {
+        0
+    };
+    std::process::exit(code);
+}
+
+#[cfg(target_os = "linux")]
+fn forward_inherited_child_cases(
+    home: &std::path::Path,
+    witness: &crate::application_storage::FixtureForwardActivationWitness,
+    candidate: &crate::backend::ExclusiveTrialFile,
+) -> crate::Result<()> {
+    use std::process::{Command, Stdio};
+    let executable = std::env::current_exe().unwrap();
+    let executable_hash = forward_fixture_sha256(&std::fs::read(&executable).unwrap());
+    let database_hash =
+        forward_fixture_sha256(&std::fs::read(home.join("userdata/statev2.omdb")).unwrap());
+    for case in [
+        "valid",
+        "lost",
+        "reopened",
+        "foreign",
+        "stale",
+        "version",
+        "runtime",
+        "child-failure",
+    ] {
+        let input = match case {
+            "lost" => Stdio::null(),
+            "reopened" => {
+                Stdio::from(std::fs::File::open(home.join("userdata/statev2.omdb")).unwrap())
+            }
+            "foreign" => Stdio::from(std::fs::File::open(&executable).unwrap()),
+            _ => Stdio::from(candidate.inherited_file()?),
+        };
+        let mut encoded = serde_json::to_value(witness).unwrap();
+        if case == "stale" {
+            encoded["receipt_sha256"] = json!("0".repeat(64));
+        }
+        let mut command = Command::new(&executable);
+        command
+            .arg("application_bootstrap::upgrade::tests::forward_inherited_child_fixture")
+            .arg("--exact")
+            .env_clear()
+            .stdin(input)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .env("T3_TEST_FORWARD_CHILD_HOME", home)
+            .env("T3_TEST_FORWARD_CHILD_WITNESS", encoded.to_string())
+            .env(
+                "T3_TEST_FORWARD_CHILD_VERSION",
+                if case == "version" {
+                    "foreign"
+                } else {
+                    env!("CARGO_PKG_VERSION")
+                },
+            )
+            .env(
+                "T3_TEST_FORWARD_CHILD_EXE",
+                if case == "runtime" {
+                    "foreign"
+                } else {
+                    &executable_hash
+                },
+            )
+            .env("T3_TEST_FORWARD_CHILD_DB", &database_hash);
+        if case == "child-failure" {
+            command.env("T3_TEST_FORWARD_CHILD_FAIL", "1");
+        }
+        let mut child = command.spawn().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("inherited child timed out: {case}");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        let expected = match case {
+            "valid" => 0,
+            "child-failure" => 73,
+            _ => 78,
+        };
+        assert_eq!(status.code(), Some(expected), "inherited child {case}");
+        println!("T05 inherited child {case}: exit {expected}");
+        candidate.verified_file()?;
+        assert_eq!(
+            forward_fixture_sha256(&std::fs::read(home.join("userdata/statev2.omdb")).unwrap()),
+            database_hash
+        );
+    }
+    Ok(())
 }

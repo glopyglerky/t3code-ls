@@ -1045,6 +1045,18 @@ pub(super) async fn probe_forward_activation(
     update_id: String,
     probe: impl FnOnce(&super::FixtureForwardActivationWitness) -> Result<()>,
 ) -> Result<super::FixtureForwardActivationWitness> {
+    probe_forward_activation_with_file(home, update_id, |witness, _| probe(witness)).await
+}
+
+#[cfg(test)]
+pub(super) async fn probe_forward_activation_with_file(
+    home: PathBuf,
+    update_id: String,
+    probe: impl FnOnce(
+        &super::FixtureForwardActivationWitness,
+        &crate::backend::ExclusiveTrialFile,
+    ) -> Result<()>,
+) -> Result<super::FixtureForwardActivationWitness> {
     use crate::{application::ForwardServiceActivation, backend::ExclusiveTrialFile};
 
     let directories = TrialRestoreDirectories::open(&home)?;
@@ -1114,7 +1126,7 @@ pub(super) async fn probe_forward_activation(
         selection_sha256: marker.forward_selection_sha256.clone(),
     };
     super::tests::interrupt_trial_publication("forward-readiness-before-probe");
-    probe(&witness)?;
+    probe(&witness, &candidate)?;
     super::tests::interrupt_trial_publication("forward-readiness-after-probe");
     lease.verify_promotion_runtimes(&saved).await?;
     verify()?;
