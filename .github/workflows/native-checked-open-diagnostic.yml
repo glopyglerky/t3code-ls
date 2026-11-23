@@ -23,6 +23,7 @@ jobs:
       ENGINE_PHASE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-') }}
       ENGINE_REUSE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-') }}
       PAIRED_REUSE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-') }}
+      STRICT_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-strict-') }}
       READINESS_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-readiness-') }}
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
       STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
@@ -67,6 +68,10 @@ jobs:
           mkdir -p "$scratch/probe/tools/src/bin"
           cp tools/diagnostics/t16-checked-open.rs "$scratch/probe/tools/src/bin/t16-checked-open.rs"
           cp tools/diagnostics/t16-readiness.rs "$scratch/probe/tools/src/startup_probe/readiness.rs"
+          if [[ "$STRICT_PROOF" == true ]]; then
+            cp tools/diagnostics/t16-strict-control.rs "$scratch/probe/tools/src/bin/t16-strict-control.rs"
+            cp tools/diagnostics/t16-strict-control.rs "$evidence/probe-strict-control.rs"
+          fi
           cp tools/diagnostics/t16-readiness.rs "$evidence/probe-readiness.rs"
           git -C "$scratch/probe" diff --binary > "$evidence/probe-overlay.patch"
           sha256sum "$evidence/probe-overlay.patch" > "$evidence/probe-overlay.sha256"
@@ -166,6 +171,11 @@ jobs:
           "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked -p t3code-ls-tools --bin t16-checked-open
           "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --release --locked -p t3code-ls-tools \
             --bin t3code-ls-tools --bin t16-checked-open
+          if [[ "$STRICT_PROOF" == true ]]; then
+            "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked -p t3code-ls-tools --bin t16-strict-control
+            "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --release --locked -p t3code-ls-tools --bin t16-strict-control
+            sha256sum "$CARGO_TARGET_DIR/release/t16-strict-control" > "$evidence/strict-verifier.sha256"
+          fi
           install -m 755 "$CARGO_TARGET_DIR/release/t16-checked-open" "$DIAGNOSTIC_WORK/bin/t16-checked-open"
           (cd "$CARGO_TARGET_DIR/release" && sha256sum t3code-ls-tools t16-checked-open) > "$evidence/probes.sha256"
           jq '{release,compiler_revision,coordinator_revision,archive_sha256,checked_members}' \
@@ -499,6 +509,104 @@ jobs:
           if [[ "$READINESS_PROOF" == true ]]; then expected=37; fi
           test "$(wc -l < "$evidence/paired-reopen.tsv")" -eq "$expected"
           uptime >> "$evidence/paired-host.txt"
+      - name: Verify separate benchmark-only WAL FULL stock control
+        if: env.STRICT_PROOF == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          scratch="$DIAGNOSTIC_WORK"
+          evidence="$RUNNER_TEMP/checked-open-evidence"
+          verifier="$CARGO_TARGET_DIR/release/t16-strict-control"
+          probe="$CARGO_TARGET_DIR/release/t3code-ls-tools"
+          # Frozen stock and its built denominator remain untouched.
+          git clone --quiet --shared --no-checkout "$scratch/stock" "$scratch/strict-stock"
+          git -C "$scratch/strict-stock" checkout --detach "$STOCK_COMMIT"
+          "$verifier" source "$scratch/strict-stock" > "$scratch/strict-source.ts"
+          mv "$scratch/strict-source.ts" "$scratch/strict-stock/apps/server/src/persistence/Sqlite.ts"
+          git -C "$scratch/strict-stock" diff --check
+          test "$(git -C "$scratch/strict-stock" diff --name-only)" = apps/server/src/persistence/Sqlite.ts
+          git -C "$scratch/strict-stock" diff --binary > "$evidence/strict-stock.patch"
+          sha256sum "$evidence/strict-stock.patch" > "$evidence/strict-stock-patch.sha256"
+          (
+            cd "$scratch/strict-stock"
+            pnpm install --frozen-lockfile --store-dir "$scratch/pnpm-store"
+            mkdir -p apps/web/dist
+            cp -a "$scratch/stock/apps/web/dist/." apps/web/dist/
+            pnpm --dir apps/server run build:bundle
+            sha256sum pnpm-lock.yaml
+            find apps/server/dist apps/web/dist -type f -print0 | sort -z | xargs -0 -r sha256sum
+          ) > "$evidence/strict-stock-build.txt"
+          git -C "$scratch/stock" diff --exit-code
+          (
+            cd "$scratch/strict-stock"
+            sha256sum pnpm-lock.yaml
+            find apps/server/dist apps/web/dist -type f -print0 | sort -z | xargs -0 -r sha256sum
+          ) > "$evidence/arm-strict-verifier.sha256"
+          (cd "$scratch/stock" && sha256sum --check "$evidence/arm-stock.sha256") > "$evidence/stock-after-strict-build.txt"
+          for sample in "$evidence"/paired-[1-6]-*.json; do
+            "$verifier" account < "$sample" > "${sample%.json}-resource-account.json"
+          done
+          chrome="$(command -v google-chrome)"
+          driver="$(command -v chromedriver || printf '%s/chromedriver' "$CHROMEWEBDRIVER")"
+          test -x "$driver"
+          # Two fresh same-path pairs in AB/BA order. Configuration/work verifier only.
+          # These four samples are separate from the six-round, three-arm comparison.
+          for round in 1 2; do
+            variants=(stock strict)
+            if [[ "$round" == 2 ]]; then variants=(strict stock); fi
+            for variant in "${variants[@]}"; do
+              root="$scratch/stock"
+              if [[ "$variant" == strict ]]; then root="$scratch/strict-stock"; fi
+              trial="$scratch/trials/strict-verifier"
+              test ! -e "$trial"
+              sample="$evidence/strict-verifier-$round-$variant.json"
+              sudo -n unshare --mount --net --pid --fork --mount-proc --kill-child -- bash -euc '
+                mount --make-rprivate /
+                # Read-only source/bundles; only fresh synthetic profiles are writable.
+                for root in "$1" "$2"; do
+                  mount --bind "$root" "$root"
+                  mount -o remount,bind,ro "$root"
+                done
+                shift 2
+                ip link set dev lo up
+                user="$1"; shift
+                exec runuser -u "$user" -- "$@"
+              ' _ "$scratch/stock" "$scratch/strict-stock" "$(id -un)" \
+                env -u REDB_CHECKED_OPEN_DIAGNOSTICS -u T3_CODE_LS_DIAGNOSTIC_DB \
+                "$probe" probe-reopen "$(command -v node)" "$root/apps/server/dist/bin.mjs" \
+                "$trial" "$driver" "$chrome" stock > "$sample"
+              jq -e '.profile == "stock" and .native_lookups == false and .persistence_spans == null
+                and .readiness_phases == null and .snapshot.valid and .snapshot.threadCount == 32
+                and .snapshot.messageCount == 200 and .database_migration > 0
+                and .database_bytes_at_reopen > 0 and .readiness_evidence.runtime_pid_matched
+                and .readiness_evidence.environment_id_matched and .readiness_evidence.html_root_matched
+                and .migration_evidence.source == "live-sqlite-descriptors"' "$sample" > /dev/null
+              "$verifier" account < "$sample" > "$evidence/strict-resources-$round-$variant.json"
+              (
+                cd "$trial"
+                find .codex/sessions -type f -print0 | sort -z | xargs -0 sha256sum
+              ) > "$evidence/strict-fixture-$round-$variant.sha256"
+              rm -r -- "$trial"
+            done
+            cmp "$evidence/strict-fixture-$round-stock.sha256" "$evidence/strict-fixture-$round-strict.sha256"
+            match='{fixture,fixture_workspace,database_migration,snapshot:(.snapshot | {valid,threadCount,messageCount,selectedThreadId})}'
+            diff -u <(jq -c "$match" "$evidence/strict-verifier-$round-stock.json") \
+              <(jq -c "$match" "$evidence/strict-verifier-$round-strict.json")
+          done
+          (cd "$scratch/stock" && sha256sum --check "$evidence/arm-stock.sha256") > "$evidence/stock-after-strict-workload.txt"
+          jq -n --arg stock "$STOCK_COMMIT" --arg tree "$STOCK_TREE" \
+            '{journey:"J02",kind:"strict-control-configuration-and-work-verifier",stock:$stock,tree:$tree,
+              denominator:"unchanged SQLite WAL/NORMAL",extra_control:"SQLite WAL/FULL with writer readback assertions",
+              pairs:2,order:[["stock","strict"],["strict","stock"]],balanced_performance_qualified:false,
+              cpu_rss_qualified:false,power_loss_qualified:false,equal_durability_qualified:false,
+              source_isolation:"read-only stock and strict roots in private mount namespace",
+              profile_isolation:"fresh synthetic profile, loopback network and PID namespace, same fixture path",
+              limits:["Strict setup adds two PRAGMA readbacks; configuration verifier, not plain timing arm",
+                "No pooling with earlier runs or the separate three-arm observations",
+                "FULL relies on SQLite VFS, filesystem and device sync semantics; no fault-injection proof",
+                "Read-only mounts protect the workload view, not host-global immutable storage"]}' \
+            > "$evidence/strict-verifier-scope.json"
       - name: Remove task-owned generated files and record available space
         if: always() && env.DIAGNOSTIC_WORK != ''
         shell: bash
