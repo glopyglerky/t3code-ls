@@ -5,6 +5,8 @@ import * as Schema from "effect/Schema";
 import { NodeId, RunAttemptId, TrimmedNonEmptyString } from "./index.ts";
 import {
   latestProviderTurnForAttempt,
+  OrchestrationV2ThreadLaunchInput,
+  OrchestrationV2ThreadLaunchResult,
   OrchestrationV2ProviderCapabilities,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderThreadJson,
@@ -637,5 +639,27 @@ describe("latestProviderTurnForAttempt", () => {
     ];
     expect(latestProviderTurnForAttempt(turns, RunAttemptId.make("goal-attempt"))?.id).toBe("last");
     expect(latestProviderTurnForAttempt(turns, null)).toBeUndefined();
+  });
+});
+
+
+describe("launch receipt negotiation", () => {
+  it("lets old servers strip the opt-in without changing the command", () => {
+    const { responseMode: _responseMode, ...legacyFields } = OrchestrationV2ThreadLaunchInput.fields;
+    const legacyInput = Schema.Struct(legacyFields);
+    const input = { commandId: "launch", threadId: "thread", projectId: "project", title: "Thread",
+      modelSelection: { instanceId: "codex", model: "test" }, runtimeMode: "full-access",
+      interactionMode: "default", workspaceStrategy: { type: "root" },
+      initialMessage: { text: "Hello", attachments: [] } };
+    const decodeLegacy = Schema.decodeUnknownSync(legacyInput);
+    expect(decodeLegacy({ ...input, responseMode: "receipt" })).toEqual(decodeLegacy(input));
+    expect(Schema.decodeUnknownSync(OrchestrationV2ThreadLaunchInput)(input).responseMode).toBeUndefined();
+  });
+  it("requires an exact sequence for a projection-free receipt", () => {
+    const decode = Schema.decodeUnknownSync(OrchestrationV2RpcSchemas.launchThread.output);
+    const receipt = { responseMode: "receipt", threadId: "thread", resumed: true, sequence: 42 };
+    expect(decode(receipt)).toEqual(receipt);
+    expect(() => decode({ responseMode: "receipt", threadId: "thread", resumed: true })).toThrow();
+    expect(() => Schema.decodeUnknownSync(OrchestrationV2ThreadLaunchResult)(receipt)).toThrow();
   });
 });

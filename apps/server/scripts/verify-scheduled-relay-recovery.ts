@@ -194,7 +194,8 @@ try {
       }),
     );
     threadId = launched.threadId;
-    Assert.equal(launched.projection.messages.length, 0);
+    Assert.ok("projection" in launched);
+  Assert.equal(launched.projection.messages.length, 0);
     Assert.equal(launched.projection.runs.length, 0);
   }
   const { task } = await client.rpc((rpc) => rpc[WS_METHODS.scheduledTasksUpsert]({

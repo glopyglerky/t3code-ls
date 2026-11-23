@@ -83,6 +83,7 @@ const layerLaunches = Layer.effect(
   Effect.gen(function* () {
     const threads = yield* ThreadManagement.ThreadManagementService;
     return ThreadLaunch.ThreadLaunchService.of({
+      launchReceipt: () => Effect.die("unused"),
       launch: (input: ThreadLaunch.ThreadLaunchInput) =>
         threads
           .dispatch({

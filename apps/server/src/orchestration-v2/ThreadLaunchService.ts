@@ -13,6 +13,7 @@ import {
   type OrchestrationV2LinkOrigin,
   type OrchestrationV2ProviderThreadNativeMetadata,
   type OrchestrationV2ThreadProjection,
+  type OrchestrationV2ThreadLaunchReceipt,
   type ProviderDriverKind,
   type ProviderInteractionMode,
   ProjectId,
@@ -204,6 +205,12 @@ export class ThreadLaunchService extends Context.Service<
       input: ThreadLaunchInput,
     ) => Effect.Effect<
       ThreadLaunchResult,
+      ThreadLaunchError | ThreadManagement.ThreadManagementProviderInstanceDisabledError
+    >;
+    readonly launchReceipt: (
+      input: ThreadLaunchInput & { readonly initialMessage: ThreadLaunchInitialMessage },
+    ) => Effect.Effect<
+      OrchestrationV2ThreadLaunchReceipt,
       ThreadLaunchError | ThreadManagement.ThreadManagementProviderInstanceDisabledError
     >;
     /** Check a new worktree's base ref and branch name before creation for early errors; launch otherwise accepts and reports these failures inside the thread. */
@@ -1027,8 +1034,8 @@ const make = Effect.gen(function* () {
     );
   });
 
-  const launch: ThreadLaunchService["Service"]["launch"] = Effect.fn("ThreadLaunchService.launch")(
-    function* (request) {
+  const launchWithResponse = Effect.fn("ThreadLaunchService.launch")(
+    function* (request: ThreadLaunchInput, receiptOnly: boolean) {
       // Scratch has no Git repository. Normalize before folder allocation so
       // durable preparation and retries use the thread's own Scratch folder.
       const input: ThreadLaunchInput =
@@ -1221,14 +1228,21 @@ const make = Effect.gen(function* () {
           }
         }
 
-        const projection = yield* threads
-          .getThreadProjection(threadId)
-          .pipe(Effect.mapError(mapError(input, "create-thread", threadId)));
+        // Dispatch above owns acceptance and the exact message sequence. The receipt
+        // path needs only workspace binding and this run's preparation state.
+        const projection = receiptOnly
+          ? undefined
+          : yield* threads.getThreadProjection(threadId).pipe(
+              Effect.mapError(mapError(input, "create-thread", threadId)),
+            );
+        const preparationState = projection ?? (yield* threads.getThreadRecords(
+          threadId, ["runs"], { runIds: runId === null ? [] : [runId] },
+        ).pipe(Effect.mapError(mapError(input, "create-thread", threadId))));
         const runIsPreparing =
           runId !== null &&
-          projection.runs.some((run) => run.id === runId && run.status === "preparing");
+          preparationState.runs.some((run) => run.id === runId && run.status === "preparing");
         const shouldSchedule = runId === null ? Option.isNone(launchReceipt) : runIsPreparing;
-        const boundWorktreePath = projection.thread.worktreePath;
+        const boundWorktreePath = preparationState.thread.worktreePath;
         const preparationStrategy: ThreadLaunchWorkspaceStrategy =
           Option.isSome(launchReceipt) &&
           workspaceStrategy.type === "root" &&
@@ -1279,6 +1293,20 @@ const make = Effect.gen(function* () {
       });
     },
   );
+
+  const launch: ThreadLaunchService["Service"]["launch"] = (input) =>
+    launchWithResponse(input, false).pipe(Effect.map((result) => ({
+      ...result,
+      projection: result.projection!,
+    })));
+
+  const launchReceipt: ThreadLaunchService["Service"]["launchReceipt"] = (input) =>
+    launchWithResponse(input, true).pipe(Effect.map((result) => ({
+      responseMode: "receipt" as const,
+      threadId: result.threadId,
+      resumed: result.resumed,
+      sequence: result.sequence!,
+    })));
 
   const prepareRun: ThreadLaunchService["Service"]["prepareRun"] = Effect.fn(
     "ThreadLaunchService.prepareRun",
@@ -1357,7 +1385,7 @@ const make = Effect.gen(function* () {
     );
   });
 
-  return ThreadLaunchService.of({ launch, checkWorktreeBase, retryPreparation, prepareRun });
+  return ThreadLaunchService.of({ launch, launchReceipt, checkWorktreeBase, retryPreparation, prepareRun });
 });
 
 export const layer = Layer.effect(ThreadLaunchService, make);

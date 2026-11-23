@@ -2193,7 +2193,7 @@ export const layerWsRpc = (
                     })
                     .pipe(
                       Effect.andThen(
-                        ThreadMessageIntake.launchThread({
+                        ThreadMessageIntake.launchThreadForWire({
                           commandId: input.commandId,
                           ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
                           ...(input.reuseExistingThread === undefined
@@ -2224,7 +2224,7 @@ export const layerWsRpc = (
                               }),
                           createdBy: "user",
                           creationSource: input.creationSource ?? "web",
-                        }),
+                        }, input.responseMode),
                       ),
                       Effect.provide(intakeContext),
                     ),
@@ -2248,10 +2248,10 @@ export const layerWsRpc = (
                             Effect.ignore,
                           ),
                   ),
-                  Effect.map((result) => ({
+                  Effect.map((result) => "projection" in result ? {
                     ...result,
                     projection: projectThreadProjectionForWire(result.projection),
-                  })),
+                  } : result),
                   Effect.catchTags({
                     AttachmentClaimError: (cause) =>
                       new OrchestrationV2ThreadLaunchError({

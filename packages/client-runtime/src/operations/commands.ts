@@ -781,6 +781,7 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
                 : { branch: bootstrap.branch }),
             };
     return yield* request(ORCHESTRATION_V2_WS_METHODS.launchThread, {
+      responseMode: "receipt",
       commandId,
       creationSource: input.creationSource ?? "web",
       threadId: input.threadId,

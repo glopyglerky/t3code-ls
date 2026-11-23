@@ -3807,6 +3807,8 @@ export const OrchestrationV2ArchivedShellSnapshot = Schema.Struct({
 export type OrchestrationV2ArchivedShellSnapshot = typeof OrchestrationV2ArchivedShellSnapshot.Type;
 
 export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
+  /** Opt in to a durable receipt. Older servers ignore this and return the full result. */
+  responseMode: Schema.optional(Schema.Literal("receipt")),
   commandId: CommandId,
   creationSource: Schema.optional(OrchestrationV2CreationSource),
   threadId: Schema.optional(ThreadId),
@@ -3837,6 +3839,20 @@ export const OrchestrationV2ThreadLaunchResult = Schema.Struct({
   sequence: Schema.optionalKey(NonNegativeInt),
 });
 export type OrchestrationV2ThreadLaunchResult = typeof OrchestrationV2ThreadLaunchResult.Type;
+
+export const OrchestrationV2ThreadLaunchReceipt = Schema.Struct({
+  responseMode: Schema.Literal("receipt"),
+  threadId: ThreadId,
+  resumed: Schema.Boolean,
+  sequence: NonNegativeInt,
+});
+export type OrchestrationV2ThreadLaunchReceipt = typeof OrchestrationV2ThreadLaunchReceipt.Type;
+
+/** Legacy results remain valid when a server cannot use the receipt path. */
+export const OrchestrationV2ThreadLaunchResponse = Schema.Union([
+  OrchestrationV2ThreadLaunchResult,
+  OrchestrationV2ThreadLaunchReceipt,
+]);
 
 export const OrchestrationV2DispatchCommandResult = Schema.Struct({
   sequence: NonNegativeInt,
@@ -4494,7 +4510,7 @@ export const OrchestrationV2RpcSchemas = {
   },
   launchThread: {
     input: OrchestrationV2ThreadLaunchInput,
-    output: OrchestrationV2ThreadLaunchResult,
+    output: OrchestrationV2ThreadLaunchResponse,
   },
   subscribeShell: {
     input: OrchestrationV2SubscribeShellInput,
