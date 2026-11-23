@@ -67,6 +67,13 @@ impl BridgeClient {
         Ok(())
     }
 
+    /// An empty RPC response acknowledges the request, not a terminal run outcome.
+    pub async fn cancel_run(&self, agent_id: &str, run_id: &str) -> Result<(), BridgeError> {
+        self.unary("CancelRun", json!({ "agentId": agent_id, "runId": run_id }))
+            .await?;
+        Ok(())
+    }
+
     pub async fn send(
         &self,
         agent_id: &str,
