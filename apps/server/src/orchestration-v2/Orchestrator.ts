@@ -15933,7 +15933,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           }),
       ),
     ),
-    watchForkHistory: (threadId) => watchForkHistory(threadId, projectionStore, eventSink),
+    watchForkHistory: Effect.fn("OrchestratorV2.watchForkHistory")(function (threadId) {
+      return watchForkHistory(threadId, projectionStore, eventSink);
+    }),
     streamStoredEventsFrom: (input) =>
       eventSink.stream({ ...input, bounded: true }).pipe(
         Stream.mapError(
