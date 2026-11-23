@@ -4,11 +4,14 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Layer from "effect/Layer";
 
 import * as ProjectionStore from "../apps/server/src/orchestration-v2/ProjectionStore.ts";
 import * as NativeProjectionRecords from "../apps/server/src/orchestration-v2/NativeProjectionRecordRows.ts";
 import * as NativeProjectionStore from "../apps/server/src/orchestration-v2/NativeProjectionStore.ts";
 import { encodeThreadHistoryCursor } from "../apps/server/src/orchestration-v2/threadHistoryPaging.ts";
+import * as NativeEventRows from "../apps/server/src/persistence/NativeEventRows.ts";
+import * as OrchestrationEventStore from "../apps/server/src/persistence/OrchestrationEventStore.ts";
 import { createFixture } from "./database-fixture.mjs";
 import { exportSqliteState } from "./export-sqlite-state.mjs";
 import {
@@ -683,6 +686,80 @@ const exercise = Effect.fn("checkRedbProjectionWindows.exercise")(function* ({
   return normalized(result);
 });
 
+async function checkWindowAcrossCommit() {
+  const thread = "thread:child";
+  const itemId = "item:child:work:0002";
+  const options = { rowLimit: 8, anchorItemId: itemId };
+  const original = eventsFor("child", 4).find((event) => event.payload.id === itemId);
+  NodeAssert.ok(original);
+  const updatedText = "Committed while the anchored read was open";
+  const change = {
+    ...original,
+    id: "event:window-concurrent-commit",
+    payload: { ...original.payload, text: updatedText },
+  };
+  const commit = () => withNative(executable, fixture, (client) =>
+    Effect.gen(function* () {
+      const writer = yield* NativeProjectionStore.make;
+      const events = yield* OrchestrationEventStore.OrchestrationEventStore.pipe(
+        Effect.provide(
+          OrchestrationEventStore.layerFromEventRows.pipe(Layer.provide(NativeEventRows.layer)),
+        ),
+      );
+      return yield* client.withTransaction(Effect.gen(function* () {
+        const stored = yield* events.appendAgentEvents({ events: [change] });
+        yield* writer.apply(change);
+        NodeAssert.equal(stored.length, 1);
+        return stored[0].sequence;
+      }));
+    }),
+  );
+
+  let armed = false;
+  let committedSequence;
+  const interceptSequenceRead = (database) => ({
+    ...database,
+    withSession: (use) => database.withSession((session) => use({
+      ...session,
+      request: Effect.fnUntraced(function* (input, response) {
+        // The production reader already assembled the projection at this point.
+        if (armed && input.operation === "application_events_latest" && input.thread_id === thread) {
+          armed = false;
+          committedSequence = yield* Effect.promise(commit);
+        }
+        return yield* session.request(input, response);
+      }),
+    })),
+  });
+
+  const after = await withNative(executable, fixture, () =>
+    Effect.gen(function* () {
+      const store = yield* NativeProjectionStore.make;
+      const before = yield* store.getThreadSnapshotWindow(thread, options);
+      NodeAssert.equal(
+        before.projection.turnItems.find((item) => item.id === itemId)?.text,
+        original.payload.text,
+      );
+      armed = true;
+      const during = yield* store.getThreadSnapshotWindow(thread, options);
+      NodeAssert.ok(committedSequence > before.snapshotSequence, "The separate helper committed");
+      NodeAssert.deepEqual(normalized(during), normalized(before), "Read snapshot stays coherent");
+      const fresh = yield* store.getThreadSnapshotWindow(thread, options);
+      NodeAssert.equal(fresh.snapshotSequence, committedSequence);
+      NodeAssert.equal(fresh.projection.turnItems.find((item) => item.id === itemId)?.text, updatedText);
+      return normalized(fresh);
+    }).pipe(Effect.timeout("30 seconds")),
+    interceptSequenceRead,
+  );
+  await withNative(executable, fixture, () =>
+    Effect.gen(function* () {
+      const store = yield* NativeProjectionStore.make;
+      const reopened = yield* store.getThreadSnapshotWindow(thread, options);
+      NodeAssert.deepEqual(normalized(reopened), after);
+    }),
+  );
+}
+
 try {
   const source = NodePath.join(fixture.root, "source.sqlite");
   await createMigratedSqlite(source, (sql) =>
@@ -863,6 +940,8 @@ try {
     }),
   );
   checks.push("Reopened native windows preserve committed state");
+  await checkWindowAcrossCommit();
+  checks.push("Anchored windows and their replay watermarks share a snapshot across a concurrent commit and reopen");
   NodeAssert.equal(hash(await NodeFSP.readFile(source)), sourceHash);
   await finishProof({
     executable,
@@ -877,6 +956,8 @@ try {
       "apps/server/src/orchestration-v2/ProjectionHistoryRows.ts",
       "apps/server/src/orchestration-v2/NativeProjectionRecordRows.ts",
       "apps/server/src/orchestration-v2/NativeProjectionStore.ts",
+      "apps/server/src/persistence/NativeEventRows.ts",
+      "apps/server/src/persistence/redb_event_rows.rs",
       "apps/server/src/persistence/redb_projection_records.rs",
       "apps/server/src/persistence/redb_projection_window.rs",
       "apps/server/src/persistence/redb_projection_window_index.rs",
