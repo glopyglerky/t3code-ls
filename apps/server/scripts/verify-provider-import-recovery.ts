@@ -343,17 +343,19 @@ try {
       JSON.stringify({ timestamp: new Date(stamp.getTime() + index * 1000).toISOString(), ...record }),
     ).join("\n") + "\n");
     FS.utimesSync(rollout, mtime, mtime);
-    const stats = FS.statSync(rollout);
+    // The scanner converts bigint file times to whole milliseconds before
+    // constructing dates. Node's numeric Stats dates round fractions instead.
+    const stats = FS.statSync(rollout, { bigint: true });
     return {
       provider: "codex",
       providerInstanceId: ProviderInstanceId.make("codex"),
       providerSessionId: sessionId,
       filePath: rollout,
-      size: stats.size,
-      mtimeMs: stats.mtime.getTime(),
-      device: stats.dev,
-      inode: FS.statSync(rollout, { bigint: true }).ino.toString(),
-      birthtimeMs: stats.birthtime.getTime(),
+      size: Number(stats.size),
+      mtimeMs: Number(stats.mtimeMs),
+      device: Number(stats.dev),
+      inode: stats.ino.toString(),
+      birthtimeMs: Number(stats.birthtimeMs),
     };
   };
   const original = writeRollout(response, stamp);
