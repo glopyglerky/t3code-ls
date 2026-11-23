@@ -73,13 +73,13 @@ jobs:
         working-directory: apps/web
         run: pnpm exec vp test run --project unit --maxWorkers 2 src/composerDraftStore.test.ts
       - name: Exercise voice draft selection through the Rust browser binding
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-voice-')
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-voice-')
         env:
           VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
         working-directory: apps/web
         run: pnpm exec vp test run --project browser --maxWorkers 2 src/speech/useEnvironmentSpeechInput.browser.test.tsx
       - name: Exercise selection compatibility and invalid boundaries
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-voice-')
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-voice-')
         run: pnpm exec vp test run --maxWorkers 2 packages/client-runtime/src/voice-input/controller.test.ts
       - name: Exercise the text splice encoder and legacy fallback
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-splice-')
