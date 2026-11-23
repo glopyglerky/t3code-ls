@@ -86,13 +86,39 @@ pub struct IsolatedTrialRequest {
     pub target_schema_sha256: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct IsolatedTrialPreparation {
     pub update_id: String,
     pub database: TrialFileIdentity,
     pub snapshot: TrialSnapshot,
     pub file_sha256: String,
     pub target_schema_sha256: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct IsolatedTrialVerification {
+    pub request: IsolatedTrialRequest,
+    pub preparation: IsolatedTrialPreparation,
+}
+
+fn validate_isolated_trial_request(
+    home: &Path,
+    update_id: &str,
+    request: &IsolatedTrialRequest,
+) -> Result<()> {
+    if !home.is_absolute()
+        || !valid_update_id(update_id)
+        || update_id != request.update_id
+        || request.database.created.is_none()
+        || !valid_digest(&request.checkpoint.catalog_sha256)
+        || !valid_digest(&request.checkpoint.checksum)
+        || !valid_digest(&request.target_schema_sha256)
+    {
+        return Err(Error::Invalid("invalid isolated trial identity".into()));
+    }
+    Ok(())
 }
 
 /// Exercise the candidate's native bootstrap on a private copy of an offline
@@ -102,16 +128,7 @@ pub async fn prepare_isolated_service_trial(
     update_id: String,
     request: IsolatedTrialRequest,
 ) -> Result<IsolatedTrialPreparation> {
-    if !home.is_absolute()
-        || !valid_update_id(&update_id)
-        || update_id != request.update_id
-        || request.database.created.is_none()
-        || !valid_digest(&request.checkpoint.catalog_sha256)
-        || !valid_digest(&request.checkpoint.checksum)
-        || !valid_digest(&request.target_schema_sha256)
-    {
-        return Err(Error::Invalid("invalid isolated trial identity".into()));
-    }
+    validate_isolated_trial_request(&home, &update_id, &request)?;
     #[cfg(target_os = "linux")]
     {
         // The worker owns the home and database leases through completion,
@@ -123,6 +140,38 @@ pub async fn prepare_isolated_service_trial(
     #[cfg(not(target_os = "linux"))]
     Err(Error::Invalid(
         "isolated trial preparation is unsupported on this platform".into(),
+    ))
+}
+
+/// Revalidate a preparation receipt against the stopped source, checkpoint and
+/// trial. This read-only check grants no authority after the leases are dropped.
+pub async fn verify_isolated_service_trial(
+    home: PathBuf,
+    update_id: String,
+    verification: IsolatedTrialVerification,
+) -> Result<()> {
+    let IsolatedTrialVerification {
+        request,
+        preparation,
+    } = verification;
+    validate_isolated_trial_request(&home, &update_id, &request)?;
+    if preparation.update_id != update_id
+        || preparation.database == request.database
+        || preparation.database.created.is_none()
+        || preparation.target_schema_sha256 != request.target_schema_sha256
+        || !valid_digest(&preparation.file_sha256)
+        || !valid_digest(&preparation.snapshot.catalog_sha256)
+        || !valid_digest(&preparation.snapshot.checksum)
+    {
+        return Err(Error::Invalid("invalid isolated trial preparation".into()));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        isolated::verify(home, request, preparation).await
+    }
+    #[cfg(not(target_os = "linux"))]
+    Err(Error::Invalid(
+        "isolated trial verification is unsupported on this platform".into(),
     ))
 }
 
