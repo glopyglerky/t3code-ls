@@ -47,11 +47,12 @@ function readStartupObservations(logPath: string) {
 export async function withAndroidPairingFixture(input: {
   temporary: string;
   signal: AbortSignal;
+  record: (receipt: Record<string, unknown>) => void;
+}, pairing?: {
   device: (args: string[]) => void;
   cleanupDevice: (args: string[]) => void;
   execute: () => Promise<unknown>;
   reopen: () => Promise<unknown>;
-  record: (receipt: Record<string, unknown>) => void;
 }) {
   Assert.equal(process.env.GITHUB_ACTIONS, "true");
   Assert.equal(process.platform, "linux");
@@ -108,10 +109,6 @@ export async function withAndroidPairingFixture(input: {
     }
     return started;
   };
-  const reverse = (devicePort: number, hostPort: number) => {
-    input.device(["reverse", "--no-rebind", `tcp:${devicePort}`, `tcp:${hostPort}`]);
-    mappings.add(devicePort);
-  };
   const track = (socket: Net.Socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
@@ -147,6 +144,15 @@ export async function withAndroidPairingFixture(input: {
     checkpoint = "server-auth";
     let client = await authenticatePackagedServer(server, input.signal);
     await client.createProject({ projectId: ProjectId.make("t12-dispatch-project"), title: "T12 synthetic project", workspaceRoot: workspace });
+    if (pairing === undefined) {
+      checkpoint = "authenticated-project-ready";
+      receipt.status = "passed";
+      return;
+    }
+    const reverse = (devicePort: number, hostPort: number) => {
+      pairing.device(["reverse", "--no-rebind", `tcp:${devicePort}`, `tcp:${hostPort}`]);
+      mappings.add(devicePort);
+    };
     const accessSnapshot = () => client.rpc((rpc) => rpc[WS_METHODS.subscribeAuthAccess]({}).pipe(
       Stream.runHead, Effect.map((event) => {
         Assert.ok(Option.isSome(event) && event.value.type === "snapshot");
@@ -194,7 +200,7 @@ export async function withAndroidPairingFixture(input: {
         if (transition === paths.length && request.method === "POST") {
           if (request.url === "/drop-dispatch" && dispatchTransition === 0) {
             connected = false;
-            input.device(["reverse", "--remove", "tcp:47832"]);
+            pairing.device(["reverse", "--remove", "tcp:47832"]);
             mappings.delete(47832);
             for (const socket of sockets) socket.destroy();
             dispatchTransition = 1;
@@ -218,7 +224,7 @@ export async function withAndroidPairingFixture(input: {
         Assert.ok(transition < paths.length);
         if (transition % 2 === 0) {
           connected = false;
-          input.device(["reverse", "--remove", "tcp:47832"]);
+          pairing.device(["reverse", "--remove", "tcp:47832"]);
           mappings.delete(47832);
           for (const socket of sockets) socket.destroy();
         } else {
@@ -241,7 +247,7 @@ export async function withAndroidPairingFixture(input: {
     reverse(47832, proxyPort);
     checkpoint = "installed-pair-reconnect";
     receipt.providerLaunchRequested = true;
-    const observedEnvironment = await input.execute();
+    const observedEnvironment = await pairing.execute();
     Assert.equal(observedEnvironment, descriptor.environmentId);
     Assert.equal(transition, 4);
     Assert.ok(configured);
@@ -306,7 +312,7 @@ export async function withAndroidPairingFixture(input: {
     Assert.deepEqual(verifyProjection(await projection()), completed);
     reopening = true;
     checkpoint = "reopened-mobile-and-server-convergence";
-    Assert.equal(await input.reopen(), descriptor.environmentId);
+    Assert.equal(await pairing.reopen(), descriptor.environmentId);
     Assert.deepEqual(verifyProjection(await projection()), completed);
     // Release the native store again to prove the exact receipt survived both reopen owners.
     const reopenedAccess = await accessSnapshot();
@@ -331,7 +337,7 @@ export async function withAndroidPairingFixture(input: {
   } finally {
     const cleanupErrors: string[] = [];
     for (const port of mappings) {
-      try { input.cleanupDevice(["reverse", "--remove", `tcp:${port}`]); }
+      try { pairing?.cleanupDevice(["reverse", "--remove", `tcp:${port}`]); }
       catch { cleanupErrors.push("reverse mapping"); }
     }
     for (const socket of sockets) socket.destroy();

@@ -548,7 +548,10 @@ jobs:
           git fetch --no-tags --depth=1 origin "$producer"
           test "$(git rev-parse 'FETCH_HEAD^{tree}')" = "$producer_tree"
           git diff --exit-code "$producer" HEAD -- . \
-            ':(exclude).github/workflows/thread-recovery.yml' ':(exclude)scripts/android-pairing-fixture.ts'
+            ':(exclude).github/workflows/thread-recovery.yml' ':(exclude)scripts/android-pairing-fixture.ts' \
+            ':(exclude)scripts/verify-android-outbox-runtime.ts'
+          sha256sum scripts/android-pairing-fixture.ts scripts/verify-android-outbox-runtime.ts \
+            > "$RUNNER_TEMP/outbox-runtime-proof/host-verifier.sha256"
           scratch=$(mktemp -d "$RUNNER_TEMP/retained-outbox.XXXXXXXX")
           trap 'rm -rf -- "$scratch"' EXIT
           proof="$RUNNER_TEMP/outbox-runtime-proof"

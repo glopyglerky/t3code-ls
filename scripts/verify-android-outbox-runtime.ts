@@ -213,29 +213,43 @@ async function verifyNormalApp(positiveApk: string) {
   checkpoint("normal-app:await-pending-task");
   const hierarchyFile = "/data/local/tmp/t3-normal-outbox.xml";
   const deadline = Date.now() + 60_000;
-  while (true) {
-    Assert.equal(fixturePid(), pid, "The normal app exited before showing the pending task");
-    device(["shell", "rm", "-f", hierarchyFile]);
-    const dump = device(["shell", "uiautomator", "dump", "--compressed", hierarchyFile], true);
-    if (dump.status === 0) {
-      const xml = device(["shell", "cat", hierarchyFile], true);
-      const nodes = [...xml.stdout.matchAll(/<node\b[^>]*>/gu)].filter(([node]) =>
-        node.includes(` package="${packageName}"`) &&
-        node.includes(' clickable="true"') &&
-        node.includes(' enabled="true"') &&
-        (node.includes(` content-desc="${pendingTaskTitle}"`) ||
-          node.includes(` text="${pendingTaskTitle}"`)),
-      );
-      if (nodes.length > 0) {
-        Assert.equal(nodes.length, 1, "Expected one accessible pending task in the normal app");
-        report.normalAppPendingTask = { pid, title: pendingTaskTitle, package: packageName };
-        break;
+  const observations = { attemptedDumps: 0, validDumps: 0, displayedPackage: false,
+    displayedLabel: false, actionableLabel: false, idleRefusals: 0 };
+  report.normalAppObservations = observations;
+  try {
+    while (true) {
+      Assert.equal(fixturePid(), pid, "The normal app exited before showing the pending task");
+      device(["shell", "rm", "-f", hierarchyFile]);
+      observations.attemptedDumps += 1;
+      const dump = device(["shell", "uiautomator", "dump", "--compressed", hierarchyFile], true);
+      if (dump.stdout.includes("could not get idle state") || dump.stderr.includes("could not get idle state")) {
+        observations.idleRefusals += 1;
       }
+      if (dump.status === 0) {
+        const xml = device(["shell", "cat", hierarchyFile], true);
+        if (xml.status === 0 && xml.stdout.includes("<hierarchy")) observations.validDumps += 1;
+        const appNodes = [...xml.stdout.matchAll(/<node\b[^>]*>/gu)]
+          .filter(([node]) => node.includes(` package="${packageName}"`));
+        const labels = appNodes.filter(([node]) =>
+          node.includes(` content-desc="${pendingTaskTitle}"`) ||
+          node.includes(` text="${pendingTaskTitle}"`),
+        );
+        const nodes = labels.filter(([node]) => node.includes(' clickable="true"') && node.includes(' enabled="true"'));
+        observations.displayedPackage ||= appNodes.length > 0;
+        observations.displayedLabel ||= labels.length > 0;
+        observations.actionableLabel ||= nodes.length > 0;
+        if (nodes.length > 0) {
+          Assert.equal(nodes.length, 1, "Expected one accessible pending task in the normal app");
+          report.normalAppPendingTask = { pid, title: pendingTaskTitle, package: packageName };
+          break;
+        }
+      }
+      Assert.ok(Date.now() < deadline, "The normal app did not render the saved pending task");
+      await delay(500, undefined, { signal: abort.signal });
     }
-    Assert.ok(Date.now() < deadline, "The normal app did not render the saved pending task");
-    await delay(500, undefined, { signal: abort.signal });
+  } finally {
+    device(["shell", "rm", "-f", hierarchyFile], true);
   }
-  device(["shell", "rm", "-f", hierarchyFile]);
   const fixtureLog = device(["logcat", "-d", "-v", "raw", `--pid=${pid}`, "-s", "T3OutboxRuntimeProof:I", "*:S"]);
   Assert.ok(!fixtureLog.stdout.split("\n").some((line) => line.startsWith("{")));
   await stopFixture("normal-app", pid);
@@ -336,6 +350,13 @@ try {
     Assert.equal(admission.emulatorVersion, report.emulatorVersion);
     Assert.equal(admission.adbVersion, report.adbVersion);
     report.source = run("git", ["-C", root, "rev-parse", "HEAD", "HEAD^{tree}"]).stdout.trim().split("\n");
+    if (pairReconnect) {
+      checkpoint("pair-reconnect:server-preflight");
+      const { withAndroidPairingFixture } = await import("./android-pairing-fixture.ts");
+      await withAndroidPairingFixture({ temporary, signal: abort.signal,
+        record: (receipt) => { report.pairingServerPreflight = receipt; save(); },
+      });
+    }
     for (const variant of ["missing-library", "positive"] as const) {
       checkpoint(`${variant}:package`);
       const apk = Path.join(temporary, `outbox-runtime-${variant}.apk`);
@@ -401,6 +422,8 @@ try {
         checkpoint("pair-reconnect:prepare-server");
         const { withAndroidPairingFixture } = await import("./android-pairing-fixture.ts");
         await withAndroidPairingFixture({ temporary, signal: abort.signal,
+          record: (receipt) => { report.pairingServer = receipt; save(); },
+        }, {
           device: (args) => { device(args); },
           cleanupDevice: (args) => {
             const result = ChildProcess.spawnSync(adb, ["-s", serial, ...args], {
@@ -441,7 +464,6 @@ try {
             await stopFixture("dispatch-reopen", result.pid);
             return result.receipt.environmentId;
           },
-          record: (receipt) => { report.pairingServer = receipt; save(); },
         });
       }
     }
