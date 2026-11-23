@@ -19,7 +19,7 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
-import { chromium, type Browser, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
 import { inspectNativeMessageUpdates, inspectNativeReplay } from "./hybrid-client-database.ts";
 import {
@@ -44,6 +44,7 @@ const startupTimeoutMs = 180_000;
 const replayPrompt = "Replay: showcase";
 const replayMarker = "This turn is a replay.";
 const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
+const splitPtyProof = process.env.T3_CODE_LS_SPLIT_PTY_PROOF === "true";
 const multiTabDraftProof = process.env.T3_CODE_LS_MULTI_TAB_DRAFT_PROOF === "true";
 const fileEditorProof = process.env.T3_CODE_LS_FILE_EDITOR_PROOF === "true";
 const tasksFile = "fixture-tasks.md";
@@ -507,7 +508,7 @@ async function verifyInterruptedShowcase(page: Page, expected: InterruptedShowca
   Assert.equal(message?.streaming, false);
 }
 
-async function terminalMarker(page: Page, prefix: "fixture-pty" | "fixture-reattach") {
+async function terminalInput(page: Page) {
   const input = page.getByRole("textbox", { name: "Terminal input" });
   const drawer = page.getByRole("button", { name: "Toggle terminal drawer" });
   await drawer.waitFor({ state: "visible" });
@@ -521,28 +522,62 @@ async function terminalMarker(page: Page, prefix: "fixture-pty" | "fixture-reatt
   });
   await page.evaluate(() => navigator.clipboard.writeText(""));
   await input.focus();
-  const selectedText = async (pattern: RegExp) => {
-    const deadline = Date.now() + 10_000;
-    do {
-      await input.press("Control+Shift+a");
-      await input.press("Control+Shift+c");
-      const clipboard = await page.evaluate(() => navigator.clipboard.readText());
-      const match = clipboard.match(pattern);
-      if (match !== null) return match;
-      await page.waitForTimeout(100);
-    } while (Date.now() < deadline);
-    throw new Error(`Expected a rendered shell response for ${prefix}`);
-  };
-  await selectedText(/[$#]\s*$/u);
+  return input;
+}
+
+async function waitForTerminalCopy(page: Page, input: Locator, pattern: RegExp) {
+  const deadline = Date.now() + 10_000;
+  do {
+    await input.press("Control+Shift+a");
+    await input.press("Control+Shift+c");
+    const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+    const match = clipboard.match(pattern);
+    if (match !== null) return match;
+    await page.waitForTimeout(100);
+  } while (Date.now() < deadline);
+  throw new Error(`Expected a rendered terminal response matching ${pattern}`);
+}
+
+async function terminalMarker(page: Page, prefix: "fixture-pty" | "fixture-reattach") {
+  const input = await terminalInput(page);
+  await waitForTerminalCopy(page, input, /[$#]\s*$/u);
   const command = `printf '${prefix}:%s %s\\n' "$$" '世界'`;
   await page.evaluate((line) => navigator.clipboard.writeText(line), command);
   await input.press("Control+Shift+v");
-  await selectedText(new RegExp(`${prefix}:%s %s`, "u"));
+  await waitForTerminalCopy(page, input, new RegExp(`${prefix}:%s %s`, "u"));
   await input.press("Enter");
   // The echoed format string contains no PID. Only rendered shell output matches.
-  const [, pid] = await selectedText(new RegExp(`${prefix}:(\\d+) 世界`, "u"));
+  const [, pid] = await waitForTerminalCopy(page, input, new RegExp(`${prefix}:(\\d+) 世界`, "u"));
   Assert.ok(pid);
   return pid;
+}
+
+async function verifySplitTerminalReconnect(page: Page, workspace: string, shell: string) {
+  const gate = NodePath.join(workspace, ".fixture-terminal-resume");
+  const quotedGate = `'${gate.replaceAll("'", "'\\''")}'`;
+  const command = [
+    `printf 'fixture-fragment-start:%s\\n\\033[3' "$$"`,
+    "attempt=0",
+    `while [ ! -f ${quotedGate} ] && [ "$attempt" -lt 600 ]; do /usr/bin/sleep 0.1; attempt=$((attempt+1)); done`,
+    `if [ -f ${quotedGate} ]; then printf '2mfixture-fragment-end:%s \\360\\237' "$$"; /usr/bin/sleep 0.2; printf '\\246\\200\\033[0m\\n'; fi`,
+  ].join("; ");
+  const started = /(?:^|\n)fixture-fragment-start:(\d+)\s*$/u;
+  const ended = /(?:^|\n)fixture-fragment-end:(\d+) 🦀(?:\r?\n|\s*$)/u;
+  const input = await terminalInput(page);
+  await page.evaluate((line) => navigator.clipboard.writeText(line), command);
+  await input.press("Control+Shift+v");
+  await waitForTerminalCopy(page, input, /fixture-fragment-end:%s/u);
+  await input.press("Enter");
+  const [, before] = await waitForTerminalCopy(page, input, started);
+  Assert.equal(before, shell);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  const reattached = await terminalInput(page);
+  const [, restored] = await waitForTerminalCopy(page, reattached, started);
+  Assert.equal(restored, shell);
+  NodeFS.writeFileSync(gate, "resume\n", { flag: "wx" });
+  const [, after] = await waitForTerminalCopy(page, reattached, ended);
+  Assert.equal(after, shell);
+  return { sameShell: true, controlSequenceResumed: true, splitUnicode: "🦀" };
 }
 
 function summarizeSnapshot(snapshot: OrchestrationV2ThreadDetailSnapshot) {
@@ -961,6 +996,7 @@ async function exercise(implementation: Implementation): Promise<void> {
       storedUpdates: ReturnType<typeof inspectNativeMessageUpdates>;
     } | null,
     terminalReattach: null as { sameShell: boolean; unicodeOutput: boolean } | null,
+    terminalSplit: null as Awaited<ReturnType<typeof verifySplitTerminalReconnect>> | null,
     terminalFailure: null as string | null,
     terminalInitialOutput: false,
     fileEditor: null as Awaited<ReturnType<typeof verifyFileEditor>> | null,
@@ -1256,6 +1292,11 @@ async function exercise(implementation: Implementation): Promise<void> {
         Assert.equal(reattached, shell, "A browser reload must reattach to the same PTY shell");
         proof.terminalReattach = { sameShell: true, unicodeOutput: true };
         completed("Reattached to the same PTY and copied its rendered Unicode output after reload");
+        if (splitPtyProof) {
+          starting("reattach across a split terminal control sequence");
+          proof.terminalSplit = await verifySplitTerminalReconnect(page, workspace, shell);
+          completed("Reattached across a split control sequence and copied split UTF-8 output");
+        }
       } catch (error) {
         proof.terminalFailure = redact(error instanceof Error ? error.message : String(error));
         saveProof();
