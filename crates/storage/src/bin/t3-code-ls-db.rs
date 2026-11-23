@@ -74,6 +74,11 @@ enum Request {
     ApplicationBootstrap {
         event_layout: Option<ApplicationEventLayout>,
     },
+    // Explicit opt-in: no bootstrap fields or existing operation shapes change.
+    ApplicationStartupPreparePrefix {
+        #[serde(default)]
+        durable_relay: bool,
+    },
     ApplicationMigrations {},
     ApplicationStartupMigrations {},
     ApplicationProjectionWindowQuery {
@@ -519,7 +524,8 @@ impl Request {
         match self {
             #[cfg(feature = "ordered-engine-fixture")]
             Self::ApplicationOrderedFixtureSelect { .. } => true,
-            Self::ApplicationInit { .. }
+            Self::ApplicationStartupPreparePrefix { .. }
+            | Self::ApplicationInit { .. }
             | Self::ApplicationAuthPrepare { .. }
             | Self::ApplicationPeersPrepare { .. }
             | Self::ApplicationRuntimeStatePrepare { .. }
@@ -749,6 +755,11 @@ async fn evaluate(
         Request::ApplicationBootstrap { event_layout } => serde_json::to_value(
             store
                 .bootstrap_application_with_event_layout(event_layout)
+                .await?,
+        ),
+        Request::ApplicationStartupPreparePrefix { durable_relay } => serde_json::to_value(
+            store
+                .prepare_application_startup_prefix(durable_relay)
                 .await?,
         ),
         Request::ApplicationMigrations {} => serde_json::to_value(
@@ -1964,5 +1975,119 @@ async fn main() {
     if let Err(error) = run().await {
         eprintln!("{error}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod startup_prefix_tests {
+    use super::*;
+
+    const OWNERS: [&str; 17] = [
+        "events",
+        "receipts",
+        "positions",
+        "projects",
+        "projections",
+        "outbox",
+        "viewed_files",
+        "auth",
+        "peers",
+        "runtime_state",
+        "scheduled",
+        "projection_reads",
+        "auxiliary",
+        "message_rowids",
+        "thread_search",
+        "legacy_v1",
+        "maintenance",
+    ];
+
+    async fn wire(
+        store: &Store,
+        transactions: &mut ApplicationTransactions,
+        input: Value,
+        acknowledgements: &mut usize,
+    ) -> Result<Value, Error> {
+        let request: Request = serde_json::from_value(input).unwrap();
+        let result = evaluate(
+            store,
+            transactions,
+            None,
+            request,
+            #[cfg(feature = "ordered-engine-fixture")]
+            false,
+        )
+        .await?;
+        *acknowledgements += 1;
+        Ok(result)
+    }
+
+    // Counts successful decoded protocol dispatches, not elapsed time or subprocess I/O.
+    #[tokio::test]
+    async fn mature_reopen_uses_one_prefix_dispatch_instead_of_seventeen() {
+        let temp_root = std::env::var_os("T3_CODE_LS_TEST_TMPDIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir);
+        let directory = tempfile::Builder::new()
+            .prefix("t3-prefix-wire-")
+            .tempdir_in(temp_root)
+            .unwrap();
+        let path = directory.path().join("state.redb");
+        let store = Store::initialize_local(&path).await.unwrap();
+        store.bootstrap_application().await.unwrap();
+        while !store
+            .prepare_application_startup_prefix(false)
+            .await
+            .unwrap()
+            .prepared
+        {}
+        store.shutdown().await.unwrap();
+        let store = Store::open_local(&path).await.unwrap();
+        let mut transactions = ApplicationTransactions::new(store.clone());
+        let mut acknowledgements = 0;
+        for owner in OWNERS {
+            let result = wire(
+                &store,
+                &mut transactions,
+                json!({"operation": format!("application_{owner}_prepare")}),
+                &mut acknowledgements,
+            )
+            .await
+            .unwrap();
+            assert_eq!(result["prepared"], true);
+        }
+        assert_eq!(acknowledgements, 17);
+        acknowledgements = 0;
+        let result = wire(
+            &store,
+            &mut transactions,
+            json!({"operation": "application_startup_prepare_prefix"}),
+            &mut acknowledgements,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result, json!({"prepared": true, "completed_owners": 17}));
+        assert_eq!(acknowledgements, 1);
+        transactions.begin("held-writer").await.unwrap();
+        assert!(matches!(
+            wire(
+                &store,
+                &mut transactions,
+                json!({"operation": "application_startup_prepare_prefix"}),
+                &mut acknowledgements
+            )
+            .await,
+            Err(Error::WriterBusy)
+        ));
+        assert_eq!(acknowledgements, 1);
+        transactions.rollback("held-writer").await.unwrap();
+        assert!(
+            serde_json::from_value::<Request>(json!({
+                "operation": "application_startup_prepare_prefix", "skip": true
+            }))
+            .is_err()
+        );
+        drop(transactions);
+        store.shutdown().await.unwrap();
     }
 }

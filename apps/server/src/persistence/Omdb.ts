@@ -54,6 +54,8 @@ export const make = Effect.fn("Omdb.make")(
     readonly executable: string;
     readonly databasePath: string;
     readonly independentReads?: boolean;
+    /** Explicit matched-helper selection. Older helpers retain individual preparation. */
+    readonly startupPreparation?: "prefix-v1";
   }) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -288,26 +290,40 @@ export const make = Effect.fn("Omdb.make")(
       // Finish every resumable index preparation before making the cutover durable.
       // A failed preparation leaves the preserved SQLite source and the retryable
       // native candidate intact, without activating the older-server fence.
-      for (const prepare of [
-        client.prepareEvents,
-        client.prepareReceipts,
-        client.preparePositions,
-        client.prepareProjects,
-        client.prepareProjections,
-        client.prepareOutbox,
-        client.prepareViewedFiles,
-        client.prepareAuth,
-        client.preparePeers,
-        client.prepareRuntimeState,
-        client.prepareScheduled,
-        client.prepareProjectionReads,
-        client.prepareAuxiliary,
-        client.prepareMessageRowids,
-        client.prepareSearch,
-        client.prepareLegacyV1,
-        client.prepareMaintenance,
-      ]) {
-        while (!(yield* prepare).prepared) yield* Effect.yieldNow;
+      if (options.startupPreparation === "prefix-v1") {
+        const preparation = Schema.Struct({
+          prepared: Schema.Boolean,
+          completed_owners: Schema.Number,
+        });
+        while (!(yield* database.request(
+          {
+            operation: "application_startup_prepare_prefix",
+            ...(client.durableRelayWebhooks ? { durable_relay: true } : {}),
+          },
+          preparation,
+        )).prepared) yield* Effect.yieldNow;
+      } else {
+        for (const prepare of [
+          client.prepareEvents,
+          client.prepareReceipts,
+          client.preparePositions,
+          client.prepareProjects,
+          client.prepareProjections,
+          client.prepareOutbox,
+          client.prepareViewedFiles,
+          client.prepareAuth,
+          client.preparePeers,
+          client.prepareRuntimeState,
+          client.prepareScheduled,
+          client.prepareProjectionReads,
+          client.prepareAuxiliary,
+          client.prepareMessageRowids,
+          client.prepareSearch,
+          client.prepareLegacyV1,
+          client.prepareMaintenance,
+        ]) {
+          while (!(yield* prepare).prepared) yield* Effect.yieldNow;
+        }
       }
       if (readDatabase !== undefined) {
         yield* readDatabase.request({ operation: "application_schema" }, RedbClient.ApplicationSchema);
