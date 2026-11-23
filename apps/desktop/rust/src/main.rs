@@ -1,3 +1,4 @@
+mod navigation;
 mod replay;
 #[path = "../../../../packages/client-runtime/rust/host/server_snapshot.rs"]
 mod server_snapshot;
@@ -32,7 +33,7 @@ const SUBMIT_LABEL: &str = "Submit message";
 const STOP_LABEL: &str = "Stop";
 const APPROVAL_LABEL: &str = "Allow once";
 const REPLY_LABEL: &str = "Recorded assistant reply";
-const USAGE: &str = "Usage: t3-code-ls-desktop-gpui --fixture showcase | --thread-snapshot | --thread-compose < CONNECTION_JSON";
+const USAGE: &str = "Usage: t3-code-ls-desktop-gpui --fixture showcase | --thread-snapshot | --thread-workspace | --thread-compose < CONNECTION_JSON";
 const SHORTCUT: &str = if cfg!(target_os = "macos") {
     "Command+Enter"
 } else {
@@ -56,6 +57,8 @@ enum SubmissionStatus {
 }
 
 struct Workspace {
+    read_only: bool,
+    reply_focused: bool,
     composer: Entity<TextareaState>,
     reply: Option<RecordedReply>,
     status: Option<SubmissionStatus>,
@@ -109,7 +112,11 @@ impl Workspace {
                     secondary: true,
                     shift: false,
                 } => workspace.submit(window, cx),
-                InputEvent::Focus | InputEvent::Blur => cx.notify(),
+                InputEvent::Focus => {
+                    workspace.reply_focused = false;
+                    cx.notify();
+                }
+                InputEvent::Blur => cx.notify(),
                 InputEvent::Change
                     if matches!(workspace.status, Some(SubmissionStatus::Refused(_)))
                         && !workspace.server_attempted =>
@@ -121,6 +128,8 @@ impl Workspace {
             },
         );
         Self {
+            read_only: false,
+            reply_focused: false,
             composer,
             reply: None,
             status: None,
@@ -134,6 +143,9 @@ impl Workspace {
     }
 
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.read_only {
+            return;
+        }
         let draft = self.composer.update(cx, |state, cx| {
             state
                 .marked_text_range(window, cx)
@@ -360,7 +372,10 @@ impl Workspace {
             state.set_readonly(true, cx);
             state
         });
-        let focus_events = cx.subscribe_in(&editor, window, |_, _, event, _, cx| {
+        let focus_events = cx.subscribe_in(&editor, window, |workspace, _, event, _, cx| {
+            if matches!(event, InputEvent::Focus) {
+                workspace.reply_focused = true;
+            }
             if matches!(event, InputEvent::Focus | InputEvent::Blur) {
                 cx.notify();
             }
@@ -401,6 +416,10 @@ impl Render for Workspace {
             }
             Some(SubmissionStatus::Completed) => ("Recorded reply loaded.", 0x126647),
             Some(SubmissionStatus::Refused(message)) => (*message, 0xa32726),
+            None if self.read_only => (
+                "Unsent draft. Sending requires a thread command identity.",
+                0x49596a,
+            ),
             None if self.server.is_some() => ("Submit to the selected server thread.", 0x49596a),
             None => (
                 "Only the recorded showcase runs in this workspace.",
@@ -408,7 +427,7 @@ impl Render for Workspace {
             ),
         };
 
-        let title = if self.server.is_some() {
+        let title = if self.server.is_some() || self.read_only {
             "Server conversation"
         } else {
             "hybrid-fixture"
@@ -470,7 +489,9 @@ impl Render for Workspace {
                                     .child(
                                         Button::new("submit-message")
                                             .disabled(
-                                                self.server.is_some() && self.server_attempted,
+                                                self.read_only
+                                                    || (self.server.is_some()
+                                                        && self.server_attempted),
                                             )
                                             .accessibility_label(SUBMIT_LABEL)
                                             .border_2()
@@ -564,7 +585,7 @@ impl Render for Workspace {
                                 .flex()
                                 .flex_col()
                                 .gap_2()
-                                .child(if self.server.is_some() {
+                                .child(if self.server.is_some() || self.read_only {
                                     server_snapshot::LABEL
                                 } else {
                                     REPLY_LABEL
@@ -673,6 +694,7 @@ fn main() -> ExitCode {
         println!("{USAGE}");
         return ExitCode::SUCCESS;
     }
+    let mut navigation = None;
     let mut server_session = None;
     let snapshot = if first.as_deref() == Some(OsStr::new("--thread-compose"))
         && args.next().is_none()
@@ -682,6 +704,9 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         };
         server_session = Some(session);
+        None
+    } else if first.as_deref() == Some(OsStr::new("--thread-workspace")) && args.next().is_none() {
+        navigation = Some(server_snapshot::Connection::read(std::io::stdin().lock()));
         None
     } else if first.as_deref() == Some(OsStr::new("--thread-snapshot")) && args.next().is_none() {
         Some(
@@ -699,7 +724,9 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
 
-    let title = if server_session.is_some() {
+    let title = if navigation.is_some() {
+        "T3 Code · Thread workspace"
+    } else if server_session.is_some() {
         "T3 Code · Server composer"
     } else if snapshot.is_some() {
         "T3 Code · Server conversation"
@@ -727,7 +754,11 @@ fn main() -> ExitCode {
                     ..Default::default()
                 },
                 move |window, cx| {
-                    if let Some(server) = server_session {
+                    if let Some(connection) = navigation {
+                        let workspace =
+                            cx.new(|cx| navigation::ThreadWorkspace::new(connection, window, cx));
+                        cx.new(|cx| Root::new(workspace, window, cx))
+                    } else if let Some(server) = server_session {
                         let workspace =
                             cx.new(|cx| Workspace::new_with_server(Some(server), window, cx));
                         cx.new(|cx| Root::new(workspace, window, cx))

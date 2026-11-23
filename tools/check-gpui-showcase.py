@@ -119,6 +119,144 @@ def check_thread_snapshot(executable):
     print("GPUI authenticated snapshot passed AT-SPI content and identity, credential and missing-thread refusal checks")
 
 
+def check_thread_workspace_race(executable):
+    # Hold A until B is painted. Release the old request while B remains selected.
+    import http.server
+    import threading
+    release = threading.Event()
+    started = threading.Event()
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+        def do_GET(self):
+            if self.path == "/.well-known/t3/environment":
+                value = {"environmentId": "race-env"}
+            else:
+                assert self.headers.get("Authorization") == "Bearer fixture.token"
+                assert self.headers.get("x-t3-orchestration-protocol") == "2"
+                if self.path == "/api/orchestration/shell?omitOlderSettled=1":
+                    value = {"schemaVersion": 2, "snapshotSequence": 1, "threads": [
+                        {"id": "a", "title": "First"}, {"id": "b", "title": "Second"}]}
+                else:
+                    assert self.path in ["/api/orchestration/threads/a/bounded", "/api/orchestration/threads/b/bounded"]
+                    thread = self.path.split("/")[-2]
+                    if thread == "a":
+                        started.set()
+                        assert release.wait(4), "B was not selected before the bounded A deadline"
+                    value = {"snapshotSequence": 2, "projection": {
+                        "thread": {"id": thread, "title": thread}, "messages": []}}
+            body = json.dumps(value).encode()
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = threading.Thread(target=server.serve_forever)
+    worker.start()
+    application = subprocess.Popen([executable, "--thread-workspace"], stdin=subprocess.PIPE, text=True)
+    def click(node):
+        bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+        x11("mousemove", str(bounds.x + bounds.width // 2), str(bounds.y + bounds.height // 2))
+        x11("click", "1")
+    def text():
+        node = find("Server thread snapshot", application)
+        field = node.queryText()
+        return field.getText(0, field.characterCount)
+    try:
+        application.stdin.write(json.dumps({"port": server.server_port, "token": "fixture.token",
+            "environmentId": "race-env", "threadId": "a"}))
+        application.stdin.close()
+        window = wait_for(find_window, "Race workspace did not open", application)
+        x11("windowfocus", "--sync", window)
+        assert started.wait(2)
+        click(find("Open thread b", application))
+        wait_for(lambda: True if "Thread b\n" in text() else None, "B never painted", application)
+        release.set()
+        # Let A's receiver consume its response, then verify the selected document is still B.
+        time.sleep(0.3)
+        assert "Thread b\n" in text()
+        click(find("Open thread a", application))
+        wait_for(lambda: True if "Thread a\n" in text() else None, "A reply was lost", application)
+        request_window_close(window)
+        assert application.wait(timeout=10) == 0
+    finally:
+        release.set()
+        if application.poll() is None:
+            application.terminate()
+            try:
+                application.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                application.kill()
+                application.wait(timeout=3)
+        server.shutdown()
+        server.server_close()
+        worker.join(timeout=3)
+    print("GPUI late A reply stayed with A while B remained selected")
+
+
+def check_thread_workspace(executable):
+    connection = json.load(sys.stdin)
+    second = connection.pop("secondThreadId")
+    application = subprocess.Popen([executable, "--thread-workspace"], stdin=subprocess.PIPE, text=True)
+    def click(node):
+        bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+        x11("mousemove", str(bounds.x + bounds.width // 2), str(bounds.y + bounds.height // 2))
+        x11("click", "1")
+    def body(node):
+        field = node.queryText()
+        return field.getText(0, field.characterCount)
+    def select(thread):
+        click(find("Open thread " + thread, application))
+    def snapshot(thread):
+        def matches():
+            document = find("Server thread snapshot", application)
+            return document if "Thread " + thread + "\n" in body(document) else None
+        return wait_for(matches, "Wrong selected thread content", application)
+    try:
+        application.stdin.write(json.dumps(connection))
+        application.stdin.close()
+        window = wait_for(find_window, "Thread workspace did not open", application)
+        x11("windowfocus", "--sync", window)
+        snapshot(connection["threadId"])
+        find("Message", application, pyatspi.STATE_FOCUSED)
+        x11("type", "--clearmodifiers", "first draft")
+        x11("key", "shift+Left", "shift+Left", "shift+Left")
+        select(second)
+        snapshot(second)
+        composer = find("Message", application, pyatspi.STATE_FOCUSED)
+        assert body(composer) == ""
+        x11("type", "--clearmodifiers", "second draft")
+        select(connection["threadId"])
+        snapshot(connection["threadId"])
+        composer = find("Message", application, pyatspi.STATE_FOCUSED)
+        assert body(composer) == "first draft"
+        field = composer.queryText()
+        assert field.getSelection(0) == (8, 11)
+        # Extending from the retained left endpoint proves direction, beyond sorted bounds.
+        x11("key", "shift+Left")
+        assert composer.queryText().getSelection(0) == (7, 11)
+        reply = snapshot(connection["threadId"])
+        click(reply)
+        find("Server thread snapshot", application, pyatspi.STATE_FOCUSED)
+        select(second)
+        composer = find("Message", application, pyatspi.STATE_FOCUSED)
+        assert body(composer) == "second draft"
+        select(connection["threadId"])
+        find("Server thread snapshot", application, pyatspi.STATE_FOCUSED)
+        assert len(x11("search", "--onlyvisible", "--name", "T3 Code").splitlines()) == 1
+        request_window_close(window)
+        assert application.wait(timeout=10) == 0
+    finally:
+        if application.poll() is None:
+            application.terminate()
+            try:
+                application.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                application.kill()
+                application.wait(timeout=3)
+    print("GPUI two-thread navigation retained independent drafts, directed selection and editor focus")
+
+
 def check_thread_compose(executable, approval=False, follow_up=False, stop=False):
     connection = json.load(sys.stdin)
     prompt = "GPUI sends a follow-up in the same thread." if follow_up else "GPUI sends one recorded prompt."
@@ -365,6 +503,12 @@ def main():
         return
     if sys.argv[2:] == ["--thread-compose-follow-up"]:
         check_thread_compose(executable, follow_up=True)
+        return
+    if sys.argv[2:] == ["--thread-workspace-race"]:
+        check_thread_workspace_race(executable)
+        return
+    if sys.argv[2:] == ["--thread-workspace"]:
+        check_thread_workspace(executable)
         return
     if sys.argv[2:] == ["--thread-snapshot"]:
         check_thread_snapshot(executable)

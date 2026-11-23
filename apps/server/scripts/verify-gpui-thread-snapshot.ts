@@ -24,6 +24,7 @@ const userdata = Path.join(baseDir, "userdata");
 const bootstrap = Crypto.randomBytes(32).toString("hex");
 const projectId = ProjectId.make("gpui-snapshot-project");
 const sessionId = "0251af00-0000-4000-8000-000000000035";
+const secondSessionId = "0251af00-0000-4000-8000-000000000036";
 const threadId = `import:codex:${sessionId}`;
 for (const directory of [userdata, workspace, codexHome]) FS.mkdirSync(directory, { recursive: true });
 ChildProcess.execFileSync("/usr/bin/git", ["init", "--quiet"], { cwd: workspace, env: { PATH: "/usr/bin:/bin", HOME: scratch, GIT_CONFIG_NOSYSTEM: "1" } });
@@ -47,6 +48,12 @@ const records = [
 ];
 FS.writeFileSync(Path.join(sessions, `rollout-${day}T00-00-00-${sessionId}.jsonl`),
   records.map((record, index) => JSON.stringify({
+    timestamp: new Date(stamp.getTime() + index * 1000).toISOString(), ...record,
+  })).join("\n") + "\n");
+const secondRecords = records.map((record) => record.type === "session_meta"
+  ? { ...record, payload: { ...record.payload, id: secondSessionId } } : record);
+FS.writeFileSync(Path.join(sessions, `rollout-${day}T00-00-01-${secondSessionId}.jsonl`),
+  secondRecords.map((record, index) => JSON.stringify({
     timestamp: new Date(stamp.getTime() + index * 1000).toISOString(), ...record,
   })).join("\n") + "\n");
 const reservation = Net.createServer();
@@ -114,7 +121,7 @@ try {
     // A transport exception can contain the one-use WebSocket ticket URL.
     throw new Error("Synthetic provider import RPC failed");
   });
-  Assert.deepEqual(imported, { importedCount: 1, skippedCount: 0 });
+  Assert.deepEqual(imported, { importedCount: 2, skippedCount: 0 });
   const snapshot = await fetch(origin + `/api/orchestration/threads/${encodeURIComponent(threadId)}/bounded`, { headers, signal: AbortSignal.timeout(15_000) });
   Assert.ok(snapshot.ok);
   const data = await snapshot.json() as { projection: { thread: { id: string }; messages: { text: string }[] } };
@@ -130,6 +137,16 @@ try {
     view.once("close", (code) => code === 0 ? resolve() : reject(new Error("GPUI snapshot view check failed")));
     view.stdin.on("error", reject);
     view.stdin.end(JSON.stringify({ port, token, environmentId: descriptor.environmentId, threadId }));
+  });
+  await new Promise<void>((resolve, reject) => {
+    const view = ChildProcess.spawn("/usr/bin/python3", [Path.join(root, "tools/check-gpui-showcase.py"), executable, "--thread-workspace"], {
+      env: process.env, stdio: ["pipe", "inherit", "inherit"],
+    });
+    view.once("error", reject);
+    view.once("close", (code) => code === 0 ? resolve() : reject(new Error("GPUI workspace navigation check failed")));
+    view.stdin.on("error", reject);
+    view.stdin.end(JSON.stringify({ port, token, environmentId: descriptor.environmentId, threadId,
+      secondThreadId: `import:codex:${secondSessionId}` }));
   });
   console.log("GPUI read the selected native server's authenticated imported thread through its production bounded snapshot route.");
 } finally {
