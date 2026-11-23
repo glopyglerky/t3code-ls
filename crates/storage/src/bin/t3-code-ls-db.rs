@@ -32,7 +32,8 @@ use t3_code_ls_storage::application_search::ThreadSearchQuery;
 use t3_code_ls_storage::application_storage::{
     IsolatedTrialRequest, IsolatedTrialVerification, TrialRestorePublicationRequest,
     TrialRestoreRequest, backup_service_trial, prepare_isolated_service_trial,
-    prepare_service_trial_restore, publish_service_trial_restore, verify_isolated_service_trial,
+    prepare_service_trial_restore, publish_service_trial_restore, service_trial_capabilities,
+    verify_isolated_service_trial,
 };
 use t3_code_ls_storage::application_thread_find::ThreadFindQuery;
 use t3_code_ls_storage::outbox::{self, EnqueueEffect};
@@ -1551,6 +1552,10 @@ fn read_trial_request<T: DeserializeOwned>(message: &str) -> io::Result<Result<T
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let trial_response = match args.as_slice() {
+        [mode] if mode == "trial-capabilities" => Some(match service_trial_capabilities() {
+            Ok(capabilities) => json!({"ok": true, "result": capabilities}),
+            Err(error) => error_response(&error),
+        }),
         [mode, home, update_id, catalog_sha256] if mode == "trial-backup" => {
             match backup_service_trial(home.into(), update_id.clone(), catalog_sha256.clone()).await
             {

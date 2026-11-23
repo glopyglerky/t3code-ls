@@ -21,7 +21,7 @@ const MAX_PAGE_ROWS: u32 = 4096;
 const MAX_IDLE: Duration = Duration::from_secs(300);
 const MAX_SAVEPOINTS: usize = 64;
 const DEFAULT_LOCK_TIMEOUT_MS: u64 = 5000;
-const OMDB_REVISION: &str = "b2ff031398b1f0a793a352db7a699575b5d4d3d4";
+pub(crate) const OMDB_REVISION: &str = "b2ff031398b1f0a793a352db7a699575b5d4d3d4";
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]

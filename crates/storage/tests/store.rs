@@ -614,6 +614,24 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
             .collect()
     };
     let definition = include_bytes!("../../../apps/server/src/persistence/omdb-schema.json");
+    let capabilities = Command::new(executable)
+        .arg("trial-capabilities")
+        .output()
+        .unwrap();
+    assert!(capabilities.status.success());
+    assert!(capabilities.stderr.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&capabilities.stdout).unwrap(),
+        json!({
+            "ok": true,
+            "result": {
+                "version": 1,
+                "engine": identity.engine,
+                "engineRevision": identity.engine_revision,
+                "targetSchemaSha256": sha256(definition),
+            },
+        })
+    );
     let mut request = json!({
         "update_id": UPDATE,
         "database": backup["result"]["database"],

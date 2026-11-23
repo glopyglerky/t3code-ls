@@ -103,6 +103,23 @@ pub struct IsolatedTrialVerification {
     pub preparation: IsolatedTrialPreparation,
 }
 
+/// The launcher reads this before stopping an active runtime for a native trial.
+pub fn service_trial_capabilities() -> Result<serde_json::Value> {
+    #[cfg(target_os = "linux")]
+    {
+        Ok(serde_json::json!({
+            "version": 1,
+            "engine": "omdb",
+            "engineRevision": crate::application::OMDB_REVISION,
+            "targetSchemaSha256": crate::application_bootstrap::bootstrap_schema_sha256(),
+        }))
+    }
+    #[cfg(not(target_os = "linux"))]
+    Err(Error::Invalid(
+        "isolated service trials are unsupported on this platform".into(),
+    ))
+}
+
 fn validate_isolated_trial_request(
     home: &Path,
     update_id: &str,
