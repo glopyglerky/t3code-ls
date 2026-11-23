@@ -1214,12 +1214,6 @@ async function exercise(implementation: Implementation): Promise<void> {
       proof.draftMerge = await verifyDraftMerge(page);
       completed("Kept the newer draft from the first tab and the model selected in the second");
     }
-    if (draftStorageProof) {
-      starting("draft write quota denial and recovery");
-      proof.draftStorage = await verifyDraftStorageRecovery(page);
-      completed("Kept the unsent draft through quota denial, retry and reload");
-    }
-
     starting("normal composer submission and controlled approval");
     const threadId = await submitReplay(page);
     proof.threadId = threadId;
@@ -1460,6 +1454,11 @@ async function exercise(implementation: Implementation): Promise<void> {
       starting("versioned workspace file edits and conflict");
       proof.fileEditor = await verifyFileEditor(page, workspace, fileWrites);
       completed("Saved two workspace edits and retained the next draft after an external change");
+    }
+    if (draftStorageProof) {
+      starting("draft write quota denial and recovery");
+      proof.draftStorage = await verifyDraftStorageRecovery(page);
+      completed("Kept the unsent draft through quota denial, retry and reload");
     }
     if (implementation === "native") {
       Assert.equal(proof.persistence.length, 4);
