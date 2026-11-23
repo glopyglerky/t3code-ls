@@ -4,6 +4,7 @@
 // The fixture and application state stay outside the checkout. They are retained for investigation.
 import * as Assert from "node:assert/strict";
 import * as ChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
@@ -19,7 +20,7 @@ import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 import { chromium, type Browser, type Page } from "playwright";
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
-import { inspectNativeReplay } from "./hybrid-client-database.ts";
+import { inspectNativeMessageUpdates, inspectNativeReplay } from "./hybrid-client-database.ts";
 import {
   assertReplayTurnLinks,
   replayTurnIdentity,
@@ -28,6 +29,13 @@ import {
 
 type Implementation = "upstream" | "native";
 type OwnedApplication = { pid: number; pairingUrl: string; stop: () => Promise<void> };
+type InterruptedShowcase = ReplayTurnIdentity & {
+  threadId: string;
+  threadUrl: string;
+  requestId: string;
+  partialMessageId: string;
+  partialText: string;
+};
 
 const repoRoot = NodeFS.realpathSync(NodeURL.fileURLToPath(new URL("../../../", import.meta.url)));
 const timeoutMs = 90_000;
@@ -36,6 +44,19 @@ const replayPrompt = "Replay: showcase";
 const replayMarker = "This turn is a replay.";
 const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
 const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
+const capturedApproval = {
+  path: "apps/server/src/orchestration-v2/testkit/fixtures/tool_call_read_only_on_request/registry_transcript.ndjson",
+  sha256: "f9c09f88e3b8480c44adc62ba30c085a33044a6bfc1611839128c3f80ea5ad81",
+  model: "approval",
+  modelLabel: "Write approval",
+  prompt: "Replay the recorded permission request",
+  reply: "Created the requested probe file.",
+};
+const capturedQuestion = {
+  path: "apps/server/src/orchestration-v2/testkit/fixtures/acp_elicitation/registry_transcript.ndjson",
+  sha256: "544a05a240a700ecad527fa785e9b8adf203fc8e93c48e9185e790ba86f103ee",
+  option: "Strict schemas (Recommended)",
+};
 const decodeSnapshot = Schema.decodeUnknownSync(
   Schema.toCodecJson(OrchestrationV2ThreadDetailSnapshot),
 );
@@ -337,14 +358,18 @@ async function readThreadSnapshot(
   return snapshot;
 }
 
-async function submitShowcase(page: Page): Promise<string> {
+async function submitReplay(
+  page: Page,
+  modelLabel = "Showcase",
+  prompt = replayPrompt,
+): Promise<string> {
   await page.getByRole("button", { name: "New thread in hybrid-fixture", exact: true }).click();
   await page.waitForURL((url) => url.pathname.startsWith("/draft/"));
   const picker = page.locator('[data-chat-provider-model-picker="true"]:visible');
   const search = page.getByPlaceholder("Search models...");
   await picker.click();
-  await search.fill("Showcase");
-  await page.getByRole("option", { name: /Showcase/u }).click();
+  await search.fill(modelLabel);
+  await page.getByRole("option", { name: modelLabel }).click();
   if (!(await search.isVisible())) await picker.click();
   await page.locator("[data-composer-permissions-trigger]:visible").click();
   await page.getByRole("menuitemradio", { name: "Supervised", exact: true }).click();
@@ -353,12 +378,98 @@ async function submitShowcase(page: Page): Promise<string> {
 
   const editor = page.getByTestId("composer-editor");
   await editor.click();
-  await editor.fill(replayPrompt);
+  await editor.fill(prompt);
   await page.getByRole("button", { name: "Submit message", exact: true }).click();
   await page.waitForURL((url) => /^\/(?!draft\/)[^/]+\/[^/]+$/u.test(url.pathname));
   const thread = new URL(page.url()).pathname.split("/").at(-1);
   Assert.ok(thread, "The composer must navigate to the submitted thread");
   return decodeURIComponent(thread);
+}
+
+async function interruptShowcase(page: Page): Promise<InterruptedShowcase> {
+  const threadId = await submitReplay(page);
+  await page.getByRole("button", { name: /^(Yes|Approve)$/u }).first().waitFor({ state: "visible" });
+  const pending = await readThreadSnapshot(page, threadId);
+  const identity = replayTurnIdentity(pending);
+  const request = pending.projection.runtimeRequests.find(
+    (item) => item.providerTurnId === identity.providerTurnId && item.status === "pending",
+  );
+  const partialMessage = pending.projection.messages.find(
+    (item) => item.role === "assistant" && item.runId === identity.runId && item.text.length > 0,
+  );
+  Assert.ok(request, "The interrupted turn must have a pending approval");
+  Assert.ok(partialMessage, "The fixture must stream assistant text before the approval");
+  const evidence = {
+    ...identity,
+    threadId,
+    threadUrl: page.url(),
+    requestId: request.id,
+    partialMessageId: partialMessage.id,
+    partialText: partialMessage.text,
+  };
+  await page.getByRole("button", { name: "Stop generation", exact: true }).click();
+  await verifyInterruptedShowcase(page, evidence);
+  return evidence;
+}
+
+async function verifyInterruptedShowcase(page: Page, expected: InterruptedShowcase): Promise<void> {
+  await page.waitForURL((url) => url.href === expected.threadUrl);
+  await page.getByText("The project has a single math module.", { exact: false }).waitFor({ state: "visible" });
+  await page.getByRole("button", { name: /^(Stop generation|Stopping)$/u }).waitFor({ state: "hidden" });
+  const { projection } = await readThreadSnapshot(page, expected.threadId);
+  Assert.equal(projection.runs.length, 1, "An interrupted turn must not be replayed on reopen");
+  const run = projection.runs.find((item) => item.id === expected.runId);
+  const attempt = projection.attempts.find((item) => item.id === expected.attemptId);
+  const providerTurn = projection.providerTurns.find((item) => item.id === expected.providerTurnId);
+  Assert.ok(run && attempt && providerTurn, "The original interrupted execution must remain linked");
+  Assert.equal(run.status, "interrupted");
+  Assert.equal(attempt.status, "interrupted");
+  Assert.equal(providerTurn.status, "interrupted");
+  Assert.equal(attempt.runId, run.id);
+  assertReplayTurnLinks(attempt, providerTurn);
+  const request = projection.runtimeRequests.find((item) => item.id === expected.requestId);
+  Assert.equal(request?.status, "cancelled");
+  const message = projection.messages.find((item) => item.id === expected.partialMessageId);
+  Assert.equal(message?.text, expected.partialText);
+  Assert.equal(message?.streaming, false);
+}
+
+async function terminalMarker(page: Page, prefix: "fixture-pty" | "fixture-reattach") {
+  const input = page.getByRole("textbox", { name: "Terminal input" });
+  const drawer = page.getByRole("button", { name: "Toggle terminal drawer" });
+  await drawer.waitFor({ state: "visible" });
+  if ((await drawer.getAttribute("aria-pressed")) !== "true") await drawer.click();
+  await input.waitFor({ state: "visible" });
+  await page.waitForFunction(() => {
+    const element = document.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Terminal input"]',
+    );
+    return element !== null && !element.readOnly;
+  });
+  await page.evaluate(() => navigator.clipboard.writeText(""));
+  await input.focus();
+  const selectedText = async (pattern: RegExp) => {
+    const deadline = Date.now() + 10_000;
+    do {
+      await input.press("Control+Shift+a");
+      await input.press("Control+Shift+c");
+      const clipboard = await page.evaluate(() => navigator.clipboard.readText());
+      const match = clipboard.match(pattern);
+      if (match !== null) return match;
+      await page.waitForTimeout(100);
+    } while (Date.now() < deadline);
+    throw new Error(`Expected a rendered shell response for ${prefix}`);
+  };
+  await selectedText(/[$#]\s*$/u);
+  const command = `printf '${prefix}:%s %s\\n' "$$" '世界'`;
+  await page.evaluate((line) => navigator.clipboard.writeText(line), command);
+  await input.press("Control+Shift+v");
+  await selectedText(new RegExp(`${prefix}:%s %s`, "u"));
+  await input.press("Enter");
+  // The echoed format string contains no PID. Only rendered shell output matches.
+  const [, pid] = await selectedText(new RegExp(`${prefix}:(\\d+) 世界`, "u"));
+  Assert.ok(pid);
+  return pid;
 }
 
 function summarizeSnapshot(snapshot: OrchestrationV2ThreadDetailSnapshot) {
@@ -403,10 +514,15 @@ function summarizeSnapshot(snapshot: OrchestrationV2ThreadDetailSnapshot) {
 }
 const snapshotMetadata = new WeakMap<Page, ReturnType<typeof summarizeSnapshot>>();
 
-async function assertCompleted(page: Page, threadId: string, identity: ReplayTurnIdentity) {
+async function assertCompleted(
+  page: Page,
+  threadId: string,
+  identity: ReplayTurnIdentity,
+  reply = replayMarker,
+) {
   await page.waitForURL((url) => url.pathname.endsWith(`/${threadId}`), { timeout: timeoutMs });
   await page
-    .getByText(replayMarker, { exact: false })
+    .getByText(reply, { exact: false })
     .last()
     .waitFor({ state: "visible", timeout: timeoutMs });
   await page
@@ -438,7 +554,7 @@ async function assertCompleted(page: Page, threadId: string, identity: ReplayTur
   Assert.ok(providerTurn.completedAt);
   const message = snapshot.projection.messages.find(
     (item) =>
-      item.role === "assistant" && item.runId === run.id && item.text.includes(replayMarker),
+      item.role === "assistant" && item.runId === run.id && item.text.includes(reply),
   );
   Assert.ok(message, "The completed replay text must belong to the recorded run");
   Assert.equal(message.streaming, false);
@@ -457,6 +573,71 @@ async function assertCompleted(page: Page, threadId: string, identity: ReplayTur
   };
 }
 
+async function acceptCapturedApproval(page: Page) {
+  const contents = NodeFS.readFileSync(NodePath.join(repoRoot, capturedApproval.path));
+  const sha256 = NodeCrypto.createHash("sha256").update(contents).digest("hex");
+  Assert.equal(sha256, capturedApproval.sha256, "The recorded ACP approval fixture changed");
+  const threadId = await submitReplay(page, capturedApproval.modelLabel, capturedApproval.prompt);
+  const button = page
+    .getByRole("group", { name: "Command approval", exact: true })
+    .getByRole("button", { name: "Approve", exact: true });
+  await button.waitFor({ state: "visible" });
+  const pending = await readThreadSnapshot(page, threadId);
+  const identity = replayTurnIdentity(pending, capturedApproval.model);
+  const request = pending.projection.runtimeRequests.find(
+    (item) => item.providerTurnId === identity.providerTurnId && item.status === "pending",
+  );
+  Assert.ok(request, "The recorded approval must belong to the live provider turn");
+  Assert.ok(
+    pending.projection.messages.some(
+      (message) => message.role === "user" && message.text === capturedApproval.prompt,
+    ),
+    "The recorded-approval turn must contain the submitted prompt",
+  );
+  await button.click();
+  const completed = await assertCompleted(page, threadId, identity, capturedApproval.reply);
+  Assert.equal(
+    (await readThreadSnapshot(page, threadId)).projection.runtimeRequests.find(
+      (item) => item.id === request.id,
+    )?.status,
+    "resolved",
+  );
+  return { ...completed, requestId: request.id, source: capturedApproval.path, sha256 };
+}
+
+async function cancelCapturedQuestion(page: Page) {
+  const contents = NodeFS.readFileSync(NodePath.join(repoRoot, capturedQuestion.path));
+  const sha256 = NodeCrypto.createHash("sha256").update(contents).digest("hex");
+  Assert.equal(sha256, capturedQuestion.sha256, "The recorded ACP question fixture changed");
+  const threadId = await submitReplay(page, "Question", "Replay the recorded question");
+  const option = page.getByText(capturedQuestion.option, { exact: true }).first();
+  await option.waitFor({ state: "visible" });
+  const pending = await readThreadSnapshot(page, threadId);
+  const identity = replayTurnIdentity(pending, "question");
+  const request = pending.projection.runtimeRequests.find(
+    (item) => item.kind === "user_input" && item.providerTurnId === identity.providerTurnId,
+  );
+  Assert.equal(request?.status, "pending");
+  Assert.ok(request);
+  const requestId = request.id;
+  await page.getByRole("button", { name: "Stop generation", exact: true }).click();
+  await option.waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: /^(Stop generation|Stopping)$/u }).waitFor({ state: "hidden" });
+
+  function assertCancelled(snapshot: OrchestrationV2ThreadDetailSnapshot) {
+    const { projection } = snapshot;
+    Assert.equal(projection.runs.length, 1);
+    Assert.equal(projection.runs[0]?.id, identity.runId);
+    Assert.equal(projection.runs[0]?.status, "interrupted");
+    const cancelled = projection.runtimeRequests.find((item) => item.id === requestId);
+    Assert.equal(cancelled?.status, "cancelled");
+  }
+  assertCancelled(await readThreadSnapshot(page, threadId));
+  await page.reload({ waitUntil: "domcontentloaded" });
+  assertCancelled(await readThreadSnapshot(page, threadId));
+  return { ...identity, threadId, requestId, source: capturedQuestion.path, sha256 };
+}
+
 async function exercise(implementation: Implementation): Promise<void> {
   const directory = NodePath.join(proofRoot, implementation);
   NodeFS.mkdirSync(directory, { recursive: true });
@@ -466,6 +647,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     const settingsDirectory = NodePath.join(stateDirectory, "userdata");
     NodeFS.mkdirSync(settingsDirectory, { recursive: true });
     writeJson(NodePath.join(settingsDirectory, "settings.json"), {
+      responseStreamingMode: "paragraph",
       providerInstances: {
         devReplay: {
           displayName: "Replay (dev)",
@@ -515,7 +697,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     client: bundledClient ? "built" : "development",
     composer: "unverified",
     scope:
-      "Linux original web client; local project; composer submission; free ACP showcase approval; reload; same-state server restart",
+      "Linux original web client; local project; composer submission; free ACP showcase approval and interruption; reload; same-state server restart",
     startedAt: new Date().toISOString(),
     finishedAt: null as string | null,
     source,
@@ -533,6 +715,20 @@ async function exercise(implementation: Implementation): Promise<void> {
     threadId: null as string | null,
     threadUrl: null as string | null,
     turnIdentity: null as ReplayTurnIdentity | null,
+    interrupted: null as InterruptedShowcase | null,
+    capturedApproval: null as Awaited<ReturnType<typeof acceptCapturedApproval>> | null,
+    cancelledQuestion: null as Awaited<ReturnType<typeof cancelCapturedQuestion>> | null,
+    historyFind: null as { query: string; count: string; draftPreserved: boolean } | null,
+    messageAppends: null as {
+      requests: number;
+      frames: number;
+      rustDecoder: boolean;
+      messageUpdates: Array<{ sequence: number; length: number; streaming: boolean }>;
+      storedUpdates: ReturnType<typeof inspectNativeMessageUpdates>;
+    } | null,
+    terminalReattach: null as { sameShell: boolean; unicodeOutput: boolean } | null,
+    terminalFailure: null as string | null,
+    terminalInitialOutput: false,
     completedSnapshots: [] as Array<
       Awaited<ReturnType<typeof assertCompleted>> & { checkpoint: string }
     >,
@@ -573,6 +769,10 @@ async function exercise(implementation: Implementation): Promise<void> {
   };
   let context = await browser!.newContext(contextOptions);
   let page = await context.newPage();
+  let threadFindRequests = 0;
+  let messageAppendFrames = 0;
+  let messageAppendRequests = 0;
+  const wireMessages = new Map<string, Array<{ sequence: number; length: number; streaming: boolean }>>();
   function observePage(current: Page): void {
     current.setDefaultTimeout(timeoutMs);
     current.setDefaultNavigationTimeout(timeoutMs);
@@ -581,6 +781,51 @@ async function exercise(implementation: Implementation): Promise<void> {
     );
     current.on("console", (message) => {
       if (message.type() === "error") proof.browserErrors.push(redact(message.text()));
+    });
+    current.on("websocket", (socket) => {
+      socket.on("framesent", ({ payload }) => {
+        const json = payload.toString();
+        if (json.includes('"orchestration.searchThreadStream"')) {
+          threadFindRequests += 1;
+        }
+        if (json.includes('"messageTextAppends":1')) messageAppendRequests += 1;
+      });
+      socket.on("framereceived", ({ payload }) => {
+        const json = payload.toString();
+        if (json.includes('"kind":"message-text-append"')) {
+          messageAppendFrames += 1;
+        }
+        if (!json.includes('"message.updated"')) return;
+        let envelope: {
+          values?: Array<{
+            sequence?: number;
+            event?: { type?: string; payload?: { threadId?: string; text?: string; streaming?: boolean } };
+          }>;
+        };
+        try {
+          envelope = JSON.parse(json) as typeof envelope;
+        } catch {
+          return;
+        }
+        for (const frame of envelope.values ?? []) {
+          const message = frame.event?.payload;
+          if (
+            frame.event?.type !== "message.updated" ||
+            message?.threadId === undefined ||
+            message.text === undefined ||
+            frame.sequence === undefined
+          ) continue;
+          const messages = wireMessages.get(message.threadId) ?? [];
+          if (messages.length < 64) {
+            messages.push({
+              sequence: frame.sequence,
+              length: message.text.length,
+              streaming: message.streaming === true,
+            });
+            wireMessages.set(message.threadId, messages);
+          }
+        }
+      });
     });
   }
   observePage(page);
@@ -611,7 +856,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     completed("Created local project through the normal client");
 
     starting("normal composer submission and controlled approval");
-    const threadId = await submitShowcase(page);
+    const threadId = await submitReplay(page);
     proof.threadId = threadId;
     const usedRustComposer = await page.evaluate(
       () => performance.getEntriesByName("t3-composer-rust-offsets").length === 1,
@@ -642,9 +887,15 @@ async function exercise(implementation: Implementation): Promise<void> {
     proof.threadUrl = page.url();
     inspectPersistence("initial");
     completed("Received the completed replay turn on the original thread route");
+    starting("stop with a streamed reply and pending approval");
+    proof.interrupted = await interruptShowcase(page);
+    Assert.notEqual(proof.interrupted.threadId, threadId);
+    completed("Stopped a separate turn through the composer and retained its partial reply");
 
     starting("client reload");
     await page.reload({ waitUntil: "domcontentloaded" });
+    await verifyInterruptedShowcase(page, proof.interrupted);
+    await page.goto(proof.threadUrl, { waitUntil: "domcontentloaded" });
     proof.completedSnapshots.push({
       checkpoint: "client-reload",
       ...(await assertCompleted(page, threadId, turnIdentity)),
@@ -687,12 +938,107 @@ async function exercise(implementation: Implementation): Promise<void> {
       "Recovered the same durable thread after server restart in a fresh client with the existing session",
     );
     await capture(page, directory, "completed");
+    if (bundledClient && implementation === "native") {
+      starting("find in reopened conversation");
+      const draft = "Draft retained while finding a previous reply";
+      const editor = page.getByTestId("composer-editor");
+      await editor.fill(draft);
+      const requestsBeforeFind = threadFindRequests;
+      await page.keyboard.press("Control+f");
+      const bar = page.getByRole("search", { name: "Find in thread" });
+      const search = bar.getByRole("searchbox", { name: "Find in thread" });
+      const query = "single math module";
+      await search.fill(query);
+      await bar.getByText("1/1", { exact: true }).waitFor({ state: "visible" });
+      Assert.ok(threadFindRequests > requestsBeforeFind, "Find must query the restarted server");
+      await page.waitForFunction(
+        (expected) => Array.from(CSS.highlights.get("t3-thread-find-active") ?? []).some(
+          (range) => range.toString() === expected,
+        ),
+        query,
+      );
+      await page.keyboard.press("Escape");
+      await bar.waitFor({ state: "hidden" });
+      Assert.equal(await editor.innerText(), draft);
+      proof.historyFind = { query, count: "1/1", draftPreserved: true };
+      completed("Found and highlighted the previous reply after restart while retaining the draft");
+    }
+    if (bundledClient && implementation === "native") {
+      starting("interactive terminal reconnect");
+      try {
+        await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+          origin: new URL(page.url()).origin,
+        });
+        const shell = await terminalMarker(page, "fixture-pty");
+        proof.terminalInitialOutput = true;
+        saveProof();
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await assertCompleted(page, threadId, turnIdentity);
+        const reattached = await terminalMarker(page, "fixture-reattach");
+        Assert.equal(reattached, shell, "A browser reload must reattach to the same PTY shell");
+        proof.terminalReattach = { sameShell: true, unicodeOutput: true };
+        completed("Reattached to the same PTY and copied its rendered Unicode output after reload");
+      } catch (error) {
+        proof.terminalFailure = redact(error instanceof Error ? error.message : String(error));
+        saveProof();
+      }
+    }
+    await page.goto(proof.interrupted.threadUrl, { waitUntil: "domcontentloaded" });
+    await verifyInterruptedShowcase(page, proof.interrupted);
+    completed("Recovered the interrupted turn and partial reply in the new browser session");
+    starting("recorded ACP permission request");
+    proof.capturedApproval = await acceptCapturedApproval(page);
+    completed("Approved the recorded ACP permission request and received its expected reply");
+    if (bundledClient && implementation === "native") {
+      starting("recorded ACP question cancellation");
+      proof.cancelledQuestion = await cancelCapturedQuestion(page);
+      completed("Cancelled the recorded question in the composer and recovered its cancelled request");
+    }
+    if (expectsRustComposer && implementation === "native" && bundledClient) {
+      starting("negotiated Rust text appends");
+      const framesBefore = messageAppendFrames;
+      const requestsBefore = messageAppendRequests;
+      const appendThread = await submitReplay(page, "Text appends", "Replay: text appends");
+      const approve = page.getByRole("button", { name: /^(Yes|Approve)$/u }).first();
+      await approve.waitFor({ state: "visible" });
+      Assert.ok(messageAppendRequests > requestsBefore, "Subscribe before releasing the fixture");
+      await approve.click();
+      const reply = "日本語 and a 🐟 complete the sequence. The bounded text fixture is complete.";
+      await page.getByText(reply, { exact: false }).last().waitFor({ state: "visible" });
+      const appended = await readThreadSnapshot(page, appendThread);
+      await assertCompleted(page, appendThread, replayTurnIdentity(appended, "text-appends"), reply);
+      const rustDecoder = await page.evaluate(
+        () => performance.getEntriesByName("t3-thread-rust-text-append").length > 0,
+      );
+      proof.messageAppends = {
+        requests: messageAppendRequests - requestsBefore,
+        frames: messageAppendFrames - framesBefore,
+        rustDecoder,
+        messageUpdates: wireMessages.get(appendThread) ?? [],
+        storedUpdates: inspectNativeMessageUpdates(
+          nativeExecutable("db"),
+          stateDirectory,
+          appendThread,
+        ),
+      };
+      saveProof();
+      Assert.ok(proof.messageAppends.requests > 0, "The client must negotiate text appends");
+      Assert.ok(proof.messageAppends.frames > 0, "The thread subscription must receive an append");
+      Assert.ok(
+        proof.messageAppends.storedUpdates.filter((update) => update.streaming).length >= 2,
+        "The fixture must persist both streaming revisions before completing",
+      );
+      Assert.ok(rustDecoder, "The Rust binding must apply a received append");
+      completed("Applied negotiated WebSocket text appends in the Rust browser reducer");
+    }
+
     if (implementation === "native") {
       Assert.equal(proof.persistence.length, 4);
       completed(
         "Verified canonical omdb rows and event heads through read-only native inspection, with no application SQLite files",
       );
     }
+    if (proof.terminalFailure !== null) throw new Error(proof.terminalFailure);
     proof.status = "passed";
   } catch (error) {
     proof.status = "failed";

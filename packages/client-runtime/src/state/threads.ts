@@ -4,7 +4,7 @@ import {
   type EnvironmentId as EnvironmentIdType,
   type OrchestrationV2ThreadDetailSnapshot,
   type OrchestrationV2ThreadProjection,
-  type OrchestrationV2ThreadStreamItem,
+  type OrchestrationV2ThreadStreamItem as WireThreadItem,
   type OrchestrationV2TurnItem,
   type ThreadId as ThreadIdType,
 } from "@t3tools/contracts";
@@ -35,9 +35,10 @@ import * as ManagedRelay from "../relay/managedRelay.ts";
 import {
   isAuthorizationFailure,
   request,
-  subscribeDynamic,
+  subscribeThread,
   subscriptionRetryDelay,
 } from "../rpc/client.ts";
+import { canDecodeThreadMessageText } from "../rpc/threadMessageText.ts";
 import { parseThreadKey, threadKey } from "./entities.ts";
 import { applyOrchestrationV2ProjectionEvent } from "./orchestrationV2Projection.ts";
 import { THREAD_SNAPSHOT_IDLE_TTL_MS } from "./threadRetention.ts";
@@ -61,6 +62,7 @@ import {
 } from "./threadState.ts";
 
 const THREAD_SUBSCRIPTION_RETRY_DELAY = "250 millis";
+type OrchestrationV2ThreadStreamItem = Exclude<WireThreadItem, { kind: "message-text-append" }>;
 
 function statusWithoutLiveData(
   data: Option.Option<OrchestrationV2ThreadProjection>,
@@ -441,14 +443,16 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     options?: {
       readonly resetHistory?: boolean;
       readonly history?: ThreadHistoryMeta;
+      readonly snapshotSequence?: number;
     },
   ) {
     const waiting = yield* Ref.get(awaitingCompletion);
-    const sequence = yield* SubscriptionRef.get(lastSequence);
+    const snapshotSequence = options?.snapshotSequence;
+    const sequence = snapshotSequence ?? (yield* SubscriptionRef.get(lastSequence));
     // Atomic with concurrent history meta updates: never get-then-set the whole
     // state when only the projection changes. Bounded installs pass history so
     // projection + cursor persist together in one enqueue.
-    const next = yield* SubscriptionRef.updateAndGet(state, (previous) => {
+    const publish = SubscriptionRef.updateAndGet(state, (previous) => {
       const history =
         options?.history !== undefined
           ? options.history
@@ -468,14 +472,19 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         sequence,
       };
     });
+    const next =
+      snapshotSequence === undefined
+        ? yield* publish
+        : yield* Effect.uninterruptible(
+            publish.pipe(Effect.tap(() => SubscriptionRef.set(lastSequence, snapshotSequence))),
+          );
     // Active projections can update many times per second and retain large tool
     // payloads. Persist once the run settles so cache encoding stays off the
     // streaming path. Progressive meta rides along when the window is incomplete.
     if (shouldPersistThread(thread, next.history)) {
-      const snapshotSequence = yield* SubscriptionRef.get(lastSequence);
       yield* queuePersist(
         snapshotToPersist(
-          snapshotSequence,
+          sequence,
           thread,
           next.history,
           yield* Ref.get(acceptsBoundedSocketSnapshots),
@@ -541,8 +550,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       );
     }
     if (sequence === appliedSequence) return;
-    yield* SubscriptionRef.set(lastSequence, sequence);
-    if (fresh.length === 0) return;
+    if (fresh.length === 0) {
+      yield* SubscriptionRef.set(lastSequence, sequence);
+      return;
+    }
 
     const waiting = yield* Ref.get(awaitingCompletion);
     // Apply against the latest projection/history in one update so a concurrent
@@ -621,6 +632,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         return [result, result._tag === "noop" ? current : { ...current, sequence }];
       },
     );
+    yield* SubscriptionRef.set(lastSequence, sequence);
 
     if (result._tag === "delete") {
       yield* setDeleted();
@@ -653,7 +665,6 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     }
 
     if (item.kind === "snapshot") {
-      yield* SubscriptionRef.set(lastSequence, item.snapshotSequence);
       const hasProgressiveHistory =
         item.historyCursor !== undefined ||
         item.hasMoreHistory !== undefined ||
@@ -670,8 +681,9 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
                 expanded: false,
                 latestLocalTurnOrdinal: item.latestLocalTurnOrdinal ?? null,
               },
+              snapshotSequence: item.snapshotSequence,
             }
-          : { resetHistory: true },
+          : { resetHistory: true, snapshotSequence: item.snapshotSequence },
       );
       return;
     }
@@ -1001,8 +1013,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     never,
     EnvironmentSupervisor.EnvironmentSupervisor
   > =>
-    subscribeDynamic(
-      ORCHESTRATION_V2_WS_METHODS.subscribeThread,
+    subscribeThread(
       Effect.fn("EnvironmentThreadState.makeSubscribeInput")(function* (session) {
         let current = yield* SubscriptionRef.get(state);
         // A delete event already cleared this thread. Park without opening the socket.
@@ -1052,7 +1063,6 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
               // snapshots still go through applyItem (resetHistory).
               yield* applyLock.withPermits(1)(
                 Effect.gen(function* () {
-                  yield* SubscriptionRef.set(lastSequence, httpResult.snapshot.snapshotSequence);
                   const history: ThreadHistoryMeta =
                     httpResult.history !== undefined
                       ? {
@@ -1064,7 +1074,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
                           latestLocalTurnOrdinal: httpResult.history.latestLocalTurnOrdinal ?? null,
                         }
                       : EMPTY_THREAD_HISTORY_META;
-                  yield* setThread(httpResult.snapshot.projection, { history });
+                  yield* setThread(httpResult.snapshot.projection, {
+                    history,
+                    snapshotSequence: httpResult.snapshot.snapshotSequence,
+                  });
                   yield* remember;
                 }),
               );
@@ -1104,6 +1117,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
               }
             : {}),
           acceptDedupedBodies: true as const,
+          ...(canDecodeThreadMessageText() &&
+          Option.exists(config, (value) => value.threadMessageTextAppends === 1)
+            ? { messageTextAppends: 1 as const }
+            : {}),
         };
       }),
       {
@@ -1137,7 +1154,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
           ),
         ),
       ),
-      // A defect while applying items ends the stream; resubscribe for a fresh snapshot.
+      // A defect while applying items ends the stream. Resume from the last applied sequence.
       Effect.catchCause((cause) =>
         Cause.hasInterrupts(cause)
           ? Effect.interrupt

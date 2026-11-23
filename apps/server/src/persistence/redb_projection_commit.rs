@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
+use t3_code_ls_core::codex_generation::js_trim;
 
 use crate::application::{
     ApplicationCatalog, ApplicationTransactions, Session, decode_catalog, decode_row, row_prefix,
@@ -193,6 +194,12 @@ pub struct ProjectionRead {
     pub kind: String,
     pub thread_id: String,
     pub record_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct UserInputCancellation {
+    pub eligible: Option<bool>,
+    pub payload_json: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1902,6 +1909,33 @@ impl ApplicationTransactions {
         self.finish(id, session, result).await
     }
 
+    pub async fn projections_apply_many(
+        &mut self,
+        id: &str,
+        events: Vec<ProjectionApply>,
+    ) -> Result<()> {
+        let mut session = self.take(id)?;
+        let result = async {
+            if !(2..=16).contains(&events.len()) {
+                return Err(invalid("projection batch must contain 2 to 16 events"));
+            }
+            for event in events {
+                if matches!(
+                    event.event_type.as_str(),
+                    "provider-thread.updated"
+                        | "provider-turn.updated"
+                        | "thread.pull-request-link-updated"
+                ) {
+                    return Err(invalid("event requires the individual projection path"));
+                }
+                apply_event(&mut session, event).await?;
+            }
+            Ok(())
+        }
+        .await;
+        self.finish(id, session, result).await
+    }
+
     pub async fn projections_read(
         &mut self,
         id: &str,
@@ -1968,6 +2002,44 @@ impl ApplicationTransactions {
         let mut session = self.take(id)?;
         let result = guard(&mut session, condition).await;
         self.finish(id, session, result).await
+    }
+
+    pub async fn projections_user_input_cancellation(
+        &mut self,
+        id: &str,
+        thread_id: String,
+        request_id: String,
+        provider_turn_id: Option<&str>,
+    ) -> Result<Option<UserInputCancellation>> {
+        let Some(payload_json) = self
+            .projections_read(
+                id,
+                ProjectionRead {
+                    kind: "runtime_request".into(),
+                    thread_id,
+                    record_id: Some(request_id),
+                },
+            )
+            .await?
+        else {
+            return Ok(None);
+        };
+        // Imported rows may contain JavaScript-only string representations.
+        // The adapter still validates the original payload with its schema.
+        let eligible = serde_json::from_str::<Value>(&payload_json).ok().map(|payload| {
+            let same_turn = match provider_turn_id {
+                Some(expected) => payload["providerTurnId"].as_str().map(js_trim) == Some(expected),
+                None => payload.get("providerTurnId") == Some(&Value::Null),
+            };
+            same_turn
+                && payload["kind"] == "user_input"
+                && payload["status"] == "pending"
+                && matches!(
+                    payload["responseCapability"]["type"].as_str(),
+                    Some("live" | "not_resumable")
+                )
+        });
+        Ok(Some(UserInputCancellation { eligible, payload_json }))
     }
 
     pub async fn projections_mark_applied(

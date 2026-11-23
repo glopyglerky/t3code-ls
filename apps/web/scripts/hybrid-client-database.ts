@@ -175,6 +175,46 @@ export function assertNoApplicationSqlite(stateDirectory: string): void {
   }
 }
 
+function readNativeResponses(executable: string, databasePath: string, requests: readonly unknown[]) {
+  const result = ChildProcess.spawnSync(executable, ["read-only-local", databasePath], {
+    input: requests.map((request) => JSON.stringify(request)).join("\n") + "\n",
+    encoding: "utf8",
+    env: {},
+    timeout: 30_000,
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  Assert.ifError(result.error);
+  Assert.equal(result.status, 0, `Read-only native inspection failed: ${result.stderr}`);
+  return result.stdout.trim().split("\n").map((line) => JSON.parse(line));
+}
+
+export function inspectNativeMessageUpdates(executable: string, stateDirectory: string, threadId: string) {
+  const requests = [
+    { operation: "application_begin", transaction_id: transactionId, mode: "read" },
+    {
+      operation: "application_events_read",
+      transaction_id: transactionId,
+      thread_id: threadId,
+      event_type: "message.updated",
+      only_agent_events: true,
+      after_sequence: 0,
+      limit: 128,
+    },
+    { operation: "application_rollback", transaction_id: transactionId },
+  ];
+  const databasePath = Path.join(stateDirectory, "userdata", "statev2.omdb");
+  const responses = readNativeResponses(executable, databasePath, requests);
+  Assert.equal(responses.length, requests.length);
+  Assert.ok(responses.every((response) => response.ok === true));
+  const rows = responses[1].result as Array<{ sequence: number; payload_json: string }>;
+  return rows.flatMap((row) => {
+    const message = JSON.parse(row.payload_json) as { role?: string; text?: string; streaming?: boolean };
+    return message.role === "assistant" && typeof message.text === "string"
+      ? [{ sequence: row.sequence, length: message.text.length, streaming: message.streaming === true }]
+      : [];
+  });
+}
+
 export function inspectNativeReplay(input: {
   readonly executable: string;
   readonly stateDirectory: string;
@@ -192,20 +232,8 @@ export function inspectNativeReplay(input: {
     Crypto.createHash("sha256").update(FS.readFileSync(databasePath)).digest("hex");
   const before = input.closed ? hash() : null;
   const requests = nativeReplayRequests(input.expected);
-  const result = ChildProcess.spawnSync(input.executable, ["read-only-local", databasePath], {
-    input: requests.map((request) => JSON.stringify(request)).join("\n") + "\n",
-    encoding: "utf8",
-    env: {},
-    timeout: 30_000,
-    maxBuffer: 32 * 1024 * 1024,
-  });
-  Assert.ifError(result.error);
-  Assert.equal(result.status, 0, `Read-only native inspection failed: ${result.stderr}`);
   const persisted = assertNativeReplayResponses(
-    result.stdout
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line)),
+    readNativeResponses(input.executable, databasePath, requests),
     input.expected,
   );
   if (before !== null)

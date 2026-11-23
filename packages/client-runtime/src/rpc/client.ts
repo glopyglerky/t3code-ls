@@ -20,6 +20,7 @@ import { RpcClientError } from "effect/rpc";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import type { RpcSession } from "../rpc/session.ts";
+import { decodeThreadMessageText } from "./threadMessageText.ts";
 
 export class EnvironmentRpcUnavailableError extends Schema.TaggedError<EnvironmentRpcUnavailableError>()(
   "EnvironmentRpcUnavailableError",
@@ -281,6 +282,7 @@ function subscribeDynamicMapped<TTag extends EnvironmentSubscriptionRpcTag, A>(
   mapStream: (
     session: RpcSession,
     stream: Stream.Stream<EnvironmentRpcStreamValue<TTag>, EnvironmentRpcStreamFailure<TTag>>,
+    input: EnvironmentRpcInput<TTag>,
   ) => Stream.Stream<A, EnvironmentRpcStreamFailure<TTag>>,
   options?: SubscriptionOptions<TTag>,
 ): Stream.Stream<
@@ -331,6 +333,7 @@ function subscribeDynamicMapped<TTag extends EnvironmentSubscriptionRpcTag, A>(
                       const stream = mapStream(
                         session,
                         Stream.suspend(() => method(input)),
+                        input,
                       ).pipe(
                         Stream.onFirst(() =>
                           Effect.sync(() => {
@@ -429,6 +432,19 @@ export function subscribeDynamic<TTag extends EnvironmentSubscriptionRpcTag>(
 > {
   return subscribeDynamicMapped(tag, makeInput, (_session, stream) => stream, options);
 }
+
+export const subscribeThread = (
+  makeInput: (session: RpcSession) => Effect.Effect<
+    EnvironmentRpcInput<typeof ORCHESTRATION_V2_WS_METHODS.subscribeThread>
+  >,
+  options: SubscriptionOptions<typeof ORCHESTRATION_V2_WS_METHODS.subscribeThread>,
+) =>
+  subscribeDynamicMapped(
+    ORCHESTRATION_V2_WS_METHODS.subscribeThread,
+    makeInput,
+    (_session, stream, input) => decodeThreadMessageText(stream, input.messageTextAppends === 1),
+    options,
+  );
 
 /** Tags each value before `switchMap` can buffer it across a session change. */
 export function subscribeDynamicWithSession<TTag extends EnvironmentSubscriptionRpcTag>(

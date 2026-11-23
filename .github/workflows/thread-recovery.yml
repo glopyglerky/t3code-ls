@@ -1,0 +1,34 @@
+name: Client thread recovery
+
+on:
+  push:
+    branches: ["candidate/t3code-ls-t03-text-revision-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  thread-recovery:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install the locked client runtime dependencies
+        run: |
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+      - name: Exercise thread replay and recovery
+        run: |
+          pnpm exec vp test run --maxWorkers 2 \
+            packages/client-runtime/src/state/threads-sync.test.ts \
+            packages/contracts/src/orchestrationV2.test.ts \
+            apps/server/src/orchestration-v2/WireProjection.test.ts
