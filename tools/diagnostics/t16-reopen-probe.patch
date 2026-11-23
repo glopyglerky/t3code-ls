@@ -1,15 +1,54 @@
+--- a/tools/src/startup_probe.rs
++++ b/tools/src/startup_probe.rs
+@@ -127 +127 @@
+-    let (origin, descriptor_micros, html_micros, database_migration) =
++    let (origin, descriptor_micros, html_micros, database_migration, _) =
+@@ -296 +296 @@
+-) -> Result<(String, u128, u128, Option<u64>)> {
++) -> Result<(String, u128, u128, Option<u64>, Value)> {
+@@ -330 +330,7 @@
+-    Ok((origin, descriptor_micros, html_micros, migration))
++    Ok((
++        origin,
++        descriptor_micros,
++        html_micros,
++        migration,
++        descriptor,
++    ))
 --- a/tools/src/startup_probe/reopen.rs
 +++ b/tools/src/startup_probe/reopen.rs
-@@ -139,0 +140,3 @@
-+    let database_bytes_at_reopen = native
-+        .then(|| fs::metadata(state.join("statev2.omdb")).map(|metadata| metadata.len()))
-+        .transpose()?;
-@@ -142,0 +146,6 @@
+@@ -119 +119 @@
+-    let (initial_origin, _, _, initial_migration) =
++    let (initial_origin, _, _, initial_migration, _) =
+@@ -139,0 +140,6 @@
++    let database_bytes_at_reopen = fs::metadata(state.join(if native {
++        "statev2.omdb"
++    } else {
++        "statev2.sqlite"
++    }))?
++    .len();
+@@ -142,0 +149,11 @@
 +    if let Some(helper) = env::var_os("T3_CODE_LS_DIAGNOSTIC_DB") {
 +        if mode_label != "native" || trace_spans {
-+            return Err("the checked-open diagnostic requires native reopen without server spans".into());
++            return Err(
++                "the checked-open diagnostic requires native reopen without server spans".into(),
++            );
 +        }
-+        command.env("T3_CODE_LS_DB_EXECUTABLE", Path::new(&helper).canonicalize()?);
++        command.env(
++            "T3_CODE_LS_DB_EXECUTABLE",
++            Path::new(&helper).canonicalize()?,
++        );
 +    }
-@@ -240,0 +250 @@
+@@ -154 +171 @@
+-    let (reopened_origin, descriptor_micros, html_micros, migration) =
++    let (reopened_origin, descriptor_micros, html_micros, migration, readiness_descriptor) =
+@@ -239,0 +257,9 @@
 +            "database_bytes_at_reopen": database_bytes_at_reopen,
++            "fixture_workspace": workspace,
++            "readiness_evidence": {
++                "endpoint": "/.well-known/t3/environment",
++                "descriptor": readiness_descriptor,
++                "runtime_pid_matched": true,
++                "environment_id_matched": true,
++                "html_root_matched": true,
++            },

@@ -10,7 +10,7 @@ permissions:
 jobs:
   reopen:
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
-    timeout-minutes: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-') && 45 || 35 }}
+    timeout-minutes: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-') && 60 || 35 }}
     env:
       NATIVE_COMMIT: 98726c9640a0c45f58310ce4180ac3e2d125f11c
       NATIVE_TREE: 8c92451b40f5f7266596d446ab8e306541f4390e
@@ -24,6 +24,7 @@ jobs:
       ENGINE_REUSE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-') }}
       PAIRED_REUSE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-') }}
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
+      STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
       WASM_BINDGEN_VERSION: "0.2.130"
       WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
       CARGO_BUILD_JOBS: "2"
@@ -98,6 +99,24 @@ jobs:
           npm install --global --prefix "$scratch/npm" --cache "$scratch/npm-cache" pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           echo "$scratch/npm/bin" >> "$GITHUB_PATH"
           (cd "$scratch/native" && node tools/install-toolchain.mjs --destination "$scratch/toolchain")
+      - name: Build the frozen optimized stock bundle for paired comparison
+        if: env.PAIRED_REUSE_PROOF == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          stock="$DIAGNOSTIC_WORK/stock"
+          git init --quiet "$stock"
+          git -C "$stock" fetch --no-tags --depth=1 https://github.com/pingdotgg/t3code.git "$STOCK_COMMIT"
+          git -C "$stock" checkout --detach --no-recurse-submodules FETCH_HEAD
+          test "$(git -C "$stock" rev-parse HEAD)" = "$STOCK_COMMIT"
+          test "$(git -C "$stock" rev-parse 'HEAD^{tree}')" = "$STOCK_TREE"
+          cd "$stock"
+          pnpm install --frozen-lockfile --store-dir "$DIAGNOSTIC_WORK/pnpm-store"
+          pnpm --dir apps/web run build
+          pnpm --dir apps/server run build:bundle
+          test -f apps/server/dist/client/index.html
+          git diff --exit-code
+          git show -s --format='%H %T' > "$RUNNER_TEMP/checked-open-evidence/stock-source.txt"
       - name: Build the pinned packaged route and diagnostic
         shell: bash
         run: |
@@ -136,6 +155,7 @@ jobs:
           printf '%s %s\n' "$engine_commit" "$engine_tree" > "$evidence/engine-source.txt"
           ln -s "$PWD/apps/server/dist/native-bin/t3-code-ls-db" "$DIAGNOSTIC_WORK/bin/packaged-db"
           cd "$DIAGNOSTIC_WORK/probe"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked -p t3code-ls-tools startup_probe::
           "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked -p t3code-ls-tools --bin t16-checked-open
           "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --release --locked -p t3code-ls-tools \
             --bin t3code-ls-tools --bin t16-checked-open
@@ -220,6 +240,8 @@ jobs:
           chrome="$(command -v google-chrome)"
           driver="$(command -v chromedriver || printf '%s/chromedriver' "$CHROMEWEBDRIVER")"
           test -x "$driver"
+          # The invoking user owns the evidence file, and runuser drops privileges in the namespace.
+          # shellcheck disable=SC2024
           sudo -n unshare --net --pid --fork --mount-proc --kill-child -- bash -euc '
             ip link set dev lo up
             user="$1"; shift
@@ -303,11 +325,14 @@ jobs:
           done
           cmp apps/server/dist/bin.mjs apps/server/dist-checked-open-control/bin.mjs
           cmp apps/server/dist/client/index.html apps/server/dist-checked-open-control/client/index.html
-          ! cmp -s apps/server/dist/native-bin/t3-code-ls-db apps/server/dist-checked-open-control/native-bin/t3-code-ls-db
+          if cmp -s apps/server/dist/native-bin/t3-code-ls-db apps/server/dist-checked-open-control/native-bin/t3-code-ls-db; then
+            echo 'Expected distinct database helpers for the two engine builds' >&2
+            exit 1
+          fi
           diff -u \
             <(jq -S 'del(.files["t3-code-ls-db"])' apps/server/dist/native-bin/manifest.json) \
             <(jq -S 'del(.files["t3-code-ls-db"])' apps/server/dist-checked-open-control/native-bin/manifest.json)
-      - name: Compare paired packaged reopen readiness and resource use
+      - name: Compare stock and both packaged native reopen variants
         if: env.PAIRED_REUSE_PROOF == 'true'
         shell: bash
         run: |
@@ -327,14 +352,59 @@ jobs:
             "$chrome" --version
             "$driver" --version
           } > "$evidence/paired-host.txt"
-          printf 'round\tposition\tvariant\tdescriptor_us\thtml_us\tsampled_server_cpu_ms\tsampled_server_rss_bytes\tdb_bytes\n' > "$evidence/paired-reopen.tsv"
-          for round in 1 2 3 4 5; do
-            variants=(control reuse)
-            if (( round % 2 == 0 )); then variants=(reuse control); fi
-            for position in 0 1; do
+          for variant in stock control reuse; do
+            root="$scratch/native"
+            directory=dist
+            if [[ "$variant" == stock ]]; then root="$scratch/stock"; fi
+            if [[ "$variant" == control ]]; then directory=dist-checked-open-control; fi
+            (
+              cd "$root"
+              sha256sum pnpm-lock.yaml
+              find "apps/server/$directory" -type f -print0 | sort -z | xargs -0 -r sha256sum
+            ) > "$evidence/arm-$variant.sha256"
+          done
+          {
+            node --version
+            pnpm --version
+            "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --version
+            sha256sum "$(command -v node)" "$chrome" "$driver" "$scratch/bin/wasm-bindgen"
+            git -C "$scratch/native" show -s --format='%H %T'
+            git -C "$scratch/probe" show -s --format='%H %T'
+            git show -s --format='%H %T'
+          } > "$evidence/paired-tools-source.txt"
+          jq -n --arg stock "$STOCK_COMMIT" --arg stockTree "$STOCK_TREE" \
+            --arg native "$NATIVE_COMMIT" --arg nativeTree "$NATIVE_TREE" \
+            --arg engine "$OMDB_PHASE_COMMIT" --arg engineTree "$OMDB_PHASE_TREE" \
+            --arg probe "$PROBE_COMMIT" --arg probeTree "$PROBE_TREE" \
+            --arg image "${ImageOS:-unknown}/${ImageVersion:-unknown}" \
+            '{journey:"J02",stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},
+              native:{commit:$native,tree:$nativeTree,engine:$engine,engineTree:$engineTree,durability:"omdb Immediate"},
+              control:"same engine and diagnostics feature, reuse feature disabled",
+              candidate:"reuse feature enabled, runtime counters disabled",probe:{commit:$probe,tree:$probeTree},
+              image:$image,rounds:6,arms:3,cpu_rss_qualified:false,cached_paint_attribution_qualified:false,
+              acceptance:false,limiter_qualified:false,filesystem_cache:"unmanaged after import and clean stop"}' \
+            > "$evidence/paired-inputs.json"
+          printf 'round\tposition\tvariant\tdescriptor_us\thtml_us\tdb_bytes\n' > "$evidence/paired-reopen.tsv"
+          # All permutations: each arm occupies each position twice.
+          for round in 1 2 3 4 5 6; do
+            case "$round" in
+              1) variants=(stock control reuse) ;;
+              2) variants=(control reuse stock) ;;
+              3) variants=(reuse stock control) ;;
+              4) variants=(reuse control stock) ;;
+              5) variants=(stock reuse control) ;;
+              6) variants=(control stock reuse) ;;
+            esac
+            for position in 0 1 2; do
               variant="${variants[$position]}"
               directory=dist
               if [[ "$variant" == control ]]; then directory=dist-checked-open-control; fi
+              bundle="$scratch/native/apps/server/$directory/bin.mjs"
+              mode=native
+              if [[ "$variant" == stock ]]; then
+                bundle="$scratch/stock/apps/server/dist/bin.mjs"
+                mode=stock
+              fi
               # The seed transcripts include their workspace path. Reuse the pathname with a
               # fresh owned directory so each side receives the exact same workload bytes.
               trial="$scratch/trials/paired-$round"
@@ -345,27 +415,45 @@ jobs:
                 user="$1"; shift
                 exec runuser -u "$user" -- "$@"
               ' _ "$(id -un)" env -u REDB_CHECKED_OPEN_DIAGNOSTICS -u T3_CODE_LS_DIAGNOSTIC_DB \
-                "$probe" probe-reopen "$(command -v node)" "$scratch/native/apps/server/$directory/bin.mjs" \
-                "$trial" "$driver" "$chrome" native | tee "$sample" > /dev/null
+                "$probe" probe-reopen "$(command -v node)" "$bundle" \
+                "$trial" "$driver" "$chrome" "$mode" | tee "$sample" > /dev/null
               jq -er --argjson round "$round" --argjson position "$((position + 1))" --arg variant "$variant" '
-                select(.journey == "J02" and .profile == "native" and .native_lookups == false and .persistence_spans == null
+                select(.journey == "J02" and .profile == (if $variant == "stock" then "stock" else "native" end)
+                  and .native_lookups == false and .persistence_spans == null
                   and .snapshot.valid and .snapshot.threadCount == 32 and .snapshot.messageCount == 200
+                  and .fixture.threads == 32 and .fixture.messages_per_thread == 200
                   and .fixture.total_messages == 6400 and .database_migration > 0 and .database_bytes_at_reopen > 0
-                  and .descriptor_micros > 0 and .html_micros > 0
-                  and .migration_evidence.source == "stopped-native-catalog"
-                  and any(.resources.server.processes[]; .role == "native-database-helper"))
-                | [$round,$position,$variant,.descriptor_micros,.html_micros,.resources.server.observed_cpu_millis,
-                   .resources.server.sampled_peak_sum_rss_bytes,.database_bytes_at_reopen] | @tsv' \
+                  and .descriptor_micros > 0 and .html_micros >= .descriptor_micros
+                  and .readiness_evidence.endpoint == "/.well-known/t3/environment"
+                  and .readiness_evidence.runtime_pid_matched and .readiness_evidence.environment_id_matched
+                  and .readiness_evidence.html_root_matched
+                  and (.readiness_evidence.descriptor.environmentId | type == "string")
+                  and .cpu_rss_qualified == false and .cached_paint_attribution_qualified == false
+                  and .browser.firstShellVisibleMillis > 0 and .browser.selectedTextVisibleMillis > 0
+                  and .browser.authoritativeShellHttpMillis > 0 and .browser.authoritativeThreadMillis > 0
+                  and .migration_evidence.source == (if $variant == "stock" then "live-sqlite-descriptors" else "stopped-native-catalog" end)
+                  and (any(.resources.server.processes[]; .role == "native-database-helper") == ($variant != "stock")))
+                | [$round,$position,$variant,.descriptor_micros,.html_micros,.database_bytes_at_reopen] | @tsv' \
                 "$sample" >> "$evidence/paired-reopen.tsv"
               test ! -e "$trial/checked-open-trace"
               test ! -e "$trial/checked-open-phases.log"
+              (
+                cd "$trial"
+                find .codex/sessions -type f -print0 | sort -z | xargs -0 sha256sum
+              ) > "$evidence/fixture-$round-$variant.sha256"
               rm -r -- "$trial"
+            done
+            for variant in control reuse; do
+              cmp "$evidence/fixture-$round-stock.sha256" "$evidence/fixture-$round-$variant.sha256"
+              coordinates='{fixture,fixture_workspace,snapshot:(.snapshot | {valid,threadCount,messageCount,selectedThreadId})}'
+              diff -u <(jq -c "$coordinates" "$evidence/paired-$round-stock.json") \
+                <(jq -c "$coordinates" "$evidence/paired-$round-$variant.json")
             done
             match='{fixture,database_migration,saved_thread_sequence,snapshot:(.snapshot | {valid,threadCount,messageCount,selectedThreadId})}'
             diff -u <(jq -c "$match" "$evidence/paired-$round-control.json") \
               <(jq -c "$match" "$evidence/paired-$round-reuse.json")
           done
-          test "$(wc -l < "$evidence/paired-reopen.tsv")" -eq 11
+          test "$(wc -l < "$evidence/paired-reopen.tsv")" -eq 19
           uptime >> "$evidence/paired-host.txt"
       - name: Remove task-owned generated files and record available space
         if: always() && env.DIAGNOSTIC_WORK != ''

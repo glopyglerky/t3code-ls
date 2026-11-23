@@ -65,3 +65,31 @@ slot, and exercises persistent savepoint restore. The workload receipts
 describe successful backend read requests and requested bytes, including
 possible page-cache hits. They do not establish physical disk reads or a
 startup speedup. [Engine qualification](https://github.com/glopyglerky/omdb/actions/runs/45197280102)
+
+
+## Fresh stock denominator on the paired lane
+
+The `measure/t3code-ls-t16-checked-open-engine-reuse-paired-*` lane now builds
+stock at `28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f` using the optimized stock
+construction from `126ee67adb`. It runs stock, the current engine with reuse
+disabled, and the same engine with reuse enabled on one host. Six rounds use
+all six arm orders. Each arm creates a fresh owned profile at the same pathname
+within a round. The gate compares transcript hashes and meaningful fixture
+coordinates across all arms, and migration/cursor receipts between native arms.
+Stock and native migration numbers need not match.
+
+The existing probe checks the PID-bound runtime record, descriptor environment
+identity, served HTML root, durable browser caches, exact ordered selected history
+and authoritative synchronization. Each sample retains the descriptor response
+used for readiness at `/.well-known/t3/environment`. Source overlays, toolchain
+proofs, lock hashes and full emitted bundle hashes identify the actual arms.
+
+Stock retains SQLite WAL/NORMAL; both native arms retain omdb Immediate. These
+are separate durability profiles, not an equal-durability engine comparison.
+Runtime engine counters and server spans are disabled. Process samples remain
+unqualified for CPU/RSS and are omitted from the comparison table. The same
+browser observer and routes run for all arms, but its visible-text timestamps
+do not establish cached-paint attribution or presentation to a physical display.
+Filesystem cache remains unmanaged after import. No limiter or resource claim,
+global performance acceptance, product pin or normal profile change follows.
+Use only this fresh run's matched observations; do not pool earlier runs or hosts.
