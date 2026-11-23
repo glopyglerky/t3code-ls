@@ -1579,6 +1579,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let [mode, home, encoded] = args.as_slice() {
         if mode == "trial-verify-inherited-readiness" {
             if t3_code_ls_storage::forward_child_readiness::verify(Path::new(home), encoded)
+                .await
                 .is_err()
             {
                 std::process::exit(78);

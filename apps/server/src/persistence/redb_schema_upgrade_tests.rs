@@ -2337,7 +2337,18 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
                     ISOLATED_UPDATE.into(),
                     |witness, candidate| {
                         forward_inherited_child_cases(home, witness, candidate)?;
-                        forward_packaged_child_cases(home, witness, candidate)
+                        forward_packaged_child_cases(home, witness, candidate, true)?;
+                        // Corruption is confined to independent synthetic copies.
+                        // These never represent live ownership or launcher acceptance.
+                        let home = home.to_owned();
+                        let encoded = serde_json::to_vec(witness).unwrap();
+                        std::thread::spawn(move || {
+                            tokio::runtime::Runtime::new()
+                                .unwrap()
+                                .block_on(forward_packaged_catalog_refusals(&home, &encoded))
+                        })
+                        .join()
+                        .unwrap()
                     },
                 )
                 .await
@@ -2865,6 +2876,7 @@ fn forward_packaged_child_cases(
     home: &std::path::Path,
     witness: &crate::application_storage::FixtureForwardActivationWitness,
     candidate: &crate::backend::ExclusiveTrialFile,
+    coherent: bool,
 ) -> crate::Result<()> {
     use std::os::fd::AsRawFd;
     use std::process::{Command, Stdio};
@@ -2884,6 +2896,9 @@ fn forward_packaged_child_cases(
         forward_fixture_sha256(&std::fs::read(&pinned).unwrap()),
         witness.activation.target_helper_sha256
     );
+    use std::io::Seek;
+    let mut cursor = candidate.inherited_file()?;
+    let original_offset = cursor.stream_position().unwrap();
     let database_hash =
         forward_fixture_sha256(&std::fs::read(home.join("userdata/statev2.omdb")).unwrap());
     for case in [
@@ -2893,12 +2908,16 @@ fn forward_packaged_child_cases(
         "lost",
         "reopened",
         "foreign",
+        "foreign-lease",
         "stale",
         "wrong-image",
         "wrong-database",
         "output-failure",
         "parent-retry",
-    ] {
+    ]
+    .into_iter()
+    .filter(|case| coherent || *case == "valid")
+    {
         // Change the original bytes only after staging. The sealed copy stays
         // exact, while readiness refuses the now-mismatching installed package.
         let original = if case == "source-changed" {
@@ -2925,7 +2944,19 @@ fn forward_packaged_child_cases(
         if case == "wrong-database" {
             request["database_sha256"] = json!("0".repeat(64));
         }
+        let foreign_home = tempfile::tempdir().unwrap();
+        let foreign_path = foreign_home.path().join("foreign.omdb");
+        std::fs::copy(home.join("userdata/statev2.omdb"), &foreign_path).unwrap();
+        let foreign_lease = if case == "foreign-lease" {
+            Some(crate::backend::ExclusiveTrialFile::acquire(
+                foreign_path,
+                128 * 1024 * 1024,
+            )?)
+        } else {
+            None
+        };
         let input = match case {
+            "foreign-lease" => Stdio::from(foreign_lease.as_ref().unwrap().inherited_file()?),
             "lost" => Stdio::null(),
             "reopened" => {
                 Stdio::from(std::fs::File::open(home.join("userdata/statev2.omdb")).unwrap())
@@ -2984,12 +3015,12 @@ fn forward_packaged_child_cases(
                 witness.activation.target_helper_sha256
             );
         }
-        let valid = matches!(case, "valid" | "parent-retry");
+        let valid = coherent && matches!(case, "valid" | "parent-retry");
         assert_eq!(
             status.code(),
             Some(if valid {
                 0
-            } else if case == "output-failure" {
+            } else if coherent && case == "output-failure" {
                 1
             } else {
                 78
@@ -3006,6 +3037,17 @@ fn forward_packaged_child_cases(
         }
         candidate.verified_file()?;
         assert_eq!(
+            cursor.stream_position().unwrap(),
+            original_offset,
+            "child changed parent cursor: {case}"
+        );
+        let locks =
+            std::fs::read_to_string(format!("/proc/self/fdinfo/{}", cursor.as_raw_fd())).unwrap();
+        assert!(
+            locks.contains("OFDLCK"),
+            "child released parent OFD lease: {case}"
+        );
+        assert_eq!(
             forward_fixture_sha256(&std::fs::read(home.join("userdata/statev2.omdb")).unwrap()),
             database_hash
         );
@@ -3013,6 +3055,104 @@ fn forward_packaged_child_cases(
             "T05 packaged readiness {case}: exit {}",
             status.code().unwrap()
         );
+    }
+    Ok(())
+}
+
+// The copied corpus permits engine-level corruption without touching the
+// selected database. Only descriptor-read refusal is asserted on these copies.
+#[cfg(target_os = "linux")]
+async fn forward_packaged_catalog_refusals(
+    source: &std::path::Path,
+    encoded: &[u8],
+) -> crate::Result<()> {
+    use crate::application_storage::{FixtureForwardActivationWitness, IsolatedTrialVerification};
+    for case in ["coherent", "catalog", "generation", "marker", "snapshot"] {
+        let home = tempfile::Builder::new()
+            .prefix("t3-redb-test-")
+            .tempdir()
+            .unwrap();
+        let home = home.path();
+        let mut witness: FixtureForwardActivationWitness = serde_json::from_slice(encoded).unwrap();
+        let receipt = format!(
+            "userdata/.statev2-trial-{}.receipt-v1.json",
+            witness.activation.update_id
+        );
+        let marker = format!(
+            "userdata/.statev2-forward-{}.json",
+            witness.activation.update_id
+        );
+        let version = format!("runtime/versions/{}", witness.activation.target_version);
+        for name in [
+            "userdata/statev2.omdb".to_owned(),
+            "userdata/server-owner.sqlite".to_owned(),
+            "runtime/service-state.json".to_owned(),
+            receipt.clone(),
+            marker,
+            format!("{version}/t3"),
+            format!("{version}/native-bin/t3-code-ls-db"),
+        ] {
+            let path = home.join(&name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::copy(source.join(name), path).unwrap();
+        }
+        let path = home.join("userdata/statev2.omdb");
+        let store = Store::open_exclusive(&path).await?;
+        let mut tx = store.db.begin().await?;
+        let bytes = tx.get(&schema_key()).await?.unwrap();
+        let catalog = decode_catalog(&bytes)?;
+        match case {
+            "coherent" => {}
+            "marker" => {
+                let mut catalog = catalog.clone();
+                catalog
+                    .forward_service_activation_v1
+                    .as_mut()
+                    .unwrap()
+                    .update_id = "foreign-update".into();
+                let bytes = encode_catalog(&catalog)?;
+                record_generation_identity(&mut tx, &catalog, &bytes).await?;
+                tx.put(schema_key(), bytes).await?;
+            }
+            "catalog" => tx.put(schema_key(), b"corrupted catalog".to_vec()).await?,
+            "generation" => {
+                tx.put(
+                    store_key(&format!(
+                        "application/generation/{}/metadata/engine-layout",
+                        catalog.generation
+                    )),
+                    b"corrupted generation".to_vec(),
+                )
+                .await?
+            }
+            "snapshot" => {
+                tx.put(b"synthetic-extra-record".to_vec(), b"changed".to_vec())
+                    .await?
+            }
+            _ => unreachable!(),
+        }
+        tx.commit().await?;
+        store.shutdown().await?;
+        let file = std::fs::File::open(&path).unwrap();
+        witness.database = crate::application_storage::trial_file_identity(&file)?.0;
+        let mut saved: IsolatedTrialVerification =
+            serde_json::from_slice(&std::fs::read(home.join(&receipt)).unwrap()).unwrap();
+        saved.preparation.database = witness.database.clone();
+        let bytes = serde_json::to_vec(&saved).unwrap();
+        std::fs::write(home.join(receipt), &bytes).unwrap();
+        witness.receipt_sha256 = forward_fixture_sha256(&bytes);
+        let owner = crate::application_server_ownership::OwnerLock::acquire_existing_native(
+            &home.join("userdata/server-owner.sqlite"),
+        )?;
+        let candidate = crate::backend::ExclusiveTrialFile::acquire(path, 128 * 1024 * 1024)?;
+        forward_packaged_child_cases(home, &witness, &candidate, case == "coherent")?;
+        owner.verify_native()?;
+        println!(
+            "T05 packaged inherited catalog corpus {case}: expected readiness {}",
+            case == "coherent"
+        );
+        drop(candidate);
+        drop(owner);
     }
     Ok(())
 }

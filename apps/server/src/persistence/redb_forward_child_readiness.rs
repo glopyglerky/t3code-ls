@@ -1,15 +1,18 @@
-//! Linux synthetic readiness adapter. It neither opens an engine nor serves.
+//! Linux synthetic readiness adapter. It reads the inherited lease and never serves.
 //! The supervising fixture retains home, selection and database ownership.
-use crate::application::PreparedServiceActivation;
-use crate::application_storage::{
-    IsolatedTrialVerification, SealedPromotionPhase, TrialFileIdentity, trial_document_sha256,
-    trial_executable_digest, trial_file_digest,
+use crate::application::{
+    ApplicationTransactions, ForwardServiceActivation, PreparedServiceActivation,
 };
-use crate::{Error, Result};
+use crate::application_storage::{
+    IsolatedTrialVerification, MAX_TRIAL_FILE_BYTES, SealedPromotionPhase, TrialFileIdentity,
+    trial_document_sha256, trial_executable_digest,
+};
+use crate::{Error, Result, Store};
 use rustix::fs::{SealFlags, fcntl_get_seals};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::Read;
+use std::os::fd::AsFd;
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
@@ -87,13 +90,38 @@ fn bounded(path: &Path, limit: u64) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
+// Positioned reads preserve the parent's shared OFD cursor across retries.
+fn inherited_digest(file: &File) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::os::unix::fs::FileExt;
+    let len = file.metadata().map_err(|_| Error::IncompatibleStore)?.len();
+    if len == 0 || len > MAX_TRIAL_FILE_BYTES {
+        return Err(Error::IncompatibleStore);
+    }
+    let mut hash = Sha256::new();
+    let mut offset = 0;
+    let mut buffer = [0; 32 * 1024];
+    while offset < len {
+        let count = (len - offset).min(buffer.len() as u64) as usize;
+        file.read_exact_at(&mut buffer[..count], offset)
+            .map_err(|_| Error::IncompatibleStore)?;
+        hash.update(&buffer[..count]);
+        offset += count as u64;
+    }
+    Ok(hash
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
 fn executable_digest(path: &Path) -> Result<String> {
     trial_executable_digest(&File::open(path).map_err(|_| Error::IncompatibleStore)?)
 }
 
 /// A successful return is only a synthetic observation. Caller-supplied hashes
-/// do not grant ownership, authorize a database open, or permit seal release.
-pub fn verify(home: &Path, encoded: &str) -> Result<()> {
+/// do not grant ownership, authorize a writer, or permit seal release.
+pub async fn verify(home: &Path, encoded: &str) -> Result<()> {
     if encoded.len() > 16 * 1024
         || !home.is_absolute()
         || !home
@@ -145,13 +173,13 @@ pub fn verify(home: &Path, encoded: &str) -> Result<()> {
     {
         return Err(Error::IncompatibleStore);
     }
-    let marker: serde_json::Value = serde_json::from_slice(&bounded(
+    let marker: ForwardServiceActivation = serde_json::from_slice(&bounded(
         &state.join(format!(".statev2-forward-{}.json", activation.update_id)),
         16 * 1024,
     )?)
     .map_err(|_| Error::IncompatibleStore)?;
-    if marker["update_id"] != activation.update_id
-        || marker["forward_selection_sha256"] != request.selection_sha256
+    if marker.update_id != activation.update_id
+        || marker.forward_selection_sha256 != request.selection_sha256
     {
         return Err(Error::IncompatibleStore);
     }
@@ -181,7 +209,14 @@ pub fn verify(home: &Path, encoded: &str) -> Result<()> {
     }) {
         return Err(Error::IncompatibleStore);
     }
-    let inherited = File::open("/proc/self/fd/0").map_err(|_| Error::IncompatibleStore)?;
+    // dup preserves the locked OFD. Opening /proc/self/fd/0 creates a new
+    // description and cannot be used as the engine's lease.
+    let inherited = File::from(
+        std::io::stdin()
+            .as_fd()
+            .try_clone_to_owned()
+            .map_err(|_| Error::IncompatibleStore)?,
+    );
     let held = inherited.metadata().map_err(|_| Error::IncompatibleStore)?;
     let named = fs::metadata(state.join("statev2.omdb")).map_err(|_| Error::IncompatibleStore)?;
     let created = held
@@ -196,7 +231,7 @@ pub fn verify(home: &Path, encoded: &str) -> Result<()> {
         || format!("{:016x}", held.dev()) != request.database.device
         || format!("{:016x}", held.ino()) != request.database.inode
         || created != request.database.created
-        || trial_file_digest(&inherited)? != request.database_sha256
+        || inherited_digest(&inherited)? != request.database_sha256
     {
         return Err(Error::IncompatibleStore);
     }
@@ -206,6 +241,19 @@ pub fn verify(home: &Path, encoded: &str) -> Result<()> {
         ),
         Err(Error::WriterBusy)
     ) {
+        return Err(Error::IncompatibleStore);
+    }
+    let store = Store {
+        db: crate::backend::Backend::inherited_trial_reader(inherited, MAX_TRIAL_FILE_BYTES)
+            .await?,
+    };
+    // Reuse the production decoder, generation validation and bounded full
+    // record fingerprint. A prepared-only catalog cannot report readiness.
+    let checked = ApplicationTransactions::new(store.clone())
+        .verify_forward_catalog(activation, &marker, &saved.preparation.snapshot)
+        .await;
+    store.shutdown().await?;
+    if !checked? {
         return Err(Error::IncompatibleStore);
     }
     Ok(())

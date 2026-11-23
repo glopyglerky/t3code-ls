@@ -316,6 +316,82 @@ impl StorageBackend for ExclusiveSnapshot {
     }
 }
 
+// This adapter borrows the parent's OFD lease through a safe descriptor
+// duplicate. It must never acquire, release or downgrade a physical lock.
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+struct InheritedTrialReader(File);
+
+#[cfg(target_os = "linux")]
+impl StorageBackend for InheritedTrialReader {
+    fn len(&self) -> io::Result<u64> {
+        Ok(self.0.metadata()?.len())
+    }
+
+    fn read(&self, offset: u64, out: &mut [u8]) -> io::Result<()> {
+        use std::os::unix::fs::FileExt;
+        self.0.read_exact_at(out, offset)
+    }
+
+    fn set_len(&self, _: u64) -> io::Result<()> {
+        Err(io::ErrorKind::PermissionDenied.into())
+    }
+
+    fn write(&self, _: u64, _: &[u8]) -> io::Result<()> {
+        Err(io::ErrorKind::PermissionDenied.into())
+    }
+
+    fn sync_data(&self) -> io::Result<()> {
+        Err(io::ErrorKind::PermissionDenied.into())
+    }
+
+    fn try_lock_shared_range(
+        &self,
+        start: Bound<u64>,
+        end: Bound<u64>,
+    ) -> std::result::Result<bool, BackendError> {
+        match (start, end) {
+            (Bound::Unbounded | Bound::Included(0), Bound::Unbounded) => Ok(true),
+            _ => Err(BackendError::Unsupported),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Backend {
+    // The readiness owner has verified the inherited whole-file write OFD lock,
+    // identity and byte bound. Keep that same OFD alive through engine shutdown.
+    pub(crate) async fn inherited_trial_reader(file: File, max_bytes: u64) -> Result<Self> {
+        use std::os::fd::AsRawFd;
+        tokio::task::spawn_blocking(move || {
+            let metadata = file.metadata().map_err(storage_error)?;
+            if !metadata.is_file() || metadata.len() == 0 || metadata.len() > max_bytes {
+                return Err(Error::IncompatibleStore);
+            }
+            // Fingerprint byte accounting stats this descriptor, never a database path.
+            let path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
+            let mut options = builder();
+            options.set_concurrency_mode(ConcurrencyMode::ExclusiveWriter);
+            let reader = options
+                .open_read_only_with_backend(InheritedTrialReader(file))
+                .map_err(storage_error)?;
+            let handles = Arc::new(DatabaseHandles {
+                path,
+                exclusive: false,
+                read_only: true,
+                identity: None,
+                reader: Some(reader),
+                writer: Mutex::new(None),
+                opening: Mutex::new(()),
+            });
+            validate_tables(&handles.begin_read()?)?;
+            Ok(Self { handles })
+        })
+        .await
+        .map_err(worker_error)?
+    }
+}
+
 /// Owns the physical lock independently of redb's read and write handles.
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) struct ExclusiveTrialFile {
