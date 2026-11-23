@@ -798,6 +798,23 @@ async function waitForTerminalReceipt(page: Page, path: string) {
   throw new Error(`The terminal script did not write its ${NodePath.extname(path)} receipt`);
 }
 
+async function waitForSelectedTerminalText(page: Page, input: Locator, pattern: RegExp) {
+  const deadline = Date.now() + 10_000;
+  do {
+    await input.press("Control+Shift+a");
+    // The DOM copy operation reads Ghostty's selection without injecting Ctrl+C
+    // while the canvas may still be empty and a foreground job owns the PTY.
+    const text = await input.evaluate((element) => {
+      const clipboard = new DataTransfer();
+      element.dispatchEvent(new ClipboardEvent("copy", { clipboardData: clipboard, cancelable: true }));
+      return clipboard.getData("text/plain");
+    });
+    if (pattern.test(text)) return text;
+    await page.waitForTimeout(100);
+  } while (Date.now() < deadline);
+  throw new Error(`Expected selected terminal text matching ${pattern}`);
+}
+
 async function verifyAlternateTerminalReconnect(page: Page, workspace: string, shell: string) {
   const script = NodePath.join(workspace, "fixture-terminal-screen.sh");
   const release = `${script}.leave`;
@@ -806,8 +823,9 @@ async function verifyAlternateTerminalReconnect(page: Page, workspace: string, s
     script,
     [
       `trap 'printf "%s\\n" "$?" > "$0.exited"' EXIT`,
+      "trap 'exit 130' INT",
       `printf 'fixture-main-screen:%s\\n\\033[?1049h\\033[Hfixture-alternate-screen:%s 世界\\n' "$1" "$1"`,
-      'printf "%s\\n" "$1" > "$0.entered"',
+      'printf "%s %s\\n" "$1" "$$" > "$0.entered"',
       "attempt=0",
       'while [ ! -f "$0.leave" ] && [ "$attempt" -lt 600 ]; do',
       "  command -p sleep 0.1",
@@ -825,23 +843,31 @@ async function verifyAlternateTerminalReconnect(page: Page, workspace: string, s
   await input.press("Control+Shift+v");
   await waitForTerminalCopy(page, input, /fixture-terminal-screen\.sh/u, "before submission");
   await input.press("Enter");
-  Assert.equal(await waitForTerminalReceipt(page, `${script}.entered`), shell);
+  const [reportedShell, foregroundPid] =
+    (await waitForTerminalReceipt(page, `${script}.entered`)).split(" ");
+  Assert.equal(reportedShell, shell);
+  Assert.match(foregroundPid ?? "", /^\d+$/u);
   await page.reload({ waitUntil: "domcontentloaded" });
   const reattached = await terminalInput(page);
   const alternate = new RegExp(`fixture-alternate-screen:${shell} 世界`, "u");
-  await waitForTerminalCopy(page, reattached, alternate, "after alternate-screen reattach", (text) => {
-    if (alternate.test(text)) Assert.ok(!text.includes(`fixture-main-screen:${shell}`));
-  });
+  const screen = await waitForSelectedTerminalText(page, reattached, alternate);
+  Assert.ok(!screen.includes(`fixture-main-screen:${shell}`));
+  Assert.ok(
+    NodeFS.existsSync(`/proc/${foregroundPid}/stat`),
+    "The alternate screen must still belong to the original live foreground command",
+  );
   NodeFS.writeFileSync(release, "leave\n", { flag: "wx" });
   Assert.equal(await waitForTerminalReceipt(page, exited), "0");
   const restored = new RegExp(`fixture-primary-restored:${shell}`, "u");
-  await waitForTerminalCopy(page, reattached, restored, "after leaving alternate screen", (text) => {
-    if (restored.test(text)) {
-      Assert.ok(text.includes(`fixture-main-screen:${shell}`));
-      Assert.ok(!alternate.test(text));
-    }
-  });
-  return { sameShell: true, alternateScreenRetained: true, primaryScreenRestored: true };
+  const primary = await waitForSelectedTerminalText(page, reattached, restored);
+  Assert.ok(primary.includes(`fixture-main-screen:${shell}`));
+  Assert.ok(!alternate.test(primary));
+  return {
+    sameShell: true,
+    foregroundSurvivedReconnect: true,
+    alternateScreenRetained: true,
+    primaryScreenRestored: true,
+  };
 }
 
 async function verifySplitTerminalReconnect(page: Page, workspace: string, shell: string) {
