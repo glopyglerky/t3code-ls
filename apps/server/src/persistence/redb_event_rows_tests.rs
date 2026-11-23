@@ -88,6 +88,124 @@ fn stats(
 }
 
 #[tokio::test]
+#[ignore = "records physical storage use for a fixed assistant stream"]
+async fn assistant_text_layout_preserves_logical_replay_with_less_retained_storage() {
+    use crate::application::{ApplicationEventLayout, ApplicationTransactionMode};
+
+    async fn measure(
+        expected: &[EventAppendRow],
+        layout: Option<ApplicationEventLayout>,
+    ) -> (u64, usize, usize) {
+        let fixture = TestFixture::start().await;
+        let store = fixture.initialize().await;
+        assert!(
+            store
+                .bootstrap_application_with_event_layout(layout)
+                .await
+                .unwrap()
+                .initialized
+        );
+        prepare(&store).await;
+        let mut app = ApplicationTransactions::new(store.clone());
+        for (index, event) in expected.iter().enumerate() {
+            app.begin("append").await.unwrap();
+            assert_eq!(
+                app.events_append("append", event.clone(), None)
+                    .await
+                    .unwrap()
+                    .sequence,
+                index as u64 + 1,
+            );
+            app.commit("append").await.unwrap();
+        }
+        drop(app);
+        store.shutdown().await.unwrap();
+        let file_bytes = std::fs::metadata(fixture.path()).unwrap().len();
+
+        let store = fixture.connect().await;
+        let mut app = ApplicationTransactions::new(store.clone());
+        app.begin_mode("read", ApplicationTransactionMode::Read, None)
+            .await
+            .unwrap();
+        let replay = app.events_read("read", read_all()).await.unwrap();
+        assert_eq!(replay.len(), expected.len());
+        for (decoded, original) in replay.iter().zip(expected) {
+            assert_eq!(decoded.event_id, original.event_id);
+            assert_eq!(decoded.payload_json, original.payload_json);
+        }
+        app.rollback("read").await.unwrap();
+        drop(app);
+
+        // Count all keys and values in the physical table, including indexes and revision witnesses.
+        let mut raw = store.db.begin_read_only().await.unwrap();
+        let mut start = Vec::new();
+        let mut key_count = 0;
+        let mut key_value_bytes = 0;
+        loop {
+            let page = raw.scan(&start, &[u8::MAX], 64).await.unwrap();
+            let Some((last, _)) = page.last() else { break };
+            key_count += page.len();
+            key_value_bytes += page
+                .iter()
+                .map(|(key, value)| key.len() + value.len())
+                .sum::<usize>();
+            start.clone_from(last);
+            start.push(0);
+        }
+        raw.rollback().await.unwrap();
+        store.shutdown().await.unwrap();
+        (file_bytes, key_count, key_value_bytes)
+    }
+
+    let mut events = Vec::new();
+    for turn in 0..6 {
+        let thread = format!("thread-{turn}");
+        let mut text = "Synthetic opening paragraph café. ".repeat(280);
+        for revision in 0..64 {
+            text.push_str("追加 🐟 bounded stream update\n");
+            let mut event = row(&format!("assistant-{turn}-{revision}"), &thread);
+            event.actor_kind = "provider".into();
+            event.event_type = "message.updated".into();
+            event.payload_json = json!({
+                "threadId": thread, "id": "assistant-message", "text": text,
+                "role": "assistant", "createdBy": "agent", "creationSource": "provider",
+                "streaming": revision != 63, "runId": "run", "nodeId": "node",
+                "createdAt": "2026-11-10T00:00:00.000Z", "updatedAt": "2026-11-10T00:00:01.000Z",
+                "attachments": [],
+            })
+            .to_string();
+            events.push(event);
+        }
+    }
+    let full = measure(&events, None).await;
+    let revisions = measure(
+        &events,
+        Some(ApplicationEventLayout::AssistantTextRevisionsV1),
+    )
+    .await;
+    let sample = |(file_bytes, key_count, key_value_bytes)| {
+        json!({
+            "fileBytesAfterShutdown": file_bytes,
+            "keyCount": key_count,
+            "keyValueBytes": key_value_bytes,
+        })
+    };
+    println!(
+        "{}",
+        json!({
+            "scope": "assistant event log and indexes",
+            "durability": "omdb Immediate",
+            "rootCommits": events.len(),
+            "logicalPayloadBytes": events.iter().map(|row| row.payload_json.len()).sum::<usize>(),
+            "fullLayout": sample(full),
+            "revisionLayout": sample(revisions),
+        })
+    );
+    assert!(revisions.2 < full.2);
+    assert!(revisions.0 < full.0);
+}
+
+#[tokio::test]
 async fn event_append_joins_savepoint_rollback_and_preserves_typed_row_identity() {
     let fixture = TestFixture::start().await;
     let store = fixture.initialize().await;
