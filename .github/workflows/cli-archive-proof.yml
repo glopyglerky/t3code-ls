@@ -226,7 +226,7 @@ jobs:
           $pnpm = "$env:RUNNER_TEMP/cli-windows-pnpm/node_modules/@pnpm/exe.win32-x64/pnpm.exe"
           if ((& $pnpm --version) -ne '12.14.0') { throw 'Unexpected pnpm version' }
           & $pnpm install --frozen-lockfile
-          node --input-type=module -e 'await import("@t3tools/contracts"); await import("effect/Effect");'
+          node scripts/smoke-cli-archive.ts --help
       - name: Validate and exercise the transferred archive on Windows
         shell: pwsh
         timeout-minutes: 8
