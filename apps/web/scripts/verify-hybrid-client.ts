@@ -60,6 +60,12 @@ type ComposerSubmitProof = {
   renderer: "dioxus" | "dioxus-fallback";
   requests: ComposerSubmitRequest[];
 };
+type ComposerStopRequest = {
+  type: "thread.stop" | "run.interrupt";
+  commandId: string;
+  threadId: string;
+  runId?: string;
+};
 type OwnedApplication = {
   pid: number;
   pairingUrl: string;
@@ -90,6 +96,15 @@ const guestNameProof = process.env.T3_CODE_LS_GUEST_NAME_PROOF;
 Assert.ok(guestNameProof === undefined || (bundledClient && ["retained", "dioxus", "dioxus-fallback"].includes(guestNameProof)), "Guest name proof requires an explicit packaged renderer");
 const dioxusFindProof = process.env.T3_CODE_LS_DIOXUS_FIND_PROOF;
 const composerSubmitRenderer = process.env.T3_CODE_LS_COMPOSER_SUBMIT_PROOF;
+const composerStopProof = process.env.T3_CODE_LS_COMPOSER_STOP_PROOF === "true";
+const capturedStop = {
+  path: "apps/server/src/orchestration-v2/testkit/fixtures/todo_list/registry_transcript.ndjson",
+  sha256: "560623d69777188138a1d9a7fbc0cc994f4067eb2a7d30ae113b0667456ec45e",
+  model: "todo-list",
+  modelLabel: "Plan and reads",
+  prompt: "Replay the recorded plan and reads",
+  partialText: "I'll track the three steps and inspect both files.",
+};
 const composerSubmitWasmPath = "/pairing-wasm/local_pairing_bg.wasm";
 const expectsDioxusFind = process.env.VITE_T3_CODE_LS_THREAD_FIND_RENDERER === "dioxus";
 const bundledPtyProof = process.env.T3_CODE_LS_BUNDLED_PTY_PROOF === "true";
@@ -169,6 +184,11 @@ Assert.ok(
     (bundledClient && mode === "native" &&
       (composerSubmitRenderer === "dioxus" || composerSubmitRenderer === "dioxus-fallback")),
   "The Send button proof requires the bundled native application and an explicit renderer",
+);
+
+Assert.ok(
+  !composerStopProof || composerSubmitRenderer !== undefined,
+  "The Stop button proof requires the packaged Send renderer",
 );
 
 function isPairingRenderer(value: string): value is PairingRenderer {
@@ -803,6 +823,123 @@ async function verifyComposerSubmitRefusal(
   Assert.ok(await submit.evaluate((button) => document.activeElement === button));
   Assert.equal(proof.requests.length, 0, "Local refusal must never dispatch a turn");
   return submit;
+}
+
+async function verifyComposerStop(
+  page: Page,
+  threadId: string,
+  renderer: ComposerSubmitProof["renderer"],
+  requests: ComposerStopRequest[],
+) {
+  const threadUrl = page.url();
+  const draftKey = new URL(threadUrl).pathname.split("/").slice(-2).map(decodeURIComponent).join(":");
+  const editor = page.getByTestId("composer-editor");
+  const footer = page.locator('[data-chat-composer-footer="true"]:visible');
+  const native = footer.locator('button[data-composer-stop-renderer="dioxus-wasm"]');
+  const stop = footer.getByRole("button", { name: "Stop generation", exact: true });
+  const draft = "This unsent draft must survive Stop and reopen.";
+  await page.getByText(capturedStop.partialText, { exact: true }).waitFor({ state: "visible" });
+  const pending = await readThreadSnapshot(page, threadId);
+  const identity = replayTurnIdentity(pending, capturedStop.model);
+  Assert.equal(pending.projection.runs[0]?.status, "running");
+  Assert.equal(pending.projection.runtimeRequests.length, 0);
+  const partial = pending.projection.messages.find(
+    (message) => message.role === "assistant" && message.runId === identity.runId &&
+      message.text === capturedStop.partialText,
+  );
+  Assert.ok(partial, "The run must stream the captured text before Stop");
+
+  if (renderer === "dioxus-fallback") {
+    const fallback = footer.getByRole("button", { name: "Use standard Stop button", exact: true });
+    await fallback.waitFor({ state: "visible" });
+    Assert.equal(await stop.count(), 0);
+    await fallback.press("Enter");
+    await stop.waitFor({ state: "visible" });
+    Assert.ok(await stop.evaluate((button) => document.activeElement === button));
+    Assert.equal(await native.count(), 0);
+  } else {
+    await native.waitFor({ state: "visible" });
+    Assert.ok(await stop.evaluate((button) => button.matches('[data-composer-stop-renderer="dioxus-wasm"]')));
+  }
+  Assert.equal(requests.length, 0, "Rendering or selecting a fallback must never stop a run");
+  const originalStop = await stop.elementHandle();
+  await editor.fill(draft);
+  if (renderer === "dioxus-fallback") {
+    await footer.getByRole("button", { name: "Use standard Send button", exact: true }).click();
+  }
+  const send = footer.locator('button[type="submit"]:enabled');
+  await send.waitFor({ state: "visible" });
+  const originalSend = await send.elementHandle();
+  await editor.press("End");
+  await editor.press("a");
+  await editor.press("Backspace");
+  Assert.equal(await stop.count(), 1);
+  Assert.equal(await send.count(), 1);
+  Assert.ok(await stop.evaluate((button, original) => button === original, originalStop));
+  Assert.ok(await send.evaluate((button, original) => button === original, originalSend));
+  Assert.equal(await stop.getAttribute("type"), "button");
+  if (renderer === "dioxus") {
+    Assert.equal(await send.getAttribute("data-composer-submit-renderer"), "dioxus-wasm");
+  }
+
+  await stop.focus();
+  Assert.ok(await stop.evaluate((button) => document.activeElement === button));
+  await page.keyboard.press("Enter");
+  await footer.getByRole("button", { name: /^(Stop generation|Stopping)$/u })
+    .waitFor({ state: "hidden" });
+  Assert.ok(await send.evaluate((button, original) => button === original, originalSend));
+  const assertInterrupted = async () => {
+    const { projection } = await readThreadSnapshot(page, threadId);
+    Assert.equal(projection.runs.length, 1);
+    const run = projection.runs.find((item) => item.id === identity.runId);
+    const attempt = projection.attempts.find((item) => item.id === identity.attemptId);
+    const providerTurn = projection.providerTurns.find((item) => item.id === identity.providerTurnId);
+    Assert.equal(run?.status, "interrupted");
+    Assert.ok(attempt && providerTurn);
+    Assert.equal(attempt.runId, run?.id);
+    Assert.equal(attempt.status, "interrupted");
+    Assert.equal(providerTurn.status, "interrupted");
+    assertReplayTurnLinks(attempt, providerTurn);
+    const message = projection.messages.find((item) => item.id === partial.id);
+    Assert.equal(message?.text, capturedStop.partialText);
+    Assert.equal(message?.streaming, false);
+    const users = projection.messages.filter((item) => item.role === "user");
+    Assert.deepEqual(users.map((item) => item.text), [capturedStop.prompt]);
+    return users[0]?.id;
+  };
+  Assert.equal(await editor.innerText(), draft);
+  const sentMessageId = await assertInterrupted();
+  await page.waitForFunction(
+    ({ draftKey, draft }) => {
+      const raw = localStorage.getItem("t3code:composer-drafts:v1");
+      return raw !== null && JSON.parse(raw).state?.draftsByThreadKey?.[draftKey]?.prompt === draft;
+    },
+    { draftKey, draft },
+  );
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForURL(threadUrl);
+  await page.getByText(capturedStop.partialText, { exact: true }).waitFor({ state: "visible" });
+  await page.waitForFunction(
+    (expected) => document.querySelector<HTMLElement>('[data-testid="composer-editor"]')
+      ?.innerText === expected,
+    draft,
+  );
+  Assert.equal(await assertInterrupted(), sentMessageId);
+  Assert.equal(requests.length, 1, "Keyboard Stop must send exactly one interruption command");
+  const [request] = requests;
+  Assert.ok(request?.commandId);
+  Assert.equal(request.threadId, threadId);
+  if (request.type === "run.interrupt") Assert.equal(request.runId, identity.runId);
+  return {
+    renderer,
+    threadId,
+    ...identity,
+    request,
+    sentMessageId,
+    capturedFixtureSha256: capturedStop.sha256,
+    draftPreserved: true,
+    interruptedReopened: true,
+  };
 }
 
 async function pendingShowcase(
@@ -2194,7 +2331,10 @@ async function exercise(implementation: Implementation): Promise<void> {
           config: {
             source: "local",
             commandPath: process.execPath,
-            commandArgs: [NodePath.join(repoRoot, "apps/server/scripts/dev-replay-agent.ts")],
+            commandArgs: [
+              NodePath.join(repoRoot, "apps/server/scripts/dev-replay-agent.ts"),
+              ...(composerStopProof ? ["--hold-for-interrupt"] : []),
+            ],
           },
         },
       },
@@ -2245,13 +2385,16 @@ async function exercise(implementation: Implementation): Promise<void> {
       refusedWasmRequests: number;
       localRefusalPreservedDraft: true;
     }) | null,
+    composerStop: null as Awaited<ReturnType<typeof verifyComposerStop>> | null,
     textRevisionProfile: null as ReturnType<typeof textRevisionIdentity> | null,
     pdfLinks: null as Awaited<ReturnType<typeof verifyLinkedPdf>> | null,
     htmlInteraction: null as Awaited<ReturnType<typeof verifyInteractiveHtml>> | null,
     previewBrowser,
     previewLifetime: null as Awaited<ReturnType<typeof verifyPreviewLifetime>> | null,
     pdfExternalOnly: pdfExternalOnlyProof,
-    scope: composerSubmitRenderer
+    scope: composerStopProof
+      ? "Linux packaged native application; authenticated Send and keyboard Stop, captured replay, and draft-preserving reopen"
+      : composerSubmitRenderer
       ? "Linux packaged native application; authenticated ordinary Send, local refusal, and one controlled replay turn"
       : pdfExternalOnlyProof
       ? "Linux packaged native application; authenticated local project and replay thread; signed PDF internal jumps and explicit loopback external links; no terminal qualification"
@@ -2362,6 +2505,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     composerSubmitRenderer === "dioxus" || composerSubmitRenderer === "dioxus-fallback"
       ? { renderer: composerSubmitRenderer, requests: [] }
       : undefined;
+  const stopRequests: ComposerStopRequest[] = [];
   let composerWasm: BrowserResponse | undefined;
   let refusedComposerWasmRequests = 0;
   let threadFindRequests = 0;
@@ -2395,6 +2539,15 @@ async function exercise(implementation: Implementation): Promise<void> {
         )) {
           const request = JSON.parse(json);
           const input = request.payload;
+          if (
+            composerStopProof && request.tag === ORCHESTRATION_V2_WS_METHODS.dispatchCommand &&
+            (input?.type === "thread.stop" || input?.type === "run.interrupt")
+          ) {
+            stopRequests.push({
+              type: input.type, commandId: input.commandId, threadId: input.threadId,
+              ...(input.runId === undefined ? {} : { runId: input.runId }),
+            });
+          }
           if (
             (request.tag === ORCHESTRATION_V2_WS_METHODS.launchThread && input?.initialMessage) ||
             (request.tag === ORCHESTRATION_V2_WS_METHODS.dispatchCommand && input?.type === "message.dispatch")
@@ -2549,14 +2702,65 @@ async function exercise(implementation: Implementation): Promise<void> {
       proof.draftMerge = await verifyDraftMerge(page);
       completed("Kept the newer draft from the first tab and the model selected in the second");
     }
-    starting("normal composer submission and controlled approval");
-    const threadId = await submitReplay(page, undefined, undefined, undefined, composerSubmit);
+    starting(
+      composerStopProof ? "normal composer Send and Stop" : "normal composer submission and controlled approval",
+    );
+    if (composerStopProof) {
+      const capturedBytes = NodeFS.readFileSync(NodePath.join(repoRoot, capturedStop.path));
+      Assert.equal(NodeCrypto.createHash("sha256").update(capturedBytes).digest("hex"), capturedStop.sha256);
+    }
+    const threadId = await submitReplay(
+      page,
+      composerStopProof ? capturedStop.modelLabel : undefined,
+      composerStopProof ? capturedStop.prompt : undefined,
+      undefined,
+      composerSubmit,
+    );
     proof.threadId = threadId;
     const usedRustComposer = await page.evaluate(
       () => performance.getEntriesByName("t3-composer-rust-offsets").length === 1,
     );
     Assert.equal(usedRustComposer, expectsRustComposer, "The composer must use the selected mapper");
     proof.composer = usedRustComposer ? "rust-wasm" : "retained";
+    const wasmAtSend = composerWasm;
+    const refusedWasmAtSend = refusedComposerWasmRequests;
+    async function recordComposerSubmit(
+      composerSubmit: ComposerSubmitProof,
+      sentMessageId: string | undefined,
+    ) {
+      Assert.equal(composerSubmit.requests.length, 1, "Send must emit exactly one turn request");
+      const [request] = composerSubmit.requests;
+      Assert.ok(request?.commandId);
+      Assert.equal(request.method, ORCHESTRATION_V2_WS_METHODS.launchThread);
+      Assert.equal(request.threadId, threadId);
+      Assert.ok(sentMessageId);
+      Assert.equal(sentMessageId, request.messageId);
+      let wasmSha256: string | null = null;
+      if (composerSubmit.renderer === "dioxus") {
+        const response = wasmAtSend;
+        Assert.ok(response !== undefined && response.ok(), "Send must load the bundled Wasm");
+        wasmSha256 = NodeCrypto.createHash("sha256").update(await response.body()).digest("hex");
+        const bundledWasm = NodePath.join(repoRoot, "apps/web/dist", composerSubmitWasmPath.slice(1));
+        Assert.equal(wasmSha256, NodeCrypto.createHash("sha256")
+          .update(NodeFS.readFileSync(bundledWasm)).digest("hex"));
+      } else {
+        Assert.equal(refusedWasmAtSend, 1, "The explicit fallback must follow a blocked Wasm load");
+      }
+      proof.composerSubmit = {
+        ...composerSubmit,
+        wasmSha256,
+        refusedWasmRequests: refusedWasmAtSend,
+        localRefusalPreservedDraft: true,
+      };
+    }
+    if (composerStopProof && composerSubmit) {
+      proof.composerStop = await verifyComposerStop(page, threadId, composerSubmit.renderer, stopRequests);
+      proof.threadUrl = page.url();
+      await recordComposerSubmit(composerSubmit, proof.composerStop.sentMessageId);
+      completed("Verified one keyboard Stop, the interrupted run, and the unsent draft after reopen");
+      proof.status = "passed";
+      return;
+    }
     const approval = page.getByRole("button", { name: /^(Yes|Approve)$/u }).first();
     await approval.waitFor({ state: "visible" });
     const pending = await readThreadSnapshot(page, threadId);
@@ -2582,31 +2786,9 @@ async function exercise(implementation: Implementation): Promise<void> {
     inspectPersistence("initial");
     completed("Received the completed replay turn on the original thread route");
     if (composerSubmit) {
-      Assert.equal(composerSubmit.requests.length, 1, "Send must emit exactly one turn request");
-      const [request] = composerSubmit.requests;
-      Assert.ok(request?.commandId);
-      Assert.equal(request.method, ORCHESTRATION_V2_WS_METHODS.launchThread);
-      Assert.equal(request.threadId, threadId);
       const messages = pending.projection.messages.filter((message) => message.role === "user");
       Assert.equal(messages.length, 1);
-      Assert.equal(messages[0]?.id, request.messageId);
-      let wasmSha256: string | null = null;
-      if (composerSubmit.renderer === "dioxus") {
-        const response = composerWasm;
-        Assert.ok(response !== undefined && response.ok(), "Send must load the bundled Wasm");
-        wasmSha256 = NodeCrypto.createHash("sha256").update(await response.body()).digest("hex");
-        const bundledWasm = NodePath.join(repoRoot, "apps/web/dist", composerSubmitWasmPath.slice(1));
-        Assert.equal(wasmSha256, NodeCrypto.createHash("sha256")
-          .update(NodeFS.readFileSync(bundledWasm)).digest("hex"));
-      } else {
-        Assert.equal(refusedComposerWasmRequests, 1, "The explicit fallback must follow a blocked Wasm load");
-      }
-      proof.composerSubmit = {
-        ...composerSubmit,
-        wasmSha256,
-        refusedWasmRequests: refusedComposerWasmRequests,
-        localRefusalPreservedDraft: true,
-      };
+      await recordComposerSubmit(composerSubmit, messages[0]?.id);
       completed("Verified the Send button, local refusal, and exactly one authenticated turn");
       proof.status = "passed";
       return;

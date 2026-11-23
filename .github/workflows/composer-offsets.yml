@@ -33,7 +33,8 @@ jobs:
       NATIVE_PTY_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-') }}
       PAIRING_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t01-dioxus-pairing-') }}
       GUEST_NAME_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t11-dioxus-guest-') }}
-      DIOXUS_SUBMIT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-send-') }}
+      DIOXUS_STOP_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-stop-') }}
+      DIOXUS_SUBMIT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-send-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-stop-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -301,8 +302,13 @@ jobs:
           if [[ "$DIOXUS_SUBMIT_PROOF" == true ]]; then
             sha256sum apps/web/dist/pairing-wasm/local_pairing.js \
               apps/web/dist/pairing-wasm/local_pairing_bg.wasm >> "$proof/application.sha256"
+            if [[ "$DIOXUS_STOP_PROOF" == true ]]; then
+              pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
+                src/components/chat/ComposerPrimaryActions.browser.test.tsx
+            fi
             for renderer in dioxus dioxus-fallback; do
               mkdir "$proof/submit-$renderer"
+              T3_CODE_LS_COMPOSER_STOP_PROOF="$DIOXUS_STOP_PROOF" \
               T3_CODE_LS_COMPOSER_SUBMIT_PROOF="$renderer" \
                 node apps/web/scripts/verify-hybrid-client.ts "$proof/submit-$renderer" "$implementation"
             done

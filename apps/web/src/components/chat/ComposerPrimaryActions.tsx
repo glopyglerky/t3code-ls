@@ -1,6 +1,8 @@
 import {
   memo,
   useEffect,
+  useLayoutEffect,
+  useRef,
   useState,
   type MouseEventHandler,
   type PointerEventHandler,
@@ -22,7 +24,7 @@ import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../Sideb
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { DioxusComposerSubmit } from "./DioxusComposerSubmit";
+import { DioxusComposerButton } from "./DioxusComposerSubmit";
 import {
   alternateComposerDispatchAction,
   resolveComposerDispatchMode,
@@ -59,7 +61,7 @@ interface ComposerPrimaryActionsProps {
   preserveComposerFocusOnPointerDown?: boolean;
   isEditingQueuedMessage?: boolean;
   useDioxusSubmit?: boolean;
-  onSubmitMessage?: MouseEventHandler<HTMLButtonElement>;
+  onSubmitMessage?: MouseEventHandler<HTMLElement>;
   onResume?: () => void;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
@@ -138,6 +140,7 @@ function StopGenerationButton({
   preserveComposerFocusOnPointerDown,
   onStopRequested,
   onInterrupt,
+  useDioxus = false,
 }: {
   stopPhase: StopPhase;
   canOperateThread: boolean;
@@ -145,34 +148,67 @@ function StopGenerationButton({
   preserveComposerFocusOnPointerDown: boolean;
   onStopRequested: () => void;
   onInterrupt: () => void;
+  useDioxus?: boolean;
 }) {
+  const [useStandard, setUseStandard] = useState(false);
   const isStopDisabled = stopPhase === "pending";
+  const pendingActivation = useRef(isStopDisabled);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- unlock synchronous duplicate-click guard after a timeout or a new run
+  useLayoutEffect(() => {
+    pendingActivation.current = isStopDisabled;
+  }, [isStopDisabled]);
+  const activate = () => {
+    if (!canOperateThread || isStopDisabled || pendingActivation.current) return;
+    pendingActivation.current = true;
+    onStopRequested();
+    onInterrupt();
+  };
+  const disabled = !canOperateThread || isStopDisabled;
+  const label = isStopDisabled ? "Stopping" : "Stop generation";
+  const className = cn(
+    "flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-control-highlight transition-colors duration-150 hover:bg-destructive active:inset-shadow-control-pressed active:shadow-none disabled:cursor-default disabled:opacity-64 disabled:hover:bg-destructive/90 [&_svg]:pointer-events-none",
+    insidePendingAction ? "size-8 sm:size-7" : "size-8 sm:h-8 sm:w-8",
+  );
+  const onPointerDown = preserveComposerFocusOnPointerDown ? preventPointerFocus : undefined;
+  const stopArt = (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
+      <rect x="2" y="2" width="8" height="8" rx="1.5" />
+    </svg>
+  );
+  const standardButton = (
+    <button
+      type="button"
+      className={className}
+      onPointerDown={onPointerDown}
+      disabled={disabled}
+      onClick={activate}
+      aria-label={label}
+    >
+      {stopArt}
+    </button>
+  );
   return (
     <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            className={cn(
-              "flex shrink-0 cursor-pointer items-center justify-center rounded-full bg-destructive/90 text-white shadow-xs shadow-destructive/24 inset-shadow-control-highlight transition-colors duration-150 hover:bg-destructive active:inset-shadow-control-pressed active:shadow-none disabled:cursor-default disabled:opacity-64 disabled:hover:bg-destructive/90 [&_svg]:pointer-events-none",
-              insidePendingAction ? "size-8 sm:size-7" : "size-8 sm:h-8 sm:w-8",
-            )}
-            onPointerDown={preserveComposerFocusOnPointerDown ? preventPointerFocus : undefined}
-            disabled={!canOperateThread || isStopDisabled}
-            onClick={() => {
-              if (!canOperateThread || isStopDisabled) return;
-              onStopRequested();
-              onInterrupt();
-            }}
-            aria-label={stopPhase === "pending" ? "Stopping" : "Stop generation"}
-          />
-        }
-      >
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true">
-          <rect x="2" y="2" width="8" height="8" rx="1.5" />
-        </svg>
-      </TooltipTrigger>
-      <TooltipPopup>{stopPhase === "pending" ? "Stopping…" : "Interrupt"}</TooltipPopup>
+      {useDioxus ? (
+        <TooltipTrigger render={<span className="inline-flex" />}>
+          <DioxusComposerButton
+            action="stop"
+            className={className}
+            label={label}
+            disabled={disabled}
+            onPointerDown={onPointerDown}
+            onActivate={activate}
+            useStandard={useStandard}
+            onUseStandard={() => setUseStandard(true)}
+            standardButton={standardButton}
+          >
+            {stopArt}
+          </DioxusComposerButton>
+        </TooltipTrigger>
+      ) : (
+        <TooltipTrigger render={standardButton}>{stopArt}</TooltipTrigger>
+      )}
+      <TooltipPopup>{isStopDisabled ? "Stopping…" : "Interrupt"}</TooltipPopup>
     </Tooltip>
   );
 }
@@ -270,9 +306,10 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const isSendDisabled = !canOperateThread || sendDisabledReason !== null;
   const stageBackdropVariant = useSidebarStageBackdropVariant(environmentIdentificationMode);
 
-  const renderStopGenerationButton = (insidePendingAction: boolean) => (
+  const renderStopGenerationButton = (insidePendingAction: boolean, useDioxus = false) => (
     <StopGenerationButton
       key="interrupt"
+      useDioxus={useDioxus}
       stopPhase={stopPhase}
       canOperateThread={canOperateThread}
       insidePendingAction={insidePendingAction}
@@ -280,16 +317,6 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       onStopRequested={() => setStopPhase("pending")}
       onInterrupt={onInterrupt}
     />
-  );
-
-  // Keep the clicked target at the right edge even if typing changes the primary action.
-  const withStopButton = (action: ReactNode) => (
-    <>
-      {action}
-      {stopPhase === "pending" || stopPhase === "timedOut"
-        ? renderStopGenerationButton(false)
-        : null}
-    </>
   );
 
   if (pendingAction) {
@@ -352,23 +379,14 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     );
   }
 
-  if (
-    (canInterrupt || stopPhase === "pending" || stopPhase === "timedOut") &&
-    !hasSendableContent &&
-    !isEditingQueuedMessage
-  ) {
-    return (
-      <>
-        {children}
-        {renderStopGenerationButton(false)}
-      </>
-    );
-  }
+  const waitingForStop = stopPhase === "pending" || stopPhase === "timedOut";
+  const hideSubmitForStop =
+    (canInterrupt || waitingForStop) && !hasSendableContent && !isEditingQueuedMessage;
 
   const showResume = canResume && !hasSendableContent && !isEditingQueuedMessage;
 
   const compactTokens =
-    compactBeforeSendTokens !== null && !showResume && !isEditingQueuedMessage
+    compactBeforeSendTokens !== null && !showResume && !isEditingQueuedMessage && !hideSubmitForStop
       ? formatContextWindowTokens(compactBeforeSendTokens)
       : null;
   const compactsBeforeSend = compactTokens !== null && !keepFullHistory;
@@ -464,27 +482,35 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     useDioxusSubmit &&
     !voiceInputActive &&
     !showResume &&
-    !isRunning &&
-    !canInterrupt &&
-    stopPhase === null &&
     !isEditingQueuedMessage &&
     compactTokens === null;
+  const renderDioxusStop =
+    useDioxusSubmit && !voiceInputActive && !isEditingQueuedMessage && compactBeforeSendTokens === null;
+  const stopButton =
+    hideSubmitForStop || waitingForStop || (renderDioxusStop && canInterrupt)
+      ? renderStopGenerationButton(false, renderDioxusStop)
+      : null;
 
   const submit = (
     <Tooltip key="submit">
       <TooltipTrigger render={<span className="inline-flex" />}>
         {renderDioxusSubmit ? (
-          <DioxusComposerSubmit
+          <DioxusComposerButton
+            action="submit"
             className={sendButtonClassName}
             label={sendButtonLabel}
             disabled={sendButtonDisabled}
             {...pointerFocusProps}
+            onActivate={(event) => {
+              if (stopPhase === "landed") event.preventDefault();
+              else if (isRunning) onSubmitMessage?.(event);
+            }}
             useStandard={useStandardSubmit}
             onUseStandard={() => setUseStandardSubmit(true)}
             standardButton={sendButton}
           >
             {sendButtonArt}
-          </DioxusComposerSubmit>
+          </DioxusComposerButton>
         ) : (
           sendButton
         )}
@@ -493,15 +519,16 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     </Tooltip>
   );
   if (compactTokens === null || hideCompactToggle) {
-    return withStopButton(
+    return (
       <>
         {children}
-        {submit}
-      </>,
+        {hideSubmitForStop ? null : submit}
+        {stopButton}
+      </>
     );
   }
 
-  return withStopButton(
+  const compactSend = (
     <div data-chat-composer-compact-send="true" className="flex items-center gap-2">
       <Tooltip>
         <TooltipTrigger
@@ -534,6 +561,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       </Tooltip>
       {children}
       {submit}
-    </div>,
+    </div>
+  );
+  return (
+    <>
+      {compactSend}
+      {stopButton}
+    </>
   );
 });

@@ -2032,12 +2032,16 @@
           "acceptance_evidence": {}
         }
       ],
-      "acceptance_tests": ["apps/web/scripts/verify-hybrid-client.ts"],
+      "acceptance_tests": [
+        "apps/web/scripts/verify-hybrid-client.ts",
+        "apps/web/src/components/chat/ComposerPrimaryActions.browser.test.tsx"
+      ],
       "hosted_acceptance": {
-        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/chat/ComposerPrimaryActions.browser.test.tsx": ".github/workflows/composer-offsets.yml"
       },
       "retired_paths": [],
-      "notes": "T01/T02/T11. VITE_T3_CODE_LS_COMPOSER_SUBMIT_RENDERER=dioxus selects the ordinary Send button. The browser submits the existing ChatComposer form, which retains draft, validation and command ownership. Specialized actions use their existing renderer. Run 45205232266 at 6742110c8042b03dad894d65c95d0a6daa5d7ca7 verified keyboard submission over the packaged native route, refusal with the draft retained, and the explicit standard control after a blocked Wasm load.",
+      "notes": "T01/T02/T11. VITE_T3_CODE_LS_COMPOSER_SUBMIT_RENDERER=dioxus selects the ordinary Send button. The browser submits the existing ChatComposer form, which retains draft, validation and command ownership. Specialized actions use their existing renderer. Run 45205232266 at 6742110c8042b03dad894d65c95d0a6daa5d7ca7 verified keyboard submission over the packaged native route, refusal with the draft retained, and the explicit standard control after a blocked Wasm load. The same opt-in selects the ordinary expanded Stop button beside a follow-up Send. The Stop candidate uses the existing interruption owner and has its own packaged proof selection.",
       "rust_crates": ["apps/web/rust/pairing"]
     },
     {

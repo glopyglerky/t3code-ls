@@ -211,7 +211,7 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
   preserveComposerFocusOnPointerDown?: boolean;
   isEditingQueuedMessage: boolean;
   useDioxusSubmit?: boolean;
-  onSubmitMessage: React.MouseEventHandler<HTMLButtonElement>;
+  onSubmitMessage: React.MouseEventHandler<HTMLElement>;
   onResume: () => void;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;

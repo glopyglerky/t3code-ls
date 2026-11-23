@@ -4,6 +4,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type MouseEventHandler,
   type PointerEventHandler,
   type ReactNode,
 } from "react";
@@ -15,20 +16,24 @@ type MountState =
   | { status: "loading" | "failed" }
   | { status: "ready"; button: HTMLButtonElement };
 
-export function DioxusComposerSubmit({
+export function DioxusComposerButton({
+  action,
   className,
   label,
   disabled,
   onPointerDown,
+  onActivate,
   useStandard,
   onUseStandard,
   standardButton,
   children,
 }: {
+  action: "submit" | "stop";
   className: string;
   label: string;
   disabled: boolean;
   onPointerDown?: PointerEventHandler<HTMLElement>;
+  onActivate?: MouseEventHandler<HTMLElement>;
   useStandard: boolean;
   onUseStandard: () => void;
   standardButton: ReactNode;
@@ -41,9 +46,13 @@ export function DioxusComposerSubmit({
   const [view, setView] = useState<MountState>({ status: "loading" });
   const attach = useEffectEvent(
     (bindings: Awaited<ReturnType<typeof loadOnboardingBindings>>, root: HTMLSpanElement) => {
-      mount.current = bindings.mount_composer_submit(root, className, label, disabled);
+      const mountButton =
+        action === "submit" ? bindings.mount_composer_submit : bindings.mount_composer_stop;
+      mount.current = mountButton(root, className, label, disabled);
     },
   );
+
+  const actionName = action === "submit" ? "Send" : "Stop";
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the status reflects the external renderer and the lifetime of its DOM
   useEffect(() => {
@@ -52,7 +61,7 @@ export function DioxusComposerSubmit({
     let disposed = false;
     const observer = new MutationObserver(() => {
       const button = root.querySelector<HTMLButtonElement>(
-        'button[data-composer-submit-renderer="dioxus-wasm"]',
+        `button[data-composer-${action}-renderer="dioxus-wasm"]`,
       );
       if (!button) return;
       observer.disconnect();
@@ -79,7 +88,7 @@ export function DioxusComposerSubmit({
       })
       .catch(fail);
     return dispose;
-  }, [useStandard]);
+  }, [action, useStandard]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- update the existing button and keep its DOM identity
   useLayoutEffect(() => {
@@ -97,24 +106,30 @@ export function DioxusComposerSubmit({
   }, [useStandard]);
 
   return (
-    <span ref={container} tabIndex={-1} className="inline-flex items-center">
+    <span
+      ref={container}
+      tabIndex={-1}
+      className="inline-flex items-center"
+      onClickCapture={(event) => {
+        if (useStandard || !(event.target instanceof Node) || !host.current?.contains(event.target)) {
+          return;
+        }
+        if (view.status !== "ready" || disabled) {
+          event.preventDefault();
+          return;
+        }
+        if (view.button.contains(event.target)) onActivate?.(event);
+      }}
+    >
       {useStandard ? (
         standardButton
       ) : (
         <>
-          <span
-            ref={host}
-            hidden={view.status !== "ready"}
-            onPointerDown={onPointerDown}
-            onClick={(event) => {
-              // The form owns submission. Veto clicks while the DOM catches up to the owner.
-              if (view.status !== "ready" || disabled) event.preventDefault();
-            }}
-          />
+          <span ref={host} hidden={view.status !== "ready"} onPointerDown={onPointerDown} />
           {view.status === "ready" && createPortal(children, view.button)}
           {view.status === "loading" && (
             <span role="status" className="h-9 w-9 sm:h-8 sm:w-8">
-              <span className="sr-only">Loading Send button</span>
+              <span className="sr-only">Loading {actionName} button</span>
             </span>
           )}
           {view.status === "failed" && (
@@ -127,7 +142,7 @@ export function DioxusComposerSubmit({
                 onUseStandard();
               }}
             >
-              Use standard Send button
+              Use standard {actionName} button
             </button>
           )}
         </>

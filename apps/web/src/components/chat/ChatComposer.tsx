@@ -2213,7 +2213,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       );
     },
   });
-  const handleSubmitMessage = (event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleSubmitMessage = (event: React.MouseEvent<HTMLElement>) => {
     event.preventDefault();
     submitComposer(
       event,
