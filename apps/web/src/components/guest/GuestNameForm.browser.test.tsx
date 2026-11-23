@@ -77,7 +77,7 @@ describe("guest name form renderer", () => {
     const mount = vi.fn(bindings.mount_guest_name);
     vi.mocked(loadOnboardingBindings).mockReturnValueOnce(load.promise);
     await using screen = await render(<NameForm credential="synthetic.invite" onJoined={vi.fn()} />);
-    await expect.element(screen.getByRole("status")).toHaveTextContent("Loading the name form");
+    await expect.element(screen.getByRole("status")).toHaveTextContent("Loading the name form…");
     await screen.unmount();
     await act(async () => { load.resolve({ ...bindings, mount_guest_name: mount }); await load.promise; });
     expect(mount).not.toHaveBeenCalled();
