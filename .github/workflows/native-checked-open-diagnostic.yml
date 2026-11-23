@@ -23,6 +23,7 @@ jobs:
       ENGINE_PHASE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-') }}
       ENGINE_REUSE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-') }}
       PAIRED_REUSE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-') }}
+      READINESS_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-readiness-') }}
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
       STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
       WASM_BINDGEN_VERSION: "0.2.130"
@@ -65,6 +66,10 @@ jobs:
           git -C "$scratch/probe" apply --unidiff-zero "$GITHUB_WORKSPACE/tools/diagnostics/t16-reopen-probe.patch"
           mkdir -p "$scratch/probe/tools/src/bin"
           cp tools/diagnostics/t16-checked-open.rs "$scratch/probe/tools/src/bin/t16-checked-open.rs"
+          cp tools/diagnostics/t16-readiness.rs "$scratch/probe/tools/src/startup_probe/readiness.rs"
+          cp tools/diagnostics/t16-readiness.rs "$evidence/probe-readiness.rs"
+          git -C "$scratch/probe" diff --binary > "$evidence/probe-overlay.patch"
+          sha256sum "$evidence/probe-overlay.patch" > "$evidence/probe-overlay.sha256"
           sha256sum tools/diagnostics/t16-* > "$evidence/diagnostic-source.sha256"
           if [[ "$ENGINE_PHASE_PROOF" == true ]]; then
             touch "$scratch/bin/engine-phases"
@@ -389,6 +394,7 @@ jobs:
               acceptance:false,limiter_qualified:false,filesystem_cache:"unmanaged after import and clean stop"}' \
             > "$evidence/paired-inputs.json"
           printf 'round\tposition\tvariant\tdescriptor_us\thtml_us\tdb_bytes\n' > "$evidence/paired-reopen.tsv"
+          printf 'round\tvariant\tplain_us\ttraced_us\ttraced_minus_plain_us\n' > "$evidence/readiness-overhead.tsv"
           # All permutations: each arm occupies each position twice.
           for round in 1 2 3 4 5 6; do
             case "$round" in
@@ -413,17 +419,32 @@ jobs:
               # fresh owned directory so each side receives the exact same workload bytes.
               trial="$scratch/trials/paired-$round"
               test ! -e "$trial"
+              observations=(plain)
+              if [[ "$READINESS_PROOF" == true ]]; then
+                observations=(plain spans)
+                if (( round % 2 == 0 )); then observations=(spans plain); fi
+              fi
+              for observation in "${observations[@]}"; do
+              test ! -e "$trial"
               sample="$evidence/paired-$round-$variant.json"
+              extra=()
+              if [[ "$observation" == spans ]]; then
+                sample="$evidence/paired-$round-$variant-spans.json"
+                extra=(server-spans)
+              fi
               sudo -n unshare --net --pid --fork --mount-proc --kill-child -- bash -euc '
                 ip link set dev lo up
                 user="$1"; shift
                 exec runuser -u "$user" -- "$@"
               ' _ "$(id -un)" env -u REDB_CHECKED_OPEN_DIAGNOSTICS -u T3_CODE_LS_DIAGNOSTIC_DB \
                 "$probe" probe-reopen "$(command -v node)" "$bundle" \
-                "$trial" "$driver" "$chrome" "$mode" | tee "$sample" > /dev/null
-              jq -er --argjson round "$round" --argjson position "$((position + 1))" --arg variant "$variant" '
+                "$trial" "$driver" "$chrome" "$mode" "${extra[@]}" | tee "$sample" > /dev/null
+              jq -er --argjson round "$round" --argjson position "$((position + 1))" --arg variant "$variant" --arg observation "$observation" '
                 select(.journey == "J02" and .profile == (if $variant == "stock" then "stock" else "native" end)
-                  and .native_lookups == false and .persistence_spans == null
+                  and .native_lookups == false
+                  and (if $observation == "plain" then .persistence_spans == null and .readiness_phases == null
+                    else (.persistence_spans | length > 0) and (.readiness_phases.rows | length > 0)
+                      and .readiness_phases.causal_critical_path_qualified == false end)
                   and .snapshot.valid and .snapshot.threadCount == 32 and .snapshot.messageCount == 200
                   and .fixture.threads == 32 and .fixture.messages_per_thread == 200
                   and .fixture.total_messages == 6400 and .database_migration > 0 and .database_bytes_at_reopen > 0
@@ -431,21 +452,38 @@ jobs:
                   and .readiness_evidence.endpoint == "/.well-known/t3/environment"
                   and .readiness_evidence.runtime_pid_matched and .readiness_evidence.environment_id_matched
                   and .readiness_evidence.html_root_matched
+                  and .readiness_evidence.observer.runtime_first_observed_us > 0
+                  and .readiness_evidence.observer.runtime_first_observed_us <= .descriptor_micros
+                  and .readiness_evidence.observer.descriptor_requests[-1].success
+                  and .readiness_evidence.observer.descriptor_requests[-1].end_us == .descriptor_micros
                   and (.readiness_evidence.descriptor.environmentId | type == "string")
                   and .cpu_rss_qualified == false and .cached_paint_attribution_qualified == false
                   and .browser.firstShellVisibleMillis > 0 and .browser.selectedTextVisibleMillis > 0
                   and .browser.authoritativeShellHttpMillis > 0 and .browser.authoritativeThreadMillis > 0
                   and .migration_evidence.source == (if $variant == "stock" then "live-sqlite-descriptors" else "stopped-native-catalog" end)
                   and (any(.resources.server.processes[]; .role == "native-database-helper") == ($variant != "stock")))
-                | [$round,$position,$variant,.descriptor_micros,.html_micros,.database_bytes_at_reopen] | @tsv' \
+                | [$round,$position,($variant + "-" + $observation),.descriptor_micros,.html_micros,.database_bytes_at_reopen] | @tsv' \
                 "$sample" >> "$evidence/paired-reopen.tsv"
               test ! -e "$trial/checked-open-trace"
               test ! -e "$trial/checked-open-phases.log"
               (
                 cd "$trial"
                 find .codex/sessions -type f -print0 | sort -z | xargs -0 sha256sum
-              ) > "$evidence/fixture-$round-$variant.sha256"
+              ) > "$evidence/fixture-$round-$variant-$observation.sha256"
               rm -r -- "$trial"
+              done
+              cp "$evidence/fixture-$round-$variant-plain.sha256" "$evidence/fixture-$round-$variant.sha256"
+              if [[ "$READINESS_PROOF" == true ]]; then
+                cmp "$evidence/fixture-$round-$variant-plain.sha256" "$evidence/fixture-$round-$variant-spans.sha256"
+                match='{fixture,fixture_workspace,database_migration,saved_thread_sequence,snapshot:(.snapshot | {valid,threadCount,messageCount,selectedThreadId})}'
+                diff -u <(jq -c "$match" "$evidence/paired-$round-$variant.json") \
+                  <(jq -c "$match" "$evidence/paired-$round-$variant-spans.json")
+                jq -sr --argjson round "$round" --arg variant "$variant" '
+                  map(.descriptor_micros) as [$plain,$traced] |
+                  [$round,$variant,$plain,$traced,$traced - $plain] | @tsv' \
+                  "$evidence/paired-$round-$variant.json" "$evidence/paired-$round-$variant-spans.json" \
+                  >> "$evidence/readiness-overhead.tsv"
+              fi
             done
             for variant in control reuse; do
               cmp "$evidence/fixture-$round-stock.sha256" "$evidence/fixture-$round-$variant.sha256"
@@ -457,7 +495,9 @@ jobs:
             diff -u <(jq -c "$match" "$evidence/paired-$round-control.json") \
               <(jq -c "$match" "$evidence/paired-$round-reuse.json")
           done
-          test "$(wc -l < "$evidence/paired-reopen.tsv")" -eq 19
+          expected=19
+          if [[ "$READINESS_PROOF" == true ]]; then expected=37; fi
+          test "$(wc -l < "$evidence/paired-reopen.tsv")" -eq "$expected"
           uptime >> "$evidence/paired-host.txt"
       - name: Remove task-owned generated files and record available space
         if: always() && env.DIAGNOSTIC_WORK != ''

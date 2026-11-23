@@ -93,3 +93,57 @@ do not establish cached-paint attribution or presentation to a physical display.
 Filesystem cache remains unmanaged after import. No limiter or resource claim,
 global performance acceptance, product pin or normal profile change follows.
 Use only this fresh run's matched observations; do not pool earlier runs or hosts.
+
+
+## Descriptor-window attribution after verified-page reuse
+
+Use `measure/t3code-ls-t16-checked-open-engine-reuse-paired-readiness-*` to
+extend the same proof route with plain/traced pairs for each stock, control
+and reuse arm. The six existing arm permutations remain. Within each arm,
+plain precedes tracing in odd rounds and follows it in even rounds. Both
+members seed fresh profiles at the same path; transcript hashes, fixture
+coordinates, migration head and selected history must match. Runtime engine
+read counters remain disabled. There is no new runner or engine algorithm.
+
+The existing Rust probe records the first PID-bound runtime record it observes
+and descriptor request start/end offsets on its monotonic spawn clock. A
+successful descriptor is still checked against the profile environment ID,
+then the actual HTML root is fetched. Record observation can lag publication
+by polling and scheduling. Request wall time includes launching curl. These
+are observer boundaries, not exact application event timestamps.
+
+With the existing `server-spans` option, `readiness_phases` retains emitted
+`server.startup.*`, `Omdb.make`, `Sqlite.setup` and `NativeDatabase.*` spans.
+The trace is read after clean shutdown so closed spans crossing descriptor
+readiness can be clipped to that window. Absolute server epoch timestamps
+are aligned to the probe's pre-spawn epoch sample; that alignment is not a
+shared monotonic clock. Trace output and retained spans stay bounded by the
+existing parser. Completed startup spans after readiness are excluded.
+
+Each named row reports summed held time and its interval union. The overall
+instrumented union merges every retained interval, including nested and
+parallel spans. Never sum the named rows as elapsed time. Held spans include
+await and scheduler time; neither their duration nor uncovered time proves
+CPU cost or a causal critical path. `http.wait` measures the startup fiber's
+wait for its listener signal, not all HTTP initialization. Missing spans are
+not zero work. The remaining wall interval includes loading, uninstrumented
+work, observer delay and clock alignment error. CPU/RSS, physical I/O and
+causal critical-path qualification remain false.
+
+`readiness-overhead.tsv` retains each paired descriptor delta. Assess those
+six deltas per arm and their spread before trusting trace attribution. Do not
+subtract one median as a universal correction or pool this probe's timings
+with prior artifacts. Plain samples also use the new boundary observer.
+The original `paired-*.json` filenames hold plain observations; `-spans.json`
+holds diagnostics. Raw trace files and profiles are removed with each trial.
+The existing full bundle/tool/probe/source manifests identify both arms;
+`diagnostic-source.sha256` also covers the Rust interval accountant. The
+patched probe overlay must be retained alongside its binary hash.
+
+Decision rule: use the largest named held interval intersecting readiness as
+a source investigation candidate only after overhead is acceptably bounded.
+A large uncovered interval directs the next observation toward module/layer
+construction or observer delay. No current result authorizes changing reads,
+transactions, integrity checks, activation or durability. The independently
+qualified engine read counters remain the source for logical backend read
+attribution, not evidence of physical device traffic.

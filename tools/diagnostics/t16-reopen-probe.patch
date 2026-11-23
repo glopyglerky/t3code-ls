@@ -1,33 +1,97 @@
 --- a/tools/src/startup_probe.rs
 +++ b/tools/src/startup_probe.rs
-@@ -127 +127 @@
+@@ -1,4 +1,5 @@
+ mod browser;
++mod readiness;
+ pub(crate) mod reopen;
+ pub(crate) mod resources;
+
+@@ -124,7 +125,7 @@
+     let start = Instant::now();
+     let mut child = OwnedChild(command.spawn()?);
+     let pairing = child.0.stdout.take().map(pairing_link);
 -    let (origin, descriptor_micros, html_micros, database_migration) =
 +    let (origin, descriptor_micros, html_micros, database_migration, _) =
-@@ -296 +296 @@
+         sample(&mut child.0, &state, start)?;
+     let database_migration = database_migration
+         .ok_or("served descriptor did not identify an applied database migration")?;
+@@ -293,8 +294,10 @@
+     child: &mut Child,
+     state: &Path,
+     start: Instant,
 -) -> Result<(String, u128, u128, Option<u64>)> {
 +) -> Result<(String, u128, u128, Option<u64>, Value)> {
-@@ -330 +330,7 @@
+     let runtime_path = state.join("server-runtime.json");
++    let mut runtime_observed_us = None;
++    let mut descriptor_requests = Vec::new();
+     let (origin, descriptor, descriptor_micros) = loop {
+         if let Some(status) = child.try_wait()? {
+             return Err(format!("bundled application exited before readiness: {status}").into());
+@@ -305,10 +308,16 @@
+                     .into(),
+             );
+         }
+-        if let Some(origin) = runtime_origin(&runtime_path, child.id())?
+-            && let Some(response) = fetch(&origin, "/.well-known/t3/environment")?
+-        {
+-            break (origin, response, start.elapsed().as_micros());
++        if let Some(origin) = runtime_origin(&runtime_path, child.id())? {
++            runtime_observed_us.get_or_insert_with(|| start.elapsed().as_micros());
++            let request_start_us = start.elapsed().as_micros();
++            let response = fetch(&origin, "/.well-known/t3/environment")?;
++            let request_end_us = start.elapsed().as_micros();
++            descriptor_requests.push(json!({"start_us": request_start_us,
++                "end_us": request_end_us, "success": response.is_some()}));
++            if let Some(response) = response {
++                break (origin, response, request_end_us);
++            }
+         }
+         thread::sleep(POLL_INTERVAL);
+     };
+@@ -327,7 +336,18 @@
+     if !std::str::from_utf8(&html)?.contains("id=\"root\"") {
+         return Err("web entry did not contain the application root".into());
+     }
 -    Ok((origin, descriptor_micros, html_micros, migration))
 +    Ok((
 +        origin,
 +        descriptor_micros,
 +        html_micros,
 +        migration,
-+        descriptor,
++        json!({"descriptor": descriptor, "observer": {
++            "runtime_first_observed_us": runtime_observed_us,
++            "descriptor_requests": descriptor_requests,
++            "poll_interval_ms": POLL_INTERVAL.as_millis(),
++            "limits": "PID-bound runtime record observation, not publication time; request wall includes curl spawn and scheduling"
++        }}),
 +    ))
+ }
+
+ fn runtime_origin(path: &Path, pid: u32) -> Result<Option<String>> {
 --- a/tools/src/startup_probe/reopen.rs
 +++ b/tools/src/startup_probe/reopen.rs
-@@ -119 +119 @@
+@@ -116,7 +116,7 @@
+     let initial_start = Instant::now();
+     let mut initial = OwnedChild(make_server()?.spawn()?);
+     let pairing = pairing_link(initial.0.stdout.take().ok_or("missing pairing pipe")?);
 -    let (initial_origin, _, _, initial_migration) =
 +    let (initial_origin, _, _, initial_migration, _) =
-@@ -139,0 +140,6 @@
+         sample(&mut initial.0, &state, initial_start)
+             .map_err(|error| format!("{mode_label} seed readiness: {error}"))?;
+     if initial_origin != origin {
+@@ -137,9 +137,26 @@
+         return Err("seeded workspace used an unexpected database".into());
+     }
+
 +    let database_bytes_at_reopen = fs::metadata(state.join(if native {
 +        "statev2.omdb"
 +    } else {
 +        "statev2.sqlite"
 +    }))?
 +    .len();
-@@ -142,0 +149,11 @@
+     let resource_baseline = super::resources::Baseline::capture(browser.driver_pid())?;
+     let trace_path = trial.join("reopened-server-trace.ndjson");
+     let mut command = make_server()?;
 +    if let Some(helper) = env::var_os("T3_CODE_LS_DIAGNOSTIC_DB") {
 +        if mode_label != "native" || trace_spans {
 +            return Err(
@@ -39,16 +103,59 @@
 +            Path::new(&helper).canonicalize()?,
 +        );
 +    }
-@@ -154 +171 @@
+     if trace_spans {
+         command
+             .env("T3CODE_TRACE_MIN_LEVEL", "Trace")
+@@ -151,7 +168,7 @@
+     let mut reopened = OwnedChild(command.spawn()?);
+     let resources = resource_baseline.start(reopened.0.id(), started)?;
+     let _pairing_output = pairing_link(reopened.0.stdout.take().ok_or("missing reopen output")?);
 -    let (reopened_origin, descriptor_micros, html_micros, migration) =
 +    let (reopened_origin, descriptor_micros, html_micros, migration, readiness_descriptor) =
-@@ -239,0 +257,9 @@
+         sample(&mut reopened.0, &state, started)
+             .map_err(|error| format!("{mode_label} reopen readiness: {error}"))?;
+     if reopened_origin != origin {
+@@ -188,6 +205,18 @@
+     let resources = resources.finish()?;
+     browser.close()?;
+     stop_gracefully(&mut reopened)?;
++    let readiness_phases = if trace_spans {
++        // Read after shutdown to include spans that crossed descriptor readiness.
++        // Clip in Rust rather than dropping those intervals at the boundary.
++        let spans = read_server_spans(
++            &trace_path,
++            epoch_millis,
++            epoch_millis + started.elapsed().as_secs_f64() * 1000.0,
++        )?;
++        Some(super::readiness::summarize(&spans, descriptor_micros)?)
++    } else {
++        None
++    };
+     let persistence_spans = if trace_spans {
+         let mut spans =
+             read_server_spans(&trace_path, epoch_millis, epoch_millis + measured_millis)?;
+@@ -237,6 +266,16 @@
+         json!({
+             "schema_version": 1, "journey": "J02", "profile": mode_label, "native_lookups": native_lookups,
+             "fixture": {"threads": THREADS, "messages_per_thread": MESSAGES, "total_messages": THREADS * MESSAGES, "transcript_bytes": fixture_bytes},
 +            "database_bytes_at_reopen": database_bytes_at_reopen,
 +            "fixture_workspace": workspace,
 +            "readiness_evidence": {
 +                "endpoint": "/.well-known/t3/environment",
-+                "descriptor": readiness_descriptor,
++                "descriptor": readiness_descriptor["descriptor"],
++                "observer": readiness_descriptor["observer"],
 +                "runtime_pid_matched": true,
 +                "environment_id_matched": true,
 +                "html_root_matched": true,
 +            },
+             "descriptor_micros": descriptor_micros, "html_micros": html_micros,
+             "navigation_started_micros": navigation_started_micros, "database_migration": database_migration,
+             "migration_evidence": {
+@@ -250,6 +289,7 @@
+             "filesystem_cache": "unmanaged, after fixture import and clean stop",
+             "resources": resources,
+             "persistence_spans": persistence_spans,
++            "readiness_phases": readiness_phases,
+             "cpu_rss_qualified": false, "cached_paint_attribution_qualified": false,
+         })
+     );
