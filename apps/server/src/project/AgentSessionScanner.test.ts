@@ -164,13 +164,17 @@ const makeTempDir = Effect.fn("AgentSessionScanner.test.makeTempDir")(function* 
 
 const writeTranscript = Effect.fn("AgentSessionScanner.test.writeTranscript")(function* (input: {
   readonly filePath: string;
-  readonly contents: string;
+  readonly contents: string | Uint8Array;
   readonly mtimeMs: number;
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   yield* fileSystem.makeDirectory(path.dirname(input.filePath), { recursive: true });
-  yield* fileSystem.writeFileString(input.filePath, input.contents);
+  if (typeof input.contents === "string") {
+    yield* fileSystem.writeFileString(input.filePath, input.contents);
+  } else {
+    yield* fileSystem.writeFile(input.filePath, input.contents);
+  }
   const seconds = input.mtimeMs / 1000;
   yield* fileSystem.utimes(input.filePath, seconds, seconds);
 });
@@ -1678,7 +1682,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
       }),
     );
 
-    it.effect("imports a rewound Codex thread with the history its new rollout inherits", () =>
+    it.effect.each([false, true])("imports a rewound Codex thread with compressed parent %s", (compressed) =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
@@ -1711,9 +1715,12 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
           .map((record) => `${record}\n`)
           .join("");
 
+        const history = `${keptHistory}${prompt("Rewound request")}\n${reply("Rewound reply")}\n`;
+        const parent = compressed ? NodeZlib.zstdCompressSync(history) : history;
+        if (compressed) expect(Buffer.byteLength(parent)).toBeLessThan(Buffer.byteLength(keptHistory));
         yield* writeTranscript({
-          filePath: path.join(sessionsDir, `rollout-2026-08-24T10-00-00-${threadId}.jsonl`),
-          contents: `${keptHistory}${prompt("Rewound request")}\n${reply("Rewound reply")}\n`,
+          filePath: path.join(sessionsDir, `rollout-2026-08-24T10-00-00-${threadId}.jsonl${compressed ? ".zst" : ""}`),
+          contents: parent,
           mtimeMs: nowMs - 60_000,
         });
         yield* writeTranscript({
