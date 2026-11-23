@@ -1257,23 +1257,28 @@ async function verifyOwnedPtyShutdown(page: Page, workspace: string, shell: stri
   }
 }
 
-async function verifyAlternateTerminalReconnect(page: Page, workspace: string, shell: string) {
-  const script = NodePath.join(workspace, "fixture-terminal-screen.sh");
+async function verifyAlternateTerminalReconnect(
+  page: Page,
+  workspace: string,
+  shell: string,
+  scope: "normal" | "contention" = "normal",
+) {
+  const script = NodePath.join(workspace, `fixture-terminal-screen-${scope}.sh`);
   const release = `${script}.leave`;
   const exited = `${script}.exited`;
   NodeFS.writeFileSync(
     script,
     [
       "trap 'exit 130' INT",
-      'saved=$(stty -g) || exit 1',
-      `trap 'status=$?; stty "$saved"; printf "%s\\n" "$status" > "$0.exited"' EXIT`,
-      'stty -echo -icanon min 1 time 0 || exit 1',
+      'saved=$(command -p stty -g) || exit 1',
+      `trap 'status=$?; command -p stty "$saved"; printf "%s\\n" "$status" > "$0.exited"' EXIT`,
+      'command -p stty -echo -icanon min 1 time 0 || exit 1',
       'query() {',
       `  printf '\\033[%s;%sH\\033[6n' "$2" "$3"`,
       `  IFS= read -r -t 10 -d R response || exit 1`,
       `  printf -v expected '\\033[%s;%s' "$2" "$3"`,
       '  [[ $response == "$expected" ]] || exit 1',
-      `  printf '%sR' "$response" | od -An -tx1 | tr -d ' \\n' > "$0.$1"`,
+      `  printf '%sR' "$response" > "$0.$1" || exit 1`,
       '}',
       `printf 'fixture-main-screen:%s\\n\\033[?1049h\\033[Hfixture-alternate-screen:%s 世界\\n' "$1" "$1"`,
       "query queried 7 11",
@@ -1294,13 +1299,13 @@ async function verifyAlternateTerminalReconnect(page: Page, workspace: string, s
   const input = await terminalInput(page);
   await page.evaluate((line) => navigator.clipboard.writeText(line), `/bin/bash ${shellQuote} "$$"`);
   await input.press("Control+Shift+v");
-  await waitForTerminalCopy(page, input, /fixture-terminal-screen\.sh/u, "before submission");
+  await waitForTerminalCopy(page, input, /fixture-terminal-screen-(normal|contention)\.sh/u, "before submission");
   await input.press("Enter");
   const [reportedShell, foregroundPid] =
     (await waitForTerminalReceipt(page, `${script}.entered`)).split(" ");
   Assert.equal(reportedShell, shell);
   Assert.match(foregroundPid ?? "", /^\d+$/u);
-  Assert.equal(await waitForTerminalReceipt(page, `${script}.queried`), "1b5b373b313152");
+  Assert.equal(Buffer.from(await waitForTerminalReceipt(page, `${script}.queried`)).toString("hex"), "1b5b373b313152");
   const originalShell = liveLinuxProcess(Number(shell));
   const foreground = liveLinuxProcess(Number(foregroundPid));
   Assert.ok(originalShell && foreground);
@@ -1318,7 +1323,7 @@ async function verifyAlternateTerminalReconnect(page: Page, workspace: string, s
   Assert.deepEqual(liveLinuxProcess(Number(foregroundPid)), foreground);
   Assert.equal(liveLinuxProcess(Number(shell))?.started, originalShell.started);
   NodeFS.writeFileSync(release, "leave\n", { flag: "wx" });
-  Assert.equal(await waitForTerminalReceipt(page, `${script}.reconnected`), "1b5b383b313252");
+  Assert.equal(Buffer.from(await waitForTerminalReceipt(page, `${script}.reconnected`)).toString("hex"), "1b5b383b313252");
   Assert.equal(await waitForTerminalReceipt(page, exited), "0");
   const restored = new RegExp(`fixture-primary-restored:${shell}`, "u");
   const primary = await waitForSelectedTerminalText(page, reattached, restored);
@@ -1800,7 +1805,7 @@ async function verifyTerminalContention(
     );
     Assert.equal(reopened.assistantMessageId, completed.assistantMessageId);
     await assertExactChat();
-    const alternate = await verifyAlternateTerminalReconnect(page, workspace, shell);
+    const alternate = await verifyAlternateTerminalReconnect(page, workspace, shell, "contention");
     Assert.ok(!NodeFS.existsSync(NodePath.join(workspace, ".codex-probe-write-action.txt")));
     return {
       helper: { pid: helper, sha256 },
