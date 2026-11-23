@@ -15,6 +15,7 @@ interface ImportMetaEnv {
   readonly VITE_RELAY_OTLP_TRACES_DATASET: string;
   readonly VITE_RELAY_OTLP_TRACES_TOKEN: string;
   readonly VITE_T3_CODE_LS_COMPOSER_OFFSETS?: "rust";
+  readonly VITE_T3_CODE_LS_COMPOSER_SUBMIT_RENDERER?: "dioxus";
   readonly VITE_T3_CODE_LS_PAIRING_RENDERER?: "dioxus";
   readonly VITE_T3_CODE_LS_GUEST_NAME_RENDERER?: "dioxus";
   readonly VITE_T3_CODE_LS_THREAD_FIND_RENDERER?: "dioxus";

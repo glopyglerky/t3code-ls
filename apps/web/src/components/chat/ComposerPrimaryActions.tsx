@@ -22,6 +22,7 @@ import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../Sideb
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { DioxusComposerSubmit } from "./DioxusComposerSubmit";
 import {
   alternateComposerDispatchAction,
   resolveComposerDispatchMode,
@@ -57,6 +58,7 @@ interface ComposerPrimaryActionsProps {
   canResume?: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
   isEditingQueuedMessage?: boolean;
+  useDioxusSubmit?: boolean;
   onSubmitMessage?: MouseEventHandler<HTMLButtonElement>;
   onResume?: () => void;
   onPreviousPendingQuestion: () => void;
@@ -239,6 +241,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   canResume = false,
   preserveComposerFocusOnPointerDown = false,
   isEditingQueuedMessage = false,
+  useDioxusSubmit = false,
   onSubmitMessage,
   onResume,
   onPreviousPendingQuestion,
@@ -249,6 +252,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   onToggleKeepFullHistory,
 }: ComposerPrimaryActionsProps) {
   const [stopPhase, setStopPhase] = useStopPhase({ runId, canInterrupt, canOperateThread });
+  const [useStandardSubmit, setUseStandardSubmit] = useState(false);
   const pointerFocusProps = preserveComposerFocusOnPointerDown
     ? { onPointerDown: preventPointerFocus }
     : undefined;
@@ -398,32 +402,17 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         ? `Click to ${followUpBehavior}, ${isMacPlatform(navigator.platform) ? "⌘" : "Ctrl"}-click${alternateShortcutLabel ? ` or ${alternateShortcutLabel}` : ""} to ${alternateAction}`
         : submitLabel);
 
-  const sendButton = (
-    <button
-      type={showResume ? "button" : "submit"}
-      className={cn(
-        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
-        stageBackdropVariant
-          ? "bg-transparent text-white enabled:shadow-black/24 enabled:hover:brightness-110 disabled:opacity-64"
-          : "bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover disabled:bg-foreground/12 disabled:text-muted-foreground",
-      )}
-      {...pointerFocusProps}
-      onClick={(event) => {
-        if (stopPhase === "landed") {
-          event.preventDefault();
-          return;
-        }
-        if (showResume) onResume?.();
-        else onSubmitMessage?.(event);
-      }}
-      disabled={
-        isSendBusy ||
-        isSendDisabled ||
-        isEnvironmentUnavailable ||
-        (!hasSendableContent && !showResume)
-      }
-      aria-label={submitStatus ?? submitLabel}
-    >
+  const sendButtonClassName = cn(
+    "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-control-highlight hover:scale-105 active:inset-shadow-control-pressed active:shadow-none disabled:pointer-events-none disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8 [&_svg]:pointer-events-none",
+    stageBackdropVariant
+      ? "bg-transparent text-white enabled:shadow-black/24 enabled:hover:brightness-110 disabled:opacity-64"
+      : "bg-message-action text-message-action-foreground enabled:shadow-message-action/24 hover:bg-message-action-hover disabled:bg-foreground/12 disabled:text-muted-foreground",
+  );
+  const sendButtonDisabled =
+    isSendBusy || isSendDisabled || isEnvironmentUnavailable || (!hasSendableContent && !showResume);
+  const sendButtonLabel = submitStatus ?? submitLabel;
+  const sendButtonArt = (
+    <>
       {stageBackdropVariant ? (
         <span className="pointer-events-none absolute inset-0 -z-10" aria-hidden="true">
           <StageBackdropButtonArt variant={stageBackdropVariant} />
@@ -450,12 +439,56 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           />
         </svg>
       )}
+    </>
+  );
+  const sendButton = (
+    <button
+      type={showResume ? "button" : "submit"}
+      className={sendButtonClassName}
+      {...pointerFocusProps}
+      onClick={(event) => {
+        if (stopPhase === "landed") {
+          event.preventDefault();
+          return;
+        }
+        if (showResume) onResume?.();
+        else onSubmitMessage?.(event);
+      }}
+      disabled={sendButtonDisabled}
+      aria-label={sendButtonLabel}
+    >
+      {sendButtonArt}
     </button>
   );
+  const renderDioxusSubmit =
+    useDioxusSubmit &&
+    !voiceInputActive &&
+    !showResume &&
+    !isRunning &&
+    !canInterrupt &&
+    stopPhase === null &&
+    !isEditingQueuedMessage &&
+    compactTokens === null;
 
   const submit = (
     <Tooltip key="submit">
-      <TooltipTrigger render={<span className="inline-flex" />}>{sendButton}</TooltipTrigger>
+      <TooltipTrigger render={<span className="inline-flex" />}>
+        {renderDioxusSubmit ? (
+          <DioxusComposerSubmit
+            className={sendButtonClassName}
+            label={sendButtonLabel}
+            disabled={sendButtonDisabled}
+            {...pointerFocusProps}
+            useStandard={useStandardSubmit}
+            onUseStandard={() => setUseStandardSubmit(true)}
+            standardButton={sendButton}
+          >
+            {sendButtonArt}
+          </DioxusComposerSubmit>
+        ) : (
+          sendButton
+        )}
+      </TooltipTrigger>
       <TooltipPopup>{submitTooltip}</TooltipPopup>
     </Tooltip>
   );

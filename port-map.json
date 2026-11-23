@@ -1999,6 +1999,48 @@
       "rust_crates": ["apps/web/rust/pairing"]
     },
     {
+      "id": "browser-composer-submit-dioxus",
+      "state": "candidate",
+      "domain_owner": "apps/web/src/components/chat",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/web/src/components/chat/ChatComposer.tsx",
+          "blob": "eb01b8242e2dfaaead2e42b57e6e7508758e90fd"
+        },
+        {
+          "path": "apps/web/src/components/chat/ComposerPrimaryActions.tsx",
+          "blob": "41e5e3c77191f7de29d5b5be62db46c21e778a3e"
+        }
+      ],
+      "rust_paths": ["apps/web/rust/pairing/src/composer_submit.rs"],
+      "adapter_paths": [
+        ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/chat/ChatComposer.tsx",
+        "apps/web/src/components/chat/ComposerFooterControls.tsx",
+        "apps/web/src/components/chat/ComposerPrimaryActions.tsx",
+        "apps/web/src/components/chat/DioxusComposerSubmit.tsx",
+        "apps/web/src/onboarding/dioxusBindings.ts",
+        "apps/web/src/vite-env.d.ts"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["browser"],
+          "state": "candidate",
+          "implementation": "dioxus-wasm",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": ["apps/web/scripts/verify-hybrid-client.ts"],
+      "hosted_acceptance": {
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
+      },
+      "retired_paths": [],
+      "notes": "T01/T02/T11. VITE_T3_CODE_LS_COMPOSER_SUBMIT_RENDERER=dioxus selects the ordinary Send button. The browser submits the existing ChatComposer form, which retains draft, validation and command ownership. Specialized actions use their existing renderer. The bundled native replay proof includes local refusal and an explicit standard control after a blocked Wasm load.",
+      "rust_crates": ["apps/web/rust/pairing"]
+    },
+    {
       "id": "mobile-outbox-delivery",
       "state": "candidate",
       "domain_owner": "apps/mobile/src/state",
