@@ -1,4 +1,4 @@
-use super::CandidatePreparationObservation;
+use super::{CandidatePreparationObservation, NativePromotionIntent};
 use super::{
     IsolatedTrialPreparation, IsolatedTrialPublication, IsolatedTrialRequest,
     IsolatedTrialSelection, IsolatedTrialVerification, MAX_TRIAL_FILE_BYTES, TrialBackupReceipt,
@@ -263,10 +263,21 @@ impl TrialLease {
     }
 
     fn verify_installed_target(&self, activation: &PreparedServiceActivation) -> Result<()> {
-        let version_dir = self
-            .home
-            .join("runtime/versions")
-            .join(&activation.target_version);
+        self.verify_installed_runtime(
+            &activation.target_version,
+            &activation.target_entry_sha256,
+            &activation.target_helper_sha256,
+        )
+        .map(|_| ())
+    }
+
+    fn verify_installed_runtime(
+        &self,
+        version: &str,
+        entry_sha256: &str,
+        helper_sha256: &str,
+    ) -> Result<PathBuf> {
+        let version_dir = self.home.join("runtime/versions").join(version);
         let versions_dir = version_dir.parent().ok_or(Error::IncompatibleStore)?;
         if fs::canonicalize(versions_dir).map_err(io_error)? != versions_dir
             || fs::canonicalize(&version_dir).map_err(io_error)? != version_dir
@@ -285,7 +296,7 @@ impl TrialLease {
             .read_to_string(&mut content)
             .map_err(io_error)?
             > 256
-            || content.trim() != activation.target_version
+            || content.trim() != version
         {
             return Err(Error::IncompatibleStore);
         }
@@ -298,8 +309,8 @@ impl TrialLease {
             .ok_or(Error::IncompatibleStore)?
             .join("native-bin/t3-code-ls-db");
         for (path, sha256, executable) in [
-            (&entry, &activation.target_entry_sha256, true),
-            (&helper, &activation.target_helper_sha256, false),
+            (&entry, entry_sha256, true),
+            (&helper, helper_sha256, false),
         ] {
             if fs::canonicalize(path).map_err(io_error)? != *path {
                 return Err(Error::IncompatibleStore);
@@ -310,11 +321,47 @@ impl TrialLease {
             } else {
                 trial_file_digest(&file)?
             };
-            if digest != *sha256 {
+            if digest != sha256 {
                 return Err(Error::IncompatibleStore);
             }
         }
-        self.directories.verify(&self.home)
+        self.directories.verify(&self.home)?;
+        Ok(helper)
+    }
+
+    async fn verify_promotion_bindings(&self, saved: &IsolatedTrialVerification) -> Result<()> {
+        let Some(intent) = &saved.promotion_intent else {
+            return Ok(());
+        };
+        let activation = saved
+            .request
+            .activation
+            .as_ref()
+            .ok_or(Error::IncompatibleStore)?;
+        let source = self.verify_installed_runtime(
+            &activation.from_version,
+            &intent.source_entry_sha256,
+            &intent.source_helper_sha256,
+        )?;
+        let target = self.verify_installed_runtime(
+            &activation.target_version,
+            &activation.target_entry_sha256,
+            &activation.target_helper_sha256,
+        )?;
+        for version in [&activation.from_version, &activation.target_version] {
+            let entry = self.home.join("runtime/versions").join(version).join("t3");
+            if fs::metadata(entry).map_err(io_error)?.mode() & 0o111 == 0 {
+                return Err(Error::IncompatibleStore);
+            }
+        }
+        verify_intent_helper(&source, &intent.source_helper_schema_sha256).await?;
+        verify_intent_helper(&target, &activation.target_schema_sha256).await?;
+        self.verify_installed_runtime(
+            &activation.from_version,
+            &intent.source_entry_sha256,
+            &intent.source_helper_sha256,
+        )?;
+        self.verify_activation(&saved.request)
     }
 
     fn sync_publication(&self) -> Result<()> {
@@ -482,7 +529,8 @@ pub(super) async fn verify(
     if saved.request != request || saved.preparation != preparation {
         return Err(Error::IncompatibleStore);
     }
-    lease.verify_candidate(&request, &preparation).await
+    lease.verify_candidate(&request, &preparation).await?;
+    lease.verify_promotion_bindings(&saved).await
 }
 
 pub(super) async fn move_sealed(
@@ -496,6 +544,10 @@ pub(super) async fn move_sealed(
     let saved = read_trial_receipt::<IsolatedTrialVerification>(&receipt)?
         .ok_or(Error::IncompatibleStore)?;
     validate_observation(&saved)?;
+    if matches!(movement, SealedMove::Publish) && saved.promotion_intent.is_some() {
+        // An intent must not enter the legacy database-only publication path.
+        return Err(Error::IncompatibleStore);
+    }
     let activation = saved
         .request
         .activation
@@ -742,6 +794,7 @@ pub(super) async fn inspect_selection(
     if read_trial_receipt::<IsolatedTrialVerification>(&receipt)?.as_ref() != Some(&saved) {
         return Err(Error::IncompatibleStore);
     }
+    lease.verify_promotion_bindings(&saved).await?;
     lease.verify_inputs()?;
     Ok(IsolatedTrialSelection {
         update_id,
@@ -767,6 +820,7 @@ pub(super) async fn prepare(
         }
         validate_isolated_trial_preparation(&request, &saved.preparation)?;
         lease.verify_candidate(&request, &saved.preparation).await?;
+        lease.verify_promotion_bindings(&saved).await?;
         lease.sync_publication()?;
         return Ok(saved.preparation);
     }
@@ -851,6 +905,7 @@ pub(super) async fn prepare(
         request,
         preparation,
         candidate_observation: None,
+        promotion_intent: None,
     };
     write_trial_receipt(
         &receipt,
@@ -864,7 +919,11 @@ pub(super) async fn prepare(
 // The observation proves the exact stopped-candidate check. It grants no activation.
 pub(super) fn validate_observation(saved: &IsolatedTrialVerification) -> Result<()> {
     let Some(observation) = &saved.candidate_observation else {
-        return Ok(());
+        return if saved.promotion_intent.is_none() {
+            Ok(())
+        } else {
+            Err(Error::IncompatibleStore)
+        };
     };
     if observation.verification_json.len() > 4096 {
         return Err(Error::IncompatibleStore);
@@ -882,6 +941,7 @@ pub(super) fn validate_observation(saved: &IsolatedTrialVerification) -> Result<
         .map(|byte| format!("{byte:02x}"))
         .collect();
     if input.candidate_observation.is_some()
+        || input.promotion_intent.is_some()
         || input.request != saved.request
         || input.preparation != saved.preparation
         || witness.protocol != 1
@@ -894,6 +954,21 @@ pub(super) fn validate_observation(saved: &IsolatedTrialVerification) -> Result<
     {
         return Err(Error::IncompatibleStore);
     }
+    if let Some(intent) = &saved.promotion_intent {
+        if intent.version != 1
+            || intent.verification_sha256 != witness.verification_sha256
+            || ![
+                &intent.verification_sha256,
+                &intent.source_entry_sha256,
+                &intent.source_helper_sha256,
+                &intent.source_helper_schema_sha256,
+            ]
+            .into_iter()
+            .all(|digest| super::valid_digest(digest))
+        {
+            return Err(Error::IncompatibleStore);
+        }
+    }
     Ok(())
 }
 
@@ -905,7 +980,7 @@ pub(super) async fn record_observation(
     let mut proposed: IsolatedTrialVerification =
         serde_json::from_str(&observation.verification_json)
             .map_err(|_| Error::IncompatibleStore)?;
-    if proposed.candidate_observation.is_some() {
+    if proposed.candidate_observation.is_some() || proposed.promotion_intent.is_some() {
         return Err(Error::IncompatibleStore);
     }
     validate_isolated_trial_request(&home, &update_id, &proposed.request)?;
@@ -917,6 +992,7 @@ pub(super) async fn record_observation(
     let saved = read_trial_receipt::<IsolatedTrialVerification>(&receipt)?
         .ok_or(Error::IncompatibleStore)?;
     validate_observation(&saved)?;
+    proposed.promotion_intent = saved.promotion_intent.clone();
     if saved.request != proposed.request
         || saved.preparation != proposed.preparation
         || (saved.candidate_observation.is_some() && saved != proposed)
@@ -958,7 +1034,133 @@ pub(super) async fn record_observation(
     lease
         .verify_candidate(&proposed.request, &proposed.preparation)
         .await?;
+    lease.verify_promotion_bindings(&proposed).await?;
     Ok(
         serde_json::json!({"witness": proposed.candidate_observation.unwrap().witness, "reused": reused}),
     )
+}
+
+// The capability command is read-only. Bound both pipes and execution time before
+// extending a receipt that an older rollback helper would refuse to parse.
+async fn verify_intent_helper(path: &Path, schema: &str) -> Result<()> {
+    use std::process::Stdio;
+    use tokio::io::AsyncReadExt;
+    let mut child = tokio::process::Command::new(path)
+        .arg("trial-capabilities")
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(io_error)?;
+    let stdout = child.stdout.take().ok_or(Error::IncompatibleStore)?;
+    let stderr = child.stderr.take().ok_or(Error::IncompatibleStore)?;
+    let read = async move {
+        let mut output = Vec::new();
+        let mut errors = Vec::new();
+        let out = async { stdout.take(8193).read_to_end(&mut output).await };
+        let err = async { stderr.take(8193).read_to_end(&mut errors).await };
+        let (status, _, _) = tokio::try_join!(child.wait(), out, err).map_err(io_error)?;
+        if !status.success() || output.len() > 8192 || !errors.is_empty() {
+            return Err(Error::IncompatibleStore);
+        }
+        let frame: serde_json::Value =
+            serde_json::from_slice(&output).map_err(|_| Error::IncompatibleStore)?;
+        if frame["ok"] != true
+            || frame["result"]["version"] != 1
+            || frame["result"]["engine"] != "omdb"
+            || frame["result"]["engineRevision"] != crate::application::OMDB_REVISION
+            || frame["result"]["sealedTrialRollback"] != 1
+            || frame["result"]["promotionIntent"] != 1
+            || frame["result"]["targetSchemaSha256"] != schema
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), read)
+        .await
+        .map_err(|_| Error::IncompatibleStore)?
+}
+
+pub(super) async fn record_promotion_intent(
+    home: PathBuf,
+    update_id: String,
+    intent: NativePromotionIntent,
+) -> Result<serde_json::Value> {
+    let directories = TrialRestoreDirectories::open(&home)?;
+    let receipt = TrialRestoreDirectories::pinned(&directories.state)
+        .join(format!(".statev2-trial-{update_id}.receipt-v1.json"));
+    let mut proposed = read_trial_receipt::<IsolatedTrialVerification>(&receipt)?
+        .ok_or(Error::IncompatibleStore)?;
+    validate_isolated_trial_request(&home, &update_id, &proposed.request)?;
+    validate_isolated_trial_preparation(&proposed.request, &proposed.preparation)?;
+    validate_observation(&proposed)?;
+    if proposed
+        .promotion_intent
+        .as_ref()
+        .is_some_and(|saved| saved != &intent)
+    {
+        return Err(Error::IncompatibleStore);
+    }
+    let saved = proposed.clone();
+    let reused = proposed.promotion_intent.is_some();
+    proposed.promotion_intent = Some(intent);
+    validate_observation(&proposed)?;
+    let lease = TrialLease::open(home.clone(), &proposed.request).await?;
+    directories.verify(&home)?;
+    if read_trial_receipt::<IsolatedTrialVerification>(&receipt)?.as_ref() != Some(&saved) {
+        return Err(Error::IncompatibleStore);
+    }
+    lease
+        .verify_candidate(&proposed.request, &proposed.preparation)
+        .await?;
+    lease.verify_promotion_bindings(&proposed).await?;
+    if !reused {
+        let bytes = serde_json::to_vec(&proposed).map_err(|_| Error::IncompatibleStore)?;
+        if bytes.len() > 8192 {
+            return Err(Error::IncompatibleStore);
+        }
+        let mut stage = tempfile::NamedTempFile::new_in(TrialRestoreDirectories::pinned(
+            &lease.directories.state,
+        ))
+        .map_err(io_error)?;
+        stage.write_all(&bytes).map_err(io_error)?;
+        #[cfg(test)]
+        super::tests::interrupt_trial_publication("promotion-intent-written");
+        stage.as_file().sync_all().map_err(io_error)?;
+        lease.verify_inputs()?;
+        lease.verify_activation(&proposed.request)?;
+        let activation = proposed
+            .request
+            .activation
+            .as_ref()
+            .ok_or(Error::IncompatibleStore)?;
+        let binding = proposed.promotion_intent.as_ref().unwrap();
+        lease.verify_installed_runtime(
+            &activation.from_version,
+            &binding.source_entry_sha256,
+            &binding.source_helper_sha256,
+        )?;
+        if read_trial_receipt::<IsolatedTrialVerification>(&receipt)?.as_ref() != Some(&saved) {
+            return Err(Error::IncompatibleStore);
+        }
+        stage
+            .persist(&receipt)
+            .map_err(|error| io_error(error.error))?;
+    }
+    lease.sync_publication()?;
+    #[cfg(test)]
+    if !reused {
+        super::tests::interrupt_trial_publication("promotion-intent-durable");
+    }
+    if read_trial_receipt::<IsolatedTrialVerification>(&receipt)?.as_ref() != Some(&proposed) {
+        return Err(Error::IncompatibleStore);
+    }
+    lease
+        .verify_candidate(&proposed.request, &proposed.preparation)
+        .await?;
+    lease.verify_promotion_bindings(&proposed).await?;
+    Ok(serde_json::json!({"intent": proposed.promotion_intent, "reused": reused}))
 }

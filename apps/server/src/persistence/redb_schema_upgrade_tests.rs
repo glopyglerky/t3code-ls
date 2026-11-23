@@ -596,7 +596,18 @@ async fn isolated_trial_publish_interrupt_fixture() {
             .is_some_and(|name| name.to_string_lossy().starts_with("t3-redb-test-"))
     );
     let boundary = std::env::var("T3_TEST_INTERRUPT_TRIAL_PUBLICATION").unwrap();
-    if boundary.starts_with("candidate-observation-") {
+    if boundary.starts_with("promotion-intent-") {
+        let intent =
+            serde_json::from_slice(&std::fs::read(home.join("promotion-intent.json")).unwrap())
+                .unwrap();
+        crate::application_storage::record_native_promotion_intent(
+            home,
+            ISOLATED_UPDATE.into(),
+            intent,
+        )
+        .await
+        .unwrap();
+    } else if boundary.starts_with("candidate-observation-") {
         let observation = serde_json::from_slice(
             &std::fs::read(home.join("candidate-observation.json")).unwrap(),
         )
@@ -1291,4 +1302,289 @@ async fn exact_88_history_is_required_and_read_only_future_or_damaged_histories_
         );
         store.shutdown().await.unwrap();
     }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn service_promotion_intent_is_durable_exact_and_keeps_publication_fenced() {
+    use crate::application::PreparedServiceActivation;
+    use crate::application_bootstrap::bootstrap_schema_sha256;
+    use crate::application_server_ownership::OwnerLock;
+    use crate::application_storage::{
+        CandidatePreparationObservation, IsolatedTrialRequest, NativePromotionIntent,
+        TrialSnapshot, backup_service_trial, prepare_isolated_service_trial,
+        publish_isolated_service_trial, record_isolated_candidate_preparation,
+        record_native_promotion_intent,
+    };
+    use sha2::{Digest, Sha256};
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    const UPDATE: &str = ISOLATED_UPDATE;
+    let hash = |bytes: &[u8]| -> String {
+        Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    };
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    assert!(store.bootstrap_application().await.unwrap().initialized);
+    let identity = ApplicationTransactions::new(store.clone())
+        .generation_identity()
+        .await
+        .unwrap()
+        .unwrap();
+    store.shutdown().await.unwrap();
+    let home = fs::canonicalize(fixture.path().parent().unwrap()).unwrap();
+    let state = home.join("userdata");
+    fs::create_dir(&state).unwrap();
+    fs::create_dir(home.join("runtime")).unwrap();
+    let live = state.join("statev2.omdb");
+    fs::rename(fixture.path(), &live).unwrap();
+    OwnerLock::acquire(&state.join("server-owner.sqlite"))
+        .unwrap()
+        .activate_native()
+        .unwrap();
+    let backup = backup_service_trial(home.clone(), UPDATE.into(), identity.catalog_sha256.clone())
+        .await
+        .unwrap();
+    let source_bytes = fs::read(&live).unwrap();
+    let checkpoint = home.join(format!("runtime/native-db-backup/{UPDATE}.omdb"));
+    let checkpoint_bytes = fs::read(&checkpoint).unwrap();
+    let capabilities = crate::application_storage::service_trial_capabilities().unwrap();
+    let helper_bytes = if let Some(path) = std::env::var_os("T3_TEST_PROMOTION_HELPER") {
+        let path = std::path::PathBuf::from(path);
+        assert!(path.is_absolute());
+        assert!(fs::metadata(&path).unwrap().len() <= 128 * 1024 * 1024);
+        println!("T05 promotion intent uses the pinned built Rust helper");
+        fs::read(path).unwrap()
+    } else {
+        println!("T05 promotion intent uses a controlled read-only capability peer");
+        format!(
+            "#!/bin/sh\n[ \"$1\" = trial-capabilities ] || exit 99\nprintf '%s\\n' '{}'\n",
+            json!({"ok": true, "result": capabilities})
+        )
+        .into_bytes()
+    };
+    let install = |version: &str, entry: &[u8]| {
+        let directory = home.join("runtime/versions").join(version);
+        fs::create_dir_all(directory.join("native-bin")).unwrap();
+        fs::write(directory.join(".install-complete"), format!("{version}\n")).unwrap();
+        fs::write(directory.join("t3"), entry).unwrap();
+        fs::set_permissions(directory.join("t3"), fs::Permissions::from_mode(0o700)).unwrap();
+        let helper = directory.join("native-bin/t3-code-ls-db");
+        fs::write(&helper, &helper_bytes).unwrap();
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+        helper
+    };
+    let source_helper = install("1.2.3", b"synthetic source entry");
+    let target_helper = install("1.2.4", b"synthetic candidate entry");
+    let source_entry = home.join("runtime/versions/1.2.3/t3");
+    let target_schema = bootstrap_schema_sha256();
+    let activation = PreparedServiceActivation {
+        update_id: UPDATE.into(),
+        from_version: "1.2.3".into(),
+        target_version: "1.2.4".into(),
+        target_entry_sha256: hash(b"synthetic candidate entry"),
+        target_helper_sha256: hash(&helper_bytes),
+        target_schema_sha256: target_schema.clone(),
+    };
+    let selection = home.join("runtime/service-state.json");
+    let selection_bytes = serde_json::to_vec(&json!({ "protocol": 5, "activeVersion": "1.2.3", "update": {
+        "id": UPDATE, "fromVersion": "1.2.3", "targetVersion": "1.2.4", "dbPath": live, "status": "pending",
+    }})).unwrap();
+    fs::write(&selection, &selection_bytes).unwrap();
+    let request = IsolatedTrialRequest {
+        update_id: UPDATE.into(),
+        database: backup.database,
+        checkpoint: TrialSnapshot {
+            catalog_sha256: identity.catalog_sha256,
+            rows: backup.backup.rows,
+            checksum: backup.backup.checksum,
+        },
+        target_schema_sha256: target_schema.clone(),
+        activation: Some(activation.clone()),
+    };
+    let prepared = prepare_isolated_service_trial(home.clone(), UPDATE.into(), request.clone())
+        .await
+        .unwrap();
+    let verification_json =
+        serde_json::to_string(&json!({"request": request, "preparation": prepared})).unwrap();
+    let observation: CandidatePreparationObservation = serde_json::from_value(json!({
+        "verification_json": verification_json, "witness": {
+            "protocol": 1, "status": "prepared-isolated", "updateId": UPDATE, "targetVersion": "1.2.4",
+            "entrySha256": activation.target_entry_sha256, "helperSha256": activation.target_helper_sha256,
+            "verificationSha256": hash(verification_json.as_bytes()),
+        },
+    })).unwrap();
+    let intent = NativePromotionIntent {
+        version: 1,
+        verification_sha256: hash(verification_json.as_bytes()),
+        source_entry_sha256: hash(b"synthetic source entry"),
+        source_helper_sha256: hash(&helper_bytes),
+        source_helper_schema_sha256: target_schema,
+    };
+    let record = || record_native_promotion_intent(home.clone(), UPDATE.into(), intent.clone());
+    assert!(
+        matches!(record().await, Err(Error::IncompatibleStore)),
+        "no intent before earned observation"
+    );
+    record_isolated_candidate_preparation(home.clone(), UPDATE.into(), observation.clone())
+        .await
+        .unwrap();
+    let receipt = state.join(format!(".statev2-trial-{UPDATE}.receipt-v1.json"));
+    let trial = state.join(format!(".statev2-trial-{UPDATE}.omdb"));
+    let prepared_receipt = fs::read(&receipt).unwrap();
+    let trial_bytes = fs::read(&trial).unwrap();
+    let trial_identity = fs::metadata(&trial).unwrap();
+    let mut stale = intent.clone();
+    stale.verification_sha256 = "0".repeat(64);
+    assert!(matches!(
+        record_native_promotion_intent(home.clone(), UPDATE.into(), stale).await,
+        Err(Error::IncompatibleStore)
+    ));
+    let mut old_capabilities = capabilities.clone();
+    old_capabilities
+        .as_object_mut()
+        .unwrap()
+        .remove("promotionIntent");
+    let old_helper = format!(
+        "#!/bin/sh\nprintf '%s\\n' '{}'\n",
+        json!({"ok": true, "result": old_capabilities})
+    );
+    fs::write(&source_helper, old_helper.as_bytes()).unwrap();
+    let mut unsupported = intent.clone();
+    unsupported.source_helper_sha256 = hash(old_helper.as_bytes());
+    assert!(matches!(
+        record_native_promotion_intent(home.clone(), UPDATE.into(), unsupported).await,
+        Err(Error::IncompatibleStore)
+    ));
+    assert_eq!(fs::read(&receipt).unwrap(), prepared_receipt);
+    fs::write(&source_helper, &helper_bytes).unwrap();
+    fs::write(
+        home.join("promotion-intent.json"),
+        serde_json::to_vec(&intent).unwrap(),
+    )
+    .unwrap();
+    let interrupt = |boundary: &str| {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("isolated_trial_publish_interrupt_fixture")
+            .env("T3_TEST_ISOLATED_TRIAL_HOME", &home)
+            .env("T3_TEST_INTERRUPT_TRIAL_PUBLICATION", boundary)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(73),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    };
+    interrupt("promotion-intent-written");
+    assert_eq!(fs::read(&receipt).unwrap(), prepared_receipt);
+    interrupt("promotion-intent-durable");
+    let durable_receipt = fs::read(&receipt).unwrap();
+    assert_ne!(durable_receipt, prepared_receipt);
+    assert_eq!(record().await.unwrap()["reused"], true);
+    assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+    if let Some(executable) = std::env::var_os("T3_TEST_PROMOTION_HELPER") {
+        use std::io::Write;
+        let mut child = std::process::Command::new(executable)
+            .arg("trial-record-promotion")
+            .arg(&home)
+            .arg(UPDATE)
+            .env_clear()
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(&intent).unwrap())
+            .unwrap();
+        let result = child.wait_with_output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let frame: Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(frame["ok"], true);
+        assert_eq!(frame["result"]["reused"], true);
+        assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+    }
+    record_isolated_candidate_preparation(home.clone(), UPDATE.into(), observation)
+        .await
+        .unwrap();
+    assert_eq!(
+        fs::read(&receipt).unwrap(),
+        durable_receipt,
+        "observation retry must preserve the intent"
+    );
+    assert!(matches!(
+        publish_isolated_service_trial(home.clone(), UPDATE.into()).await,
+        Err(Error::IncompatibleStore)
+    ));
+    let mut wrong = intent.clone();
+    wrong.source_helper_schema_sha256 = "0".repeat(64);
+    assert!(matches!(
+        record_native_promotion_intent(home.clone(), UPDATE.into(), wrong).await,
+        Err(Error::IncompatibleStore)
+    ));
+    for path in [&source_entry, &source_helper, &target_helper] {
+        let original = fs::read(path).unwrap();
+        fs::write(path, b"changed artifact").unwrap();
+        assert!(matches!(record().await, Err(Error::IncompatibleStore)));
+        assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+        fs::write(path, original).unwrap();
+    }
+    fs::set_permissions(&source_entry, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(matches!(record().await, Err(Error::IncompatibleStore)));
+    assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+    fs::set_permissions(&source_entry, fs::Permissions::from_mode(0o700)).unwrap();
+    let mut corrupted: Value = serde_json::from_slice(&durable_receipt).unwrap();
+    corrupted["promotion_intent"]["version"] = json!(2);
+    let corrupted_bytes = serde_json::to_vec(&corrupted).unwrap();
+    fs::write(&receipt, &corrupted_bytes).unwrap();
+    assert!(matches!(record().await, Err(Error::IncompatibleStore)));
+    assert_eq!(fs::read(&receipt).unwrap(), corrupted_bytes);
+    fs::write(&receipt, &durable_receipt).unwrap();
+    let moved = state.join("held-stage.omdb");
+    fs::rename(&trial, &moved).unwrap();
+    assert!(record().await.is_err());
+    fs::rename(&moved, &trial).unwrap();
+    let mut changed_selection: Value = serde_json::from_slice(&selection_bytes).unwrap();
+    changed_selection["update"]["status"] = json!("committed");
+    fs::write(&selection, serde_json::to_vec(&changed_selection).unwrap()).unwrap();
+    assert!(matches!(record().await, Err(Error::IncompatibleStore)));
+    fs::write(&selection, &selection_bytes).unwrap();
+    assert_eq!(record().await.unwrap()["reused"], true);
+    assert_eq!(fs::read(&live).unwrap(), source_bytes);
+    assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);
+    assert_eq!(fs::read(&trial).unwrap(), trial_bytes);
+    assert_eq!(fs::read(&selection).unwrap(), selection_bytes);
+    assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+    use std::os::unix::fs::MetadataExt;
+    assert_eq!(fs::metadata(&trial).unwrap().ino(), trial_identity.ino());
+    let sealed = Store::open_read_only(&trial).await.unwrap();
+    assert!(matches!(
+        ApplicationTransactions::new(sealed.clone()).schema().await,
+        Err(Error::IncompatibleStore)
+    ));
+    sealed.shutdown().await.unwrap();
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    #[allow(dead_code)]
+    struct PreviousReceipt {
+        request: serde_json::Value,
+        preparation: serde_json::Value,
+        candidate_observation: serde_json::Value,
+    }
+    assert!(serde_json::from_slice::<PreviousReceipt>(&durable_receipt).is_err());
+    println!(
+        "T05 promotion intent durable retry preserved source, checkpoint, stage and selection without publication"
+    );
 }

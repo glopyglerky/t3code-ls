@@ -509,3 +509,84 @@ passed the native startup gate. The separate environment layer unit tests await
 execution. Source lineage remains MIT T3 Code at
 `28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`, under method SHA-256
 `5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
+
+### Durable promotion intent without activation
+
+`trial-record-promotion HOME UPDATE_ID` records an explicit promotion intent in the
+existing isolated trial receipt. It accepts a version 1 `NativePromotionIntent` request.
+
+```json
+{
+  "version": 1,
+  "verification_sha256": "<earned preparation verification digest>",
+  "source_entry_sha256": "<installed source runtime digest>",
+  "source_helper_sha256": "<installed source helper digest>",
+  "source_helper_schema_sha256": "<source helper build schema digest>"
+}
+```
+
+The surrounding receipt remains authoritative for the update ID, versions,
+original source identity, checkpoint, sealed stage identity and contents, target
+entry/helper/schema and actual preparation observation. The intent's verification
+digest must match that observation. The source helper's build schema identity is
+separate from the original database catalog and checkpoint identities.
+
+Recording acquires the existing version-selection, home and database fences. It
+revalidates the receipt under those fences, the stopped source and original
+checkpoint, the sealed stage and both as-installed runtimes. Entry and helper
+files retain the existing regular-file, directory, bounded hash and install-marker
+checks. Both entries must retain execute permission bits. Each helper must answer the read-only
+`trial-capabilities` query with the expected schema, pinned engine, rollback
+support and `promotionIntent: 1`. Output is bounded to 8 KiB per pipe and each query
+has a five-second deadline. Helper capability compatibility does not establish
+arbitrary future schema/backend or application compatibility.
+
+The owner syncs a temporary receipt, rechecks its fences and the previous receipt,
+then atomically replaces and directory-syncs the same receipt. Retry revalidates
+all bindings and reuses only the exact same intent. Stale, corrupt, changed-artifact
+or missing-stage input refuses. Preparation observation retries preserve the intent.
+Inspection and preparation revalidate an existing intent. Previous strict receipt
+decoders refuse the new field, and helpers without the capability are refused
+before the intent can be recorded. Keep an intent-capable helper with the receipt;
+reverting to an older helper does not provide an intent downgrade path.
+
+This transition changes no database name, catalog seal, runtime selection or
+foreground process. Once an intent exists, the old database-only sealed publication
+command refuses it. A future transition must publish a crash-recoverable coherent
+runtime/database decision before releasing the serving fence. Rollback parsing
+continues to understand the extended receipt and does not depend on the failed
+candidate's continued presence. Ordinary native trial admission remains closed.
+There is no serving write or post-commit downgrade in this increment.
+
+The native owner fixture interrupts immediately after the first staged write and
+after durable receipt publication, then retries. It checks missing observation,
+unsupported helper capability, corrupt/stale intent, changed source/target
+artifacts, missing stage and changed pending selection. It requires unchanged
+source, original checkpoint, stage bytes and inode, and pending selection, while
+ordinary catalog access and legacy publication stay fenced. The default unit
+fixture uses a controlled read-only capability peer. The focused hosted lane
+supplies the actual built Rust helper for both installed helper roles and also
+retries through its normal CLI command. The current fixture's runtime entry bytes
+and observation remain synthetic. Hosted [native intent recovery](https://github.com/glopyglerky/t3code-ls/actions/runs/45168397467) passed these checks. The [packaged launcher proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45168397250) recorded the exact intent and recovered it with a fresh launcher using the installed runtime. Both kept the source and candidate files, runtime selection and serving fence intact.
+
+The focused lane is `promotion-intent-proof.yml`. After selecting the pinned
+Lustr/BlueFe toolchain and isolated Cargo/test directories, its exact commands are:
+
+```sh
+"$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+  build --locked -j 2 -p t3-code-ls-storage --bin t3-code-ls-db
+T3_TEST_PROMOTION_HELPER="$CARGO_TARGET_DIR/debug/t3-code-ls-db" \
+  "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+  test --locked -j 2 -p t3-code-ls-storage --lib \
+  application_bootstrap::upgrade::tests::service_promotion_intent_is_durable_exact_and_keeps_publication_fenced \
+  -- --exact --nocapture
+```
+
+The lane checks completion markers and `pipefail`, retains source/helper/compiler
+identities and bounded logs, reruns existing isolated-trial cases, and removes its
+owned generated output. Local formatting and source checks are not runtime
+qualification. No build or live profile activation ran on the Mac.
+
+MIT stock lineage remains
+`28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`. Mandatory method SHA-256 is
+`5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.

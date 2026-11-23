@@ -84,7 +84,7 @@ struct TrialBackupReceipt {
     snapshot: TrialSnapshot,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IsolatedTrialRequest {
     pub update_id: String,
@@ -99,7 +99,7 @@ pub struct IsolatedTrialRequest {
     pub activation: Option<PreparedServiceActivation>,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IsolatedTrialPreparation {
     pub update_id: String,
@@ -109,24 +109,54 @@ pub struct IsolatedTrialPreparation {
     pub target_schema_sha256: String,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IsolatedTrialVerification {
     pub request: IsolatedTrialRequest,
     pub preparation: IsolatedTrialPreparation,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub candidate_observation: Option<CandidatePreparationObservation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub promotion_intent: Option<NativePromotionIntent>,
+}
+
+/// A recorded decision to pursue promotion, never authority to serve the stage.
+/// Update, target artifacts, stage and checkpoint remain bound by the enclosing receipt.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct NativePromotionIntent {
+    pub version: u32,
+    pub verification_sha256: String,
+    pub source_entry_sha256: String,
+    pub source_helper_sha256: String,
+    pub source_helper_schema_sha256: String,
+}
+
+pub async fn record_native_promotion_intent(
+    home: PathBuf,
+    update_id: String,
+    intent: NativePromotionIntent,
+) -> Result<serde_json::Value> {
+    if !home.is_absolute() || !valid_update_id(&update_id) {
+        return Err(Error::IncompatibleStore);
+    }
+    #[cfg(target_os = "linux")]
+    return tokio::spawn(isolated::record_promotion_intent(home, update_id, intent))
+        .await
+        .map_err(|_| Error::IncompatibleStore)?;
+    #[cfg(not(target_os = "linux"))]
+    Err(Error::IncompatibleStore)
 }
 
 /// Exact input and response observed by the stopped launcher caller.
-#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CandidatePreparationObservation {
     pub verification_json: String,
     pub witness: CandidatePreparationWitness,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CandidatePreparationWitness {
     pub protocol: u32,
@@ -247,6 +277,7 @@ pub fn service_trial_capabilities() -> Result<serde_json::Value> {
             "engineRevision": crate::application::OMDB_REVISION,
             "targetSchemaSha256": crate::application_bootstrap::bootstrap_schema_sha256(),
             "sealedTrialRollback": 1,
+            "promotionIntent": 1,
         }))
     }
     #[cfg(not(target_os = "linux"))]
