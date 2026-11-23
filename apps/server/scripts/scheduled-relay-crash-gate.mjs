@@ -7,7 +7,7 @@ import * as Path from "node:path";
 import * as Readline from "node:readline";
 
 const config = JSON.parse(FS.readFileSync(new URL("./relay-crash-gate.json", import.meta.url), "utf8"));
-Assert.ok(["before-claim", "after-claim"].includes(config.boundary));
+Assert.ok(["before-claim", "after-claim", "after-dispatch"].includes(config.boundary));
 const [mode, target] = process.argv.slice(2);
 Assert.equal(process.argv.length, 4);
 if (mode === "owner-lock") {
@@ -36,9 +36,12 @@ const stop = () => {
 process.once("SIGTERM", stop);
 process.once("SIGINT", stop);
 child.once("exit", stop);
-const admit = { transaction: undefined, promptHash: undefined, committed: false };
+const admit = { transaction: undefined, commandId: undefined, promptHash: undefined, committed: false };
 let workerTransaction;
-const publishWitness = (workerClaimCommitted) => {
+let workerClaimCommitted = false;
+let dispatchTransaction;
+let dispatchCommitted = false;
+const publishWitness = () => {
   Assert.ok(admit.committed && admit.promptHash, "The exact ready delivery must be committed");
   const temporary = config.witness + ".tmp";
   FS.writeFileSync(temporary, JSON.stringify({
@@ -46,7 +49,7 @@ const publishWitness = (workerClaimCommitted) => {
     promptSha256: admit.promptHash,
     admissionCommitted: true,
     workerClaimCommitted,
-    workerClaimAcknowledged: false,
+    dispatchCommitted,
   }) + "\n", { flag: "wx", mode: 0o600 });
   FS.renameSync(temporary, config.witness);
   if (input.closed) return;
@@ -61,7 +64,17 @@ try {
       mutation?.kind === "patch_pending" && mutation.delivery_id === config.deliveryId &&
       mutation.patch.state === "relay_running";
     if (claimsDelivery && config.boundary === "before-claim") {
-      await publishWitness(false);
+      await publishWitness();
+      break;
+    }
+    if (
+      config.boundary === "after-dispatch" &&
+      mutation?.kind === "patch_task" &&
+      mutation.expected?.last_run_webhook_delivery_id === config.deliveryId &&
+      mutation.patch.last_run_status === "succeeded"
+    ) {
+      Assert.ok(workerClaimCommitted && dispatchCommitted, "Command acceptance must already be committed");
+      await publishWitness();
       break;
     }
 
@@ -71,6 +84,7 @@ try {
     if (mutation?.kind === "insert_ready_relay" && mutation.delivery_id === config.deliveryId) {
       Assert.equal(JSON.parse(reply.value).ok, true, "The helper rejected ready admission");
       admit.transaction = request.transaction_id;
+      admit.commandId = `scheduled-task:${mutation.task_id}:webhook:${config.deliveryId}`;
       admit.promptHash = Crypto.createHash("sha256").update(JSON.parse(mutation.prompt_json)).digest("hex");
     }
     if (request.operation === "application_commit" && request.transaction_id === admit.transaction) {
@@ -85,9 +99,25 @@ try {
     if (request.operation === "application_commit" && request.transaction_id === workerTransaction) {
       const envelope = JSON.parse(reply.value);
       Assert.ok(envelope.ok === true && envelope.result.committed === true);
-      // Do not release the application worker to dispatch after committing its claim.
-      await publishWitness(true);
-      break;
+      workerClaimCommitted = true;
+      if (config.boundary === "after-claim") {
+        await publishWitness();
+        break;
+      }
+    }
+    if (
+      ["application_receipts_insert", "application_receipts_upsert"].includes(request.operation) &&
+      request.receipt.command_id === admit.commandId &&
+      request.receipt.command_type === "message.dispatch" &&
+      request.receipt.status === "accepted"
+    ) {
+      Assert.equal(JSON.parse(reply.value).ok, true, "The helper rejected the dispatch receipt");
+      Assert.equal(typeof request.transaction_id, "string");
+      dispatchTransaction = request.transaction_id;
+    }
+    if (request.operation === "application_commit" && request.transaction_id === dispatchTransaction) {
+      const envelope = JSON.parse(reply.value);
+      dispatchCommitted = envelope.ok === true && envelope.result.committed === true;
     }
     process.stdout.write(reply.value + "\n");
   }
