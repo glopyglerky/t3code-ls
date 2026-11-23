@@ -2443,6 +2443,39 @@ describe("EnvironmentThreads", () => {
       }),
   );
 
+  it.effect("replays an event whose projection application failed", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({ cached: BASE_PROJECTION });
+      yield* SubscriptionRef.changes(harness.subscriptionCount).pipe(
+        Stream.filter((count) => count >= 1),
+        Stream.runHead,
+      );
+
+      const sequence = CACHED_SNAPSHOT_SEQUENCE + 1;
+      const defective = titleUpdated("Recover this update", sequence);
+      if (defective.kind !== "event") throw new Error("Expected an event fixture");
+      Object.defineProperty(defective.event, "payload", {
+        get() {
+          throw new Error("Projection application failed");
+        },
+      });
+      yield* Queue.offer(harness.inputs, defective);
+      yield* TestClock.adjust("60 seconds");
+      expect(yield* SubscriptionRef.get(harness.subscriptionCount)).toBe(2);
+      expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBe(CACHED_SNAPSHOT_SEQUENCE);
+
+      yield* Queue.offer(harness.inputs, titleUpdated("Recover this update", sequence));
+      const recovered = yield* awaitThreadState(
+        harness.observed,
+        (value) =>
+          value.status === "live" &&
+          Option.isSome(value.data) &&
+          value.data.value.thread.title === "Recover this update",
+      );
+      expect(recovered.sequence).toBe(sequence);
+    }),
+  );
+
   it.effect("keeps replayed updates synchronizing until the completion marker arrives", () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness({ cached: BASE_PROJECTION, completionMarker: true });
