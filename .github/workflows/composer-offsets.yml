@@ -106,7 +106,8 @@ jobs:
           T3_CODE_LS_IMPLEMENTATION: upstream
         run: |
           pnpm exec vp test run --maxWorkers 2 \
-            packages/contracts/src/orchestrationV2.test.ts packages/client-runtime/src/operations/commands.test.ts
+            packages/contracts/src/orchestrationV2.test.ts packages/client-runtime/src/operations/commands.test.ts \
+            packages/client-runtime/src/connection/registry.test.ts packages/client-runtime/src/state/threadDetail.test.ts
           pnpm --filter @t3tools/contracts run typecheck
           pnpm --filter @t3tools/client-runtime run typecheck
           pnpm --dir apps/server run typecheck
@@ -268,6 +269,7 @@ jobs:
         env:
           T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
           T3_CODE_LS_BUNDLED_PTY_PROOF: ${{ env.NATIVE_PTY_PROOF }}
+          T3_CODE_LS_LAUNCH_RECEIPT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t16-root-release-launch-ack-') }}
           T3_CODE_LS_PTY_RESTART_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-restart-') }}
           T3_CODE_LS_SPLICE_NEGOTIATION_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-splice-') }}
           T3_CODE_LS_SPLIT_PTY_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-') }}

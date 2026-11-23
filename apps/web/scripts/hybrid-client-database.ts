@@ -215,11 +215,12 @@ export function inspectNativeMessageUpdates(executable: string, stateDirectory: 
   });
 }
 
-export function inspectNativeApprovalReceipt(
+function inspectNativeThreadReceipt(
   executable: string,
   stateDirectory: string,
   commandId: string,
   threadId: string,
+  commandType: string,
   snapshotSequence: number,
 ) {
   const databasePath = Path.join(stateDirectory, "userdata", "statev2.omdb");
@@ -230,16 +231,42 @@ export function inspectNativeApprovalReceipt(
   ]);
   Assert.equal(responses.length, 3);
   for (const response of responses) Assert.equal(response.ok, true, JSON.stringify(response.error));
-  const receipt = object(responses[1].result, "Expected the exact native approval receipt");
+  const receipt = object(responses[1].result, "Expected the exact native command receipt");
   Assert.equal(receipt.command_id, commandId);
   Assert.equal(receipt.aggregate_kind, "thread");
   Assert.equal(receipt.aggregate_id, threadId);
-  Assert.equal(receipt.command_type, "runtime-request.respond");
+  Assert.equal(receipt.command_type, commandType);
   Assert.equal(receipt.status, "accepted");
   const sequence = receipt.result_sequence;
   Assert.ok(typeof sequence === "number" && Number.isSafeInteger(sequence) && sequence > 0);
-  Assert.ok(sequence <= snapshotSequence, "Approval receipt must precede the reopened snapshot");
+  Assert.ok(sequence <= snapshotSequence, "Command receipt must precede the reopened snapshot");
   return { commandId, threadId, sequence, engine: "omdb" as const };
+}
+
+export function inspectNativeApprovalReceipt(
+  executable: string,
+  stateDirectory: string,
+  commandId: string,
+  threadId: string,
+  snapshotSequence: number,
+) {
+  return inspectNativeThreadReceipt(
+    executable, stateDirectory, commandId, threadId, "runtime-request.respond", snapshotSequence,
+  );
+}
+
+export function inspectNativeLaunchReceipt(
+  executable: string,
+  stateDirectory: string,
+  launchCommandId: string,
+  threadId: string,
+  sequence: number,
+) {
+  const receipt = inspectNativeThreadReceipt(
+    executable, stateDirectory, `${launchCommandId}:initial-message`, threadId, "message.dispatch", sequence,
+  );
+  Assert.equal(receipt.sequence, sequence, "The wire sequence must match the committed message");
+  return receipt;
 }
 
 export function inspectNativeReplay(input: {
