@@ -1,0 +1,240 @@
+# MIT. Candidate artifact recovery only; frozen application source, standard hosted runners.
+name: Frozen iOS Intel artifact recovery
+on:
+  push:
+    branches: ["candidate/t3code-ls-t12-ios-intel-recovery-*"]
+  workflow_dispatch:
+    inputs:
+      install:
+        description: Also request standard arm64 hosted installed qualification
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  mobile-outbox-ios:
+    runs-on: macos-26-intel
+    timeout-minutes: 120
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
+      BUILD_HOST_ARCH: x86_64
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: b204ba556fe1e413d3a9e6238e2008b612b633c7
+      - name: Build device and simulator libraries and link a Swift caller
+        run: |
+          evidence="$RUNNER_TEMP/ios-outbox-evidence"
+          mkdir -p "$evidence"
+          test "$(uname -m)" = "$BUILD_HOST_ARCH"
+          export CARGO_HOME="$RUNNER_TEMP/outbox-cargo-home"
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(xcodebuild -version)" = $'Xcode 26.4.1\nBuild version 17E202'
+          xcrun --sdk iphonesimulator --show-sdk-version
+          df -Pk "$RUNNER_TEMP"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-target"
+          export IPHONEOS_DEPLOYMENT_TARGET=18.0
+          export CARGO_PROFILE_RELEASE_LTO=false
+          export RUSTFLAGS="-Cembed-bitcode=no"
+          rustup toolchain install 1.99.1 --profile minimal \
+            --target aarch64-apple-ios,aarch64-apple-ios-sim --component llvm-tools-preview
+          rust_sysroot=$(rustc +1.99.1 --print sysroot)
+          rust_host=$(rustc +1.99.1 -vV | sed -n 's/^host: //p')
+          llvm_nm="$rust_sysroot/lib/rustlib/$rust_host/bin/llvm-nm"
+          headers=apps/mobile/modules/t3-native-controls/rust/include
+          for target in aarch64-apple-ios aarch64-apple-ios-sim; do
+            cargo +1.99.1 rustc --locked --release --target "$target" \
+              -p t3-code-ls-mobile-outbox --crate-type staticlib
+            library="$CARGO_TARGET_DIR/$target/release/libt3_outbox.a"
+            "$llvm_nm" --extern-only --defined-only "$library" > "$RUNNER_TEMP/$target-symbols.txt"
+            grep -F '_t3_outbox_delivery_v1' "$RUNNER_TEMP/$target-symbols.txt"
+            shasum -a 256 "$library"
+          done
+          xcodebuild -create-xcframework \
+            -library "$CARGO_TARGET_DIR/aarch64-apple-ios/release/libt3_outbox.a" -headers "$headers" \
+            -library "$CARGO_TARGET_DIR/aarch64-apple-ios-sim/release/libt3_outbox.a" -headers "$headers" \
+            -output "$RUNNER_TEMP/T3Outbox.xcframework"
+          swift_probe="$RUNNER_TEMP/OutboxProbe.swift"
+          printf 'import T3Outbox\npublic func fixtureAction() -> Int32 { t3_outbox_delivery_v1(62) }\n' > "$swift_probe"
+          xcrun --sdk iphonesimulator swiftc -emit-library -target arm64-apple-ios18.0-simulator \
+            -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" -I "$headers" "$swift_probe" \
+            "$CARGO_TARGET_DIR/aarch64-apple-ios-sim/release/libt3_outbox.a" \
+            -o "$RUNNER_TEMP/libOutboxProbe.dylib"
+          xcrun lipo -archs "$RUNNER_TEMP/libOutboxProbe.dylib" > "$evidence/swift-probe-arch.txt"
+          test "$(cat "$evidence/swift-probe-arch.txt")" = arm64
+          xcrun vtool -show-build "$RUNNER_TEMP/libOutboxProbe.dylib" > "$evidence/swift-probe-platform.txt"
+          xcrun clang --version > "$evidence/clang.txt"
+          xcrun swiftc --version > "$evidence/swift.txt"
+          rustc +1.99.1 -vV > "$evidence/rustc.txt"
+          xcrun vtool -show-build "$RUNNER_TEMP/libOutboxProbe.dylib" | grep -E 'platform +IOSSIMULATOR'
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install locked Expo development dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+          VP_REMOTE_CACHE: "off"
+          VP_REMOTE_CACHE_URL: ""
+        run: |
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile --store-dir "$RUNNER_TEMP/outbox-pnpm-store"
+      - name: Link the Rust outbox library into the generated iOS app
+        timeout-minutes: 100
+        env:
+          APP_VARIANT: development
+          EXPO_NO_GIT_STATUS: "1"
+          EXPO_NO_DOTENV: "1"
+          CI: "1"
+        run: |
+          evidence="$RUNNER_TEMP/ios-outbox-evidence"
+          mkdir -p "$evidence"
+          git show -s --format='%H %T' > "$evidence/source.txt"
+          uname -m > "$evidence/build-host-arch.txt"
+          xcodebuild -version > "$evidence/xcode.txt"
+          pod --version > "$evidence/cocoapods.txt"
+          configuration=Release
+          export ENTRY_FILE="$GITHUB_WORKSPACE/apps/mobile/proof/outbox-installed.tsx"
+          export T3CODE_MOBILE_UPDATES_ENABLED=0
+          printf '%s\n' apps/mobile/proof/outbox-installed.tsx > "$evidence/fixture-entry.txt"
+          outbox=apps/mobile/modules/t3-native-controls/ios/T3Outbox.xcframework
+          cp -R "$RUNNER_TEMP/T3Outbox.xcframework" "$outbox"
+          pnpm --dir apps/mobile exec expo prebuild --platform ios --no-install
+          (cd apps/mobile/ios && pod install)
+          workspaces=(apps/mobile/ios/*.xcworkspace)
+          test "${#workspaces[@]}" -eq 1
+          test -d "${workspaces[0]}"
+          workspace="${workspaces[0]}"
+          scheme="$(basename "$workspace" .xcworkspace)"
+          derived="$RUNNER_TEMP/outbox-ios-derived"
+          : > "$evidence/xcodebuild.log"
+          build_started=$SECONDS
+          (
+            while sleep 30; do
+              {
+              printf '%s iOS build progress, %s log lines\n' \
+                "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$(wc -l < "$evidence/xcodebuild.log")"
+              printf 'elapsed_seconds=%s\n' "$((SECONDS - build_started))"
+              df -Pk "$RUNNER_TEMP"
+              du -sk "$derived" 2>/dev/null || true
+              tail -2 "$evidence/xcodebuild.log" | cut -c 1-240
+              } 2>&1 | tee -a "$evidence/progress.log"
+            done
+          ) &
+          progress_pid=$!
+          trap 'kill "$progress_pid" 2>/dev/null || true; wait "$progress_pid" 2>/dev/null || true' EXIT
+          xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration "$configuration" \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$derived" \
+            CODE_SIGNING_ALLOWED=NO ENABLE_DEBUG_DYLIB=NO ONLY_ACTIVE_ARCH=NO ARCHS=arm64 -jobs 2 build \
+            > "$evidence/xcodebuild.log" 2>&1 || {
+              grep -n -m 12 -B 12 -A 24 -E 'error:|fatal error:|Error Domain=|command not found|No such file or directory|failed with' \
+                "$evidence/xcodebuild.log" || true
+              tail -120 "$evidence/xcodebuild.log"
+              exit 1
+            }
+          kill "$progress_pid" 2>/dev/null || true
+          wait "$progress_pid" 2>/dev/null || true
+          trap - EXIT
+          applications=("$derived"/Build/Products/"$configuration"-iphonesimulator/*.app)
+          test "${#applications[@]}" -eq 1
+          test -d "${applications[0]}"
+          executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${applications[0]}/Info.plist")"
+          binary="${applications[0]}/$executable"
+          test -f "${applications[0]}/main.jsbundle"
+          xcrun vtool -show-build "$binary" > "$evidence/application-platform.txt"
+          grep -E 'platform +IOSSIMULATOR' "$evidence/application-platform.txt"
+          file "$binary" > "$evidence/application-type.txt"
+          grep -F 'arm64' "$evidence/application-type.txt"
+          xcrun lipo -archs "$binary" > "$evidence/application-architectures.txt"
+          grep -Fx arm64 "$evidence/application-architectures.txt"
+          xcrun nm -gU "$binary" > "$RUNNER_TEMP/outbox-ios-symbols.txt"
+          grep -F ' _t3_outbox_delivery_v1' "$RUNNER_TEMP/outbox-ios-symbols.txt" > "$evidence/outbox-symbol.txt"
+          shasum -a 256 "$binary" apps/mobile/ios/Podfile.lock \
+            "$RUNNER_TEMP/outbox-target/aarch64-apple-ios-sim/release/libt3_outbox.a" \
+            > "$evidence/artifacts.sha256"
+          archive="$RUNNER_TEMP/ios-outbox-simulator.tar.gz"
+          tar -czf "$archive" -C "$(dirname "${applications[0]}")" "$(basename "${applications[0]}")"
+          (cd "$RUNNER_TEMP" && shasum -a 256 ios-outbox-simulator.tar.gz) > "$evidence/archive.sha256"
+      - name: Clean generated iOS intermediates
+        if: always()
+        shell: bash
+        run: |
+          evidence="$RUNNER_TEMP/ios-outbox-evidence"
+          mkdir -p "$evidence"
+          df -Pk "$RUNNER_TEMP" > "$evidence/cleanup-before.txt"
+          rm -rf -- "$RUNNER_TEMP/outbox-target" "$RUNNER_TEMP/outbox-ios-derived" \
+            "$RUNNER_TEMP/T3Outbox.xcframework" apps/mobile/ios \
+            apps/mobile/modules/t3-native-controls/ios/T3Outbox.xcframework
+          rm -rf -- "$RUNNER_TEMP/outbox-cargo-home" "$RUNNER_TEMP/outbox-pnpm-store"
+          find "$GITHUB_WORKSPACE" -type d -name node_modules -prune -exec rm -rf {} +
+          df -Pk "$RUNNER_TEMP" > "$evidence/cleanup-after.txt"
+      - name: Normalize hosted paths in retained receipts
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY_NORMALIZE'
+          import os
+          from pathlib import Path
+          evidence = Path(os.environ['RUNNER_TEMP']) / 'ios-outbox-evidence'
+          for path in evidence.glob('*'):
+              if path.is_file():
+                  value = path.read_text()
+                  for name in ('GITHUB_WORKSPACE', 'RUNNER_TEMP', 'HOME'):
+                      value = value.replace(os.environ[name], '$' + name)
+                  path.write_text(value)
+          PY_NORMALIZE
+      - name: Retain iOS app linkage receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ios-outbox-evidence
+          path: ${{ runner.temp }}/ios-outbox-evidence/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Retain the verified arm64 simulator application
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ios-outbox-simulator-arm64
+          path: ${{ runner.temp }}/ios-outbox-simulator.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
+
+  mobile-outbox-ios-installed:
+    if: github.event_name == 'workflow_dispatch' && inputs.install
+    needs: mobile-outbox-ios
+    runs-on: macos-26
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          ref: b204ba556fe1e413d3a9e6238e2008b612b633c7
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ios-outbox-evidence
+          path: ${{ runner.temp }}/ios-outbox-evidence
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ios-outbox-simulator-arm64
+          path: ${{ runner.temp }}
+      - name: Exercise the installed Expo and Swift Rust boundary
+        run: |
+          node --test tools/run-ios-outbox-installed.test.mjs
+          node tools/run-ios-outbox-installed.mjs \
+            "$RUNNER_TEMP/ios-outbox-simulator.tar.gz" "$RUNNER_TEMP/ios-outbox-evidence" \
+            "$(git rev-parse HEAD)" "$(git rev-parse 'HEAD^{tree}')" \
+            "$RUNNER_TEMP/ios-outbox-installed" --admit-disposable-simulator
+      - name: Retain installed behavior receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ios-outbox-installed
+          path: ${{ runner.temp }}/ios-outbox-installed/
+          if-no-files-found: warn
+          retention-days: 14
