@@ -5,6 +5,7 @@ on:
     branches:
       - "candidate/t3code-ls-t03-text-revision-*"
       - "candidate/t3code-ls-t12-outbox-identity-*"
+      - "candidate/t3code-ls-t15-task-cache-*"
 
 permissions:
   contents: read
@@ -39,3 +40,8 @@ jobs:
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-')
         working-directory: apps/mobile
         run: pnpm exec vp test run --project unit --maxWorkers 2 src/state/thread-outbox.test.ts
+      - name: Exercise task-cache cleanup and savings transactions
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-task-cache-')
+        run: |
+          pnpm --filter @t3tools/task-cache test src/Cleanup.test.ts src/Cache.test.ts \
+            src/NativeClients.test.ts src/Savings.test.ts
