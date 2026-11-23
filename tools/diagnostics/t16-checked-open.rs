@@ -15,6 +15,8 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const WRITER_BYTE: &str = "l_start=4611686018427387904, l_len=1}";
 const TRACE_CALLS: &str =
     "trace=execve,openat,fcntl,flock,pread64,pwrite64,read,write,fsync,fdatasync,ftruncate";
+const MAX_TRACE_FILES: usize = 128;
+const MAX_TRACE_BYTES: u64 = 256 * 1024 * 1024;
 
 fn launch(mode: &OsString, database: &Path) -> Result<()> {
     let launcher = std::env::current_exe()?;
@@ -269,18 +271,30 @@ fn run() -> Result<()> {
             let trial = Path::new(trial).canonicalize()?;
             let database = trial.join("profile/userdata/statev2.omdb");
             let file = database.to_str().ok_or("non-UTF-8 fixture path")?;
-            let mut traces = Vec::new();
+            let mut paths = Vec::new();
+            let mut bytes = 0u64;
             for entry in fs::read_dir(trial.join("checked-open-trace"))? {
                 let entry = entry?;
                 if entry.file_type()?.is_file()
                     && entry.file_name().to_string_lossy().starts_with("syscalls.")
                 {
-                    if traces.len() >= 32 || entry.metadata()?.len() > 16 * 1024 * 1024 {
-                        return Err("unexpectedly large helper trace".into());
-                    }
-                    traces.push(fs::read_to_string(entry.path())?);
+                    bytes = bytes
+                        .checked_add(entry.metadata()?.len())
+                        .ok_or("trace size overflow")?;
+                    paths.push(entry.path());
                 }
             }
+            eprintln!(
+                "Checked-open raw trace: {} files, {bytes} bytes",
+                paths.len()
+            );
+            if paths.len() > MAX_TRACE_FILES || bytes > MAX_TRACE_BYTES {
+                return Err("helper trace exceeded its aggregate fixture budget".into());
+            }
+            let traces = paths
+                .into_iter()
+                .map(fs::read_to_string)
+                .collect::<std::io::Result<Vec<_>>>()?;
             print!("{}", summarize(&traces, file)?);
             Ok(())
         }
