@@ -207,7 +207,7 @@ jobs:
         env:
           T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
           T3_CODE_LS_BUNDLED_PTY_PROOF: ${{ env.NATIVE_PTY_PROOF }}
-          T3_CODE_LS_PTY_RESTART_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-restart-') }}
+          T3_CODE_LS_PTY_RESTART_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-restart-') }}
           T3_CODE_LS_SPLICE_NEGOTIATION_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-splice-') }}
           T3_CODE_LS_SPLIT_PTY_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-') }}
           T3_CODE_LS_MULTI_TAB_DRAFT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-') }}
@@ -266,9 +266,20 @@ jobs:
             jq -e '.status == "passed" and .htmlInteraction.signedAssetStatus == 200 and .htmlInteraction.toolCalls == 1 and .htmlInteraction.opaqueOrigin and .htmlInteraction.ownFrameResize and .htmlInteraction.unrelatedFrameUnchanged and .htmlInteraction.modalDetached and .htmlInteraction.reopenedFresh' \
               "$proof/native/proof.json"
           fi
-          if [[ "$T3_CODE_LS_PTY_RESTART_PROOF" == true ]]; then
-            jq -e '.status == "passed" and .bundledNativePtyOwner and .terminalRestart.oldOwnerExited and .terminalRestart.foregroundExited and .terminalRestart.newShell and .terminalRestart.previousThreadReopened' \
+          restart_proof="$proof"
+          if [[ "$INTEGRATED_NATIVE" == true ]]; then
+            jq -e '.status == "passed" and .terminalAlternate.alternateScreenRetained and .capturedApproval != null and .cancelledQuestion != null and .textRevisionProfile != null' \
               "$proof/native/proof.json"
+            restart_proof="$proof/pty-restart"
+            mkdir "$restart_proof"
+            env T3_CODE_LS_PTY_RESTART_PROOF=true T3_CODE_LS_HTML_INTERACTION_PROOF=false \
+              T3_CODE_LS_PDF_LINK_PROOF=false T3_CODE_LS_FILE_EDITOR_PROOF=false \
+              T3_CODE_LS_MULTI_TAB_DRAFT_PROOF=false T3_CODE_LS_DRAFT_STORAGE_PROOF=false \
+              node apps/web/scripts/verify-hybrid-client.ts "$restart_proof" native
+          fi
+          if [[ "$INTEGRATED_NATIVE" == true || "$T3_CODE_LS_PTY_RESTART_PROOF" == true ]]; then
+            jq -e '.status == "passed" and .bundledNativePtyOwner and .terminalRestart.oldOwnerExited and .terminalRestart.foregroundExited and .terminalRestart.newShell and .terminalRestart.previousThreadReopened' \
+              "$restart_proof/native/proof.json"
           fi
           if [[ "$INTEGRATED_NATIVE" == true || "$GITHUB_REF_NAME" == candidate/t3code-ls-t02-bundled-native-t13-voice-* ]]; then
             mkdir "$proof/voice"
