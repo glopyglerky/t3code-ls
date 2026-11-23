@@ -14,8 +14,8 @@ jobs:
     env:
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
       STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
-      CANDIDATE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
-      CANDIDATE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') && '78647c8e507b6b677fa6f1585839bd8bdc12bc55' || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
+      CANDIDATE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-lookups-') && '7216183e0c013c7f5d7e9975d8aee7beda42b880' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
+      CANDIDATE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-lookups-') && '675636c7feb22a55179fa726af94e5cfa49212b8' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') && '78647c8e507b6b677fa6f1585839bd8bdc12bc55' || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
       CATALOG_COMMIT: 2bb6ae9e57559bde6cff0feeddcff8ddf02de009
       CATALOG_TREE: 55e2c8aba6fc06642b06a8d60861c7bdaf3c67f9
       WASM_BINDGEN_VERSION: "0.2.130"
@@ -32,6 +32,7 @@ jobs:
       COMPARE_CATALOG: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-catalog-') }}
       COMPARE_SINGLE_READS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') }}
       REOPEN_WORKSPACE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-') }}
+      REOPEN_LOOKUPS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-lookups-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -258,10 +259,24 @@ jobs:
           for ((pair=1; pair<=6; pair++)); do
             profiles=(stock candidate)
             if (( pair % 2 == 0 )); then profiles=(candidate stock); fi
+            if [[ "$REOPEN_LOOKUPS" == true ]]; then
+              case "$pair" in
+                1) profiles=(stock candidate candidate-lookups) ;;
+                2) profiles=(candidate candidate-lookups stock) ;;
+                3) profiles=(candidate-lookups stock candidate) ;;
+                4) profiles=(candidate-lookups candidate stock) ;;
+                5) profiles=(stock candidate-lookups candidate) ;;
+                6) profiles=(candidate stock candidate-lookups) ;;
+              esac
+            fi
             for ((position=0; position<${#profiles[@]}; position++)); do
               profile="${profiles[$position]}"
-              mode=stock
-              if [[ "$profile" == candidate ]]; then mode=native; fi
+              bundle_profile="$profile"
+              case "$profile" in
+                stock) mode=stock ;;
+                candidate) mode=native ;;
+                candidate-lookups) bundle_profile=candidate; mode=native-lookups ;;
+              esac
               trial="$pair-$profile"
               result="$evidence/sample-$trial.json"
               printf 'Reopen pair %s profile %s\n' "$pair" "$profile"
@@ -271,18 +286,21 @@ jobs:
                 shift
                 exec runuser -u "$user" -- "$@"
               ' _ "$(id -un)" "$probe" probe-reopen "$node_path" \
-                "$PWD/$profile/apps/server/dist/bin.mjs" "$trial_root/$trial" \
+                "$PWD/$bundle_profile/apps/server/dist/bin.mjs" "$trial_root/$trial" \
                 "$driver" "$chrome" "$mode" | tee "$result" > /dev/null
               jq -er --argjson pair "$pair" --argjson position "$((position + 1))" --arg profile "$profile" \
-                'select(.journey == "J02" and .snapshot.valid and .fixture.total_messages == 6400 and .database_migration > 0 and .migration_evidence.source == (if $profile == "candidate" then "stopped-native-catalog" else "live-sqlite-descriptors" end)) | [$pair,$position,$profile,.descriptor_micros,.browser.firstShellVisibleMillis,.browser.selectedTextVisibleMillis,.browser.authoritativeShellHttpMillis,.browser.authoritativeThreadMillis] | @tsv' \
+                'select(.journey == "J02" and .snapshot.valid and .fixture.total_messages == 6400 and .database_migration > 0 and .native_lookups == ($profile == "candidate-lookups") and .migration_evidence.source == (if $profile == "stock" then "live-sqlite-descriptors" else "stopped-native-catalog" end)) | [$pair,$position,$profile,.descriptor_micros,.browser.firstShellVisibleMillis,.browser.selectedTextVisibleMillis,.browser.authoritativeShellHttpMillis,.browser.authoritativeThreadMillis] | @tsv' \
                 "$result" >> "$evidence/reopen.tsv"
               jq -er --argjson pair "$pair" --arg profile "$profile" \
-                'select(.resources.samples >= 2 and (.resources.server.processes | length) > 0 and any(.resources.browser.processes[]; .role == "browser-renderer") and (.profile != "native" or any(.resources.server.processes[]; .role == "native-database-helper"))) | [$pair,$profile,.resources.server.observed_cpu_millis,.resources.browser.observed_cpu_millis,.resources.server.sampled_peak_sum_rss_bytes,.resources.browser.sampled_peak_sum_rss_bytes,.resources.sampler_scan_wall_millis,.resources.max_sample_gap_millis] | @tsv' \
+                'select(.resources.samples >= 2 and (.resources.server.processes | length) > 0 and any(.resources.browser.processes[]; .role == "browser-renderer") and (.profile == "stock" or any(.resources.server.processes[]; .role == "native-database-helper"))) | [$pair,$profile,.resources.server.observed_cpu_millis,.resources.browser.observed_cpu_millis,.resources.server.sampled_peak_sum_rss_bytes,.resources.browser.sampled_peak_sum_rss_bytes,.resources.sampler_scan_wall_millis,.resources.max_sample_gap_millis] | @tsv' \
                 "$result" >> "$evidence/reopen-resources.tsv"
               rm -r "${trial_root:?}/${trial:?}"
             done
-            diff <(jq -c '.snapshot | {valid,threadCount,messageCount,selectedThreadId}' "$evidence/sample-$pair-stock.json") \
-              <(jq -c '.snapshot | {valid,threadCount,messageCount,selectedThreadId}' "$evidence/sample-$pair-candidate.json")
+            for profile in "${profiles[@]}"; do
+              if [[ "$profile" == stock ]]; then continue; fi
+              diff <(jq -c '.snapshot | {valid,threadCount,messageCount,selectedThreadId}' "$evidence/sample-$pair-stock.json") \
+                <(jq -c '.snapshot | {valid,threadCount,messageCount,selectedThreadId}' "$evidence/sample-$pair-$profile.json")
+            done
           done
       - name: Retain exact artifacts and matched observations
         if: always()

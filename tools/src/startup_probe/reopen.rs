@@ -25,15 +25,20 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     }
     let args: Vec<_> = args.collect();
     let [node, bundle, trial, driver, chrome, mode] = args.as_slice() else {
-        return Err("usage: t3code-ls-tools probe-reopen NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME stock|native|fork-sqlite".into());
+        return Err("usage: t3code-ls-tools probe-reopen NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME stock|native|native-lookups|fork-sqlite".into());
     };
     let mode_label = mode.to_str().ok_or("invalid reopen profile")?;
     let implementation = match mode_label {
         "stock" => None,
-        "native" => Some("native"),
+        "native" | "native-lookups" => Some("native"),
         "fork-sqlite" => Some("upstream"),
-        _ => return Err("reopen implementation must be stock, native or fork-sqlite".into()),
+        _ => {
+            return Err(
+                "reopen implementation must be stock, native, native-lookups or fork-sqlite".into(),
+            );
+        }
     };
+    let native_lookups = mode_label == "native-lookups";
     let node = fs::canonicalize(node)?;
     let bundle = fs::canonicalize(bundle)?;
     let trial = Path::new(trial);
@@ -92,6 +97,11 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
             .stderr(Stdio::null());
         if let Some(implementation) = implementation {
             command.env("T3_CODE_LS_IMPLEMENTATION", implementation);
+        }
+        if native_lookups {
+            command
+                .env("T3_CODE_LS_INDEPENDENT_READS", "1")
+                .env("T3_CODE_LS_SINGLE_PROJECTION_READS", "1");
         }
         Ok(command)
     };
@@ -183,7 +193,7 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     println!(
         "{}",
         json!({
-            "schema_version": 1, "journey": "J02", "profile": mode.to_str(),
+            "schema_version": 1, "journey": "J02", "profile": mode_label, "native_lookups": native_lookups,
             "fixture": {"threads": THREADS, "messages_per_thread": MESSAGES, "total_messages": THREADS * MESSAGES, "transcript_bytes": fixture_bytes},
             "descriptor_micros": descriptor_micros, "html_micros": html_micros,
             "navigation_started_micros": navigation_started_micros, "database_migration": database_migration,
