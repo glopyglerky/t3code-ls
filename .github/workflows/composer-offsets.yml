@@ -129,8 +129,13 @@ jobs:
           if [[ "$T3_CODE_LS_VOICE_DRAFT_PROOF" == true ]]; then
             sudo -n unshare --net -- bash -euc '
               ip link set dev lo up
-              exec runuser -u "$1" -- "$2" apps/web/scripts/verify-hybrid-client.ts "$3" "$4"
+              exec runuser -u "$1" -- env \
+                T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 T3_CODE_LS_VOICE_DRAFT_PROOF=true \
+                VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
+                "$2" apps/web/scripts/verify-hybrid-client.ts "$3" "$4"
             ' _ "$(id -un)" "$(command -v node)" "$proof" "$implementation"
+            jq -e '.voiceDraft.rustSelection and .voiceDraft.transcriptionRequests == 1 and .voiceDraft.remainedUnsent' \
+              "$proof/native/proof.json"
           else
             node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
           fi

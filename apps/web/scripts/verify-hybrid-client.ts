@@ -1224,6 +1224,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     }
 
     if (voiceDraftProof) {
+      Assert.ok(bundledClient && implementation === "native" && expectsRustComposer);
       starting("capture synthetic microphone audio into an unsent draft");
       proof.voiceDraft = await verifyBundledVoiceDraft(page);
       completed("Preserved a concurrent Unicode draft edit through dictated insertion and cancellation");
