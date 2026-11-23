@@ -137,7 +137,9 @@ const composerDraftBaseStorage =
         setItem: (name: string, value: string) => globalThis.localStorage.setItem(name, value),
         removeItem: (name: string) => globalThis.localStorage.removeItem(name),
       };
-export const useComposerDraftStorageUnavailable = create<boolean>(() => false);
+type ComposerDraftStorageStatus = "available" | "unavailable" | "conflict";
+export const useComposerDraftStorageStatus = create<ComposerDraftStorageStatus>(() => "available");
+const DRAFT_RECOVERY_CONFLICT = new Error("Another tab saved changes to this draft");
 
 interface ComposerDraftWrite {
   readonly text: string;
@@ -285,6 +287,19 @@ function serializeComposerDraftState(value: StorageValue<ComposerPersistState>):
   const baseline = composerDraftLastWrite?.local ?? composerDraftLoadedState;
   const stored = baseline ? readStoredComposerDraftState() : null;
   const merged = stored && baseline ? mergeComposerDraftStates(stored, local, baseline) : local;
+  if (stored && baseline && useComposerDraftStorageStatus.getState() !== "available") {
+    // Replay other tabs' edits over the candidate. A difference means recovery
+    // would undo a saved edit. Use the same draft field groups as ordinary saves.
+    const restoredDrafts = mergeDraftRecord(
+      merged.draftsByThreadKey,
+      stored.draftsByThreadKey ?? {},
+      baseline.draftsByThreadKey,
+      mergeComposerThreadDraft,
+    );
+    if (!Equal.equals(restoredDrafts, merged.draftsByThreadKey)) {
+      throw DRAFT_RECOVERY_CONFLICT;
+    }
+  }
   const text = JSON.stringify({ state: merged, version: value.version });
   composerDraftPendingWrite = { text, local, merged };
   return text;
@@ -297,7 +312,7 @@ const composerDebouncedStorage = createDeferredStorage<StorageValue<ComposerPers
       composerDraftBaseStorage.setItem(name, text);
       if (composerDraftPendingWrite?.text === text)
         composerDraftLastWrite = composerDraftPendingWrite;
-      useComposerDraftStorageUnavailable.setState(false);
+      useComposerDraftStorageStatus.setState("available");
     },
     removeItem: (name) => {
       composerDraftBaseStorage.removeItem(name);
@@ -307,7 +322,11 @@ const composerDebouncedStorage = createDeferredStorage<StorageValue<ComposerPers
   },
   serializeComposerDraftState,
   COMPOSER_PERSIST_DEBOUNCE_MS,
-  () => useComposerDraftStorageUnavailable.setState(true),
+  (cause) => {
+    useComposerDraftStorageStatus.setState(
+      cause === DRAFT_RECOVERY_CONFLICT ? "conflict" : "unavailable",
+    );
+  },
 );
 
 const composerPersistStorage: PersistStorage<ComposerPersistState> = {
@@ -316,7 +335,7 @@ const composerPersistStorage: PersistStorage<ComposerPersistState> = {
     try {
       raw = composerDebouncedStorage.getItem(name);
     } catch {
-      useComposerDraftStorageUnavailable.setState(true);
+      useComposerDraftStorageStatus.setState("unavailable");
       return null;
     }
     if (typeof raw !== "string") {

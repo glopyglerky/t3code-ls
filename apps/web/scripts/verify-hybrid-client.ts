@@ -919,10 +919,9 @@ async function verifyDraftStorageRecovery(page: Page) {
     { storageKey, draftId, prompt },
     { timeout: 10_000 },
   );
-  await editor.fill(original);
-  Assert.equal(await editor.innerText(), original);
-  await saved(original);
-  await page.evaluate((key) => {
+  const retry = page.getByRole("button", { name: "Retry saving", exact: true });
+  const fault = page.locator('html[data-fixture-draft-quota-fault="true"]');
+  const deny = () => page.evaluate((key) => {
     const setItem = Storage.prototype.setItem;
     window.addEventListener("fixture-restore-draft-storage", () => {
       Storage.prototype.setItem = setItem;
@@ -938,21 +937,65 @@ async function verifyDraftStorageRecovery(page: Page) {
   const recovered = () => page.evaluate(() => {
     window.dispatchEvent(new Event("fixture-restore-draft-storage"));
   });
+  const notice = page.getByText("Draft changes could not be saved", { exact: true });
+  await editor.fill(original);
+  Assert.equal(await editor.innerText(), original);
+  await saved(original);
+  await deny();
   try {
     await editor.fill(revised);
-    await page.locator('html[data-fixture-draft-quota-fault="true"]').waitFor({ state: "attached" });
-    const notice = page.getByText("Draft changes could not be saved", { exact: true });
+    await fault.waitFor({ state: "attached" });
     await notice.waitFor({ state: "visible", timeout: 10_000 });
     Assert.equal(await editor.innerText(), revised);
     await saved(original);
     await recovered();
-    await page.getByRole("button", { name: "Retry saving", exact: true }).click();
+    await retry.click();
     await saved(revised);
     await notice.waitFor({ state: "hidden" });
     await page.reload({ waitUntil: "domcontentloaded" });
     await editor.waitFor({ state: "visible" });
     Assert.equal(await editor.innerText(), revised);
-    return { failureVisible: true, promptRetained: true, savedAfterRetry: true };
+
+    const other = await page.context().newPage();
+    other.setDefaultTimeout(timeoutMs);
+    try {
+      await other.goto(page.url(), { waitUntil: "domcontentloaded" });
+      const otherEditor = other.getByRole("textbox", { name: "Message New thread", exact: true });
+      await otherEditor.waitFor({ state: "visible" });
+      Assert.equal(await otherEditor.innerText(), revised);
+      const unsaved = "First tab's unsaved edit";
+      const newer = "Second tab's newer saved edit";
+      await deny();
+      await editor.fill(unsaved);
+      await fault.waitFor({ state: "attached" });
+      await notice.waitFor({ state: "visible", timeout: 10_000 });
+      await saved(revised);
+      await otherEditor.fill(newer);
+      await saved(newer);
+      const readEnvelope = () => other.evaluate((key) => localStorage.getItem(key), storageKey);
+      const beforeRetry = await readEnvelope();
+      Assert.equal(JSON.parse(beforeRetry!).version, 9);
+
+      await recovered();
+      await retry.click();
+      Assert.equal(await readEnvelope(), beforeRetry, "Retry overwrote the other tab's saved draft");
+      await page.getByRole("alert").filter({ hasText: "Draft changed in another tab" })
+        .waitFor({ state: "visible" });
+      Assert.equal(await editor.innerText(), unsaved);
+
+      await other.reload({ waitUntil: "domcontentloaded" });
+      await otherEditor.waitFor({ state: "visible" });
+      Assert.equal(await otherEditor.innerText(), newer);
+    } finally {
+      await other.close();
+    }
+    return {
+      failureVisible: true,
+      promptRetained: true,
+      savedAfterRetry: true,
+      newerDraftPreserved: true,
+      conflictAnnounced: true,
+    };
   } finally {
     await recovered();
   }
@@ -2714,9 +2757,9 @@ async function exercise(implementation: Implementation): Promise<void> {
       completed("Saved two workspace edits and retained the next draft after an external change");
     }
     if (draftStorageProof) {
-      starting("draft write quota denial and recovery");
+      starting("draft quota denial, retry and cross-tab conflict");
       proof.draftStorage = await verifyDraftStorageRecovery(page);
-      completed("Kept the unsent draft through quota denial, retry and reload");
+      completed("Recovered the unsent draft and preserved the newer save from another tab");
     }
     if (implementation === "native") {
       Assert.equal(proof.persistence.length, 4);
