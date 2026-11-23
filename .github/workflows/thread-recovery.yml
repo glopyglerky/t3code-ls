@@ -153,11 +153,11 @@ jobs:
 
   mobile-outbox-ios:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
-    runs-on: ${{ (startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-') || startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-installed-')) && 'macos-26-intel' || 'macos-26' }}
-    timeout-minutes: 75
+    runs-on: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-') && 'macos-26-intel' || 'macos-26' }}
+    timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-installed-') && 115 || 75 }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
-      BUILD_HOST_ARCH: ${{ (startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-') || startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-installed-')) && 'x86_64' || 'arm64' }}
+      BUILD_HOST_ARCH: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-') && 'x86_64' || 'arm64' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -206,7 +206,7 @@ jobs:
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
       - name: Link the Rust outbox library into the generated iOS app
-        timeout-minutes: 60
+        timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-installed-') && 90 || 60 }}
         env:
           APP_VARIANT: development
           EXPO_NO_GIT_STATUS: "1"
