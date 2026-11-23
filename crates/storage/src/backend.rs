@@ -518,14 +518,19 @@ impl Backend {
     /// Inspect an existing store without a writable descriptor, integrity repair,
     /// schema initialization, or later promotion to a writer.
     pub(crate) async fn open_read_only(path: impl AsRef<Path>) -> Result<Self> {
-        Self::open_snapshot(path.as_ref().to_owned(), false).await
+        Self::open_snapshot(path.as_ref().to_owned(), false, u64::MAX).await
     }
 
     pub(crate) async fn open_offline_snapshot(path: &Path) -> Result<Self> {
-        Self::open_snapshot(path.to_owned(), true).await
+        Self::open_snapshot(path.to_owned(), true, u64::MAX).await
     }
 
-    async fn open_snapshot(path: PathBuf, exclusive: bool) -> Result<Self> {
+    #[cfg(unix)]
+    pub(crate) async fn open_bounded_offline_snapshot(path: &Path, max_bytes: u64) -> Result<Self> {
+        Self::open_snapshot(path.to_owned(), true, max_bytes).await
+    }
+
+    async fn open_snapshot(path: PathBuf, exclusive: bool, max_bytes: u64) -> Result<Self> {
         if !path.is_absolute() {
             return Err(Error::Invalid("database path must be absolute".into()));
         }
@@ -539,6 +544,11 @@ impl Backend {
                     .map_err(storage_error)?
                 {
                     return Err(Error::WriterBusy);
+                }
+                if file.len().map_err(storage_error)? > max_bytes {
+                    return Err(Error::Invalid(
+                        "trial restore database exceeds file size limit".into(),
+                    ));
                 }
                 let mut options = builder();
                 options.set_concurrency_mode(ConcurrencyMode::ExclusiveWriter);
@@ -748,6 +758,60 @@ impl Backend {
         })
         .await
         .map_err(worker_error)?
+    }
+
+    pub(crate) async fn storage_fingerprint(&self) -> Result<StorageBackup> {
+        self.fingerprint(|_, _| Ok(())).await
+    }
+
+    #[cfg(unix)]
+    pub(crate) async fn bounded_storage_fingerprint(&self) -> Result<StorageBackup> {
+        let mut rows_left = MAX_BATCH_RECORDS;
+        let mut bytes_left = MAX_BATCH_BYTES;
+        self.fingerprint(move |key, value| {
+            rows_left = rows_left
+                .checked_sub(1)
+                .ok_or_else(|| Error::Invalid("trial restore database exceeds row limit".into()))?;
+            bytes_left = bytes_left
+                .checked_sub(key.len())
+                .and_then(|remaining| remaining.checked_sub(value.len()))
+                .ok_or(Error::ResourceLimit(ResourceLimit::ScanBytes))?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn fingerprint(
+        &self,
+        meter: impl FnMut(&[u8], &[u8]) -> Result<()> + Send + 'static,
+    ) -> Result<StorageBackup> {
+        let handles = self.handles.clone();
+        tokio::task::spawn_blocking(move || {
+            let (rows, checksum) = snapshot_digest(&handles.begin_read()?, meter)?;
+            let bytes = std::fs::metadata(&handles.path)
+                .map_err(storage_error)?
+                .len();
+            handles.verify_identity()?;
+            Ok(StorageBackup {
+                rows,
+                bytes,
+                checksum,
+            })
+        })
+        .await
+        .map_err(worker_error)?
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn offline_file_metadata(&self) -> Result<std::fs::Metadata> {
+        if !self.handles.exclusive || !self.handles.read_only {
+            return Err(Error::IncompatibleStore);
+        }
+        let file = open_regular_file(&self.handles.path, OpenOptions::new().read(true))?;
+        if self.handles.identity.as_ref() != Some(&file_identity(&file)?) {
+            return Err(Error::IncompatibleStore);
+        }
+        file.metadata().map_err(storage_error)
     }
 
     pub(crate) fn verify_identity(&self) -> Result<()> {

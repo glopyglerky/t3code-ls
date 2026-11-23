@@ -443,6 +443,89 @@ async fn acknowledged_batch_survives_process_kill_and_reopens() {
     assert_eq!(lines[1]["result"], acknowledgement["result"]["receipt"]);
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn service_trial_restore_cli_reports_one_result_and_prepares_reopenable_stage() {
+    use std::fs;
+    use t3_code_ls_storage::application::ApplicationTransactions;
+    use t3_code_ls_storage::application_server_ownership::OwnerLock;
+
+    const UPDATE_ID: &str = "aa212c2b-63d4-4b28-97e4-1c1d6dc6d281";
+    let fixture = test_support::TestFixture::start().await;
+    let home = fs::canonicalize(fixture.path().parent().unwrap()).unwrap();
+    let state = home.join("userdata");
+    fs::create_dir(&state).unwrap();
+    fs::create_dir(home.join("runtime")).unwrap();
+    let owner = OwnerLock::acquire(&state.join("server-owner.sqlite")).unwrap();
+    let database = state.join("statev2.omdb");
+    let store = Store::initialize_local(&database).await.unwrap();
+    store.bootstrap_application().await.unwrap();
+    store.commit(&batch("before", 0)).await.unwrap();
+    let identity = ApplicationTransactions::new(store.clone())
+        .generation_identity()
+        .await
+        .unwrap()
+        .unwrap();
+    store.shutdown().await.unwrap();
+    owner.activate_native().unwrap();
+    drop(owner);
+
+    let executable = env!("CARGO_BIN_EXE_t3-code-ls-db");
+    let output = Command::new(executable)
+        .arg("trial-backup")
+        .arg(&home)
+        .args([UPDATE_ID, &identity.catalog_sha256])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let backup: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(backup["ok"], true);
+    let snapshot = json!({
+        "catalog_sha256": identity.catalog_sha256,
+        "rows": backup["result"]["backup"]["rows"],
+        "checksum": backup["result"]["backup"]["checksum"],
+    });
+    let mut request = json!({
+        "update_id": UPDATE_ID,
+        "phase": "committed",
+        "database": backup["result"]["database"],
+        "checkpoint": snapshot,
+        "target": snapshot,
+    });
+    let prepare = |request: &Value| {
+        let mut child = Command::new(executable)
+            .arg("trial-prepare-restore")
+            .arg(&home)
+            .arg(UPDATE_ID)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        serde_json::to_writer(child.stdin.take().unwrap(), request).unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        assert_eq!(
+            output.stdout.iter().filter(|byte| **byte == b'\n').count(),
+            1
+        );
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+
+    let stage = state.join(format!(".statev2-restore-{UPDATE_ID}.omdb"));
+    let live_bytes = fs::read(&database).unwrap();
+    assert_eq!(prepare(&request)["error"]["kind"], "invalid_request");
+    assert!(!stage.exists());
+    request["phase"] = json!("failed-before-activation");
+    assert_eq!(prepare(&request)["result"]["reused"], false);
+    assert_eq!(prepare(&request)["result"]["reused"], true);
+    let reopened = Store::open_read_only(stage).await.unwrap();
+    assert!(reopened.read_receipt("before").await.unwrap().is_some());
+    reopened.shutdown().await.unwrap();
+    assert_eq!(fs::read(&database).unwrap(), live_bytes);
+}
+
 #[tokio::test]
 async fn concurrent_helpers_reopen_after_crash_without_reading_unrecovered_state() {
     let executable = env!("CARGO_BIN_EXE_t3-code-ls-db");

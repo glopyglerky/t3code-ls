@@ -29,7 +29,9 @@ use t3_code_ls_storage::application_receipts::ReceiptRow;
 use t3_code_ls_storage::application_runtime_state::RuntimeStateOperation;
 use t3_code_ls_storage::application_scheduled::{ScheduledRead, ScheduledWrite};
 use t3_code_ls_storage::application_search::ThreadSearchQuery;
-use t3_code_ls_storage::application_storage::backup_service_trial;
+use t3_code_ls_storage::application_storage::{
+    TrialRestoreRequest, backup_service_trial, prepare_service_trial_restore,
+};
 use t3_code_ls_storage::application_thread_find::ThreadFindQuery;
 use t3_code_ls_storage::outbox::{self, EnqueueEffect};
 use t3_code_ls_storage::project_service::{ProjectRequest, execute_project};
@@ -1529,19 +1531,37 @@ fn error_response(error: &Error) -> Value {
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if let [mode, home, update_id, catalog_sha256] = args.as_slice()
-        && mode == "trial-backup"
-    {
-        let response = match backup_service_trial(
-            home.into(),
-            update_id.clone(),
-            catalog_sha256.clone(),
-        )
-        .await
-        {
-            Ok(backup) => json!({"ok": true, "result": backup}),
-            Err(error) => error_response(&error),
-        };
+    let trial_response = match args.as_slice() {
+        [mode, home, update_id, catalog_sha256] if mode == "trial-backup" => {
+            match backup_service_trial(home.into(), update_id.clone(), catalog_sha256.clone()).await
+            {
+                Ok(backup) => Some(json!({"ok": true, "result": backup})),
+                Err(error) => Some(error_response(&error)),
+            }
+        }
+        [mode, home, update_id] if mode == "trial-prepare-restore" => {
+            const MAX_RESTORE_REQUEST_BYTES: usize = 4096;
+            let mut input = Vec::new();
+            io::stdin()
+                .lock()
+                .take((MAX_RESTORE_REQUEST_BYTES + 1) as u64)
+                .read_to_end(&mut input)?;
+            let request = serde_json::from_slice::<TrialRestoreRequest>(&input);
+            Some(match request {
+                Ok(request) if input.len() <= MAX_RESTORE_REQUEST_BYTES => {
+                    match prepare_service_trial_restore(home.into(), update_id.clone(), request)
+                        .await
+                    {
+                        Ok(stage) => json!({"ok": true, "result": stage}),
+                        Err(error) => error_response(&error),
+                    }
+                }
+                _ => error_response(&Error::Invalid("invalid trial restore request".into())),
+            })
+        }
+        _ => None,
+    };
+    if let Some(response) = trial_response {
         let mut output = io::stdout().lock();
         serde_json::to_writer(&mut output, &response)?;
         writeln!(output)?;
@@ -1561,7 +1581,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         [mode, path] if mode == "exclusive-local" => Store::open_exclusive(path).await,
         _ => {
             return Err(Error::Invalid(
-                "usage: t3-code-ls-db initialize-local PATH | local PATH | read-only-local PATH | exclusive-local PATH | owner-lock PATH | trial-backup HOME UPDATE_ID CATALOG_SHA256".into(),
+                "usage: t3-code-ls-db initialize-local PATH | local PATH | read-only-local PATH | exclusive-local PATH | owner-lock PATH | trial-backup HOME UPDATE_ID CATALOG_SHA256 | trial-prepare-restore HOME UPDATE_ID < REQUEST_JSON".into(),
             )
             .into());
         }
