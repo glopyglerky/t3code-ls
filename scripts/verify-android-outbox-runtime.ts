@@ -103,7 +103,7 @@ try {
   await unusedPort(5558); await unusedPort(5559);
   checkpoint("installed-system-image");
   Assert.ok(FS.existsSync(Path.join(image, "package.xml")),
-    "Missing admitted system-images;android-36;google_apis;x86_64; no SDK installation was attempted");
+    "Missing staged system-images;android-36;google_apis;x86_64");
   report.systemImageMetadataSha256 = Crypto.createHash("sha256").update(FS.readFileSync(Path.join(image, "package.xml"))).digest("hex");
   checkpoint("create-owned-avd");
   run(avdmanager, ["create", "avd", "--name", avdName, "--package", String(report.systemImage),
@@ -114,7 +114,7 @@ try {
   const log = FS.openSync(Path.join(proof, `${phase}-emulator.log`), "w", 0o600);
   child = ChildProcess.spawn(emulator, ["-avd", avdName, "-port", "5558", "-accel", "on",
     "-no-window", "-no-audio", "-no-boot-anim", "-no-snapshot", "-memory", "2048", "-cores", "2",
-    "-gpu", "swiftshader_indirect"],
+    "-gpu", "swiftshader"],
   { env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
   closed = new Promise<void>((resolve) => child!.once("close", () => { FS.closeSync(log); resolve(); }));
   child.once("error", () => { logOverflow = true; });

@@ -368,12 +368,40 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "26.12.1"
-      - name: Admit and boot an isolated x64 Android emulator before compiling
+      - name: Stage the pinned Android emulator and system image
         shell: bash
         run: |
           set -euo pipefail
           export JAVA_HOME="$JAVA_HOME_21_X64"
           mkdir "$RUNNER_TEMP/outbox-runtime-proof"
+          sdk="$RUNNER_TEMP/outbox-runtime-sdk"
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$ANDROID_HOME/platform-tools/adb"
+          mkdir "$sdk" "$RUNNER_TEMP/outbox-runtime-sdk-user"
+          cp -R "$ANDROID_HOME/licenses" "$sdk/licenses"
+          ln -s "$ANDROID_HOME/cmdline-tools" "$sdk/cmdline-tools"
+          ln -s "$ANDROID_HOME/platform-tools" "$sdk/platform-tools"
+          ANDROID_USER_HOME="$RUNNER_TEMP/outbox-runtime-sdk-user" \
+            "$sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk" --channel=0 --install \
+              emulator 'system-images;android-36;google_apis;x86_64' </dev/null
+          img="$sdk/system-images/android-36/google_apis/x86_64"
+          sed -nE 's/^Pkg\.Revision[[:space:]]*=[[:space:]]*//p' "$sdk/emulator/source.properties" \
+            > "$RUNNER_TEMP/outbox-runtime-proof/emulator-revision.txt"
+          sed -nE 's/^Pkg\.Revision[[:space:]]*=[[:space:]]*//p' "$img/source.properties" \
+            > "$RUNNER_TEMP/outbox-runtime-proof/image-revision.txt"
+          grep -Fx '37.3.10' "$RUNNER_TEMP/outbox-runtime-proof/emulator-revision.txt"
+          grep -Fx '7' "$RUNNER_TEMP/outbox-runtime-proof/image-revision.txt"
+          (
+            cd "$sdk"
+            sha256sum emulator/emulator emulator/package.xml platform-tools/adb \
+              system-images/android-36/google_apis/x86_64/{package.xml,system.img}
+          ) > "$RUNNER_TEMP/outbox-runtime-proof/sdk.sha256"
+      - name: Admit and boot an isolated x64 Android emulator before compiling
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="$JAVA_HOME_21_X64"
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -c /dev/kvm
           stat -c 'type=%F mode=%a group=%G' /dev/kvm > "$RUNNER_TEMP/outbox-runtime-proof/kvm-node.txt"
@@ -383,7 +411,7 @@ jobs:
             ip link set dev lo up
             exec runuser -u "$1" -g "$6" -G kvm -- env GITHUB_ACTIONS=true RUNNER_TEMP="$3" ANDROID_HOME="$4" JAVA_HOME="$5" \
               "$2" scripts/verify-android-outbox-runtime.ts admit "$3/outbox-runtime-proof"
-          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$ANDROID_HOME" "$JAVA_HOME" "$(id -gn)"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$RUNNER_TEMP/outbox-runtime-sdk" "$JAVA_HOME" "$(id -gn)"
       - name: Build matching JNI and two embedded-JS proof packages
         shell: bash
         run: |
@@ -431,7 +459,7 @@ jobs:
             ip link set dev lo up
             exec runuser -u "$1" -g "$6" -G kvm -- env GITHUB_ACTIONS=true RUNNER_TEMP="$3" ANDROID_HOME="$4" JAVA_HOME="$5" \
               "$2" scripts/verify-android-outbox-runtime.ts run "$3/outbox-runtime-proof"
-          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$ANDROID_HOME" "$JAVA_HOME" "$(id -gn)"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$RUNNER_TEMP/outbox-runtime-sdk" "$JAVA_HOME" "$(id -gn)"
       - name: Retain Android execution or the first admission blocker
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -447,10 +475,12 @@ jobs:
           name: outbox-android-runtime-apk
           path: ${{ runner.temp }}/outbox-runtime-positive.apk
           retention-days: 3
-      - name: Remove owned package copies
+      - name: Remove owned packages and SDK staging
         if: always()
         shell: bash
-        run: rm -f -- "$RUNNER_TEMP/outbox-runtime-positive.apk" "$RUNNER_TEMP/outbox-runtime-missing-library.apk"
+        run: |
+          rm -f -- "$RUNNER_TEMP/outbox-runtime-positive.apk" "$RUNNER_TEMP/outbox-runtime-missing-library.apk"
+          rm -rf -- "$RUNNER_TEMP/outbox-runtime-sdk" "$RUNNER_TEMP/outbox-runtime-sdk-user"
 
   maintenance-snapshot:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-maintenance-snapshot-')
