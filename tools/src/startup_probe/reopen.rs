@@ -210,7 +210,7 @@ fn stopped_native_migration(bundle: &Path, state: &Path) -> Result<u64> {
         .join("native-bin/t3-code-ls-db");
     let mut child = OwnedChild(
         Command::new("timeout")
-            .args(["--kill-after=1s", "5s", "--"])
+            .args(["--kill-after=1s", "--", "5s"])
             .arg(helper)
             .arg("read-only-local")
             .arg(state.join("statev2.omdb"))
@@ -234,8 +234,12 @@ fn stopped_native_migration(bundle: &Path, state: &Path) -> Result<u64> {
         .ok_or("missing native helper output")?
         .take(1_048_577)
         .read_to_end(&mut response)?;
-    if response.len() > 1_048_576 || !child.0.wait()?.success() {
-        return Err("native migration inspection exceeded its bound or failed".into());
+    if response.len() > 1_048_576 {
+        return Err("native migration inspection exceeded its output bound".into());
+    }
+    let exit = child.0.wait()?;
+    if !exit.success() {
+        return Err(format!("native migration inspection failed: {exit}").into());
     }
     migration_head(&response)
 }
