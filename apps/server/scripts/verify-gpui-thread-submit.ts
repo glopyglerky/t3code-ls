@@ -9,6 +9,7 @@ import * as Path from "node:path";
 import { ORCHESTRATION_V2_WS_METHODS, ProjectId, ThreadId, CommandId, ProviderInstanceId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import { RpcClient, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
 import { makeWsRpcProtocolClient } from "../../../packages/client-runtime/src/rpc/protocol.ts";
@@ -81,7 +82,12 @@ try {
     Assert.ok(!startupFailed && server.exitCode === null, "Synthetic server exited before readiness");
     try {
       const response = await fetch(origin + "/.well-known/t3/environment", { signal: AbortSignal.timeout(1000) });
-      if (response.ok) { descriptor = await response.json(); break; }
+      if (response.ok) {
+        descriptor = Schema.decodeUnknownSync(Schema.Struct({ environmentId: Schema.String }))(
+          await response.json(),
+        );
+        break;
+      }
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
@@ -220,9 +226,9 @@ try {
     Assert.equal(receipt.command_id?.value, stopCommandId);
     Assert.equal(receipt.aggregate_id?.value, threadId);
     Assert.equal(receipt.status?.value, "accepted");
-    console.log(JSON.stringify({ toolkit: "gpui", serverImplementation: "native",
+    process.stdout.write(JSON.stringify({ toolkit: "gpui", serverImplementation: "native",
       commands: ["message.dispatch", "run.interrupt"], runCount: 1, status: "interrupted",
-      selectedProvider: "devReplay/todo-list", liveProvider: false, interruptReceiptCount: 1 }));
+      selectedProvider: "devReplay/todo-list", liveProvider: false, interruptReceiptCount: 1 }) + "\n");
   } else {
     await submitThroughWindow(approval ? "--thread-compose-approval" : "--thread-compose", commandId, messageId);
     const accepted = await currentProjection();
@@ -248,14 +254,14 @@ try {
         Assert.deepEqual(reopened.messages.find((row) => row.id === message.id), message);
       }
     }
-    console.log(JSON.stringify({ toolkit: "gpui", serverImplementation: "native", transport: "WebSocket JSON RPC",
+    process.stdout.write(JSON.stringify({ toolkit: "gpui", serverImplementation: "native", transport: "WebSocket JSON RPC",
       commands: approval ? ["message.dispatch", "runtime-request.respond"] : ["message.dispatch"],
       runCount: approval ? 1 : 2, userMessageCount: approval ? 1 : 2, refusalWindows: approval ? 0 : 4,
       normalCommandAndProjectionRoute: true, followUpInSameThread: !approval,
       ...(approval ? { approvalDecision: "accept", resolvedRequestCount: 1 } : {}),
       ...(approval ? {} : { streaming: "original ACP partial before completed run; same message identity final/reopen; later unsent draft retained" }),
       unqualified: ["live providers", "general stream recovery and delta negotiation", "durable client identity allocation"],
-    }));
+    }) + "\n");
   }
 } finally {
   if (server && server.exitCode === null) server.kill("SIGTERM");

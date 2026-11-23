@@ -7,8 +7,10 @@ import * as Net from "node:net";
 import * as OS from "node:os";
 import * as Path from "node:path";
 import { WS_METHODS, ProjectId } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import { RpcClient, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
 import { makeWsRpcProtocolClient } from "../../../packages/client-runtime/src/rpc/protocol.ts";
@@ -35,8 +37,8 @@ FS.writeFileSync(Path.join(userdata, "settings.json"), JSON.stringify({
       config: { setupMode: "existing", homePath: codexHome, binaryPath: Path.join(scratch, "absent-codex") } },
   },
 }));
-const stamp = new Date(Date.now() - 60_000);
-const day = stamp.toISOString().slice(0, 10);
+const stamp = DateTime.toEpochMillis(Effect.runSync(DateTime.now)) - 60_000;
+const day = DateTime.formatIso(DateTime.makeUnsafe(stamp)).slice(0, 10);
 const sessions = Path.join(codexHome, "sessions", ...day.split("-"));
 FS.mkdirSync(sessions, { recursive: true });
 const records = [
@@ -47,7 +49,7 @@ const records = [
 ];
 FS.writeFileSync(Path.join(sessions, `rollout-${day}T00-00-00-${sessionId}.jsonl`),
   records.map((record, index) => JSON.stringify({
-    timestamp: new Date(stamp.getTime() + index * 1000).toISOString(), ...record,
+    timestamp: DateTime.formatIso(DateTime.makeUnsafe(stamp + index * 1000)), ...record,
   })).join("\n") + "\n");
 const reservation = Net.createServer();
 await new Promise<void>((resolve, reject) => { reservation.once("error", reject); reservation.listen(0, "127.0.0.1", resolve); });
@@ -79,7 +81,12 @@ try {
     Assert.equal(server.exitCode, null, "Synthetic server exited before readiness");
     try {
       const response = await fetch(origin + "/.well-known/t3/environment", { signal: AbortSignal.timeout(1000) });
-      if (response.ok) { descriptor = await response.json(); break; }
+      if (response.ok) {
+        descriptor = Schema.decodeUnknownSync(Schema.Struct({ environmentId: Schema.String }))(
+          await response.json(),
+        );
+        break;
+      }
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
@@ -131,7 +138,7 @@ try {
     view.stdin.on("error", reject);
     view.stdin.end(JSON.stringify({ port, token, environmentId: descriptor.environmentId, threadId }));
   });
-  console.log("GPUI read the selected native server's authenticated imported thread through its production bounded snapshot route.");
+  process.stdout.write("GPUI read the selected native server's authenticated imported thread through its production bounded snapshot route.\n");
 } finally {
   if (server.exitCode === null) server.kill("SIGTERM");
   const terminate = setTimeout(() => { if (server.exitCode === null) server.kill("SIGKILL"); }, 8_000);

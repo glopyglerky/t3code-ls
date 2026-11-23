@@ -118,7 +118,15 @@ const CLIENT_THREAD_SUBSCRIPTION = {
   acceptCompactTurnItems: true,
   acceptCompactIds: true,
   acceptDedupedBodies: true,
-} satisfies Required<Omit<OrchestrationV2SubscribeThreadInput, "threadId" | "afterSequence">>;
+} satisfies Required<Pick<
+  OrchestrationV2SubscribeThreadInput,
+  | "requestCompletionMarker"
+  | "acceptBoundedSnapshot"
+  | "acceptDeferredWork"
+  | "acceptCompactTurnItems"
+  | "acceptCompactIds"
+  | "acceptDedupedBodies"
+>>;
 type ShellResumeField = "afterSequence" | "httpSnapshotFallback" | "knownProjectIdentities";
 const CLIENT_SHELL_SUBSCRIPTION = {
   requestCompletionMarker: true,
