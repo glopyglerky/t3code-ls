@@ -25,7 +25,7 @@ fn git(root: &Path, args: &[&str]) -> Result<String> {
 }
 
 // Print an exact-source overlay. The caller writes it only in its owned staging tree.
-fn strict_source(root: &Path) -> Result<String> {
+fn strict_source(root: &Path, plain: bool) -> Result<String> {
     if git(root, &["rev-parse", "HEAD"])?.trim() != STOCK
         || git(root, &["rev-parse", "HEAD^{tree}"])?.trim() != TREE
         || !git(root, &["status", "--porcelain", "--untracked-files=normal"])?.is_empty()
@@ -36,6 +36,10 @@ fn strict_source(root: &Path) -> Result<String> {
     if fs::read_to_string(root.join(SOURCE))? != source {
         return Err("stock working source differs from frozen blob".into());
     }
+    policy_overlay(&source, plain)
+}
+
+fn policy_overlay(source: &str, plain: bool) -> Result<String> {
     let old = "      yield* sql`PRAGMA synchronous = NORMAL;`;";
     if source.matches(old).count() != 1 {
         return Err("ambiguous synchronous setup".into());
@@ -49,7 +53,15 @@ fn strict_source(root: &Path) -> Result<String> {
       if (strictJournal[0]?.journal_mode !== "wal" || strictSync[0]?.synchronous !== 2) {
         return yield* Effect.die(new Error("T16 strict-control writer is not WAL/FULL"));
       }"#;
-    Ok(source.replacen(old, new, 1))
+    Ok(source.replacen(
+        old,
+        if plain {
+            "      yield* sql`PRAGMA synchronous = FULL;`;"
+        } else {
+            new
+        },
+        1,
+    ))
 }
 
 fn number(value: &Value, field: &str) -> Result<u64> {
@@ -138,10 +150,108 @@ fn account(sample: &Value) -> Result<Value> {
     )
 }
 
+// These marks are completion coordinates, not quantities to normalize away.
+// Retain a receipt before refusing unequal work. Background events remain unknown.
+fn match_samples(samples: &[Value]) -> Result<Value> {
+    if samples.len() != 3 {
+        return Err("expected stock, plain FULL, native samples".into());
+    }
+    let mut rows = Vec::new();
+    for (index, sample) in samples.iter().enumerate() {
+        account(sample)?;
+        let expected = if index == 2 { "native" } else { "stock" };
+        let snapshot = &sample["snapshot"];
+        let browser = &sample["browser"];
+        if sample["profile"] != expected
+            || sample["native_lookups"] != false
+            || !sample["persistence_spans"].is_null()
+            || !sample["readiness_phases"].is_null()
+            || snapshot["threadCount"] != 32
+            || snapshot["messageCount"] != 200
+            || snapshot["selectedThreadId"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .is_none()
+            || sample["fixture_workspace"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .is_none()
+        {
+            return Err("expected complete plain selected J02 sample".into());
+        }
+        for field in [
+            "runtime_pid_matched",
+            "environment_id_matched",
+            "html_root_matched",
+        ] {
+            if sample["readiness_evidence"][field] != true {
+                return Err("readiness identity mismatch".into());
+            }
+        }
+        if number(sample, "database_migration")? == 0
+            || number(sample, "database_bytes_at_reopen")? == 0
+            || number(sample, "descriptor_micros")? == 0
+            || number(sample, "html_micros")? < number(sample, "descriptor_micros")?
+            || number(&sample["fixture"], "transcript_bytes")? == 0
+            || number(sample, "saved_thread_sequence")? == 0
+            || number(snapshot, "shellSequence")? == 0
+            || number(snapshot, "threadSequence")? == 0
+            || number(browser, "threadResumeAfterSequence")?
+                != number(sample, "saved_thread_sequence")?
+        {
+            return Err("incomplete work or completion coordinates".into());
+        }
+        rows.push(
+            json!({"fixture":sample["fixture"],"workspace":sample["fixture_workspace"],
+            "snapshot":snapshot,"saved_thread_sequence":sample["saved_thread_sequence"],
+            "threadResumeAfterSequence":browser["threadResumeAfterSequence"]}),
+        );
+    }
+    let equivalent = rows[0] == rows[1]
+        && rows[0] == rows[2]
+        && samples[0]["database_migration"] == samples[1]["database_migration"];
+    Ok(
+        json!({"journey":"J02","kind":"plain-work-equivalence-control",
+        "equivalent_completed_coordinates":equivalent,"arms":["stock","full","native"],"coordinates":rows,
+        "sqlite_migrations":[samples[0]["database_migration"],samples[1]["database_migration"]],
+        "native_migration":samples[2]["database_migration"],
+        "background_events_classified":false,"performance_qualified":false,"equal_durability_qualified":false,
+        "limits":["Original probe verifies exact ordered selected history and cache; transcript hashes are checked separately",
+        "Sequence divergence blocks this comparison; no normalization or pooling",
+        "Matching coordinates do not prove absence of background work or crash durability"]}),
+    )
+}
+fn read_sample(path: &Path) -> Result<Value> {
+    let mut bytes = Vec::new();
+    fs::File::open(path)?
+        .take(4_194_305)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > 4_194_304 {
+        return Err("sample exceeds bound".into());
+    }
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
 fn main() -> Result<()> {
     let args: Vec<_> = env::args_os().skip(1).collect();
     match args.as_slice() {
-        [command, root] if command == "source" => print!("{}", strict_source(Path::new(root))?),
+        [command, root] if command == "source" => {
+            print!("{}", strict_source(Path::new(root), false)?)
+        }
+        [command, root] if command == "plain-source" => {
+            print!("{}", strict_source(Path::new(root), true)?)
+        }
+        [command, stock, full, native] if command == "match" => {
+            let receipt = match_samples(&[
+                read_sample(Path::new(stock))?,
+                read_sample(Path::new(full))?,
+                read_sample(Path::new(native))?,
+            ])?;
+            println!("{receipt}");
+            if receipt["equivalent_completed_coordinates"] != true {
+                return Err("unequal completed work; retain receipt and investigate events".into());
+            }
+        }
         [command] if command == "account" => {
             let mut bytes = Vec::new();
             io::stdin().take(4_194_305).read_to_end(&mut bytes)?;
@@ -152,7 +262,7 @@ fn main() -> Result<()> {
         }
         _ => {
             return Err(
-                "usage: t16-strict-control source CLEAN_FROZEN_STOCK | account < sample.json"
+                "usage: t16-strict-control source CLEAN_FROZEN_STOCK | plain-source CLEAN_FROZEN_STOCK | match STOCK FULL NATIVE | account < sample.json"
                     .into(),
             );
         }
@@ -197,5 +307,83 @@ mod tests {
         let mut bad = input;
         bad["resources"]["server"]["processes"][0]["baseline_cpu_ticks"] = json!(5);
         assert!(account(&bad).is_err());
+    }
+}
+
+#[cfg(test)]
+mod equivalence_tests {
+    use super::*;
+    fn sample(native: bool) -> Value {
+        json!({"journey":"J02","profile":if native {"native"} else {"stock"},"native_lookups":false,
+        "persistence_spans":null,"readiness_phases":null,"database_migration":if native {1} else {107},
+        "database_bytes_at_reopen":4096,"descriptor_micros":100,"html_micros":101,
+        "snapshot":{"valid":true,"threadCount":32,"messageCount":200,"selectedThreadId":"selected","shellSequence":12866,"threadSequence":12866},
+        "fixture":{"threads":32,"messages_per_thread":200,"total_messages":6400,"transcript_bytes":42},
+        "fixture_workspace":"fixture","saved_thread_sequence":12866,"browser":{"threadResumeAfterSequence":12866},
+        "readiness_evidence":{"runtime_pid_matched":true,"environment_id_matched":true,"html_root_matched":true},
+        "cpu_rss_qualified":false,"resources":{"ticks_per_second":100,"page_size":4096,"samples":2,
+        "elapsed_millis":75,"max_sample_gap_millis":50,"sampler_scan_wall_millis":1,"sampler_setup_scan_wall_millis":1,
+        "unavailable_process_reads":0,"baseline_unavailable_process_reads":0,
+        "server":{"observed_cpu_ticks":3,"observed_cpu_millis":30,"sampled_peak_sum_rss_bytes":8192,
+        "processes":[{"pid":10,"start_ticks":1,"baseline_cpu_ticks":0,"last_cpu_ticks":3}]},
+        "browser":{"observed_cpu_ticks":4,"observed_cpu_millis":40,"sampled_peak_sum_rss_bytes":12288,
+        "processes":[{"pid":20,"start_ticks":2,"baseline_cpu_ticks":100,"last_cpu_ticks":104}]}}})
+    }
+    #[test]
+    fn plain_overlay_changes_only_synchronous_and_strict_keeps_writer_reads() {
+        let source = "before\n      yield* sql`PRAGMA synchronous = NORMAL;`;\nafter\n";
+        let plain = policy_overlay(source, true).unwrap();
+        assert_eq!(
+            plain,
+            source.replace("synchronous = NORMAL", "synchronous = FULL")
+        );
+        let strict = policy_overlay(source, false).unwrap();
+        assert!(strict.contains("PRAGMA synchronous = FULL;"));
+        assert!(strict.contains("PRAGMA journal_mode;"));
+        assert!(strict.contains("PRAGMA synchronous;"));
+        assert!(strict.contains("strictSync[0]?.synchronous !== 2"));
+        assert!(policy_overlay("no policy", true).is_err());
+        assert!(policy_overlay(&source.repeat(2), true).is_err());
+    }
+    #[test]
+    fn matches_completed_coordinates_but_preserves_native_migration_domain() {
+        let samples = [sample(false), sample(false), sample(true)];
+        assert_eq!(
+            match_samples(&samples).unwrap()["equivalent_completed_coordinates"],
+            true
+        );
+        for pointer in [
+            "/snapshot/shellSequence",
+            "/snapshot/threadSequence",
+            "/saved_thread_sequence",
+        ] {
+            let mut bad = samples.clone();
+            *bad[1].pointer_mut(pointer).unwrap() = json!(12867);
+            if pointer == "/saved_thread_sequence" {
+                bad[1]["browser"]["threadResumeAfterSequence"] = json!(12867);
+            }
+            assert_eq!(
+                match_samples(&bad).unwrap()["equivalent_completed_coordinates"],
+                false
+            );
+        }
+        let mut bad = samples.clone();
+        bad[1]["snapshot"]["selectedThreadId"] = json!("another");
+        assert_eq!(
+            match_samples(&bad).unwrap()["equivalent_completed_coordinates"],
+            false
+        );
+        let mut bad = samples.clone();
+        bad[1]["database_migration"] = json!(108);
+        assert_eq!(
+            match_samples(&bad).unwrap()["equivalent_completed_coordinates"],
+            false
+        );
+        let mut bad = samples;
+        bad[1]["snapshot"]
+            .as_object_mut()
+            .unwrap()
+            .remove("shellSequence");
+        assert!(match_samples(&bad).is_err());
     }
 }

@@ -23,7 +23,8 @@ jobs:
       ENGINE_PHASE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-') }}
       ENGINE_REUSE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-') }}
       PAIRED_REUSE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-') }}
-      STRICT_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-strict-') }}
+      PLAIN_STRICT_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-plain-strict-') }}
+      STRICT_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-strict-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-plain-strict-') }}
       READINESS_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-readiness-') }}
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
       STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
@@ -609,6 +610,133 @@ jobs:
                 "FULL relies on SQLite VFS, filesystem and device sync semantics; no fault-injection proof",
                 "Read-only mounts protect the workload view, not host-global immutable storage"]}' \
             > "$evidence/strict-verifier-scope.json"
+      - name: Compare separate plain NORMAL FULL and Immediate arms
+        if: env.PLAIN_STRICT_PROOF == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          scratch="$DIAGNOSTIC_WORK"
+          evidence="$RUNNER_TEMP/checked-open-evidence"
+          verifier="$CARGO_TARGET_DIR/release/t16-strict-control"
+          probe="$CARGO_TARGET_DIR/release/t3code-ls-tools"
+          # The preceding untimed verifier retains the writer readback assertions.
+          # This build differs from frozen stock by the synchronous assignment only.
+          git clone --quiet --shared --no-checkout "$scratch/stock" "$scratch/full-stock"
+          git -C "$scratch/full-stock" checkout --detach "$STOCK_COMMIT"
+          "$verifier" plain-source "$scratch/full-stock" > "$scratch/full-source.ts"
+          mv "$scratch/full-source.ts" "$scratch/full-stock/apps/server/src/persistence/Sqlite.ts"
+          git -C "$scratch/full-stock" diff --check
+          test "$(git -C "$scratch/full-stock" diff --name-only)" = apps/server/src/persistence/Sqlite.ts
+          git -C "$scratch/full-stock" diff --binary > "$evidence/plain-full-stock.patch"
+          sha256sum "$evidence/plain-full-stock.patch" > "$evidence/plain-full-stock.sha256"
+          (
+            cd "$scratch/full-stock"
+            pnpm install --frozen-lockfile --store-dir "$scratch/pnpm-store"
+            mkdir -p apps/web/dist
+            cp -a "$scratch/stock/apps/web/dist/." apps/web/dist/
+            pnpm --dir apps/server run build:bundle
+          ) > "$evidence/plain-full-build.txt"
+          chrome="$(command -v google-chrome)"
+          driver="$(command -v chromedriver || printf '%s/chromedriver' "$CHROMEWEBDRIVER")"
+          test -x "$driver"
+          {
+            uname -srmo
+            lscpu
+            df -T "$RUNNER_TEMP"
+            uptime
+            node --version
+            pnpm --version
+            "$chrome" --version
+            "$driver" --version
+            sha256sum "$(command -v node)" "$chrome" "$driver" "$probe" "$verifier"
+            git show -s --format='%H %T'
+            git -C "$scratch/native" show -s --format='%H %T'
+            git -C "$scratch/probe" show -s --format='%H %T'
+          } > "$evidence/plain-host-tools-source.txt"
+          for variant in stock full native; do
+            root="$scratch/$variant"
+            if [[ "$variant" == full ]]; then root="$scratch/full-stock"; fi
+            (
+              cd "$root"
+              sha256sum pnpm-lock.yaml
+              find apps/server/dist apps/web/dist -type f -print0 | sort -z | xargs -0 -r sha256sum
+            ) > "$evidence/plain-arm-$variant.sha256"
+          done
+          (cd "$scratch/stock" && sha256sum --check "$evidence/arm-stock.sha256") > "$evidence/plain-denominator-before.txt"
+          jq -n --arg stock "$STOCK_COMMIT" --arg stockTree "$STOCK_TREE" \
+            --arg native "$NATIVE_COMMIT" --arg nativeTree "$NATIVE_TREE" \
+            --arg engine "$OMDB_PHASE_COMMIT" --arg engineTree "$OMDB_PHASE_TREE" \
+            --arg probe "$PROBE_COMMIT" --arg probeTree "$PROBE_TREE" \
+            '{journey:"J02",kind:"separate-plain-strict-comparison",stock:$stock,stockTree:$stockTree,
+              native:$native,nativeTree:$nativeTree,engine:$engine,engineTree:$engineTree,probe:$probe,probeTree:$probeTree,
+              arms:["stock WAL/NORMAL","benchmark-only WAL/FULL","native Immediate, reuse enabled"],
+              rounds:6,balanced_orders:true,performance_qualified:false,cpu_rss_qualified:false,
+              equal_durability_qualified:false,power_loss_qualified:false,limiter_qualified:false,
+              filesystem_cache:"unmanaged after import",pooling_allowed:false,
+              policy_verification:"separate untimed readback verifier, not crash proof"}' > "$evidence/plain-inputs.json"
+          printf 'round\tposition\tvariant\tdescriptor_us\thtml_us\n' > "$evidence/plain-reopen.tsv"
+          for round in 1 2 3 4 5 6; do
+            case "$round" in
+              1) variants=(stock full native) ;;
+              2) variants=(full native stock) ;;
+              3) variants=(native stock full) ;;
+              4) variants=(native full stock) ;;
+              5) variants=(stock native full) ;;
+              6) variants=(full stock native) ;;
+            esac
+            for position in 0 1 2; do
+              variant="${variants[$position]}"
+              root="$scratch/$variant"
+              mode=stock
+              if [[ "$variant" == full ]]; then root="$scratch/full-stock"; fi
+              if [[ "$variant" == native ]]; then mode=native; fi
+              trial="$scratch/trials/plain-strict"
+              test ! -e "$trial"
+              sample="$evidence/plain-$round-$variant.json"
+              sudo -n unshare --mount --net --pid --fork --mount-proc --kill-child -- bash -euc '
+                mount --make-rprivate /
+                for root in "$1" "$2" "$3"; do
+                  mount --bind "$root" "$root"
+                  mount -o remount,bind,ro "$root"
+                done
+                shift 3
+                ip link set dev lo up
+                user="$1"; shift
+                exec runuser -u "$user" -- "$@"
+              ' _ "$scratch/stock" "$scratch/full-stock" "$scratch/native" "$(id -un)" \
+                env -u REDB_CHECKED_OPEN_DIAGNOSTICS -u T3_CODE_LS_DIAGNOSTIC_DB \
+                "$probe" probe-reopen "$(command -v node)" "$root/apps/server/dist/bin.mjs" \
+                "$trial" "$driver" "$chrome" "$mode" > "$sample"
+              jq -er --argjson round "$round" --argjson position "$((position + 1))" --arg variant "$variant" '
+                select(.journey == "J02" and .snapshot.valid
+                  and .cached_paint_attribution_qualified == false
+                  and .browser.firstShellVisibleMillis > 0 and .browser.selectedTextVisibleMillis > 0
+                  and .browser.authoritativeShellHttpMillis > 0 and .browser.authoritativeThreadMillis > 0
+                  and .migration_evidence.source == (if $variant == "native" then "stopped-native-catalog" else "live-sqlite-descriptors" end)
+                  and (any(.resources.server.processes[]; .role == "native-database-helper") == ($variant == "native")))
+                | [$round,$position,$variant,.descriptor_micros,.html_micros] | @tsv' "$sample" >> "$evidence/plain-reopen.tsv"
+              test ! -e "$trial/checked-open-trace"
+              test ! -e "$trial/checked-open-phases.log"
+              (
+                cd "$trial"
+                find .codex/sessions -type f -print0 | sort -z | xargs -0 sha256sum
+              ) > "$evidence/plain-fixture-$round-$variant.sha256"
+              rm -r -- "$trial"
+            done
+            # Keep all three raw marks before this fail-closed gate, including on mismatch.
+            "$verifier" match "$evidence/plain-$round-stock.json" "$evidence/plain-$round-full.json" \
+              "$evidence/plain-$round-native.json" > "$evidence/plain-equivalence-$round.json"
+            cmp "$evidence/plain-fixture-$round-stock.sha256" "$evidence/plain-fixture-$round-full.sha256"
+            cmp "$evidence/plain-fixture-$round-stock.sha256" "$evidence/plain-fixture-$round-native.sha256"
+          done
+          test "$(wc -l < "$evidence/plain-reopen.tsv")" -eq 19
+          for variant in stock full native; do
+            root="$scratch/$variant"
+            if [[ "$variant" == full ]]; then root="$scratch/full-stock"; fi
+            (cd "$root" && sha256sum --check "$evidence/plain-arm-$variant.sha256") > "$evidence/plain-after-$variant.txt"
+          done
+          uptime >> "$evidence/plain-host-tools-source.txt"
       - name: Remove task-owned generated files and record available space
         if: always() && env.DIAGNOSTIC_WORK != ''
         shell: bash
