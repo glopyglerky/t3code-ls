@@ -37,6 +37,7 @@ export function PairingRouteSurface({
   onAuthenticated: () => void;
 }) {
   const formProps = { initialErrorMessage: initialErrorMessage ?? "", onAuthenticated };
+  const [useStandardPairing, setUseStandardPairing] = useState(false);
   return (
     <StandalonePage>
       <StandalonePageHeader
@@ -44,8 +45,12 @@ export function PairingRouteSurface({
         description={describeAuthGate(auth.bootstrapMethods)}
       />
 
-      {import.meta.env.VITE_T3_CODE_LS_PAIRING_RENDERER === "dioxus" ? (
-        <DioxusPairingForm {...formProps} submitCredential={exchangePairingCredential} />
+      {import.meta.env.VITE_T3_CODE_LS_PAIRING_RENDERER === "dioxus" && !useStandardPairing ? (
+        <DioxusPairingForm
+          {...formProps}
+          submitCredential={exchangePairingCredential}
+          onUseStandardPairing={() => setUseStandardPairing(true)}
+        />
       ) : (
         <RetainedPairingForm {...formProps} />
       )}

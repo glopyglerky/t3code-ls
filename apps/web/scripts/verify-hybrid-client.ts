@@ -29,7 +29,7 @@ import {
 } from "./hybrid-client-turn.ts";
 
 type Implementation = "upstream" | "native";
-type PairingRenderer = "retained" | "dioxus";
+type PairingRenderer = "retained" | "dioxus" | "dioxus-fallback";
 type OwnedApplication = { pid: number; pairingUrl: string; stop: () => Promise<void> };
 type InterruptedShowcase = ReplayTurnIdentity & {
   threadId: string;
@@ -91,7 +91,7 @@ if (pairingProof !== undefined && (!bundledClient || !isPairingRenderer(pairingP
 }
 
 function isPairingRenderer(value: string): value is PairingRenderer {
-  return value === "retained" || value === "dioxus";
+  return value === "retained" || value === "dioxus" || value === "dioxus-fallback";
 }
 
 function outsideCheckout(path: string): void {
@@ -352,6 +352,9 @@ async function verifyPairing(implementation: Implementation, renderer: PairingRe
     page.on("request", (request) => {
       if (new URL(request.url()).pathname === wasmPath) wasmRequests++;
     });
+    if (renderer === "dioxus-fallback") {
+      await page.route(`**${wasmPath}`, (route) => route.abort("blockedbyclient"));
+    }
     const [wasm] = await Promise.all([
       renderer === "dioxus"
         ? page.waitForResponse((response) => new URL(response.url()).pathname === wasmPath)
@@ -365,6 +368,11 @@ async function verifyPairing(implementation: Implementation, renderer: PairingRe
       wasmSha256 = sha256(await wasm.body());
       const builtWasm = NodeFS.readFileSync(NodePath.join(repoRoot, "apps/web/dist", wasmPath));
       Assert.equal(wasmSha256, sha256(builtWasm), "The page must load the built Wasm bytes");
+    }
+    if (renderer === "dioxus-fallback") {
+      await page.getByRole("alert").filter({ hasText: "Could not open the pairing form" })
+        .waitFor({ state: "visible" });
+      await page.getByRole("button", { name: "Use standard pairing", exact: true }).click();
     }
 
     const input = page.getByLabel("Pairing token", { exact: true });
@@ -425,7 +433,7 @@ async function verifyPairing(implementation: Implementation, renderer: PairingRe
     Assert.equal(await form.count(), 0, "The pairing form must leave the authenticated page");
     const authenticated = await context.request.get(sessionUrl.href);
     Assert.equal((await authenticated.json()).authenticated, true);
-    Assert.equal(wasmRequests, renderer === "dioxus" ? 1 : 0);
+    Assert.equal(wasmRequests, renderer === "retained" ? 0 : 1);
 
     writeJson(NodePath.join(directory, "proof.json"), {
       source,
