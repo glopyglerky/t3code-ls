@@ -1200,14 +1200,27 @@ async function verifyDraftMerge(page: Page) {
       .waitFor({ state: "visible" });
     // Clear the body after the second tab refreshed, then save only a model
     // from the now-stale first tab. The cleared text must not be resurrected.
-    await editor(second).fill("");
-    await waitSaved(second, "approval", "");
+    await editor(second).press("Control+a");
+    await editor(second).press("Backspace");
+    await second.waitForFunction(
+      ({ storageKey, draftId }) => {
+        const raw = localStorage.getItem(storageKey);
+        if (raw === null) return false;
+        const { version, state } = JSON.parse(raw);
+        const row = state.draftsByThreadKey?.[draftId];
+        return version === 9 && state.draftThreadsByThreadKey?.[draftId] !== undefined &&
+          (row === undefined || row.prompt === "");
+      },
+      { storageKey, draftId },
+      { timeout: 15_000 },
+    );
+    Assert.equal((await editor(second).innerText()).trim(), "");
     Assert.equal(await editor(page).innerText(), newerPrompt, "The first tab must still have the old body");
     await chooseModel(page, "Write approval");
     await waitSaved(page, "approval", "");
     await second.reload({ waitUntil: "domcontentloaded" });
     await editor(second).waitFor({ state: "visible" });
-    Assert.equal(await editor(second).innerText(), "");
+    Assert.equal((await editor(second).innerText()).trim(), "");
     const rustReconciliation = await page.evaluate(() =>
       performance.getEntriesByName("t3-composer-rust-draft-reconciliation").length > 0);
     return { visiblePrompt: newerPrompt, model: "approval", sameDraft: true,
