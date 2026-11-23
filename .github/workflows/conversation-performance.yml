@@ -16,6 +16,8 @@ jobs:
       STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
       CANDIDATE_COMMIT: c8e1245f85f48699f91de99e749635d8d06c2c6e
       CANDIDATE_TREE: 0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a
+      CATALOG_COMMIT: 2bb6ae9e57559bde6cff0feeddcff8ddf02de009
+      CATALOG_TREE: 55e2c8aba6fc06642b06a8d60861c7bdaf3c67f9
       WASM_BINDGEN_VERSION: "0.2.130"
       WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
       VP_REMOTE_CACHE: "off"
@@ -25,8 +27,9 @@ jobs:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
       GIT_TERMINAL_PROMPT: "0"
-      TRACE_CONVERSATION: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-diagnose-') }}
+      TRACE_CONVERSATION: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-diagnose-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-catalog-') }}
       TRACE_SERVER_SPANS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-diagnose-server-') }}
+      COMPARE_CATALOG: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-catalog-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -35,7 +38,7 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "26.12.1"
-      - name: Fetch and verify the two frozen source trees
+      - name: Fetch and verify the frozen source trees
         run: |
           for profile in stock candidate; do
             git init "$profile"
@@ -53,6 +56,13 @@ jobs:
             test "$(git -C "$profile" rev-parse HEAD)" = "$commit"
             test "$(git -C "$profile" rev-parse 'HEAD^{tree}')" = "$tree"
           done
+          if [[ "$COMPARE_CATALOG" == true ]]; then
+            git -C candidate fetch --no-tags --depth=1 https://github.com/glopyglerky/t3code-ls.git "$CATALOG_COMMIT"
+            test "$(git -C candidate rev-parse 'FETCH_HEAD^{tree}')" = "$CATALOG_TREE"
+            git -C candidate worktree add --detach "$GITHUB_WORKSPACE/catalog" "$CATALOG_COMMIT"
+            git -C candidate diff --name-only "$CANDIDATE_COMMIT" "$CATALOG_COMMIT" > "$RUNNER_TEMP/catalog-source-diff"
+            printf '%s\n' apps/server/src/persistence/redb_transactions{,_tests}.rs | diff - "$RUNNER_TEMP/catalog-source-diff"
+          fi
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
       - name: Build the optimized stock bundle
         working-directory: stock
@@ -86,6 +96,28 @@ jobs:
           node tools/check-hybrid.mjs --verify-binaries
           T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$PWD/bin" \
             pnpm --dir apps/server run build:bundle
+      - name: Build the catalog variant with the same packaged client and server
+        if: env.COMPARE_CATALOG == 'true'
+        working-directory: catalog
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/conversation-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/conversation-target"
+          target=x86_64-unknown-linux-gnu
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
+            --release --locked --target "$target" -p t3-code-ls-storage --bin t3-code-ls-db
+          cp -a ../candidate/apps/web/dist apps/web/dist
+          cp -a ../candidate/apps/server/dist apps/server/dist
+          ln -s "$GITHUB_WORKSPACE/candidate/node_modules" node_modules
+          ln -s "$GITHUB_WORKSPACE/candidate/apps/server/node_modules" apps/server/node_modules
+          helpers=apps/server/dist/native-bin
+          install -m 755 "$CARGO_TARGET_DIR/$target/release/t3-code-ls-db" "$helpers/t3-code-ls-db"
+          digest="$(sha256sum "$helpers/t3-code-ls-db" | cut -d ' ' -f 1)"
+          jq --arg digest "$digest" '.files["t3-code-ls-db"] = $digest' \
+            "$helpers/manifest.json" > "$helpers/manifest.next.json"
+          mv "$helpers/manifest.next.json" "$helpers/manifest.json"
+          node --input-type=module -e 'import {nativeArtifactFiles} from "./tools/native-artifacts.mjs"; nativeArtifactFiles(process.argv[1], "linux-x64");' "$helpers"
+          diff -qr ../candidate/apps/web/dist apps/web/dist
+          diff -qr --exclude=native-bin ../candidate/apps/server/dist apps/server/dist
       - name: Measure completed fixture turns in alternating order
         shell: bash
         run: |
@@ -118,7 +150,12 @@ jobs:
               pairs=3
             fi
           fi
-          for profile in stock candidate; do
+          bundles=(stock candidate)
+          if [[ "$COMPARE_CATALOG" == true ]]; then
+            bundles+=(catalog)
+            pairs=8
+          fi
+          for profile in "${bundles[@]}"; do
             (
               cd "$profile"
               sha256sum pnpm-lock.yaml
@@ -127,27 +164,29 @@ jobs:
           done
           jq -n --arg stock "$STOCK_COMMIT" --arg stockTree "$STOCK_TREE" \
             --arg candidate "$CANDIDATE_COMMIT" --arg candidateTree "$CANDIDATE_TREE" \
+            --arg catalog "$CATALOG_COMMIT" --arg catalogTree "$CATALOG_TREE" --argjson compareCatalog "$COMPARE_CATALOG" \
             --arg probe "$(git -C measurement rev-parse HEAD)" --arg node "$(node --version)" \
             --arg chrome "$("$chrome" --version)" --arg driver "$("$driver" --version)" \
             --arg image "${ImageOS:-unknown}/${ImageVersion:-unknown}" --arg kernel "$(uname -r)" \
             --arg cpu "$(LC_ALL=C lscpu | sed -n 's/^Model name:[[:space:]]*//p')" --argjson trace "$TRACE_CONVERSATION" \
             --arg systemLoad "$(uptime)" --argjson cpus "$(nproc)" \
-            '{stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},forkSqliteControl:$trace,providerTrace:$trace,probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
+            '{stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},catalog:(if $compareCatalog then {commit:$catalog,tree:$catalogTree,durability:"omdb Immediate"} else null end),forkSqliteControl:$trace,providerTrace:$trace,probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
             > "$evidence/inputs.json"
           printf 'pair\tposition\tprofile\tfirst_visible_ms\tterminal_ms\tmax_frame_gap_ms\n' > "$evidence/trials.tsv"
           for ((pair=1; pair<=pairs; pair++)); do
             profiles=(stock candidate)
             if (( pair % 2 == 0 )); then profiles=(candidate stock); fi
             if [[ "$TRACE_CONVERSATION" == true ]]; then profiles=(stock candidate fork-sqlite); fi
+            if [[ "$COMPARE_CATALOG" == true ]]; then profiles+=(catalog); fi
             for ((position=0; position<${#profiles[@]}; position++)); do
               index="$position"
-              if [[ "$TRACE_CONVERSATION" == true ]]; then index="$(((position + pair - 1) % 3))"; fi
+              if [[ "$TRACE_CONVERSATION" == true ]]; then index="$(((position + pair - 1) % ${#profiles[@]}))"; fi
               profile="${profiles[$index]}"
               trial="$pair-$profile"
               result="$evidence/sample-$trial.json"
               mode=stock
               bundle_profile="$profile"
-              if [[ "$profile" == candidate ]]; then mode=native; fi
+              if [[ "$profile" == candidate || "$profile" == catalog ]]; then mode=native; fi
               if [[ "$profile" == fork-sqlite ]]; then mode=fork-sqlite; bundle_profile=candidate; fi
               sudo -n unshare --net -- bash -euc '
                 ip link set dev lo up
@@ -162,12 +201,11 @@ jobs:
                 "$result" >> "$evidence/trials.tsv"
               rm -r "$RUNNER_TEMP/conversation-trial-$trial"
             done
-            diff <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-stock.json") \
-              <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-candidate.json")
-            if [[ "$TRACE_CONVERSATION" == true ]]; then
+            for profile in "${profiles[@]}"; do
+              if [[ "$profile" == stock ]]; then continue; fi
               diff <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-stock.json") \
-                <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-fork-sqlite.json")
-            fi
+                <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-$profile.json")
+            done
           done
       - name: Retain exact artifacts and matched observations
         if: always()
