@@ -423,7 +423,7 @@ async function verifyDraftMerge(page: Page) {
     const search = tab.getByPlaceholder("Search models...");
     await picker.click();
     await search.fill(label);
-    await tab.getByRole("option", { name: label, exact: true }).click();
+    await tab.getByRole("option", { name: label }).click();
     if (await search.isVisible()) await search.press("Escape");
     await search.waitFor({ state: "hidden" });
   };
@@ -471,8 +471,8 @@ async function verifyDraftMerge(page: Page) {
     await second.reload({ waitUntil: "domcontentloaded" });
     await editor(second).waitFor({ state: "visible" });
     Assert.equal(await editor(second).innerText(), newerPrompt);
-    await second.locator('[data-chat-provider-model-picker="true"]:visible')
-      .getByText("Write approval", { exact: true }).waitFor({ state: "visible" });
+    await second.getByRole("button", { name: "Write approval", exact: true })
+      .waitFor({ state: "visible" });
     return { visiblePrompt: newerPrompt, model: "approval", sameDraft: true };
   } finally {
     await second.close();
