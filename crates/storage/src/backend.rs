@@ -995,7 +995,7 @@ impl Backend {
                         Err(writer) => drop(writer),
                     }
                 }
-                if let Some(reader) = handles.reader {
+                if let Some(Reader::Pinned(reader)) = handles.reader {
                     reader.close().map_err(storage_error)?;
                 }
                 Ok(())
