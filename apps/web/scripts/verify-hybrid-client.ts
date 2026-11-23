@@ -45,6 +45,7 @@ const replayPrompt = "Replay: showcase";
 const replayMarker = "This turn is a replay.";
 const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
 const multiTabDraftProof = process.env.T3_CODE_LS_MULTI_TAB_DRAFT_PROOF === "true";
+const draftStorageProof = process.env.T3_CODE_LS_DRAFT_STORAGE_PROOF === "true";
 const fileEditorProof = process.env.T3_CODE_LS_FILE_EDITOR_PROOF === "true";
 const tasksFile = "fixture-tasks.md";
 const initialTasks = "- [ ] First milestone\n- [ ] Second milestone\n- [ ] Keep the draft\n";
@@ -482,6 +483,60 @@ async function verifyDraftMerge(page: Page) {
     return { visiblePrompt: newerPrompt, model: "approval", sameDraft: true };
   } finally {
     await second.close();
+  }
+}
+
+async function verifyDraftStorageRecovery(page: Page) {
+  const storageKey = "t3code:composer-drafts:v1";
+  const original = "Draft stored before the quota fault";
+  const revised = "Draft edited while storage is full 🐟";
+  const editor = page.getByTestId("composer-editor");
+  await page.getByRole("button", { name: "New thread in hybrid-fixture", exact: true }).click();
+  await page.waitForURL((url) => url.pathname.startsWith("/draft/"));
+  const draftId = decodeURIComponent(new URL(page.url()).pathname.split("/").at(-1)!);
+  const saved = (prompt: string) => page.waitForFunction(
+    ({ storageKey, draftId, prompt }) => {
+      const raw = localStorage.getItem(storageKey);
+      return raw !== null && JSON.parse(raw).state.draftsByThreadKey[draftId]?.prompt === prompt;
+    },
+    { storageKey, draftId, prompt },
+    { timeout: 10_000 },
+  );
+  await editor.fill(original);
+  await saved(original);
+  await page.evaluate((key) => {
+    const setItem = Storage.prototype.setItem;
+    window.addEventListener("fixture-restore-draft-storage", () => {
+      Storage.prototype.setItem = setItem;
+    }, { once: true });
+    Storage.prototype.setItem = function (name, value) {
+      if (this === window.localStorage && name === key) {
+        document.documentElement.dataset.fixtureDraftQuotaFault = "true";
+        throw new DOMException("Synthetic composer storage quota", "QuotaExceededError");
+      }
+      setItem.call(this, name, value);
+    };
+  }, storageKey);
+  const recovered = () => page.evaluate(() => {
+    window.dispatchEvent(new Event("fixture-restore-draft-storage"));
+  });
+  try {
+    await editor.fill(revised);
+    await page.locator('html[data-fixture-draft-quota-fault="true"]').waitFor({ state: "attached" });
+    const notice = page.getByText("Draft changes could not be saved", { exact: true });
+    await notice.waitFor({ state: "visible", timeout: 10_000 });
+    Assert.equal(await editor.innerText(), revised);
+    await saved(original);
+    await recovered();
+    await page.getByRole("button", { name: "Retry saving", exact: true }).click();
+    await saved(revised);
+    await notice.waitFor({ state: "hidden" });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await editor.waitFor({ state: "visible" });
+    Assert.equal(await editor.innerText(), revised);
+    return { failureVisible: true, promptRetained: true, savedAfterRetry: true };
+  } finally {
+    await recovered();
   }
 }
 
@@ -953,6 +1008,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     cancelledQuestion: null as Awaited<ReturnType<typeof cancelCapturedQuestion>> | null,
     historyFind: null as { query: string; count: string; draftPreserved: boolean } | null,
     draftMerge: null as Awaited<ReturnType<typeof verifyDraftMerge>> | null,
+    draftStorage: null as Awaited<ReturnType<typeof verifyDraftStorageRecovery>> | null,
     messageAppends: null as {
       requests: number;
       frames: number;
@@ -1122,6 +1178,11 @@ async function exercise(implementation: Implementation): Promise<void> {
       starting("two-tab unsent draft and model merge");
       proof.draftMerge = await verifyDraftMerge(page);
       completed("Kept the newer draft from the first tab and the model selected in the second");
+    }
+    if (draftStorageProof) {
+      starting("draft write quota denial and recovery");
+      proof.draftStorage = await verifyDraftStorageRecovery(page);
+      completed("Kept the unsent draft through quota denial, retry and reload");
     }
 
     starting("normal composer submission and controlled approval");
