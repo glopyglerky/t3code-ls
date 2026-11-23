@@ -199,6 +199,9 @@ const decodeGixRepositoryPaths = Schema.decodeUnknownOption(Schema.fromJsonStrin
     currentBranch: Schema.NullOr(Schema.String),
   }),
 )));
+const decodeGixRefPresence = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.NullOr(Schema.Boolean)),
+);
 
 interface GitRefsSnapshot {
   readonly localBranches: ReadonlyArray<VcsRef>;
@@ -992,6 +995,25 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     gixExecutable !== undefined && path.isAbsolute(gixExecutable) && !gitDiscoveryOverrides
     ? yield* ProcessRunner.make()
     : undefined;
+  const runGix = (cwd: string, args: ReadonlyArray<string>) => {
+    if (gixRunner === undefined || gixExecutable === undefined) return Effect.succeed(null);
+    return gixRunner.run({
+      command: gixExecutable,
+      args,
+      cwd,
+      env: {},
+      extendEnv: false,
+      timeout: "2 seconds",
+      maxOutputBytes: 32_768,
+    }).pipe(
+      Effect.option,
+      Effect.map((native) =>
+        Option.isSome(native) && native.value.code === 0 && !native.value.stdoutInvalidUtf8
+          ? native.value.stdout
+          : null,
+      ),
+    );
+  };
   const serviceScope = yield* Effect.scope;
   const statusFetches = new Map<string, Fiber.Fiber<void, GitCommandError>>();
   const statusFetchProcesses = yield* Semaphore.make(4);
@@ -1520,22 +1542,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const resolveRepositoryPathsUncached = Effect.fn("resolveRepositoryPathsUncached")(function* (
     cwd: string,
   ) {
-    if (gixRunner !== undefined && gixExecutable !== undefined) {
-      const native = yield* gixRunner.run({
-        command: gixExecutable,
-        args: [cwd],
-        cwd,
-        env: {},
-        extendEnv: false,
-        timeout: "2 seconds",
-        maxOutputBytes: 32_768,
-      }).pipe(Effect.option);
-      if (Option.isSome(native) && native.value.code === 0 && !native.value.stdoutInvalidUtf8) {
-        const paths = Option.getOrNull(decodeGixRepositoryPaths(native.value.stdout));
-        if (paths !== null && path.isAbsolute(paths.gitCommonDir) && path.isAbsolute(paths.worktreeRoot)) {
-          return paths;
-        }
-      }
+    const native = yield* runGix(cwd, [cwd]);
+    const paths = native === null ? null : Option.getOrNull(decodeGixRepositoryPaths(native));
+    if (paths !== null && path.isAbsolute(paths.gitCommonDir) && path.isAbsolute(paths.worktreeRoot)) {
+      return paths;
     }
     const gitCommonDir = yield* readGitCommonDir(cwd);
     if (gitCommonDir === null) return null;
@@ -1772,14 +1782,19 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     );
 
   const remoteBranchExists: GitVcsDriver.GitVcsDriver["Service"]["remoteBranchExists"] = (input) =>
-    executeGit(
-      "GitVcsDriver.remoteBranchExists",
-      input.cwd,
-      ["show-ref", "--verify", "--quiet", `refs/remotes/${input.remoteName}/${input.refName}`],
-      {
-        allowNonZeroExit: true,
-      },
-    ).pipe(Effect.map((result) => result.exitCode === 0));
+    Effect.gen(function* () {
+      const name = `refs/remotes/${input.remoteName}/${input.refName}`;
+      const native = yield* runGix(input.cwd, ["has-remote-ref", input.cwd, name]);
+      const exists = native === null ? null : Option.getOrNull(decodeGixRefPresence(native));
+      if (exists !== null) return exists;
+      const result = yield* executeGit(
+        "GitVcsDriver.remoteBranchExists",
+        input.cwd,
+        ["show-ref", "--verify", "--quiet", name],
+        { allowNonZeroExit: true },
+      );
+      return result.exitCode === 0;
+    });
 
   const remoteExists: GitVcsDriver.GitVcsDriver["Service"]["remoteExists"] = (input) =>
     executeGit(
