@@ -66,6 +66,10 @@ jobs:
           VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
         working-directory: apps/web
         run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/ComposerPromptEditorTiptap.input.browser.test.tsx
+      - name: Exercise same-draft saves in both orders
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-')
+        working-directory: apps/web
+        run: pnpm exec vp test run --project unit --maxWorkers 2 src/composerDraftStore.test.ts
       - name: Build and open the application with the Rust composer binding
         if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
         env:
