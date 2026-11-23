@@ -1838,11 +1838,13 @@
       "rust_paths": [
         "apps/desktop/makepad-input/src/main.rs",
         "apps/desktop/makepad-input/src/macos.rs",
+        "packages/client-runtime/rust/host/server_snapshot.rs",
         "packages/client-runtime/rust/src/composer_draft.rs"
       ],
       "adapter_paths": [
         "apps/desktop/package.json",
-        "apps/desktop/makepad-input/README.md"
+        "apps/desktop/makepad-input/README.md",
+        "apps/server/scripts/verify-makepad-thread-snapshot.ts"
       ],
       "platform_routes": [
         {
@@ -1853,9 +1855,13 @@
           "acceptance_evidence": {}
         }
       ],
-      "acceptance_tests": ["apps/desktop/makepad-input/src/macos/proof.rs"],
+      "acceptance_tests": [
+        "apps/desktop/makepad-input/src/macos/proof.rs",
+        "apps/desktop/makepad-input/src/macos/snapshot_proof.rs",
+        "packages/client-runtime/rust/host/server_snapshot.rs"
+      ],
       "retired_paths": [],
-      "notes": "T01, J37 and C07. Explicit desktop candidate for plain-text editing, committed IME text, directed selection and local submission. The root workspace and retained clients select their existing routes.",
+      "notes": "T01, J37 and C07. Explicit desktop candidate for plain-text editing, committed IME text, directed selection, local submission and a bounded authenticated production thread read. The macOS snapshot proof explicitly uses retained server storage and does not qualify native macOS persistence. The root workspace and retained clients select their existing routes.",
       "rust_crates": ["apps/desktop/makepad-input", "packages/client-runtime/rust"]
     },
     {

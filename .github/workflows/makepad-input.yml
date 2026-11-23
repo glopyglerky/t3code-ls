@@ -10,14 +10,20 @@ permissions:
 jobs:
   macos-arm64:
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['macos-15'] || 'macos-15' }}
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
       - name: Build the locked desktop candidate
         run: |
           test "$(uname -m)" = arm64
@@ -27,6 +33,7 @@ jobs:
           export CARGO_TARGET_DIR="$RUNNER_TEMP/makepad-target"
           manifest=apps/desktop/makepad-input/Cargo.toml
           cargo +1.99.1 fetch --locked --manifest-path "$manifest"
+          cargo +1.99.1 test --locked --offline --manifest-path "$manifest" server_snapshot::tests
           cargo +1.99.1 build --locked --offline --manifest-path "$manifest"
           shasum -a 256 "$manifest" apps/desktop/makepad-input/Cargo.lock \
             "$CARGO_TARGET_DIR/debug/t3-code-ls-makepad-input"
@@ -34,3 +41,15 @@ jobs:
         timeout-minutes: 3
         run: |
           "$RUNNER_TEMP/makepad-target/debug/t3-code-ls-makepad-input" --proof
+      - name: Build the supported retained application server
+        run: |
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          pnpm --dir apps/web run build
+          T3_CODE_LS_IMPLEMENTATION=upstream pnpm --dir apps/server run build:bundle
+          shasum -a 256 apps/server/dist/bin.mjs apps/server/dist/native-bin/manifest.json
+      - name: Read an authenticated saved thread in the Makepad window
+        timeout-minutes: 4
+        run: |
+          node apps/server/scripts/verify-makepad-thread-snapshot.ts \
+            "$RUNNER_TEMP/makepad-target/debug/t3-code-ls-makepad-input"

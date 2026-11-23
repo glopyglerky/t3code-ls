@@ -1,11 +1,13 @@
 # Makepad desktop input candidate
 
-This T01 candidate opens one synthetic plain-text draft in the desktop app.
+This T01/T14 candidate opens one plain-text draft or reads a saved server
+conversation in a native Makepad window.
 Makepad owns editing, focus, undo history and provisional IME text. The
 shared `t3-code-ls-client-text` crate stores committed UTF-8 and the UTF-16
 anchor and head in selection order. Submission validates the current widget
 text. It reports the accepted byte count locally, with a 4096-byte cap and
-no account, provider, server or persistent draft.
+no provider action or persistent draft. The opt-in snapshot route below
+reads the existing application without submitting a message.
 
 ## Run the candidate
 
@@ -40,11 +42,59 @@ combining text, CJK preedit updates, submit refusal during composition,
 cancellation, commit, focus loss, refocus and submission of changed
 mixed-script text. It checks the shared draft and the visible status widget.
 
-The local disk-reserve guard refused the compiler probe. The GUI proof
-awaits a host build. Synthetic events begin after AppKit translation. Real
-input-method behavior, including nonempty AppKit replacement ranges, needs
-a separate test. Rich content, accessibility, packaging, other platforms,
-and the packaged Lustr and blueFe route remain outside this evidence.
+The earlier hosted Makepad run `45115372931` exercised this input replay
+through a real window after AppKit translation. It does not establish the
+new snapshot path. Real input-method behavior, including nonempty AppKit
+replacement ranges, needs a separate test. Rich content, accessibility,
+packaging, other platforms, and packaged Lustr/blueFe remain unqualified.
+
+## Read a saved application thread
+
+Run `t3-code-ls-makepad-input --thread-snapshot` with one JSON object on
+stdin, then close stdin. Supply exactly `port`, `token`, `environmentId`
+and `threadId`. Keep this object out of shell history and process arguments.
+The existing OAuth exchange supplies the token. The reader accepts only
+IPv4 loopback and checks the public environment descriptor before sending
+a bearer to the production `/api/orchestration/threads/:id/bounded` route.
+It verifies the returned thread identity and displays title, thread ID,
+snapshot sequence and ordered message text in a scrolling label.
+
+The `std` host reader is owned by
+`packages/client-runtime/rust/host/server_snapshot.rs`, reused from GPUI
+commit `04ebd088ebd43aa75930c52b2d138d68cb81fec4`. The portable `no_std`
+core stays dependency-free. The host adds the root application's locked
+`serde_json` parser. Limits match GPUI: 16 KiB input, 1 MiB HTTP reply,
+16 KiB headers, 200 messages, five seconds per GET, and no redirects,
+compressed transfer or compact ID table. Failure displays one generic
+message without printing the token or response. Local demo submission
+still stays local.
+
+The hosted workflow builds the supported explicitly retained server on
+macOS. This does not bypass the Linux-only native storage qualification.
+It creates an isolated profile, exchanges a synthetic bootstrap credential,
+creates a project, imports the same three-record Codex conversation used
+by GPUI through normal scan/import RPCs, and opens four Makepad windows.
+Wrong environment, wrong credential and missing thread must refuse. The
+valid window checks the selected label's actual text and message order
+after native drawing, then closes. Credentials travel through pipes.
+The runner bounds child output and time, suppresses raw failure output,
+removes its profile, and records backend and binary hashes.
+
+On an admitted arm64 macOS graphical runner, after the frozen application
+bundle and locked Makepad candidate are built, run from the checkout:
+
+```sh
+node apps/server/scripts/verify-makepad-thread-snapshot.ts \
+  "$CARGO_TARGET_DIR/debug/t3-code-ls-makepad-input"
+```
+
+`--thread-snapshot-proof` is the synthetic window harness used by this
+runner. It does not establish accessibility, physical input, streaming,
+provider submission, reconnect or durable client state. Native storage
+on macOS remains separate. The new reader tests and window proof await
+hosted execution. No local product compilation or hardware access ran.
+The mandatory method SHA-256 is
+`5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
 
 ## Source provenance
 

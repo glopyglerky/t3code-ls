@@ -1,4 +1,5 @@
 mod proof;
+mod snapshot_proof;
 
 use makepad_widgets::*;
 use t3_code_ls_client_text::composer_draft::{ComposerDraft, DraftError};
@@ -17,13 +18,19 @@ script_mod! {
     let app = startup() do #(App::script_component(vm)) {
         ui: Root {
             Window {
-                window.inner_size: vec2(540, 340)
+                window.inner_size: vec2(640, 600)
                 window.title: "T3 Code Makepad input"
                 body +: {
                     flow: Down
                     padding: 20
                     spacing: 12
-                    Label { text: "Synthetic draft" }
+                    snapshot_heading := Label { width: Fill text: "" }
+                    ScrollYView {
+                        width: Fill
+                        height: 220
+                        snapshot := Label { width: Fill text: "" }
+                    }
+                    Label { text: "Synthetic local draft" }
                     composer := TextInput {
                         width: Fill
                         height: 145
@@ -50,6 +57,8 @@ struct App {
     before_composition: Option<TextInputState>,
     #[rust]
     proof: Option<proof::Proof>,
+    #[rust]
+    snapshot_proof: Option<snapshot_proof::Proof>,
 }
 
 impl App {
@@ -142,11 +151,36 @@ impl AppMain for App {
     }
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
-        if matches!(event, Event::Startup) && std::env::args_os().any(|arg| arg == "--proof") {
-            self.proof = Some(proof::Proof::start(cx));
+        if matches!(event, Event::Startup) {
+            if std::env::args_os().any(|arg| arg == "--proof") {
+                self.proof = Some(proof::Proof::start(cx));
+            }
+            if let Some(snapshot) = crate::SNAPSHOT.get() {
+                self.ui
+                    .label(cx, ids!(snapshot_heading))
+                    .set_text(cx, crate::server_snapshot::LABEL);
+                let text = match snapshot {
+                    Ok(snapshot) => snapshot.text.as_str(),
+                    Err(_) => crate::server_snapshot::FAILED,
+                };
+                self.ui.label(cx, ids!(snapshot)).set_text(cx, text);
+                if std::env::args_os().any(|arg| arg == "--thread-snapshot-proof") {
+                    self.snapshot_proof = Some(snapshot_proof::Proof::start(cx));
+                }
+            }
         }
         self.match_event(cx, event);
         self.dispatch(cx, event);
+        if let Some(mut proof) = self.snapshot_proof.take() {
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                proof.advance(self, cx, event);
+            }))
+            .is_err()
+            {
+                std::process::exit(1);
+            }
+            self.snapshot_proof = Some(proof);
+        }
         if let Some(mut proof) = self.proof.take() {
             // AppKit contains callback panics. Make a failed proof exit instead
             // of leaving an interactive window open after an assertion fails.
