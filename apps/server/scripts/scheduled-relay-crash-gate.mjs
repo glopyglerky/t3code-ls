@@ -7,6 +7,7 @@ import * as Path from "node:path";
 import * as Readline from "node:readline";
 
 const config = JSON.parse(FS.readFileSync(new URL("./relay-crash-gate.json", import.meta.url), "utf8"));
+Assert.ok(["before-claim", "after-claim"].includes(config.boundary));
 const [mode, target] = process.argv.slice(2);
 Assert.equal(process.argv.length, 4);
 if (mode === "owner-lock") {
@@ -36,24 +37,31 @@ process.once("SIGTERM", stop);
 process.once("SIGINT", stop);
 child.once("exit", stop);
 const admit = { transaction: undefined, promptHash: undefined, committed: false };
+let workerTransaction;
+const publishWitness = (workerClaimCommitted) => {
+  Assert.ok(admit.committed && admit.promptHash, "The exact ready delivery must be committed");
+  const temporary = config.witness + ".tmp";
+  FS.writeFileSync(temporary, JSON.stringify({
+    deliveryId: config.deliveryId,
+    promptSha256: admit.promptHash,
+    admissionCommitted: true,
+    workerClaimCommitted,
+    workerClaimAcknowledged: false,
+  }) + "\n", { flag: "wx", mode: 0o600 });
+  FS.renameSync(temporary, config.witness);
+  if (input.closed) return;
+  return new Promise((resolve) => input.once("close", resolve));
+};
 
 try {
   for await (const line of input) {
     const request = JSON.parse(line);
     const mutation = request.operation === "application_scheduled_write" ? request.mutation : undefined;
-    if (
+    const claimsDelivery =
       mutation?.kind === "patch_pending" && mutation.delivery_id === config.deliveryId &&
-      mutation.patch.state === "relay_running"
-    ) {
-      Assert.ok(admit.committed && admit.promptHash, "The exact ready delivery must be committed");
-      FS.writeFileSync(config.witness, JSON.stringify({
-        deliveryId: config.deliveryId,
-        promptSha256: admit.promptHash,
-        admissionCommitted: true,
-        workerTransitionForwarded: false,
-      }) + "\n", { flag: "wx", mode: 0o600 });
-      // Hold the worker before its first native state change until the verifier kills the group.
-      if (!input.closed) await new Promise((resolve) => input.once("close", resolve));
+      mutation.patch.state === "relay_running";
+    if (claimsDelivery && config.boundary === "before-claim") {
+      await publishWitness(false);
       break;
     }
 
@@ -68,6 +76,18 @@ try {
     if (request.operation === "application_commit" && request.transaction_id === admit.transaction) {
       const envelope = JSON.parse(reply.value);
       admit.committed = envelope.ok === true && envelope.result.committed === true;
+    }
+    if (claimsDelivery) {
+      Assert.equal(JSON.parse(reply.value).ok, true, "The helper rejected the worker claim");
+      Assert.equal(typeof request.transaction_id, "string");
+      workerTransaction = request.transaction_id;
+    }
+    if (request.operation === "application_commit" && request.transaction_id === workerTransaction) {
+      const envelope = JSON.parse(reply.value);
+      Assert.ok(envelope.ok === true && envelope.result.committed === true);
+      // Do not release the application worker to dispatch after committing its claim.
+      await publishWitness(true);
+      break;
     }
     process.stdout.write(reply.value + "\n");
   }
