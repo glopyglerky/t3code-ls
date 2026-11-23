@@ -97,7 +97,14 @@ export async function verifySavedHistory(page: Page, seed: Awaited<ReturnType<ty
   await page.waitForFunction(() => document.querySelector(".messages-timeline-scroll")?.scrollTop === 0);
   const loadEarlier = page.getByRole("button", { name: "Load earlier turns", exact: true });
   await loadEarlier.waitFor({ state: "visible" });
-  const [older] = await Promise.all([observedPage(false), loadEarlier.click()]);
+  // The fixture has an importable Codex home and no live Codex binary. Its
+  // dismissible provider notice can cover the history control at the top.
+  const dismiss = page.getByRole("button", { name: "Dismiss Codex provider error", exact: true });
+  if (await dismiss.isVisible()) {
+    await dismiss.click({ timeout: 10_000 });
+    await dismiss.waitFor({ state: "hidden" });
+  }
+  const [older] = await Promise.all([observedPage(false), loadEarlier.click({ timeout: 10_000 })]);
   Assert.ok(older.ok());
   const history = decodePage(await older.json());
   Assert.ok(history.items.length > 0);
