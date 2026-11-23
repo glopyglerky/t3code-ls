@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import * as Clock from "effect/Clock";
 import type * as Cloudflare from "@cloudflare/workers-types";
 import type { Summary } from "./Summary.ts";
+import * as SavingsFold from "./SavingsFold.ts";
 
 interface Totals {
   developer: string;
@@ -47,15 +48,16 @@ export class Savings extends Context.Service<
   }
 >()("@t3tools/task-cache/Savings") {}
 
-const make = Effect.gen(function* () {
+const make = Effect.fn("TaskCache.makeSavings")(function* (fold: SavingsFold.SavingsFold) {
   const database = yield* Database;
   const record = Effect.fn("TaskCache.persistSavings")(function* (
     summary: typeof Summary.Type,
     developer: string,
   ) {
-    const local = summary.tasks.filter((task) => task.source === "local");
-    const unspecified = summary.tasks.filter((task) => task.source === "unspecified");
-    const remote = summary.tasks.filter((task) => task.source === "remote");
+    const totals = yield* Effect.try({
+      try: () => fold(summary.tasks),
+      catch: (cause) => new SavingsError({ operation: "record", cause }),
+    });
     // D1 batch is transactional. changes() gates the increment on the preceding receipt insertion.
     yield* Effect.tryPromise({
       try: () =>
@@ -76,14 +78,7 @@ const make = Effect.gen(function* () {
               summary.platform,
               summary.arch,
               Number(summary.ci),
-              local.reduce((sum, task) => sum + task.savedMs, 0),
-              remote.reduce((sum, task) => sum + task.savedMs, 0),
-              local.length,
-              remote.length,
-              summary.tasks.filter((task) => task.source === "executed").length,
-              summary.tasks.filter((task) => task.source === "failed").length,
-              unspecified.reduce((sum, task) => sum + task.savedMs, 0),
-              unspecified.length,
+              ...totals,
             ),
         ]),
       catch: (cause) => new SavingsError({ operation: "record", cause }),
@@ -137,4 +132,5 @@ const make = Effect.gen(function* () {
   return Savings.of({ record, emitTotals, cleanup });
 });
 
-export const layer = Layer.effect(Savings, make);
+export const layerWithFold = (fold: SavingsFold.SavingsFold) => Layer.effect(Savings, make(fold));
+export const layer = layerWithFold(SavingsFold.retained);
