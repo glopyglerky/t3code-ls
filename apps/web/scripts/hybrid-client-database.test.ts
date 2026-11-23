@@ -6,6 +6,7 @@ import * as Path from "node:path";
 import { test } from "node:test";
 import {
   assertNativeReplayResponses,
+  assertNativeTextUpdates,
   assertNoApplicationSqlite,
   nativeReplayRequests,
   type PersistedReplayExpectation,
@@ -183,4 +184,21 @@ test("native state rejects SQLite databases and sidecars but permits the native 
   } finally {
     FS.rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("bounded text receipt preserves Unicode and order and rejects incomplete reads", () => {
+  const row = (sequence: number, text: string, streaming: boolean, threadId = "thread") => ({
+    sequence, payload_json: JSON.stringify({ threadId, role: "assistant", text, streaming }),
+  });
+  const rows = [row(3, "日本語", true), row(5, "日本語 🐟", true), row(9, "日本語 🐟 done", false)];
+  Assert.deepEqual(assertNativeTextUpdates(rows, "thread"), [
+    { text: "日本語", streaming: true }, { text: "日本語 🐟", streaming: true },
+    { text: "日本語 🐟 done", streaming: false },
+  ]);
+  Assert.throws(() => assertNativeTextUpdates([], "thread"));
+  Assert.throws(() => assertNativeTextUpdates(Array(129).fill(rows[0]), "thread"));
+  Assert.throws(() => assertNativeTextUpdates([rows[1], rows[0], rows[2]], "thread"));
+  Assert.throws(() => assertNativeTextUpdates([rows[0], rows[0], rows[2]], "thread"));
+  Assert.throws(() => assertNativeTextUpdates(rows.slice(0, 2), "thread"));
+  Assert.throws(() => assertNativeTextUpdates(rows, "different-thread"));
 });

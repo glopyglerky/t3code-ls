@@ -275,3 +275,40 @@ export function inspectNativeReplay(input: {
     ...persisted,
   };
 }
+
+// Reconstructed logical rows are an equality oracle, never physical storage bytes.
+export function assertNativeTextUpdates(rows: unknown, threadId: string) {
+  Assert.ok(Array.isArray(rows) && rows.length > 0 && rows.length < 129,
+    "The bounded message-update read must be nonempty and complete");
+  let previous = 0;
+  const updates: Array<{ text: string; streaming: boolean }> = [];
+  for (const value of rows) {
+    const row = object(value, "Expected an event row");
+    Assert.ok(typeof row.sequence === "number" && Number.isSafeInteger(row.sequence) && row.sequence > previous);
+    previous = row.sequence;
+    Assert.equal(typeof row.payload_json, "string");
+    const message = object(JSON.parse(row.payload_json as string), "Expected a message payload");
+    Assert.equal(message.threadId, threadId);
+    if (message.role !== "assistant") continue;
+    Assert.equal(typeof message.text, "string");
+    Assert.equal(typeof message.streaming, "boolean");
+    updates.push({ text: message.text as string, streaming: message.streaming as boolean });
+  }
+  Assert.ok(updates.filter((update) => update.streaming).length >= 2);
+  Assert.equal(updates.at(-1)?.streaming, false);
+  return updates;
+}
+
+export function inspectNativeTextUpdates(executable: string, stateDirectory: string, threadId: string) {
+  const responses = readNativeResponses(executable,
+    Path.join(stateDirectory, "userdata", "statev2.omdb"), [
+      { operation: "application_begin", transaction_id: transactionId, mode: "read" },
+      { operation: "application_events_read", transaction_id: transactionId,
+        thread_id: threadId, event_type: "message.updated", only_agent_events: true,
+        after_sequence: 0, limit: 129 },
+      { operation: "application_rollback", transaction_id: transactionId },
+    ]);
+  Assert.equal(responses.length, 3);
+  Assert.ok(responses.every((response) => response.ok === true));
+  return assertNativeTextUpdates(responses[1].result, threadId);
+}

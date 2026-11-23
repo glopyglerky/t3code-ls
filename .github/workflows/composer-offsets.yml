@@ -250,6 +250,7 @@ jobs:
           T3_CODE_LS_DRAFT_STORAGE_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-storage-') }}
           T3_CODE_LS_FILE_EDITOR_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
           T3_CODE_LS_DURABLE_TEXT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-durable-') }}
+          DURABLE_BYTE_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-byte-accounting-') }}
           T3_CODE_LS_HTML_INTERACTION_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-html-') }}
           T3_CODE_LS_PDF_LINK_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-') }}
           VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
@@ -358,6 +359,15 @@ jobs:
                 .approvalReceipt.commandId == .capturedApproval.approvalAction.decisions[0].commandId
               ' "$proof/approval-$renderer/native/proof.json"
             done
+          elif [[ "$DURABLE_BYTE_PROOF" == true ]]; then
+            node --test apps/web/scripts/hybrid-client-database.test.ts
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- env T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 \
+                T3_CODE_LS_DURABLE_BYTE_PROOF=true VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
+                "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
+            ' _ "$(id -un)" "$(command -v node)" "$proof"
+            test -s "$proof/durable-wire-predecessor.json"
           elif [[ "$GITHUB_REF_NAME" != candidate/t3code-ls-t02-bundled-native-t13-pdf-external-* && "$FORK_HISTORY_PROOF" != true ]]; then
             node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
           fi

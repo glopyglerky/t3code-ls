@@ -40,6 +40,7 @@ import { verifyBundledVoiceDraft } from "./hybrid-client-voice.ts";
 import {
   inspectNativeApprovalReceipt,
   inspectNativeMessageUpdates,
+  inspectNativeTextUpdates,
   inspectNativeReplay,
 } from "./hybrid-client-database.ts";
 import { stagePreviewFixtureBrowser, verifyPreviewLifetime } from "./hybrid-client-preview.ts";
@@ -133,6 +134,7 @@ const draftStorageProof = process.env.T3_CODE_LS_DRAFT_STORAGE_PROOF === "true";
 const fileEditorProof = process.env.T3_CODE_LS_FILE_EDITOR_PROOF === "true";
 const tasksFile = "fixture-tasks.md";
 const initialTasks = "- [ ] First milestone\n- [ ] Second milestone\n- [ ] Keep the draft\n";
+const durableByteProof = process.env.T3_CODE_LS_DURABLE_BYTE_PROOF === "true";
 const durableTextProof = process.env.T3_CODE_LS_DURABLE_TEXT_PROOF === "true";
 const voiceDraftProof = process.env.T3_CODE_LS_VOICE_DRAFT_PROOF === "true";
 const pdfLinkProof = process.env.T3_CODE_LS_PDF_LINK_PROOF === "true";
@@ -205,6 +207,14 @@ Assert.ok(
   !composerStopProof || composerSubmitRenderer !== undefined,
   "The Stop button proof requires the packaged Send renderer",
 );
+
+Assert.ok(!durableByteProof || (bundledClient && mode === "native" && expectsRustComposer && [
+  durableTextProof, parallelTurnsProof, spliceNegotiationProof, splitPtyProof, bundledPtyProof,
+  ptyRestartProof, ptyContentionProof, multiTabDraftProof, draftStorageProof, fileEditorProof,
+  voiceDraftProof, pdfLinkProof, htmlInteractionProof, previewLifetimeProof,
+  pairingProof !== undefined, guestNameProof !== undefined, dioxusFindProof !== undefined,
+  composerSubmitRenderer !== undefined, composerStopProof,
+].every((enabled) => !enabled)), "Byte receipt requires its own packaged native Rust-composer run");
 
 function isPairingRenderer(value: string): value is PairingRenderer {
   return value === "retained" || value === "dioxus" || value === "dioxus-fallback";
@@ -2158,7 +2168,7 @@ async function verifyFileEditor(page: Page, workspace: string, writes: EventEmit
   return { path: tasksFile, confirmedEdits: 2, externalChangePreserved: true, draftPreserved: true };
 }
 
-function textRevisionIdentity(stateDirectory: string, initialize = false) {
+function textRevisionIdentity(stateDirectory: string, initialize = false, layout: "full" | "compact" = "compact") {
   const executable = NodePath.join(repoRoot, "apps/server/dist/native-bin/t3-code-ls-db");
   const databasePath = NodePath.join(stateDirectory, "userdata", "statev2.omdb");
   if (initialize) {
@@ -2166,7 +2176,7 @@ function textRevisionIdentity(stateDirectory: string, initialize = false) {
   }
   const requests = [
     ...(initialize
-      ? [{ operation: "application_bootstrap", event_layout: "assistant_text_revisions_v1" }]
+      ? [{ operation: "application_bootstrap", ...(layout === "compact" ? { event_layout: "assistant_text_revisions_v1" } : {}) }]
       : []),
     { operation: "application_generation_identity" },
   ];
@@ -2187,7 +2197,8 @@ function textRevisionIdentity(stateDirectory: string, initialize = false) {
   const identity = responses.at(-1).result;
   Assert.equal(identity.engine, "omdb");
   Assert.equal(identity.generation, "native");
-  Assert.equal(identity.layout, "t3-application-keyspace-v1+assistant-text-revisions-v1");
+  Assert.equal(identity.layout, layout === "compact"
+    ? "t3-application-keyspace-v1+assistant-text-revisions-v1" : "t3-application-keyspace-v1");
   Assert.match(identity.catalog_sha256, /^[a-f0-9]{64}$/u);
   return { layout: identity.layout as string, catalogSha256: identity.catalog_sha256 as string };
 }
@@ -2433,11 +2444,20 @@ async function verifyInteractiveHtml(page: Page, resumeThreadId: string) {
   }
 }
 
-async function exercise(implementation: Implementation): Promise<void> {
-  const directory = NodePath.join(proofRoot, implementation);
+const byteSamples: Array<{
+  profile: "full" | "compact";
+  artifacts: Record<string, string>;
+  updates: ReturnType<typeof inspectNativeTextUpdates>;
+  dialogue: Array<{ role: string; text: string; streaming: boolean }>;
+  wire: { sentFrames: number; receivedFrames: number; sentPayloadBytes: number; receivedPayloadBytes: number };
+}> = [];
+
+async function exercise(implementation: Implementation, byteProfile?: "full" | "compact"): Promise<void> {
+  const fixtureName = byteProfile ? `${implementation}-${byteProfile}` : implementation;
+  const directory = NodePath.join(proofRoot, fixtureName);
   NodeFS.mkdirSync(directory, { recursive: true });
-  const workspace = NodePath.join(runRoot, implementation, "hybrid-fixture");
-  const stateDirectory = NodePath.join(runRoot, implementation, "state");
+  const workspace = NodePath.join(runRoot, fixtureName, "hybrid-fixture");
+  const stateDirectory = NodePath.join(runRoot, fixtureName, "state");
   Assert.ok(!durableTextProof || (bundledClient && implementation === "native"));
   Assert.ok(!previewLifetimeProof || implementation === "native");
   const previewBrowser = previewLifetimeProof ? stagePreviewFixtureBrowser(stateDirectory) : null;
@@ -2508,6 +2528,7 @@ async function exercise(implementation: Implementation): Promise<void> {
       localRefusalPreservedDraft: true;
     }) | null,
     composerStop: null as Awaited<ReturnType<typeof verifyComposerStop>> | null,
+    byteAccounting: null as (typeof byteSamples)[number] | null,
     textRevisionProfile: null as ReturnType<typeof textRevisionIdentity> | null,
     pdfLinks: null as Awaited<ReturnType<typeof verifyLinkedPdf>> | null,
     htmlInteraction: null as Awaited<ReturnType<typeof verifyInteractiveHtml>> | null,
@@ -2653,6 +2674,14 @@ async function exercise(implementation: Implementation): Promise<void> {
   }>();
   const wireMessages = new Map<string, Array<{ sequence: number; length: number; streaming: boolean }>>();
   const fileWrites = new EventEmitter();
+  let observeBytes = false;
+  const wire = { sentFrames: 0, receivedFrames: 0, sentPayloadBytes: 0, receivedPayloadBytes: 0 };
+  const countPayload = (direction: "sent" | "received", payload: string | Buffer) => {
+    if (!observeBytes) return;
+    const bytes = typeof payload === "string" ? Buffer.byteLength(payload, "utf8") : payload.length;
+    if (direction === "sent") { wire.sentFrames += 1; wire.sentPayloadBytes += bytes; }
+    else { wire.receivedFrames += 1; wire.receivedPayloadBytes += bytes; }
+  };
   function observePage(current: Page): void {
     current.setDefaultTimeout(timeoutMs);
     current.setDefaultNavigationTimeout(timeoutMs);
@@ -2667,6 +2696,7 @@ async function exercise(implementation: Implementation): Promise<void> {
         voiceAlternateSocketHosts.push(new URL(socket.url()).host);
       }
       socket.on("framesent", ({ payload }) => {
+        countPayload("sent", payload);
         const json = payload.toString();
         if (voiceDraftProof && (
           json.includes(ORCHESTRATION_V2_WS_METHODS.launchThread) ||
@@ -2712,6 +2742,7 @@ async function exercise(implementation: Implementation): Promise<void> {
         if (/"messageTextAppends":2(?!\d)/u.test(json)) messageSpliceRequests += 1;
       });
       socket.on("framereceived", ({ payload }) => {
+        countPayload("received", payload);
         const json = payload.toString();
         if (json.includes('"kind":"message-text-append"')) {
           messageAppendFrames += 1;
@@ -2803,9 +2834,9 @@ async function exercise(implementation: Implementation): Promise<void> {
         return route.abort("blockedbyclient");
       });
     }
-    if (durableTextProof) {
+    if (durableTextProof || byteProfile !== undefined) {
       starting("initialize the opted-in assistant text layout");
-      proof.textRevisionProfile = textRevisionIdentity(stateDirectory, true);
+      proof.textRevisionProfile = textRevisionIdentity(stateDirectory, true, byteProfile ?? "compact");
       completed("Initialized the assistant text revision layout for this fresh omdb profile");
     }
     let application = await startApplication(
@@ -2825,6 +2856,53 @@ async function exercise(implementation: Implementation): Promise<void> {
     starting("local project creation");
     await addFixtureProject(page, workspace, "hybrid-fixture");
     completed("Created local project through the normal client");
+    if (byteProfile !== undefined) {
+      starting(`packaged ${byteProfile} text byte receipt predecessor`);
+      const prompt = "Replay: text appends";
+      const first = "This controlled reply sends several messages through the normal provider stream. The composer receives the first sentence while the same message is still open. A different frame brings another sentence and the same message keeps both sentences in their original order. The next frame will continue the reply with Unicode text and then finish the same turn. ";
+      const second = "日本語 and a 🐟 complete the sequence. The bounded text fixture is complete.";
+      const finalText = first + second + " The fixture now ends the turn.";
+      const artifacts = Object.fromEntries([
+        "apps/server/dist/bin.mjs", "apps/server/dist/native-bin/t3-code-ls-db",
+        "apps/server/scripts/dev-replay-agent.ts",
+        "apps/server/scripts/dev-replay/text_appends_transcript.ndjson",
+      ].map((path) => [path, NodeCrypto.createHash("sha256")
+        .update(NodeFS.readFileSync(NodePath.join(repoRoot, path))).digest("hex")]));
+      observeBytes = true;
+      const threadId = await submitReplay(page, "Text appends", prompt);
+      const approval = page.getByRole("button", { name: /^(Yes|Approve)$/u }).first();
+      await approval.waitFor({ state: "visible" });
+      const pending = await readThreadSnapshot(page, threadId);
+      const identity = replayTurnIdentity(pending, "text-appends");
+      await approval.click();
+      await assertCompleted(page, threadId, identity, finalText);
+      const snapshot = await readThreadSnapshot(page, threadId);
+      observeBytes = false;
+      Assert.ok(wire.sentFrames > 0 && wire.receivedFrames > 0);
+      Assert.ok(messageAppendRequests > 0 && messageAppendFrames > 0);
+      Assert.ok(await page.evaluate(
+        () => performance.getEntriesByName("t3-thread-rust-text-append").length > 0,
+      ), "The packaged Rust reducer must apply a negotiated append");
+      const dialogue = snapshot.projection.messages.map(({ role, text, streaming }) => ({ role, text, streaming }));
+      Assert.deepEqual(dialogue, [
+        { role: "user", text: prompt, streaming: false },
+        { role: "assistant", text: finalText, streaming: false },
+      ]);
+      const updates = inspectNativeTextUpdates(NodePath.join(repoRoot, "apps/server/dist/native-bin/t3-code-ls-db"), stateDirectory, threadId);
+      Assert.equal(updates.at(-1)?.text, finalText);
+      Assert.ok(updates.some((update) => update.streaming && update.text === first));
+      Assert.ok(updates.some((update) => update.streaming && update.text === first + second));
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await assertCompleted(page, threadId, identity, finalText);
+      Assert.deepEqual((await readThreadSnapshot(page, threadId)).projection.messages
+        .map(({ role, text, streaming }) => ({ role, text, streaming })), dialogue);
+      Assert.deepEqual(textRevisionIdentity(stateDirectory, false, byteProfile), proof.textRevisionProfile);
+      proof.byteAccounting = { profile: byteProfile, artifacts, updates, dialogue, wire };
+      byteSamples.push(proof.byteAccounting);
+      completed("Compared the completed Unicode dialogue and ordered durable updates after reload");
+      proof.status = "passed";
+      return;
+    }
     if (voiceDraftProof) {
       Assert.ok(bundledClient && implementation === "native" && expectsRustComposer);
       starting("capture synthetic microphone audio into an unsent draft");
@@ -3471,7 +3549,30 @@ try {
     } else if (pairingProof && isPairingRenderer(pairingProof)) {
       await verifyPairing(implementation, pairingProof);
     } else {
-      await exercise(implementation);
+      if (durableByteProof) {
+        await exercise(implementation, "full");
+        await exercise(implementation, "compact");
+        const [full, compact] = byteSamples;
+        Assert.ok(full && compact && byteSamples.length === 2);
+        Assert.deepEqual(full.artifacts, compact.artifacts);
+        Assert.deepEqual(full.dialogue, compact.dialogue);
+        Assert.deepEqual(full.updates, compact.updates);
+        writeJson(NodePath.join(proofRoot, "durable-wire-predecessor.json"), {
+          schemaVersion: 1, status: "receipt-predecessor", source,
+          stockProductDenominator: "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+          pairedProfiles: byteSamples,
+          equality: "exact role/text/streaming dialogue and ordered reconstructed assistant updates; per-profile identities and timestamps excluded",
+          wireBoundary: "Playwright WebSocket sent/received payloads on the owned page, from before submitReplay through the completed authoritative snapshot; includes control and snapshot traffic on all page sockets",
+          wireExcludes: "WebSocket headers, masks, compression, TCP/TLS, HTTP and provider traffic; no per-turn transport or allocation claim",
+          physicalEventKeyValueBytes: null,
+          physicalGap: "Bundled read-only-local application events API expands stored revisions; raw event K/V plus indexes and witnesses are not exposed",
+          gainClaim: null, walEquivalence: false, stockEquivalence: false,
+          isolatedResultPooled: false,
+          remaining: "Root must qualify packaged execution, add bounded raw persisted K/V inspection and repeat matched trials before comparing bytes",
+        });
+      } else {
+        await exercise(implementation);
+      }
     }
     run.passed.push(implementation);
   }
