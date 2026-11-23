@@ -238,12 +238,26 @@ function makeHarness(options: HarnessOptions = {}) {
         folderForThread: () => Effect.succeedNone,
       }),
   );
+  const readLaunchReceipt = vi.fn<(commandId: CommandId) => void>();
+  const layerLaunchReceipts = Layer.effect(
+    CommandReceiptStore.CommandReceiptStoreV2,
+    Effect.gen(function* () {
+      const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
+      return {
+        ...receipts,
+        getByCommandId: (commandId: CommandId) =>
+          Effect.sync(() => readLaunchReceipt(commandId)).pipe(
+            Effect.andThen(receipts.getByCommandId(commandId)),
+          ),
+      };
+    }),
+  ).pipe(Layer.provide(layerReceipts));
   const layerLaunch = ThreadLaunch.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
         layerExternalServices,
         layerThreadManagement,
-        layerReceipts,
+        layerLaunchReceipts,
         layerOrchestrator,
         IdAllocator.layer,
         options.getLaunchSettings === undefined
@@ -298,6 +312,7 @@ function makeHarness(options: HarnessOptions = {}) {
       layerDatabase,
       layerExternalServices,
     ),
+    readLaunchReceipt,
     createWorktree,
     removeWorktree,
     deleteLocalBranch,
@@ -1714,6 +1729,8 @@ it.effect("replays a server-allocated launch", () =>
       assert.equal(first.threadId, retry.threadId);
       assert.isFalse(first.resumed);
       assert.isTrue(retry.resumed);
+      // The launch only reads its claim receipt. Dispatch validates the initial message receipt.
+      assert.deepEqual(harness.readLaunchReceipt.mock.calls, [[rest.commandId], [rest.commandId]]);
       // Clients drop their pending copy once the thread reaches the message's commit.
       assert.isNumber(first.sequence);
       assert.equal(retry.sequence, first.sequence);
@@ -2010,11 +2027,18 @@ it.effect("reports one concurrent same-command launch as new and the rest as res
       const input = launchInput({
         command: "command:launch:concurrent-resumed",
         thread: "thread:launch:concurrent-resumed",
+        message: "Only one concurrent initial message",
       });
       const results = yield* Effect.all([launches.launch(input), launches.launch(input)], {
         concurrency: "unbounded",
       });
       assert.deepEqual(results.map((result) => result.resumed).sort(), [false, true]);
+      assert.deepEqual(harness.readLaunchReceipt.mock.calls, [[input.commandId], [input.commandId]]);
+      assert.equal(results[0]?.sequence, results[1]?.sequence);
+      for (const result of results) {
+        assert.equal(result.projection.messages.length, 1);
+        assert.equal(result.projection.runs.length, 1);
+      }
     }).pipe(Effect.provide(harness.layer));
   }),
 );

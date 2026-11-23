@@ -1166,8 +1166,6 @@ const make = Effect.gen(function* () {
         let messageWasAlreadyAccepted = false;
         if (input.initialMessage !== undefined) {
           const messageCommandId = CommandId.make(`${input.commandId}:initial-message`);
-          const messageReceipt = yield* readReceipt(input, messageCommandId);
-          messageWasAlreadyAccepted = Option.isSome(messageReceipt);
           const messageId =
             input.initialMessage.messageId ??
             (yield* ids.allocate
@@ -1207,8 +1205,8 @@ const make = Effect.gen(function* () {
                 : (effect) => effect,
               Effect.mapError(mapError(input, "dispatch-message", threadId)),
             );
-          // A concurrent retry can read no receipt and still replay the dispatch.
-          messageWasAlreadyAccepted ||= dispatched.replayed === true;
+          // Dispatch owns receipt validation, including a concurrent commit winner.
+          messageWasAlreadyAccepted = dispatched.replayed === true;
           messageSequence = dispatched.sequence;
           const runCreated = dispatched.storedEvents.find(
             (stored) => stored.event.type === "run.created",
