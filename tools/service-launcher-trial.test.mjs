@@ -234,7 +234,11 @@ test("ordinary launcher refuses isolated candidate preparation before any child 
   await assert.rejects(fs.stat(f.starts), { code: "ENOENT" });
 });
 
-test("compiled Rust helper restores a sealed native trial before launcher startup", {
+const launcherPromotionProof = process.env.T3_TEST_LAUNCHER_PROMOTION_INTENT === "1";
+
+test(launcherPromotionProof
+  ? "compiled Rust helper records an installed launcher's native promotion intent"
+  : "compiled Rust helper restores a sealed native trial before launcher startup", {
   skip: process.env.T3_TEST_SEALED_TRIAL_HELPER === undefined,
   timeout: 120_000,
 }, async (t) => {
@@ -291,6 +295,7 @@ test("compiled Rust helper restores a sealed native trial before launcher startu
   `);
   const target = await f.install(targetVersion, "process.exit(7);");
   const preparationEntry = process.env.T3_TEST_PREPARE_ENTRY;
+  if (launcherPromotionProof) assert.ok(preparationEntry, "Pass the packaged runtime for both roles");
   if (preparationEntry !== undefined) {
     assert.ok(path.isAbsolute(preparationEntry));
     const runtimeEntryBytes = (await fs.stat(preparationEntry)).size;
@@ -299,6 +304,10 @@ test("compiled Rust helper restores a sealed native trial before launcher startu
       "The installed runtime must fit its independent 256 MiB artifact hash limit");
     await fs.copyFile(preparationEntry, path.join(target, "t3"));
     await fs.chmod(path.join(target, "t3"), 0o700);
+    if (launcherPromotionProof) {
+      await fs.copyFile(preparationEntry, path.join(previous, "t3"));
+      await fs.chmod(path.join(previous, "t3"), 0o700);
+    }
   }
   const helperSha256 = digest(await fs.readFile(executable));
   for (const directory of [previous, target]) {
@@ -393,6 +402,47 @@ test("compiled Rust helper restores a sealed native trial before launcher startu
     assert.deepEqual(await f.launcher(pending, { T3_CODE_LS_SEALED_TRIAL_RECOVERY: "1" })
       .prepareIsolatedCandidate({ request, preparation: prepared }), witness);
     assert.deepEqual(await fs.readFile(observationPath), observationBytes);
+    if (launcherPromotionProof) {
+      const input = { request, preparation: prepared };
+      const expectedIntent = {
+        version: 1,
+        verification_sha256: witness.verificationSha256,
+        source_entry_sha256: digest(await fs.readFile(path.join(previous, "t3"))),
+        source_helper_sha256: helperSha256,
+        source_helper_schema_sha256: capabilities.targetSchemaSha256,
+      };
+      let persisted;
+      for (const reopen of [false, true]) {
+        const launcher = reopen
+          ? f.launcher(pending, { T3_CODE_LS_SEALED_TRIAL_RECOVERY: "1" })
+          : preparationLauncher;
+        assert.deepEqual(await launcher.prepareIsolatedCandidate(input, { recordPromotionIntent: true }), witness);
+        const bytes = await fs.readFile(observationPath);
+        const saved = JSON.parse(bytes);
+        assert.deepEqual(saved.promotion_intent, expectedIntent);
+        assert.deepEqual(saved.candidate_observation, JSON.parse(observationBytes).candidate_observation);
+        if (persisted !== undefined) assert.deepEqual(bytes, persisted);
+        persisted = bytes;
+      }
+      const blockedPublication = spawnSync(executable, ["trial-publish-sealed", home, id], {
+        env: {}, input: "", encoding: "utf8", timeout: 30_000, maxBuffer: 8192,
+      });
+      assert.equal(blockedPublication.error, undefined);
+      assert.equal(blockedPublication.status, 0);
+      assert.equal(JSON.parse(blockedPublication.stdout).ok, false);
+      assert.equal((await fs.stat(dbPath, { bigint: true })).ino, sourceIdentity.ino);
+      assert.equal((await fs.stat(trial, { bigint: true })).ino, stageIdentity.ino);
+      assert.equal((await fs.stat(f.statePath, { bigint: true })).ino, stateIdentity.ino);
+      assert.deepEqual(await fs.readFile(dbPath), sourceBytes);
+      assert.deepEqual(await fs.readFile(trial), stageBytes);
+      assert.deepEqual(await fs.readFile(f.statePath), stateBytes);
+      assert.deepEqual(await fs.readFile(checkpoint), checkpointBytes);
+      assert.deepEqual(await fs.readFile(backupReceipt), backupReceiptBytes);
+      assert.deepEqual(await fs.readFile(observationPath), persisted);
+      await assert.rejects(fs.stat(f.starts), { code: "ENOENT" });
+      await assert.rejects(fs.stat(path.join(f.userdata, "server-runtime.json")), { code: "ENOENT" });
+      return;
+    }
     for (const valid of [false, true]) {
       const input = { request, preparation: valid ? prepared : {
         ...prepared, file_sha256: "0".repeat(64),

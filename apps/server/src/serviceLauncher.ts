@@ -162,6 +162,7 @@ export async function readBundledNativeTrialHelper(entry: string, executable: st
   readonly engineRevision: string;
   readonly targetSchemaSha256: string;
   readonly sealedTrialRollback: boolean;
+  readonly promotionIntent: boolean;
   readonly sha256: string;
 } | null> {
   // The update contract belongs to the installed native binary beside this runtime.
@@ -206,11 +207,50 @@ export async function readBundledNativeTrialHelper(entry: string, executable: st
       typeof result.targetSchemaSha256 === "string" && /^[0-9a-f]{64}$/u.test(result.targetSchemaSha256)
       ? {
           engineRevision: result.engineRevision, targetSchemaSha256: result.targetSchemaSha256,
-          sealedTrialRollback: result.sealedTrialRollback === 1, sha256: declaredDigest,
+          sealedTrialRollback: result.sealedTrialRollback === 1,
+          promotionIntent: result.promotionIntent === 1, sha256: declaredDigest,
         }
       : null;
   } finally {
     await helper.close();
+  }
+}
+
+function runOfflineTrialCommand(entry: string, args: readonly string[], input: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = NodeChildProcess.execFile(
+      entry, args,
+      { env: {}, encoding: "utf8", timeout: 65_000, maxBuffer: 8192, killSignal: "SIGKILL" },
+      (error, output, stderr) => error === null && stderr === ""
+        ? resolve(output) : reject(error ?? new Error("The offline trial command wrote a diagnostic.")),
+    );
+    child.stdin?.on("error", reject);
+    child.stdin?.end(input + "\n");
+  });
+}
+
+async function installedTrialEntrySha256(entry: string): Promise<string> {
+  if (await NodeFSP.realpath(entry) !== entry) throw new Error("The installed runtime is redirected.");
+  const entryFile = await NodeFSP.open(entry,
+    NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW | NodeFS.constants.O_NONBLOCK);
+  try {
+    const before = await entryFile.stat({ bigint: true });
+    if (!before.isFile() || before.nlink !== 1n || (before.mode & 0o111n) === 0n ||
+      before.size <= 0n || before.size > 256n * 1024n * 1024n) {
+      throw new Error("The installed runtime cannot be verified for promotion.");
+    }
+    const digest = NodeCrypto.createHash("sha256");
+    for await (const chunk of entryFile.createReadStream({ autoClose: false, end: Number(before.size) - 1 })) {
+      digest.update(chunk);
+    }
+    const after = await NodeFSP.lstat(entry, { bigint: true });
+    if (!after.isFile() || after.nlink !== 1n || before.dev !== after.dev ||
+      before.ino !== after.ino || before.size !== after.size || before.ctimeNs !== after.ctimeNs) {
+      throw new Error("The installed runtime changed during promotion preparation.");
+    }
+    return digest.digest("hex");
+  } finally {
+    await entryFile.close();
   }
 }
 
@@ -1032,9 +1072,11 @@ export class Launcher {
     this.#state = state;
   }
 
-  /** Inspect a stopped candidate before this launcher starts any server.
-   * This observation does not publish a database or admit an update. */
-  async prepareIsolatedCandidate(verification: unknown): Promise<IsolatedCandidateWitness> {
+  /** Inspect a stopped candidate before this launcher starts any server. */
+  async prepareIsolatedCandidate(
+    verification: unknown,
+    options?: { readonly recordPromotionIntent: boolean },
+  ): Promise<IsolatedCandidateWitness> {
     if (this.#started || this.#preparing || this.#stopRequested || this.#child !== null ||
       this.#environment.T3_CODE_LS_SEALED_TRIAL_RECOVERY !== "1" ||
       process.platform !== "linux" || process.arch !== "x64" ||
@@ -1082,16 +1124,9 @@ export class Launcher {
         await NodeFSP.realpath(entryPath) !== entryPath) {
         throw new Error("The isolated candidate executable is redirected.");
       }
-      const stdout = await new Promise<string>((resolve, reject) => {
-        const child = NodeChildProcess.execFile(
-          entryPath, ["__service-prepare-isolated", this.#baseDir, pending.id],
-          { env: {}, encoding: "utf8", timeout: 65_000, maxBuffer: 8192, killSignal: "SIGKILL" },
-          (error, output, stderr) => error === null && stderr === ""
-            ? resolve(output) : reject(error ?? new Error("The isolated candidate wrote a diagnostic.")),
-        );
-        child.stdin?.on("error", reject);
-        child.stdin?.end(input + "\n");
-      });
+      const stdout = await runOfflineTrialCommand(
+        entryPath, ["__service-prepare-isolated", this.#baseDir, pending.id], input,
+      );
       const response: unknown = JSON.parse(stdout);
       if (!isRecord(response) || !hasKeys(response, ["protocol", "status", "updateId", "preparation"]) ||
         response.protocol !== 1 || response.status !== "prepared-isolated" ||
@@ -1115,20 +1150,13 @@ export class Launcher {
         helperSha256: helper.sha256,
         verificationSha256: NodeCrypto.createHash("sha256").update(input).digest("hex"),
       };
-      const observationInput = JSON.stringify({ verification_json: input, witness }) + "\n";
-      if (Buffer.byteLength(observationInput) > 4096) {
+      const observationInput = JSON.stringify({ verification_json: input, witness });
+      if (Buffer.byteLength(observationInput) >= 4096) {
         throw new Error("The native preparation observation exceeds its bound.");
       }
-      const recorded = await new Promise<string>((resolve, reject) => {
-        const child = NodeChildProcess.execFile(
-          selected.executable, ["trial-record-prepared", this.#baseDir, pending.id],
-          { env: {}, encoding: "utf8", timeout: 65_000, maxBuffer: 8192, killSignal: "SIGKILL" },
-          (error, output, stderr) => error === null && stderr === ""
-            ? resolve(output) : reject(error ?? new Error("The native receipt wrote a diagnostic.")),
-        );
-        child.stdin?.on("error", reject);
-        child.stdin?.end(observationInput);
-      });
+      const recorded = await runOfflineTrialCommand(
+        selected.executable, ["trial-record-prepared", this.#baseDir, pending.id], observationInput,
+      );
       const receipt: unknown = JSON.parse(recorded);
       if (!isRecord(receipt) || !hasKeys(receipt, ["ok", "result"]) || receipt.ok !== true ||
         !isRecord(receipt.result) || !hasKeys(receipt.result, ["witness", "reused"]) ||
@@ -1137,10 +1165,48 @@ export class Launcher {
         !sameSealedPendingState(await this.#readState(), state) || this.#stopRequested) {
         throw new Error("The native preparation observation was not durably verified.");
       }
+      if (options?.recordPromotionIntent) {
+        await this.#recordIsolatedPromotion(state, witness, helper.promotionIntent);
+      }
       return witness;
 
     } finally {
       this.#preparing = false;
+    }
+  }
+
+  async #recordIsolatedPromotion(
+    state: SealedPendingState, witness: IsolatedCandidateWitness, candidateSupportsPromotion: boolean,
+  ): Promise<void> {
+    const { update } = state;
+    const { entryPath } = runtimePaths(this.#baseDir, update.fromVersion);
+    const selection = installedApplicationDatabase(entryPath, {});
+    const helper = selection.kind === "omdb"
+      ? await readBundledNativeTrialHelper(entryPath, selection.executable)
+      : null;
+    if (!helper?.promotionIntent || !candidateSupportsPromotion || selection.kind !== "omdb") {
+      throw new Error("Both installed helpers must support native promotion intents.");
+    }
+    const intent = {
+      version: 1,
+      verification_sha256: witness.verificationSha256,
+      source_entry_sha256: await installedTrialEntrySha256(entryPath),
+      source_helper_sha256: helper.sha256,
+      source_helper_schema_sha256: helper.targetSchemaSha256,
+    };
+    if (!sameSealedPendingState(await this.#readState(), state) || this.#stopRequested) {
+      throw new Error("The isolated selection changed before recording the promotion intent.");
+    }
+    const output = await runOfflineTrialCommand(
+      selection.executable, ["trial-record-promotion", this.#baseDir, update.id], JSON.stringify(intent),
+    );
+    const receipt: unknown = JSON.parse(output);
+    if (!isRecord(receipt) || !hasKeys(receipt, ["ok", "result"]) || receipt.ok !== true ||
+      !isRecord(receipt.result) || !hasKeys(receipt.result, ["intent", "reused"]) ||
+      typeof receipt.result.reused !== "boolean" ||
+      !NodeUtil.isDeepStrictEqual(receipt.result.intent, intent) ||
+      !sameSealedPendingState(await this.#readState(), state) || this.#stopRequested) {
+      throw new Error("The native promotion intent was not durably verified.");
     }
   }
 
