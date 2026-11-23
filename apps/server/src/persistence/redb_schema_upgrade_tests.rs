@@ -574,6 +574,106 @@ async fn fixture_88() -> (TestFixture, Store, ApplicationCatalog) {
     (fixture, store, source)
 }
 
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
+    use crate::application_bootstrap::bootstrap_schema_sha256;
+    use crate::application_server_ownership::OwnerLock;
+    use crate::application_storage::{
+        IsolatedTrialRequest, TrialSnapshot, backup_service_trial, prepare_isolated_service_trial,
+    };
+    use std::fs;
+
+    const UPDATE: &str = "aa212c2b-63d4-4b28-97e4-1c1d6dc6d281";
+    for unsupported in [false, true] {
+        let (fixture, store, catalog) = fixture_88().await;
+        if unsupported {
+            let mut tx = store.db.begin().await.unwrap();
+            write_row(
+                &mut tx,
+                &catalog,
+                "effect_sql_migrations",
+                Map::from_iter([
+                    ("migration_id".into(), int_cell(88)),
+                    ("name".into(), text_cell("unsupported migration")),
+                    ("created_at".into(), text_cell(NOW)),
+                ]),
+            )
+            .await
+            .unwrap();
+            tx.commit().await.unwrap();
+        }
+        let identity = ApplicationTransactions::new(store.clone())
+            .generation_identity()
+            .await
+            .unwrap()
+            .unwrap();
+        let original_rows = generation_bytes(&store, &catalog).await;
+        store.shutdown().await.unwrap();
+        let home = fs::canonicalize(fixture.path().parent().unwrap()).unwrap();
+        let state = home.join("userdata");
+        let live = state.join("statev2.omdb");
+        fs::create_dir(&state).unwrap();
+        fs::create_dir(home.join("runtime")).unwrap();
+        fs::rename(fixture.path(), &live).unwrap();
+        OwnerLock::acquire(&state.join("server-owner.sqlite"))
+            .unwrap()
+            .activate_native()
+            .unwrap();
+        let backup =
+            backup_service_trial(home.clone(), UPDATE.into(), identity.catalog_sha256.clone())
+                .await
+                .unwrap();
+        let checkpoint = home.join(format!("runtime/native-db-backup/{UPDATE}.omdb"));
+        let live_bytes = fs::read(&live).unwrap();
+        let checkpoint_bytes = fs::read(&checkpoint).unwrap();
+        let result = prepare_isolated_service_trial(
+            home,
+            UPDATE.into(),
+            IsolatedTrialRequest {
+                update_id: UPDATE.into(),
+                database: backup.database,
+                checkpoint: TrialSnapshot {
+                    catalog_sha256: identity.catalog_sha256,
+                    rows: backup.backup.rows,
+                    checksum: backup.backup.checksum,
+                },
+                target_schema_sha256: bootstrap_schema_sha256(),
+            },
+        )
+        .await;
+        let trial = state.join(format!(".statev2-trial-{UPDATE}.omdb"));
+        if unsupported {
+            assert!(matches!(result, Err(Error::Invalid(_))), "{result:?}");
+            assert!(!trial.exists());
+        } else {
+            let prepared = result.unwrap();
+            let candidate = Store::open_read_only(&trial).await.unwrap();
+            let upgraded =
+                decode_catalog(&candidate.db.read(&schema_key()).await.unwrap().unwrap()).unwrap();
+            let expected = definition().unwrap();
+            assert_eq!(upgraded, target_89(&catalog, &expected));
+            assert_eq!(
+                candidate.application_migrations().await.unwrap().len(),
+                expected.migrations.len()
+            );
+            assert_eq!(generation_bytes(&candidate, &catalog).await, original_rows);
+            assert_eq!(
+                ApplicationTransactions::new(candidate.clone())
+                    .generation_identity()
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .catalog_sha256,
+                prepared.snapshot.catalog_sha256
+            );
+            candidate.shutdown().await.unwrap();
+        }
+        assert_eq!(fs::read(&live).unwrap(), live_bytes);
+        assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);
+    }
+}
+
 async fn selected_thread_ids(
     app: &mut ApplicationTransactions,
     transaction: &str,

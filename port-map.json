@@ -1415,6 +1415,7 @@
         "apps/server/src/persistence/redb_auxiliary_reads.rs",
         "apps/server/src/persistence/redb_bootstrap.rs",
         "apps/server/src/persistence/redb_database_storage.rs",
+        "apps/server/src/persistence/redb_isolated_trial.rs",
         "apps/server/src/persistence/redb_message_rowids.rs",
         "apps/server/src/persistence/redb_projection_context.rs",
         "apps/server/src/persistence/redb_projection_control.rs",

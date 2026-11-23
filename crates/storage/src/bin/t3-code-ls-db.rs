@@ -30,8 +30,9 @@ use t3_code_ls_storage::application_runtime_state::RuntimeStateOperation;
 use t3_code_ls_storage::application_scheduled::{ScheduledRead, ScheduledWrite};
 use t3_code_ls_storage::application_search::ThreadSearchQuery;
 use t3_code_ls_storage::application_storage::{
-    TrialRestorePublicationRequest, TrialRestoreRequest, backup_service_trial,
-    prepare_service_trial_restore, publish_service_trial_restore,
+    IsolatedTrialRequest, TrialRestorePublicationRequest, TrialRestoreRequest,
+    backup_service_trial, prepare_isolated_service_trial, prepare_service_trial_restore,
+    publish_service_trial_restore,
 };
 use t3_code_ls_storage::application_thread_find::ThreadFindQuery;
 use t3_code_ls_storage::outbox::{self, EnqueueEffect};
@@ -1526,15 +1527,15 @@ fn error_response(error: &Error) -> Value {
     json!({"ok": false, "error": {"kind": kind, "message": error.to_string()}})
 }
 
-fn read_trial_restore_request<T: DeserializeOwned>() -> io::Result<Result<T, Error>> {
-    const MAX_RESTORE_REQUEST_BYTES: usize = 4096;
+fn read_trial_request<T: DeserializeOwned>(message: &str) -> io::Result<Result<T, Error>> {
+    const MAX_TRIAL_REQUEST_BYTES: usize = 4096;
     let mut input = Vec::new();
     io::stdin()
         .lock()
-        .take((MAX_RESTORE_REQUEST_BYTES + 1) as u64)
+        .take((MAX_TRIAL_REQUEST_BYTES + 1) as u64)
         .read_to_end(&mut input)?;
-    let invalid = || Error::Invalid("invalid trial restore request".into());
-    if input.len() > MAX_RESTORE_REQUEST_BYTES {
+    let invalid = || Error::Invalid(message.into());
+    if input.len() > MAX_TRIAL_REQUEST_BYTES {
         return Ok(Err(invalid()));
     }
     Ok(serde_json::from_slice(&input).map_err(|_| invalid()))
@@ -1550,8 +1551,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Err(error) => Some(error_response(&error)),
             }
         }
-        [mode, home, update_id] if mode == "trial-prepare-restore" => {
-            Some(match read_trial_restore_request::<TrialRestoreRequest>()? {
+        [mode, home, update_id] if mode == "trial-prepare-restore" => Some(
+            match read_trial_request::<TrialRestoreRequest>("invalid trial restore request")? {
                 Ok(request) => {
                     match prepare_service_trial_restore(home.into(), update_id.clone(), request)
                         .await
@@ -1561,10 +1562,25 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 Err(error) => error_response(&error),
-            })
-        }
+            },
+        ),
+        [mode, home, update_id] if mode == "trial-prepare-isolated" => Some(
+            match read_trial_request::<IsolatedTrialRequest>("invalid isolated trial request")? {
+                Ok(request) => {
+                    match prepare_isolated_service_trial(home.into(), update_id.clone(), request)
+                        .await
+                    {
+                        Ok(preparation) => json!({"ok": true, "result": preparation}),
+                        Err(error) => error_response(&error),
+                    }
+                }
+                Err(error) => error_response(&error),
+            },
+        ),
         [mode, home, update_id] if mode == "trial-publish-restore-offline" => Some(
-            match read_trial_restore_request::<TrialRestorePublicationRequest>()? {
+            match read_trial_request::<TrialRestorePublicationRequest>(
+                "invalid trial restore request",
+            )? {
                 Ok(request) => {
                     match publish_service_trial_restore(home.into(), update_id.clone(), request)
                         .await
@@ -1598,7 +1614,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         [mode, path] if mode == "exclusive-local" => Store::open_exclusive(path).await,
         _ => {
             return Err(Error::Invalid(
-                "usage: t3-code-ls-db initialize-local PATH | local PATH | read-only-local PATH | exclusive-local PATH | owner-lock PATH | trial-backup HOME UPDATE_ID CATALOG_SHA256 | trial-prepare-restore HOME UPDATE_ID < REQUEST_JSON | trial-publish-restore-offline HOME UPDATE_ID < WITNESSED_REQUEST_JSON".into(),
+                "usage: t3-code-ls-db initialize-local PATH | local PATH | read-only-local PATH | exclusive-local PATH | owner-lock PATH | trial-backup HOME UPDATE_ID CATALOG_SHA256 | trial-prepare-isolated HOME UPDATE_ID < REQUEST_JSON | trial-prepare-restore HOME UPDATE_ID < REQUEST_JSON | trial-publish-restore-offline HOME UPDATE_ID < WITNESSED_REQUEST_JSON".into(),
             )
             .into());
         }

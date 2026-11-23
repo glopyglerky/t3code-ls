@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
 
+const SCHEMA_DEFINITION: &str = include_str!("omdb-schema.json");
+
 #[path = "redb_schema_upgrade.rs"]
 mod upgrade;
 pub(crate) use upgrade::validate_import_lineage;
@@ -35,8 +37,8 @@ pub struct BootstrapResult {
 }
 
 fn definition() -> Result<Definition> {
-    let definition: Definition = serde_json::from_str(include_str!("omdb-schema.json"))
-        .map_err(|_| Error::IncompatibleStore)?;
+    let definition: Definition =
+        serde_json::from_str(SCHEMA_DEFINITION).map_err(|_| Error::IncompatibleStore)?;
     if definition.format != 1 {
         return Err(Error::IncompatibleStore);
     }
@@ -44,7 +46,31 @@ fn definition() -> Result<Definition> {
     Ok(definition)
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn bootstrap_schema_sha256() -> String {
+    use sha2::{Digest, Sha256};
+
+    Sha256::digest(SCHEMA_DEFINITION.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 impl Store {
+    #[cfg(target_os = "linux")]
+    pub(crate) async fn verify_bootstrap_schema(&self) -> Result<()> {
+        let expected = definition()?;
+        let schema = crate::application::ApplicationTransactions::new(self.clone())
+            .schema()
+            .await?
+            .ok_or(Error::IncompatibleStore)?;
+        if schema != expected.schema || self.application_migrations().await? != expected.migrations
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    }
+
     pub async fn application_migrations(&self) -> Result<Vec<Migration>> {
         let mut tx = self.db.begin_read_only().await?;
         let Some(bytes) = tx.get(&schema_key()).await? else {

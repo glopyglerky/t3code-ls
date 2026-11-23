@@ -578,7 +578,31 @@ impl Backend {
 
     /// An offline owner excludes every open omdb handle, including idle readers.
     pub(crate) async fn open_exclusive(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref().to_owned();
+        Self::open_exclusive_checked(path.as_ref().to_owned(), |_, _| Ok(())).await
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) async fn open_exclusive_trial(
+        path: PathBuf,
+        expected_identity: same_file::Handle,
+    ) -> Result<Self> {
+        use std::os::unix::fs::MetadataExt;
+
+        Self::open_exclusive_checked(path, move |file, identity| {
+            if *identity != expected_identity
+                || file.metadata().map_err(storage_error)?.nlink() != 1
+            {
+                return Err(Error::IncompatibleStore);
+            }
+            Ok(())
+        })
+        .await
+    }
+
+    async fn open_exclusive_checked(
+        path: PathBuf,
+        check: impl FnOnce(&File, &same_file::Handle) -> Result<()> + Send + 'static,
+    ) -> Result<Self> {
         if !path.is_absolute() {
             return Err(Error::Invalid("database path must be absolute".into()));
         }
@@ -588,6 +612,7 @@ impl Backend {
                 return Err(Error::IncompatibleStore);
             }
             let identity = file_identity(&file)?;
+            check(&file, &identity)?;
             let file = redb::backends::FileBackend::new(file).map_err(storage_error)?;
             let mut options = builder();
             options.set_concurrency_mode(ConcurrencyMode::ExclusiveWriter);
