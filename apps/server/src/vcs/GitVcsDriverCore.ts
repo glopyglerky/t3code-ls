@@ -995,9 +995,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     gixExecutable !== undefined && path.isAbsolute(gixExecutable) && !gitDiscoveryOverrides
     ? yield* ProcessRunner.make()
     : undefined;
-  const runGix = (cwd: string, args: ReadonlyArray<string>) => {
-    if (gixRunner === undefined || gixExecutable === undefined) return Effect.succeed(null);
-    return gixRunner.run({
+  const runGix = Effect.fn("GitVcsDriver.runGix")(function* (
+    cwd: string,
+    args: ReadonlyArray<string>,
+  ) {
+    if (gixRunner === undefined || gixExecutable === undefined) return null;
+    const native = yield* gixRunner.run({
       command: gixExecutable,
       args,
       cwd,
@@ -1005,15 +1008,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       extendEnv: false,
       timeout: "2 seconds",
       maxOutputBytes: 32_768,
-    }).pipe(
-      Effect.option,
-      Effect.map((native) =>
-        Option.isSome(native) && native.value.code === 0 && !native.value.stdoutInvalidUtf8
-          ? native.value.stdout
-          : null,
-      ),
-    );
-  };
+    }).pipe(Effect.option);
+    return Option.isSome(native) && native.value.code === 0 && !native.value.stdoutInvalidUtf8
+      ? native.value.stdout
+      : null;
+  });
   const serviceScope = yield* Effect.scope;
   const statusFetches = new Map<string, Fiber.Fiber<void, GitCommandError>>();
   const statusFetchProcesses = yield* Semaphore.make(4);
@@ -1781,8 +1780,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }),
     );
 
-  const remoteBranchExists: GitVcsDriver.GitVcsDriver["Service"]["remoteBranchExists"] = (input) =>
-    Effect.gen(function* () {
+  const remoteBranchExists = Effect.fn("GitVcsDriver.remoteBranchExists")(
+    function* (input: GitVcsDriver.GitRemoteBranchExistsInput) {
       const name = `refs/remotes/${input.remoteName}/${input.refName}`;
       const native = yield* runGix(input.cwd, ["has-remote-ref", input.cwd, name]);
       const exists = native === null ? null : Option.getOrNull(decodeGixRefPresence(native));
@@ -1794,7 +1793,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         { allowNonZeroExit: true },
       );
       return result.exitCode === 0;
-    });
+    },
+  );
 
   const remoteExists: GitVcsDriver.GitVcsDriver["Service"]["remoteExists"] = (input) =>
     executeGit(
