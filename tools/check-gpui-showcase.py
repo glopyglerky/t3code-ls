@@ -87,6 +87,8 @@ def check_thread_snapshot(executable):
         ({**connection, "threadId": "missing-fixture-thread"}, False),
         (connection, True),
     ]
+    streamed_id = None
+    unsent = "Keep this unsent café draft."
     for request, success in cases:
         application = subprocess.Popen(
             [executable, "--thread-snapshot"], stdin=subprocess.PIPE, text=True,
@@ -184,6 +186,27 @@ def check_thread_compose(executable, approval=False, follow_up=False):
                         continue
                 assert button.getState().contains(pyatspi.STATE_FOCUSED), "Allow once must accept keyboard focus"
                 x11("key", "space")
+            streaming = success and not approval and not follow_up
+            if streaming:
+                document = find("Server thread snapshot", application)
+                def partial_reply():
+                    field = document.queryText()
+                    body = field.getText(0, field.characterCount)
+                    if "I'll track" in body and "todo list fixture complete" not in body:
+                        return body
+                    return None
+                partial = wait_for(partial_reply, "Original ACP partial text was never visible before final text", application)
+                pending = projection()
+                user, = [row for row in pending["messages"] if row["id"] == connection["messageId"]]
+                run, = [row for row in pending["runs"] if row["id"] == user["runId"]]
+                assert run["status"] in ("running", "waiting"), "Partial text must precede completed turn"
+                assistant, = [row for row in pending["messages"] if row["role"] == "assistant" and row["runId"] == run["id"]]
+                streamed_id = assistant["id"]
+                assert f"Message {streamed_id}\n" in partial
+                assert not document.getState().contains(pyatspi.STATE_EDITABLE)
+                # Completion may clear only the captured prompt, never a later draft.
+                x11("key", "ctrl+a")
+                x11("type", "--clearmodifiers", unsent)
             if success:
                 try:
                     find("Server submission confirmed.", application, timeout=60)
@@ -214,7 +237,9 @@ def check_thread_compose(executable, approval=False, follow_up=False):
                 assert connection["threadId"] in body
                 assert not document.getState().contains(pyatspi.STATE_EDITABLE)
                 field = composer.queryText()
-                assert field.getText(0, field.characterCount) == ""
+                assert field.getText(0, field.characterCount) == (unsent if streaming else "")
+                if streaming:
+                    assert f"Message {streamed_id}\n" in body
             else:
                 find(failure, application, timeout=60)
                 field = composer.queryText()
@@ -249,6 +274,28 @@ def check_thread_compose(executable, approval=False, follow_up=False):
                 except subprocess.TimeoutExpired:
                     application.kill()
                     application.wait(timeout=3)
+    if streamed_id is not None:
+        application = subprocess.Popen([executable, "--thread-snapshot"], stdin=subprocess.PIPE, text=True)
+        try:
+            application.stdin.write(json.dumps({key: connection[key] for key in ("port", "token", "environmentId", "threadId")}))
+            application.stdin.close()
+            window = wait_for(find_window, "Reopened GPUI snapshot did not open", application)
+            document = find("Server thread snapshot", application)
+            field = document.queryText()
+            body = field.getText(0, field.characterCount)
+            assert f"Message {streamed_id}\n" in body and "todo list fixture complete" in body
+            assert len(projection()["runs"]) == 1
+            request_window_close(window)
+            assert application.wait(timeout=10) == 0
+        finally:
+            if application.poll() is None:
+                application.terminate()
+                try:
+                    application.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    application.kill()
+                    application.wait(timeout=3)
+        print("GPUI stream passed original partial text before completion, same reply identity on final/reopen and unsent draft checks")
     if approval:
         print("GPUI approval passed named AT-SPI button, X11 decision and same-request completion checks")
     elif follow_up:

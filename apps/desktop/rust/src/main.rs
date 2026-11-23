@@ -37,6 +37,11 @@ const SHORTCUT: &str = if cfg!(target_os = "macos") {
     "Ctrl+Enter"
 };
 
+enum ServerUpdate {
+    Partial(server_snapshot::Snapshot),
+    Finished(Result<server_submit::Progress, &'static str>),
+}
+
 enum SubmissionStatus {
     Pending,
     AwaitingApproval {
@@ -156,30 +161,18 @@ impl Workspace {
             let cancelled = Arc::clone(&self.cancelled);
             let submitted = draft.to_string();
             let request = submitted.clone();
-            let task = cx
-                .background_executor()
-                .spawn(async move { server.submit(&request, &cancelled) });
-            self._submission = Some(cx.spawn_in(window, async move |workspace, cx| {
-                let result = task.await;
-                let _ = workspace.update_in(cx, |workspace, window, cx| match result {
-                    Ok(server_submit::Progress::Completed(snapshot)) => {
-                        workspace.finish_submission(Ok(snapshot), &submitted, window, cx)
-                    }
-                    Ok(server_submit::Progress::Approval(approval)) => {
-                        workspace.status = Some(SubmissionStatus::AwaitingApproval {
-                            approval,
-                            submitted,
-                        });
-                        cx.notify();
-                    }
-                    Err(_) => workspace.finish_submission(
-                        Err(server_submit::FAILED),
-                        &submitted,
-                        window,
-                        cx,
-                    ),
-                });
-            }));
+            let (sender, receiver) = std::sync::mpsc::sync_channel(4);
+            cx.background_executor()
+                .spawn(async move {
+                    let result = server.submit_streaming(&request, &cancelled, &mut |snapshot| {
+                        sender
+                            .send(ServerUpdate::Partial(snapshot))
+                            .map_err(|_| server_submit::FAILED)
+                    });
+                    let _ = sender.send(ServerUpdate::Finished(result));
+                })
+                .detach();
+            self.receive_updates(receiver, submitted, window, cx);
             cx.notify();
             return;
         }
@@ -213,16 +206,76 @@ impl Workspace {
         self.status = Some(SubmissionStatus::Responding);
         let cancelled = Arc::clone(&self.cancelled);
         let request = submitted.clone();
-        let task = cx
-            .background_executor()
-            .spawn(async move { server.allow_once(&approval, &request, &cancelled) });
-        self._submission = Some(cx.spawn_in(window, async move |workspace, cx| {
-            let result = task.await.map_err(|_| server_submit::APPROVAL_UNCONFIRMED);
-            let _ = workspace.update_in(cx, |workspace, window, cx| {
-                workspace.finish_submission(result, &submitted, window, cx);
-            });
-        }));
+        let (sender, receiver) = std::sync::mpsc::sync_channel(4);
+        cx.background_executor()
+            .spawn(async move {
+                let result = server
+                    .allow_once_streaming(&approval, &request, &cancelled, &mut |snapshot| {
+                        sender
+                            .send(ServerUpdate::Partial(snapshot))
+                            .map_err(|_| server_submit::APPROVAL_UNCONFIRMED)
+                    })
+                    .map(server_submit::Progress::Completed)
+                    .map_err(|_| server_submit::APPROVAL_UNCONFIRMED);
+                let _ = sender.send(ServerUpdate::Finished(result));
+            })
+            .detach();
+        self.receive_updates(receiver, submitted, window, cx);
         cx.notify();
+    }
+
+    fn receive_updates(
+        &mut self,
+        receiver: std::sync::mpsc::Receiver<ServerUpdate>,
+        submitted: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let executor = cx.background_executor().clone();
+        self._submission = Some(cx.spawn_in(window, async move |workspace, cx| {
+            loop {
+                match receiver.try_recv() {
+                    Ok(ServerUpdate::Partial(snapshot)) => {
+                        if workspace
+                            .update_in(cx, |workspace, window, cx| {
+                                workspace.set_reply(
+                                    snapshot.text,
+                                    server_snapshot::LABEL,
+                                    window,
+                                    cx,
+                                );
+                                cx.notify();
+                            })
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Ok(ServerUpdate::Finished(result)) => {
+                        let _ = workspace.update_in(cx, |workspace, window, cx| match result {
+                            Ok(server_submit::Progress::Approval(approval)) => {
+                                workspace.status = Some(SubmissionStatus::AwaitingApproval {
+                                    approval,
+                                    submitted,
+                                });
+                                cx.notify();
+                            }
+                            Ok(server_submit::Progress::Completed(snapshot)) => {
+                                workspace.finish_submission(Ok(snapshot), &submitted, window, cx)
+                            }
+                            Err(error) => {
+                                workspace.finish_submission(Err(error), &submitted, window, cx)
+                            }
+                        });
+                        break;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        executor.timer(std::time::Duration::from_millis(16)).await
+                    }
+                }
+            }
+        }));
     }
 
     fn finish_submission(
@@ -258,6 +311,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some(recorded) = &self.reply {
+            recorded
+                .editor
+                .update(cx, |state, cx| state.set_value(reply, window, cx));
+            return;
+        }
         let editor = cx.new(|cx| {
             let mut state = TextareaState::new(window, cx)
                 .rows(6)
