@@ -4,6 +4,8 @@
 //! The map borrows runs from the editor. UTF-16 text lengths and one-position
 //! atoms match `apps/web/src/composer-rich-text-doc.ts` in the pinned source.
 
+pub mod text_revision;
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FlatOffset(pub f64);
 

@@ -1818,6 +1818,37 @@
       "retired_paths": [],
       "notes": "T01 and J37. Dependency-free no_std core and opt-in WebAssembly adapter for the browser composer's numeric rich-document offsets. The existing editor owns DOM composition. Browser qualification and performance evidence remain required.",
       "rust_crates": ["packages/client-runtime/rust", "packages/client-runtime/rust/web"]
+    },
+    {
+      "id": "conversation-text-revisions",
+      "state": "candidate",
+      "domain_owner": "packages/client-runtime",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/Adapters/ProviderTextDeltaCoalescer.ts",
+          "blob": "3729cb7073f9e1ef27d00468bb4fd0ba55eb4dca"
+        },
+        {
+          "path": "packages/client-runtime/src/state/orchestrationV2Projection.ts",
+          "blob": "1bc8397fc2bd72e53fb1401a85702d28cb7bc53c"
+        }
+      ],
+      "rust_paths": ["packages/client-runtime/rust/src/text_revision.rs"],
+      "adapter_paths": [],
+      "platform_routes": [
+        {
+          "targets": ["linux-x64"],
+          "state": "candidate",
+          "implementation": "standalone-component",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": ["packages/client-runtime/rust/tests/text_revision.rs"],
+      "retired_paths": [],
+      "notes": "T03 shared text-apply candidate. It defines append, replacement and UTF-16 splice behavior and a bounded retry boundary for one item. Capability negotiation, durable chunk and event representation, cache recovery, and client rendering still need integration.",
+      "rust_crates": ["packages/client-runtime/rust"]
     }
   ],
   "backend_selection": "Select before execution. Compatible Linux GNU x86_64 defaults to Rust; other hosts use the retained upstream implementation. Explicit per-component native overrides fail visibly. T3_CODE_LS_IMPLEMENTATION=upstream provides a controlled original baseline. No retry through another implementation."
