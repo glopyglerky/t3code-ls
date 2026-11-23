@@ -254,3 +254,30 @@ This increment is source-only until the root build owner records its exact
 candidate, package/helper/fixture hashes, toolchain and observed run receipt.
 T08 and all platform/provider acceptance gates remain open. MIT and stock
 `28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f` provenance are preserved.
+
+### Explicit no-MCP selector candidate
+
+The controlled package profile may explicitly add `mcp: "disabled"`. Only a runner
+returned after successful existing helper/manifest verification owns this profile.
+At `ClaudeAdapterV2.openQuery`, the runner identity, adapter instance, selected
+model instance and exact cwd must match before the adapter omits reading the
+registered authenticated MCP session. The manager's registration and all ordinary
+instances retain their behavior. The child receives no MCP session or credentials.
+Omitting this field preserves the existing MCP refusal lane. An invalid value or
+owner/cwd mismatch refuses; no SDK fallback is added. The runner's callback-free
+option equality remains unchanged.
+
+Branch selector `candidate/t3code-ls-t08-claude-package-refusal-no-mcp-*` runs both
+the existing packaged MCP refusal/reopen gate and the new `no-mcp-refusal` arm.
+The latter deliberately supplies an unrelated model mismatch and requires a
+names-only refusal witness containing `model` without `mcpServers` or `hooks`, no
+helper/child launch, one failed terminal event and native-store/reopen equality.
+It does not capture any option values. Its incomplete expectedOptions object is
+not a conversation option oracle.
+
+This is a bounded source candidate. The root owner must run the existing selector
+Vitest and hosted packaged gates. A complete safe callback-free expectedOptions
+set and observed helper/child launch, assistant identity/text, completed terminal
+receipt and reopen equivalence still block conversation qualification. Do not
+promote T08/T02 based on refusal evidence. Preserve MIT and stock comparison
+`28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`.

@@ -4,6 +4,28 @@ import { isQualifiedNativeHost, nativeExecutable, verifyBundledNativeExecutable 
 import type { ClaudeAgentSdkQueryOptions, ClaudeAgentSdkQueryRunnerShape } from "./ClaudeAdapterV2.ts";
 import { makeControlledClaudeStdioRunner } from "./ClaudeStdioRunner.ts";
 
+// A runner gains this profile only after package/helper verification. A caller's
+// config property, environment marker or matching instance name alone is insufficient.
+const noMcpOwners = new WeakMap<ClaudeAgentSdkQueryRunnerShape, {
+  readonly instanceId: string;
+  readonly directory: string;
+}>();
+
+export function controlledClaudeStdioDisablesMcp(
+  runner: ClaudeAgentSdkQueryRunnerShape,
+  ownerInstanceId: string,
+  selectedInstanceId: string,
+  cwd: string | null,
+): boolean {
+  const owner = noMcpOwners.get(runner);
+  if (owner === undefined) return false;
+  if (owner.instanceId !== ownerInstanceId || owner.instanceId !== selectedInstanceId ||
+    owner.directory !== cwd) {
+    throw new Error("Controlled Claude no-MCP owner or directory mismatch.");
+  }
+  return true;
+}
+
 /** Explicit synthetic selection only. This is not a vendor-provider replacement. */
 export async function selectControlledClaudeStdioRunner(
   instanceId: string,
@@ -34,6 +56,9 @@ export async function selectControlledClaudeStdioRunner(
     profile.expectedOptions === null || Array.isArray(profile.expectedOptions)) {
     throw new Error("Invalid controlled Claude profile.");
   }
+  if ("mcp" in profile && profile.mcp !== "disabled") {
+    throw new Error("Invalid controlled Claude MCP profile.");
+  }
   const expected = profile.expectedOptions as ClaudeAgentSdkQueryOptions;
   if (expected.permissionMode !== "default" || expected.sessionId !== "fixture" ||
     "resume" in expected || expected.cwd !== profile.directory ||
@@ -44,7 +69,11 @@ export async function selectControlledClaudeStdioRunner(
   const executable = nativeExecutable("claude-stdio", undefined, bundledDirectory);
   // Runs before adapter creation or a prompt. No SDK retry on any selected failure.
   await verifyBundledNativeExecutable("claude-stdio", executable);
-  return makeControlledClaudeStdioRunner(
+  const runner = makeControlledClaudeStdioRunner(
     executable, profile.program, profile.directory, expected,
   ).runner;
+  if ("mcp" in profile && profile.mcp === "disabled") {
+    noMcpOwners.set(runner, { instanceId, directory: profile.directory });
+  }
+  return runner;
 }

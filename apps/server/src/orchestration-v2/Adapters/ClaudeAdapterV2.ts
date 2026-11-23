@@ -1,4 +1,4 @@
-import { selectControlledClaudeStdioRunner } from "./ClaudeStdioSelection.ts";
+import { controlledClaudeStdioDisablesMcp, selectControlledClaudeStdioRunner } from "./ClaudeStdioSelection.ts";
 import * as DocumentText from "../../provider/DocumentText.ts";
 import {
   compactDynamicToolOutput,
@@ -12031,7 +12031,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           nativeThreadId: string,
         ) {
           const queryPolicy = yield* queryPolicyForTurn(turnInput);
-          const mcpSession = yield* mcpSessions.read(turnInput.threadId);
+          // Decide before reading the authenticated session. Only the package-verified
+          // synthetic runner can omit MCP, for its exact owner and selected cwd.
+          const noMcp = controlledClaudeStdioDisablesMcp(
+            queryRunner, adapterOptions.instanceId,
+            turnInput.modelSelection.instanceId, turnInput.runtimePolicy.cwd,
+          );
+          const mcpSession = noMcp ? undefined : yield* mcpSessions.read(turnInput.threadId);
           const mcpOverrides = claudeMcpQueryOverrides({
             mcpSession,
             readOnlySandbox:

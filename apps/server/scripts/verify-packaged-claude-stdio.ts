@@ -13,7 +13,10 @@ import { authenticatePackagedServer, reservePort, startPackagedServer } from "./
 
 // This gate expects the current coupled MCP profile to REFUSE. It must not turn
 // into a conversation pass when selection or option equality stops working.
-const [proofArgument, entryArgument, fixtureArgument, ...extra] = process.argv.slice(2);
+// The optional no-mcp-refusal arm must instead refuse an unrelated model mismatch.
+const [proofArgument, entryArgument, fixtureArgument, mode = "mcp-refusal", ...extra] = process.argv.slice(2);
+Assert.ok(mode === "mcp-refusal" || mode === "no-mcp-refusal");
+const noMcp = mode === "no-mcp-refusal";
 Assert.equal(extra.length, 0);
 for (const argument of [proofArgument, entryArgument, fixtureArgument]) Assert.ok(argument && Path.isAbsolute(argument));
 Assert.equal(process.platform, "linux");
@@ -32,7 +35,7 @@ const interrupt = () => abort.abort(new Error("Packaged Claude refusal interrupt
 process.once("SIGINT", interrupt);
 process.once("SIGTERM", interrupt);
 const hash = (file: string) => Crypto.createHash("sha256").update(FS.readFileSync(file)).digest("hex");
-const report: Record<string, unknown> = { status: "running", scope: "packaged MCP option refusal and reopen",
+const report: Record<string, unknown> = { status: "running", scope: noMcp ? "packaged no-MCP model option refusal and reopen" : "packaged MCP option refusal and reopen",
   stock: "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f", conversationQualified: false };
 const save = () => FS.writeFileSync(Path.join(proof, "proof.json"), JSON.stringify(report, null, 2) + "\n", { mode: 0o600 });
 let active: ReturnType<typeof startPackagedServer> | undefined;
@@ -84,7 +87,9 @@ try {
     T3_CODE_LS_IMPLEMENTATION: "native", T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
     T3CODE_TELEMETRY_ENABLED: "false", T3CODE_OTEL_SDK_DISABLED: "true", NO_COLOR: "1",
     T3_CODE_LS_CLAUDE_STDIO_SYNTHETIC: JSON.stringify({ version: 1, instanceId, program: fixture, directory: workspace,
-      expectedOptions: { permissionMode: "default", sessionId: "fixture", cwd: workspace } }),
+      ...(noMcp ? { mcp: "disabled" } : {}),
+      expectedOptions: { permissionMode: "default", sessionId: "fixture", cwd: workspace,
+        ...(noMcp ? { model: "deliberate-unrelated-mismatch" } : {}) } }),
   };
   const traces: string[] = [];
   const start = async (phase: string) => {
@@ -129,7 +134,14 @@ try {
   const witness = JSON.parse(FS.readFileSync(witnessFile, "utf8"));
   Assert.equal(witness.version, 1);
   Assert.equal(witness.type, "options-refused");
-  Assert.ok(Array.isArray(witness.differing) && witness.differing.includes("mcpServers"));
+  Assert.ok(Array.isArray(witness.differing));
+  if (noMcp) {
+    Assert.ok(!witness.differing.includes("mcpServers"));
+    Assert.ok(!witness.differing.includes("hooks"));
+    Assert.ok(witness.differing.includes("model"));
+  } else {
+    Assert.ok(witness.differing.includes("mcpServers"));
+  }
   Assert.ok(witness.differing.every((key: unknown) => typeof key === "string"));
   FS.copyFileSync(witnessFile, Path.join(proof, "options-refused.json"));
   Assert.ok(await first.stop());
@@ -177,7 +189,8 @@ try {
   Assert.ok(!/execve\("[^"\n]*\/(?:claude|claude-code)"/u.test(traceText));
   report.observed = { instanceId, commandId, messageId, runId: settled.runs[0]?.id, text,
     dispatchCount: 1, failedTerminalEvents: 1, assistantMessages: 0, nativeStore: "omdb", reopened: true,
-    helperManifestVerified: true, controlledOpenRefusedMcpOptions: true, helperOrProviderExecuted: false };
+    helperManifestVerified: true, controlledOpenRefusedMcpOptions: !noMcp,
+    controlledNoMcpRefusedUnrelatedModel: noMcp, helperOrProviderExecuted: false };
   report.status = "passed";
 } catch (error) {
   failure = error;

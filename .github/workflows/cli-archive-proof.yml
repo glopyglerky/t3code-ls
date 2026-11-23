@@ -208,6 +208,15 @@ jobs:
           ' _ "$(id -un)" "$(command -v node)" "$proof" "$entry" "$fixture"
           jq -e '.status == "passed" and .conversationQualified == false and .observed.reopened and
             .observed.controlledOpenRefusedMcpOptions and (.observed.helperOrProviderExecuted | not)' "$proof/proof.json"
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t08-claude-package-refusal-no-mcp-* ]]; then
+            proof="$RUNNER_TEMP/cli-proof/claude-no-mcp-options-refusal"
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- "$2" apps/server/scripts/verify-packaged-claude-stdio.ts "$3" "$4" "$5" no-mcp-refusal
+            ' _ "$(id -un)" "$(command -v node)" "$proof" "$entry" "$fixture"
+            jq -e '.status == "passed" and .conversationQualified == false and .observed.reopened and
+              .observed.controlledNoMcpRefusedUnrelatedModel and (.observed.helperOrProviderExecuted | not)' "$proof/proof.json"
+          fi
       - name: Install Chromium for the HTTPS browser guest fixture
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t10-packaged-guest-browser-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
         run: node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
