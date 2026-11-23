@@ -36,7 +36,7 @@ vi.mock("./sdk.ts", () => ({
 
 const executable = process.env.T3_CODE_LS_CURSOR_BRIDGE_EXECUTABLE;
 const recording = NodeFS.readFileSync(new URL(
-  "../../../../../apps/server/src/orchestration-v2/testkit/fixtures/simple/cursor_transcript.ndjson",
+  "../../../../apps/server/src/orchestration-v2/testkit/fixtures/simple/cursor_transcript.ndjson",
   import.meta.url,
 ), "utf8").trim().split("\n").map((line) => JSON.parse(line));
 const agentId: string = recording.find((row) => row.label === "agent.opened").frame.agentId;
