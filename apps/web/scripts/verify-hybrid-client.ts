@@ -74,6 +74,13 @@ const pdfLinkProof = process.env.T3_CODE_LS_PDF_LINK_PROOF === "true";
 const pdfExternalLinkProof = process.env.T3_CODE_LS_PDF_EXTERNAL_LINK_PROOF === "true";
 Assert.ok(!pdfExternalLinkProof || (pdfLinkProof && bundledClient), "External PDF links require the packaged PDF proof");
 const htmlInteractionProof = process.env.T3_CODE_LS_HTML_INTERACTION_PROOF === "true";
+const pdfExternalOnlyProof = process.env.T3_CODE_LS_PDF_EXTERNAL_ONLY_PROOF === "true";
+Assert.ok(!pdfExternalOnlyProof || (pdfExternalLinkProof && bundledClient), "PDF-only qualification requires the packaged external-link case");
+Assert.ok(!pdfExternalOnlyProof || [
+  parallelTurnsProof, spliceNegotiationProof, splitPtyProof, bundledPtyProof, ptyRestartProof,
+  multiTabDraftProof, draftStorageProof, fileEditorProof, durableTextProof, voiceDraftProof,
+  htmlInteractionProof, pairingProof !== undefined, dioxusFindProof !== undefined,
+].every((enabled) => !enabled), "PDF-only qualification cannot replace another selected proof scope");
 Assert.ok(!htmlInteractionProof || bundledClient, "Interactive HTML must exercise the packaged browser route");
 const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
 const capturedApproval = {
@@ -1811,8 +1818,10 @@ async function exercise(implementation: Implementation): Promise<void> {
     textRevisionProfile: null as ReturnType<typeof textRevisionIdentity> | null,
     pdfLinks: null as Awaited<ReturnType<typeof verifyLinkedPdf>> | null,
     htmlInteraction: null as Awaited<ReturnType<typeof verifyInteractiveHtml>> | null,
-    scope:
-      "Linux original web client; local project; composer submission; free ACP showcase approval and interruption; reload; same-state server restart",
+    pdfExternalOnly: pdfExternalOnlyProof,
+    scope: pdfExternalOnlyProof
+      ? "Linux packaged native application; authenticated local project and replay thread; signed PDF internal jumps and explicit loopback external links; no terminal qualification"
+      : "Linux original web client; local project; composer submission; free ACP showcase approval and interruption; reload; same-state server restart",
     startedAt: new Date().toISOString(),
     finishedAt: null as string | null,
     source,
@@ -2105,6 +2114,23 @@ async function exercise(implementation: Implementation): Promise<void> {
       starting("follow a same-document link in the PDF reader opened from Files");
       proof.pdfLinks = await verifyLinkedPdf(page, workspace);
       completed("Followed a link in the signed PDF with pointer and keyboard input");
+      if (pdfExternalOnlyProof) {
+        Assert.equal(implementation, "native");
+        Assert.equal(proof.client, "built");
+        Assert.equal(proof.composer, "rust-wasm");
+        Assert.equal(proof.pdfLinks.signedAssetStatus, 200);
+        Assert.equal(proof.pdfLinks.pointerDestination, 2);
+        Assert.equal(proof.pdfLinks.keyboardDestination, 2);
+        Assert.deepEqual(proof.pdfLinks.external, {
+          pointerOpened: true, keyboardOpened: true, requests: 2,
+          noUnsolicitedRequests: true, openerIsolated: true,
+        });
+        Assert.equal(proof.completedSnapshots.length, 1);
+        Assert.equal(proof.persistence.length, 1);
+        completed("Qualified signed PDF internal jumps and two explicit isolated external launches");
+        proof.status = "passed";
+        return;
+      }
       await page.getByRole("button", { name: "Toggle right panel", exact: true }).click();
     }
     if (htmlInteractionProof) {

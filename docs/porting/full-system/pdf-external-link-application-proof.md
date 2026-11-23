@@ -44,14 +44,23 @@ sudo -n unshare --net -- bash -euc '
   ip link set dev lo up
   exec runuser -u "$1" -- env T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 \
     T3_CODE_LS_PDF_LINK_PROOF=true T3_CODE_LS_PDF_EXTERNAL_LINK_PROOF=true \
+    T3_CODE_LS_PDF_EXTERNAL_ONLY_PROOF=true \
     VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
     "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
 ' _ "$(id -un)" "$(command -v node)" "$PROOF_DIRECTORY"
 ```
 
-The workflow checks `pdfLinks.external` for both activations, exactly two requests,
-passive loading and opener isolation. The existing PDF browser suite runs as its
-related owner check. Keep the proof JSON, signed-asset status and existing bundle
+The dedicated scope is explicit and cannot be combined with another selected
+proof scope. Completion requires the built native application, Rust composer,
+signed-asset HTTP 200, both internal jumps, the exact external result and the
+initial durable native snapshot/inspection. It returns before unrelated terminal
+or later conversation qualification. Ordinary and integrated scopes retain their
+full terminal and recovery checks.
+
+The workflow checks `pdfExternalOnly`, `pdfLinks.external`, both activations,
+exactly two requests, passive loading and opener isolation. The existing PDF
+browser suite runs before the dedicated application case as its related owner
+check, so a later generic terminal failure cannot suppress that component result. Keep the proof JSON, signed-asset status and existing bundle
 identities. The listener and its pages are scoped and closed on success or failure.
 Only the synthetic project's fixture file is updated with the allocated URL.
 
@@ -70,3 +79,20 @@ resource measurements and complete J47 parity remain separate qualification work
 No latency or performance improvement is claimed. MIT provenance is retained.
 The mandatory research method SHA-256 is
 `5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
+
+## Routed qualification follow-up
+
+Exact run `45175793823`, on
+`candidate/t3code-ls-t02-bundled-native-t13-pdf-external-20261123` at
+`75b4f5dea87f684cd444b4f54e5316ec820bf120`, populated every external PDF result
+successfully: signed HTTP 200, both internal jumps, both explicit destination pages,
+two destination requests, passive loading and null opener. Artifact `14818508800`
+records those results. The overall run still failed because the common fixture
+later accumulated an unrelated `fixture-reattach` terminal marker failure and
+threw it at completion. The later PDF component step was skipped.
+
+This follow-up separates the dedicated PDF qualification using
+`T3_CODE_LS_PDF_EXTERNAL_ONLY_PROOF=true`. It does not repair, suppress or qualify
+terminal behavior in the common scopes. The exact hosted follow-up remains pending;
+the earlier run's overall failure is retained rather than represented as a passed
+application qualification.

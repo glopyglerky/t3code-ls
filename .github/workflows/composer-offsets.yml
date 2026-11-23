@@ -202,6 +202,10 @@ jobs:
             -p tools/omdb-production-tsconfig.json > "$RUNNER_TEMP/pty-typecheck.log" 2>&1 || status=$?
           cat "$RUNNER_TEMP/pty-typecheck.log"
           exit "$status"
+      - name: Check the dedicated external PDF component scope
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-external-')
+        working-directory: apps/web
+        run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/files/PdfViewer.browser.test.tsx
       - name: Build and open the application with the Rust composer binding
         if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
         env:
@@ -266,10 +270,11 @@ jobs:
               ip link set dev lo up
               exec runuser -u "$1" -- env T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 \
                 T3_CODE_LS_PDF_LINK_PROOF=true T3_CODE_LS_PDF_EXTERNAL_LINK_PROOF=true \
+                T3_CODE_LS_PDF_EXTERNAL_ONLY_PROOF=true \
                 VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
                 "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
             ' _ "$(id -un)" "$(command -v node)" "$proof"
-            jq -e '.status == "passed" and .pdfLinks.pointerDestination == 2 and .pdfLinks.keyboardDestination == 2 and .pdfLinks.external.pointerOpened and .pdfLinks.external.keyboardOpened and .pdfLinks.external.requests == 2 and .pdfLinks.external.noUnsolicitedRequests and .pdfLinks.external.openerIsolated' \
+            jq -e '.status == "passed" and .pdfExternalOnly == true and .client == "built" and .composer == "rust-wasm" and .pdfLinks.signedAssetStatus == 200 and .pdfLinks.pointerDestination == 2 and .pdfLinks.keyboardDestination == 2 and .pdfLinks.external.pointerOpened and .pdfLinks.external.keyboardOpened and .pdfLinks.external.requests == 2 and .pdfLinks.external.noUnsolicitedRequests and .pdfLinks.external.openerIsolated' \
               "$proof/native/proof.json"
           else
             node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
@@ -313,7 +318,7 @@ jobs:
           pnpm --dir apps/server exec vp test run --maxWorkers 2 \
             scripts/dev-replay-agent.test.ts src/mcp/AcpMcpStdioBridge.test.ts
       - name: Exercise PDF link handling in the browser
-        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-')
+        if: (env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-')) && !startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-external-')
         working-directory: apps/web
         run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/files/PdfViewer.browser.test.tsx
       - name: Recover a partial Codex import over the packaged WebSocket
