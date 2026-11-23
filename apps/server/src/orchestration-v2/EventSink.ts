@@ -353,16 +353,12 @@ const layerBase: Layer.Layer<
             event.payload.status !== "cancelled"
           )
             continue;
-          const current = yield* projectionStore.getRuntimeRequest(
-            event.threadId,
-            event.payload.id,
-          );
-          if (
-            current?.status !== "pending" ||
-            current.kind !== "user_input" ||
-            current.providerTurnId !== event.payload.providerTurnId ||
-            current.responseCapability.type === "message"
-          ) {
+          const current = yield* projectionStore.userInputCancellationCurrent({
+            threadId: event.threadId,
+            requestId: event.payload.id,
+            providerTurnId: event.payload.providerTurnId,
+          });
+          if (!current) {
             staleRequests.add(event.payload.id);
             staleNodes.add(event.payload.nodeId);
           }
@@ -411,9 +407,7 @@ const layerBase: Layer.Layer<
     const applyStoredEvents =
       /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
       Effect.fnUntraced(function* (storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>) {
-        yield* Effect.forEach(storedEvents, (stored) => projectionStore.apply(stored.event), {
-          concurrency: 1,
-        });
+        yield* projectionStore.applyMany(storedEvents.map((stored) => stored.event));
         const sequence = storedEvents.at(-1)?.sequence;
         if (sequence !== undefined) {
           yield* projectionStore.markApplied(sequence, yield* DateTime.now);

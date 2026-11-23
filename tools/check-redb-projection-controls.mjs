@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 
 import * as ProjectionStore from "../apps/server/src/orchestration-v2/ProjectionStore.ts";
+import { userInputRequestMatchesCancellation } from "../apps/server/src/orchestration-v2/ProjectionCommitStore.ts";
 import * as NativeControls from "../apps/server/src/orchestration-v2/NativeProjectionControlRows.ts";
 import * as NativeProjectionCommit from "../apps/server/src/persistence/NativeProjectionCommitStore.ts";
 import { createFixture } from "./database-fixture.mjs";
@@ -42,7 +43,12 @@ async function withServices(kind, filename, use) {
       Effect.gen(function* () {
         const store = yield* NativeControls.make;
         const writer = yield* NativeProjectionCommit.make;
-        return yield* use({ store, apply: writer.apply, transaction: client.withTransaction });
+        return yield* use({
+          store,
+          apply: writer.apply,
+          userInputCancellationCurrent: writer.userInputCancellationCurrent,
+          transaction: client.withTransaction,
+        });
       }),
     );
   return withSqlite(filename, (sql) =>
@@ -52,6 +58,10 @@ async function withServices(kind, filename, use) {
       return yield* use({
         store,
         apply: store.apply,
+        userInputCancellationCurrent: ({ threadId, requestId, providerTurnId }) =>
+          store.getRuntimeRequest(threadId, requestId).pipe(
+            Effect.map((request) => userInputRequestMatchesCancellation(request, providerTurnId)),
+          ),
         transaction: (body) => sql.withTransaction(body),
       });
     }),
@@ -99,6 +109,7 @@ const providerEvent = (id, threadId, ownerNodeId, extra = {}) =>
 const exercise = Effect.fn("ProjectionControlsFixture.exercise")(function* ({
   store,
   apply,
+  userInputCancellationCurrent,
   transaction,
 }) {
   const result = {};
@@ -230,6 +241,22 @@ const exercise = Effect.fn("ProjectionControlsFixture.exercise")(function* ({
     (yield* store.getRuntimeResponseContext("thread:main", "request:message")).session,
     undefined,
   );
+  result.userInputCancellation = yield* transaction(
+    Effect.forEach(
+      [
+        ["thread:main", "request:main", "turn:main"],
+        ["thread:main", "request:z", "turn:main"],
+        ["thread:main", "request:message", "turn:main"],
+        ["thread:main", "request:resolved", "turn:main"],
+        ["thread:main", "request:main", "turn:foreign"],
+        ["thread:other", "request:main", "turn:main"],
+        ["thread:main", "request:missing", "turn:main"],
+      ],
+      ([threadId, requestId, providerTurnId]) =>
+        userInputCancellationCurrent({ threadId, requestId, providerTurnId }),
+    ),
+  );
+  NodeAssert.deepEqual(result.userInputCancellation, [true, true, false, false, false, false, false]);
 
   // The new settled-leaf index groups completed run nodes after other selected nodes.
   for (const [nodeId, runId] of [
@@ -365,6 +392,7 @@ const exercise = Effect.fn("ProjectionControlsFixture.exercise")(function* ({
   NodeAssert.equal(result.runningNull.providerTurn, undefined);
 
   // Reads inside a writer observe staged updates, while nested failure restores them.
+  const cancellation = { threadId: "thread:main", requestId: "request:main", providerTurnId: "turn:main" };
   yield* transaction(
     Effect.gen(function* () {
       yield* failed(
@@ -381,6 +409,7 @@ const exercise = Effect.fn("ProjectionControlsFixture.exercise")(function* ({
                 .status,
               "resolved",
             );
+            NodeAssert.equal(yield* userInputCancellationCurrent(cancellation), false);
             return yield* Effect.fail("discard request update");
           }),
         ),
@@ -389,6 +418,7 @@ const exercise = Effect.fn("ProjectionControlsFixture.exercise")(function* ({
         (yield* store.getRuntimeResponseContext("thread:main", "request:main")).request.status,
         "pending",
       );
+      NodeAssert.equal(yield* userInputCancellationCurrent(cancellation), true);
     }),
   );
   yield* apply(
@@ -457,6 +487,7 @@ try {
     "Pending node order matches one, two, duplicate and three-or-more IN bindings, settled leaves and null runs",
     "Null-attempt IS semantics, running-turn SQL null exclusion and target-instance tie breaks match source",
     "Live session bindings, detachment and nested writer rollback share one native snapshot",
+    "User input cancellation rechecks the request within the writer and respects savepoint rollback",
     "Writer-scoped control reads skip eighteen MiB of excluded historical tool output",
   );
   await withServices("redb", source, ({ store }) =>
@@ -481,6 +512,9 @@ try {
       "apps/server/src/orchestration-v2/ProjectionControlRows.ts",
       "apps/server/src/orchestration-v2/SqliteProjectionControlRows.ts",
       "apps/server/src/orchestration-v2/NativeProjectionControlRows.ts",
+      "apps/server/src/orchestration-v2/ProjectionCommitStore.ts",
+      "apps/server/src/persistence/NativeProjectionCommitStore.ts",
+      "apps/server/src/persistence/redb_projection_commit.rs",
       "apps/server/src/persistence/redb_projection_control.rs",
       "apps/server/src/persistence/redb_projection_read_index.rs",
       "apps/server/src/persistence/redb_projection_window_index.rs",

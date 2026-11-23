@@ -4,6 +4,7 @@
 // The fixture and application state stay outside the checkout. They are retained for investigation.
 import * as Assert from "node:assert/strict";
 import * as ChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
@@ -19,7 +20,8 @@ import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 import { chromium, type Browser, type Page } from "playwright";
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
-import { inspectNativeReplay } from "./hybrid-client-database.ts";
+import { SERVICE_LAUNCHER_PROTOCOL } from "../../server/src/cloud/serviceProtocol.ts";
+import { inspectNativeGeneration, inspectNativeReplay } from "./hybrid-client-database.ts";
 import {
   assertReplayTurnLinks,
   replayTurnIdentity,
@@ -27,13 +29,41 @@ import {
 } from "./hybrid-client-turn.ts";
 
 type Implementation = "upstream" | "native";
-type OwnedApplication = { pid: number; pairingUrl: string; stop: () => Promise<void> };
+type OwnedApplication = {
+  pid: number;
+  pairingUrl: string;
+  stop: (signal?: "SIGTERM" | "SIGKILL") => Promise<void>;
+};
+type InterruptedShowcase = ReplayTurnIdentity & {
+  threadId: string;
+  threadUrl: string;
+  requestId: string;
+  partialMessageId: string;
+  partialText: string;
+};
 
 const repoRoot = NodeFS.realpathSync(NodeURL.fileURLToPath(new URL("../../../", import.meta.url)));
 const timeoutMs = 90_000;
 const startupTimeoutMs = 180_000;
 const replayPrompt = "Replay: showcase";
 const replayMarker = "This turn is a replay.";
+const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
+const crashRestart = process.env.T3_CODE_LS_CRASH_RESTART_PROOF === "true";
+const bundledEntry = "apps/server/dist/bin.mjs";
+const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
+const capturedApproval = {
+  path: "apps/server/src/orchestration-v2/testkit/fixtures/tool_call_read_only_on_request/registry_transcript.ndjson",
+  sha256: "f9c09f88e3b8480c44adc62ba30c085a33044a6bfc1611839128c3f80ea5ad81",
+  model: "approval",
+  modelLabel: "Write approval",
+  prompt: "Replay the recorded permission request",
+  reply: "Created the requested probe file.",
+};
+const capturedQuestion = {
+  path: "apps/server/src/orchestration-v2/testkit/fixtures/acp_elicitation/registry_transcript.ndjson",
+  sha256: "544a05a240a700ecad527fa785e9b8adf203fc8e93c48e9185e790ba86f103ee",
+  option: "Strict schemas (Recommended)",
+};
 const decodeSnapshot = Schema.decodeUnknownSync(
   Schema.toCodecJson(OrchestrationV2ThreadDetailSnapshot),
 );
@@ -54,6 +84,10 @@ if (process.platform !== "linux") {
     "This acceptance runner qualifies Linux only; other platforms require their own gate.",
   );
 }
+Assert.ok(
+  !crashRestart || (bundledClient && mode === "native"),
+  "Crash proof requires the native bundle",
+);
 
 function outsideCheckout(path: string): void {
   const relative = NodePath.relative(repoRoot, path);
@@ -138,7 +172,7 @@ async function startApplication(
   webPort: number,
   logPath: string,
 ): Promise<OwnedApplication> {
-  const env = { ...process.env };
+  const env: NodeJS.ProcessEnv = bundledClient ? { PATH: process.env.PATH } : { ...process.env };
   // Component overrides would invalidate an explicit upstream/native comparison.
   for (const name of Object.keys(env)) {
     if (/^T3_CODE_LS_.*_EXECUTABLE$/.test(name)) delete env[name];
@@ -154,30 +188,44 @@ async function startApplication(
     FORCE_COLOR: "0",
     NO_COLOR: "1",
   });
+  if (bundledClient) Object.assign(env, { HOME: stateDirectory });
   NodeFS.writeFileSync(logPath, "");
+  const args = bundledClient
+    ? [
+        bundledEntry,
+        "serve",
+        "--base-dir",
+        stateDirectory,
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String(serverPort),
+        "--no-browser",
+      ]
+    : [
+        "scripts/dev-runner.ts",
+        "dev",
+        "--home-dir",
+        stateDirectory,
+        "--no-seed",
+        "--no-auto-bootstrap-project-from-cwd",
+        "--port",
+        String(serverPort),
+      ];
   const child = ChildProcess.spawn(
     process.execPath,
-    [
-      "scripts/dev-runner.ts",
-      "dev",
-      "--home-dir",
-      stateDirectory,
-      "--no-seed",
-      "--no-auto-bootstrap-project-from-cwd",
-      "--port",
-      String(serverPort),
-    ],
+    args,
     { cwd: repoRoot, env, detached: true, stdio: ["ignore", "pipe", "pipe"] },
   );
   const pid = child.pid;
   if (pid === undefined) {
     await new Promise<never>((_, reject) => child.once("error", reject));
-    throw new Error("The development runner did not receive a process ID");
+    throw new Error("The application did not receive a process ID");
   }
 
   let stopping = false;
   let pairingUrl: string | undefined;
-  let viteReady = false;
+  let webReady = bundledClient;
   let readyResolve: () => void;
   let readyReject: (error: Error) => void;
   const ready = new Promise<void>((resolve, reject) => {
@@ -192,7 +240,7 @@ async function startApplication(
   child.once("error", (error) => readyReject(error));
   child.once("exit", (code, signal) => {
     if (!stopping)
-      readyReject(new Error(`Development runner exited (${code ?? signal}); see ${logPath}`));
+      readyReject(new Error(`Application exited (${code ?? signal}); see ${logPath}`));
   });
 
   function consumeLine(raw: string): void {
@@ -201,14 +249,17 @@ async function startApplication(
     const candidate = line.match(/https?:\/\/[^\s"'<>]+\/pair#token=[^\s"'<>]+/u)?.[0];
     if (candidate) {
       const url = new URL(candidate);
-      if (url.origin !== `http://localhost:${webPort}`) {
+      const expectedOrigin = bundledClient
+        ? `http://127.0.0.1:${serverPort}`
+        : `http://localhost:${webPort}`;
+      if (url.origin !== expectedOrigin) {
         readyReject(new Error(`Pairing URL has an unexpected origin: ${url.origin}`));
       } else {
         pairingUrl = candidate;
       }
     }
-    if (/\bready in\b/iu.test(line)) viteReady = true;
-    if (pairingUrl && viteReady) readyResolve();
+    if (/\bready in\b/iu.test(line)) webReady = true;
+    if (pairingUrl && webReady) readyResolve();
   }
 
   for (const stream of [child.stdout, child.stderr]) {
@@ -225,7 +276,7 @@ async function startApplication(
     });
   }
 
-  const stop = async () => {
+  const stop = async (requestedSignal: "SIGTERM" | "SIGKILL" = "SIGTERM") => {
     if (stopping) return;
     stopping = true;
     const signal = (value: NodeJS.Signals) => {
@@ -235,7 +286,7 @@ async function startApplication(
         if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
       }
     };
-    signal("SIGTERM");
+    signal(requestedSignal);
     const killTimer = setTimeout(() => signal("SIGKILL"), 10_000);
     let deadlineTimer: ReturnType<typeof setTimeout>;
     const deadline = new Promise<never>((_, reject) => {
@@ -246,6 +297,7 @@ async function startApplication(
     });
     try {
       await Promise.race([exited, deadline]);
+      if (requestedSignal === "SIGKILL") Assert.equal(child.signalCode, "SIGKILL");
     } finally {
       clearTimeout(killTimer);
       clearTimeout(deadlineTimer!);
@@ -264,6 +316,63 @@ async function startApplication(
   } finally {
     clearTimeout(timer);
   }
+}
+
+function killOwnedDatabaseWriter(parent: number, executable: string, databasePath: string): void {
+  const children = ChildProcess.spawnSync("ps", ["-o", "pid=", "--ppid", String(parent)], {
+    encoding: "utf8",
+    timeout: 5_000,
+  });
+  Assert.ifError(children.error);
+  Assert.equal(children.status, 0, children.stderr);
+  const writers = children.stdout.split(/\s+/u).filter((pid) => {
+    if (!/^\d+$/u.test(pid)) return false;
+    try {
+      const args = NodeFS.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+      return (
+        args.length === 4 &&
+        ["local", "initialize-local"].includes(args[1]!) &&
+        args[2] === databasePath &&
+        NodeFS.readlinkSync(`/proc/${pid}/exe`) === executable
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }
+  });
+  Assert.equal(writers.length, 1, "Expected one native writer child of the fixture server");
+  process.kill(Number(writers[0]), "SIGKILL");
+}
+
+function assertBundledPreflight(
+  stateDirectory: string,
+  databasePath: string,
+  expected: "blocked" | "ready",
+): void {
+  const result = ChildProcess.spawnSync(
+    process.execPath,
+    [
+      bundledEntry,
+      "__service-preflight",
+      "--database-path",
+      databasePath,
+      "--launcher-protocol",
+      String(SERVICE_LAUNCHER_PROTOCOL),
+    ],
+    {
+      cwd: repoRoot,
+      env: { PATH: process.env.PATH, HOME: stateDirectory, T3_CODE_LS_IMPLEMENTATION: "native" },
+      encoding: "utf8",
+      timeout: 15_000,
+    },
+  );
+  Assert.ifError(result.error);
+  Assert.equal(result.status, 0, result.stderr);
+  const preflight = JSON.parse(result.stdout) as Record<string, unknown>;
+  Assert.equal(preflight.status, expected, JSON.stringify(preflight));
+  Assert.equal(typeof preflight.version, "string");
+  if (expected === "blocked") Assert.equal(preflight.code, "recovery_required");
+  else Assert.equal(preflight.launcherProtocol, SERVICE_LAUNCHER_PROTOCOL);
 }
 
 async function capture(page: Page, directory: string, name: string): Promise<void> {
@@ -318,14 +427,18 @@ async function readThreadSnapshot(
   return snapshot;
 }
 
-async function submitShowcase(page: Page): Promise<string> {
+async function submitReplay(
+  page: Page,
+  modelLabel = "Showcase",
+  prompt = replayPrompt,
+): Promise<string> {
   await page.getByRole("button", { name: "New thread in hybrid-fixture", exact: true }).click();
   await page.waitForURL((url) => url.pathname.startsWith("/draft/"));
   const picker = page.locator('[data-chat-provider-model-picker="true"]:visible');
   const search = page.getByPlaceholder("Search models...");
   await picker.click();
-  await search.fill("Showcase");
-  await page.getByRole("option", { name: /Showcase/u }).click();
+  await search.fill(modelLabel);
+  await page.getByRole("option", { name: modelLabel }).click();
   if (!(await search.isVisible())) await picker.click();
   await page.locator("[data-composer-permissions-trigger]:visible").click();
   await page.getByRole("menuitemradio", { name: "Supervised", exact: true }).click();
@@ -334,12 +447,60 @@ async function submitShowcase(page: Page): Promise<string> {
 
   const editor = page.getByTestId("composer-editor");
   await editor.click();
-  await editor.fill(replayPrompt);
+  await editor.fill(prompt);
   await page.getByRole("button", { name: "Submit message", exact: true }).click();
   await page.waitForURL((url) => /^\/(?!draft\/)[^/]+\/[^/]+$/u.test(url.pathname));
   const thread = new URL(page.url()).pathname.split("/").at(-1);
   Assert.ok(thread, "The composer must navigate to the submitted thread");
   return decodeURIComponent(thread);
+}
+
+async function interruptShowcase(page: Page): Promise<InterruptedShowcase> {
+  const threadId = await submitReplay(page);
+  await page.getByRole("button", { name: /^(Yes|Approve)$/u }).first().waitFor({ state: "visible" });
+  const pending = await readThreadSnapshot(page, threadId);
+  const identity = replayTurnIdentity(pending);
+  const request = pending.projection.runtimeRequests.find(
+    (item) => item.providerTurnId === identity.providerTurnId && item.status === "pending",
+  );
+  const partialMessage = pending.projection.messages.find(
+    (item) => item.role === "assistant" && item.runId === identity.runId && item.text.length > 0,
+  );
+  Assert.ok(request, "The interrupted turn must have a pending approval");
+  Assert.ok(partialMessage, "The fixture must stream assistant text before the approval");
+  const evidence = {
+    ...identity,
+    threadId,
+    threadUrl: page.url(),
+    requestId: request.id,
+    partialMessageId: partialMessage.id,
+    partialText: partialMessage.text,
+  };
+  await page.getByRole("button", { name: "Stop generation", exact: true }).click();
+  await verifyInterruptedShowcase(page, evidence);
+  return evidence;
+}
+
+async function verifyInterruptedShowcase(page: Page, expected: InterruptedShowcase): Promise<void> {
+  await page.waitForURL((url) => url.href === expected.threadUrl);
+  await page.getByText("The project has a single math module.", { exact: false }).waitFor({ state: "visible" });
+  await page.getByRole("button", { name: /^(Stop generation|Stopping)$/u }).waitFor({ state: "hidden" });
+  const { projection } = await readThreadSnapshot(page, expected.threadId);
+  Assert.equal(projection.runs.length, 1, "An interrupted turn must not be replayed on reopen");
+  const run = projection.runs.find((item) => item.id === expected.runId);
+  const attempt = projection.attempts.find((item) => item.id === expected.attemptId);
+  const providerTurn = projection.providerTurns.find((item) => item.id === expected.providerTurnId);
+  Assert.ok(run && attempt && providerTurn, "The original interrupted execution must remain linked");
+  Assert.equal(run.status, "interrupted");
+  Assert.equal(attempt.status, "interrupted");
+  Assert.equal(providerTurn.status, "interrupted");
+  Assert.equal(attempt.runId, run.id);
+  assertReplayTurnLinks(attempt, providerTurn);
+  const request = projection.runtimeRequests.find((item) => item.id === expected.requestId);
+  Assert.equal(request?.status, "cancelled");
+  const message = projection.messages.find((item) => item.id === expected.partialMessageId);
+  Assert.equal(message?.text, expected.partialText);
+  Assert.equal(message?.streaming, false);
 }
 
 function summarizeSnapshot(snapshot: OrchestrationV2ThreadDetailSnapshot) {
@@ -384,10 +545,15 @@ function summarizeSnapshot(snapshot: OrchestrationV2ThreadDetailSnapshot) {
 }
 const snapshotMetadata = new WeakMap<Page, ReturnType<typeof summarizeSnapshot>>();
 
-async function assertCompleted(page: Page, threadId: string, identity: ReplayTurnIdentity) {
+async function assertCompleted(
+  page: Page,
+  threadId: string,
+  identity: ReplayTurnIdentity,
+  reply = replayMarker,
+) {
   await page.waitForURL((url) => url.pathname.endsWith(`/${threadId}`), { timeout: timeoutMs });
   await page
-    .getByText(replayMarker, { exact: false })
+    .getByText(reply, { exact: false })
     .last()
     .waitFor({ state: "visible", timeout: timeoutMs });
   await page
@@ -419,7 +585,7 @@ async function assertCompleted(page: Page, threadId: string, identity: ReplayTur
   Assert.ok(providerTurn.completedAt);
   const message = snapshot.projection.messages.find(
     (item) =>
-      item.role === "assistant" && item.runId === run.id && item.text.includes(replayMarker),
+      item.role === "assistant" && item.runId === run.id && item.text.includes(reply),
   );
   Assert.ok(message, "The completed replay text must belong to the recorded run");
   Assert.equal(message.streaming, false);
@@ -438,11 +604,93 @@ async function assertCompleted(page: Page, threadId: string, identity: ReplayTur
   };
 }
 
+async function acceptCapturedApproval(page: Page) {
+  const contents = NodeFS.readFileSync(NodePath.join(repoRoot, capturedApproval.path));
+  const sha256 = NodeCrypto.createHash("sha256").update(contents).digest("hex");
+  Assert.equal(sha256, capturedApproval.sha256, "The recorded ACP approval fixture changed");
+  const threadId = await submitReplay(page, capturedApproval.modelLabel, capturedApproval.prompt);
+  const button = page
+    .getByRole("group", { name: "Command approval", exact: true })
+    .getByRole("button", { name: "Approve", exact: true });
+  await button.waitFor({ state: "visible" });
+  const pending = await readThreadSnapshot(page, threadId);
+  const identity = replayTurnIdentity(pending, capturedApproval.model);
+  const request = pending.projection.runtimeRequests.find(
+    (item) => item.providerTurnId === identity.providerTurnId && item.status === "pending",
+  );
+  Assert.ok(request, "The recorded approval must belong to the live provider turn");
+  Assert.ok(
+    pending.projection.messages.some(
+      (message) => message.role === "user" && message.text === capturedApproval.prompt,
+    ),
+    "The recorded-approval turn must contain the submitted prompt",
+  );
+  await button.click();
+  const completed = await assertCompleted(page, threadId, identity, capturedApproval.reply);
+  Assert.equal(
+    (await readThreadSnapshot(page, threadId)).projection.runtimeRequests.find(
+      (item) => item.id === request.id,
+    )?.status,
+    "resolved",
+  );
+  return { ...completed, requestId: request.id, source: capturedApproval.path, sha256 };
+}
+
+async function cancelCapturedQuestion(page: Page) {
+  const contents = NodeFS.readFileSync(NodePath.join(repoRoot, capturedQuestion.path));
+  const sha256 = NodeCrypto.createHash("sha256").update(contents).digest("hex");
+  Assert.equal(sha256, capturedQuestion.sha256, "The recorded ACP question fixture changed");
+  const threadId = await submitReplay(page, "Question", "Replay the recorded question");
+  const option = page.getByText(capturedQuestion.option, { exact: true }).first();
+  await option.waitFor({ state: "visible" });
+  const pending = await readThreadSnapshot(page, threadId);
+  const identity = replayTurnIdentity(pending, "question");
+  const request = pending.projection.runtimeRequests.find(
+    (item) => item.kind === "user_input" && item.providerTurnId === identity.providerTurnId,
+  );
+  Assert.equal(request?.status, "pending");
+  Assert.ok(request);
+  const requestId = request.id;
+  await page.getByRole("button", { name: "Stop generation", exact: true }).click();
+  await option.waitFor({ state: "hidden" });
+  await page.getByRole("button", { name: /^(Stop generation|Stopping)$/u }).waitFor({ state: "hidden" });
+
+  function assertCancelled(snapshot: OrchestrationV2ThreadDetailSnapshot) {
+    const { projection } = snapshot;
+    Assert.equal(projection.runs.length, 1);
+    Assert.equal(projection.runs[0]?.id, identity.runId);
+    Assert.equal(projection.runs[0]?.status, "interrupted");
+    const cancelled = projection.runtimeRequests.find((item) => item.id === requestId);
+    Assert.equal(cancelled?.status, "cancelled");
+  }
+  assertCancelled(await readThreadSnapshot(page, threadId));
+  await page.reload({ waitUntil: "domcontentloaded" });
+  assertCancelled(await readThreadSnapshot(page, threadId));
+  return { ...identity, threadId, requestId, source: capturedQuestion.path, sha256 };
+}
+
 async function exercise(implementation: Implementation): Promise<void> {
   const directory = NodePath.join(proofRoot, implementation);
   NodeFS.mkdirSync(directory, { recursive: true });
   const workspace = NodePath.join(runRoot, implementation, "hybrid-fixture");
   const stateDirectory = NodePath.join(runRoot, implementation, "state");
+  if (bundledClient) {
+    const settingsDirectory = NodePath.join(stateDirectory, "userdata");
+    NodeFS.mkdirSync(settingsDirectory, { recursive: true });
+    writeJson(NodePath.join(settingsDirectory, "settings.json"), {
+      providerInstances: {
+        devReplay: {
+          displayName: "Replay (dev)",
+          driver: "acpRegistry",
+          config: {
+            source: "local",
+            commandPath: process.execPath,
+            commandArgs: [NodePath.join(repoRoot, "apps/server/scripts/dev-replay-agent.ts")],
+          },
+        },
+      },
+    });
+  }
   NodeFS.mkdirSync(NodePath.join(workspace, "src"), { recursive: true });
   NodeFS.writeFileSync(
     NodePath.join(workspace, "package.json"),
@@ -476,8 +724,10 @@ async function exercise(implementation: Implementation): Promise<void> {
     schemaVersion: 1,
     status: "running",
     implementation,
+    client: bundledClient ? "built" : "development",
+    composer: "unverified",
     scope:
-      "Linux original web client; local project; composer submission; free ACP showcase approval; reload; same-state server restart",
+      "Linux original web client; local project; composer submission; free ACP showcase approval and interruption; reload; same-state server restart",
     startedAt: new Date().toISOString(),
     finishedAt: null as string | null,
     source,
@@ -495,10 +745,20 @@ async function exercise(implementation: Implementation): Promise<void> {
     threadId: null as string | null,
     threadUrl: null as string | null,
     turnIdentity: null as ReplayTurnIdentity | null,
+    interrupted: null as InterruptedShowcase | null,
+    capturedApproval: null as Awaited<ReturnType<typeof acceptCapturedApproval>> | null,
+    cancelledQuestion: null as Awaited<ReturnType<typeof cancelCapturedQuestion>> | null,
+    historyFind: null as { query: string; count: string; draftPreserved: boolean } | null,
     completedSnapshots: [] as Array<
       Awaited<ReturnType<typeof assertCompleted>> & { checkpoint: string }
     >,
     persistence: [] as Array<ReturnType<typeof inspectNativeReplay> & { checkpoint: string }>,
+    crashRecovery: null as {
+      readonly generation: ReturnType<typeof inspectNativeGeneration>;
+      readonly dirtyPreflight: string;
+      readonly dirtyDatabaseUnchanged: boolean;
+      recoveredPreflight: string | null;
+    } | null,
     browserErrors: [] as string[],
     error: null as string | null,
   };
@@ -535,6 +795,7 @@ async function exercise(implementation: Implementation): Promise<void> {
   };
   let context = await browser!.newContext(contextOptions);
   let page = await context.newPage();
+  let threadFindRequests = 0;
   function observePage(current: Page): void {
     current.setDefaultTimeout(timeoutMs);
     current.setDefaultNavigationTimeout(timeoutMs);
@@ -544,6 +805,13 @@ async function exercise(implementation: Implementation): Promise<void> {
     current.on("console", (message) => {
       if (message.type() === "error") proof.browserErrors.push(redact(message.text()));
     });
+    current.on("websocket", (socket) =>
+      socket.on("framesent", ({ payload }) => {
+        if (payload.toString().includes('"orchestration.searchThreadStream"')) {
+          threadFindRequests += 1;
+        }
+      }),
+    );
   }
   observePage(page);
 
@@ -573,8 +841,13 @@ async function exercise(implementation: Implementation): Promise<void> {
     completed("Created local project through the normal client");
 
     starting("normal composer submission and controlled approval");
-    const threadId = await submitShowcase(page);
+    const threadId = await submitReplay(page);
     proof.threadId = threadId;
+    const usedRustComposer = await page.evaluate(
+      () => performance.getEntriesByName("t3-composer-rust-offsets").length === 1,
+    );
+    Assert.equal(usedRustComposer, expectsRustComposer, "The composer must use the selected mapper");
+    proof.composer = usedRustComposer ? "rust-wasm" : "retained";
     const approval = page.getByRole("button", { name: /^(Yes|Approve)$/u }).first();
     await approval.waitFor({ state: "visible" });
     const pending = await readThreadSnapshot(page, threadId);
@@ -600,8 +873,15 @@ async function exercise(implementation: Implementation): Promise<void> {
     inspectPersistence("initial");
     completed("Received the completed replay turn on the original thread route");
 
+    starting("stop with a streamed reply and pending approval");
+    proof.interrupted = await interruptShowcase(page);
+    Assert.notEqual(proof.interrupted.threadId, threadId);
+    completed("Stopped a separate turn through the composer and retained its partial reply");
+
     starting("client reload");
     await page.reload({ waitUntil: "domcontentloaded" });
+    await verifyInterruptedShowcase(page, proof.interrupted);
+    await page.goto(proof.threadUrl, { waitUntil: "domcontentloaded" });
     proof.completedSnapshots.push({
       checkpoint: "client-reload",
       ...(await assertCompleted(page, threadId, turnIdentity)),
@@ -611,8 +891,28 @@ async function exercise(implementation: Implementation): Promise<void> {
     completed("Reconnected after a client reload with the same completed thread");
 
     starting("owned server restart");
-    await application.stop();
-    inspectPersistence("closed-before-restart", true);
+    const databasePath = NodePath.join(stateDirectory, "userdata", "statev2.omdb");
+    const bundledDatabase = NodePath.join(repoRoot, "apps/server/dist/native-bin/t3-code-ls-db");
+    if (crashRestart) {
+      const generation = inspectNativeGeneration(bundledDatabase, databasePath);
+      killOwnedDatabaseWriter(application.pid, bundledDatabase, databasePath);
+      await application.stop("SIGKILL");
+      const hash = () =>
+        NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(databasePath)).digest("hex");
+      const dirtyHash = hash();
+      assertBundledPreflight(stateDirectory, databasePath, "blocked");
+      Assert.equal(hash(), dirtyHash, "Update preflight must leave the dirty database untouched");
+      proof.crashRecovery = {
+        generation,
+        dirtyPreflight: "recovery_required",
+        dirtyDatabaseUnchanged: true,
+        recoveredPreflight: null,
+      };
+      completed("Killed the bundled server and its native writer and verified read-only preflight refusal");
+    } else {
+      await application.stop();
+      inspectPersistence("closed-before-restart", true);
+    }
     application = await startApplication(
       implementation,
       stateDirectory,
@@ -633,6 +933,14 @@ async function exercise(implementation: Implementation): Promise<void> {
     });
     page = await context.newPage();
     observePage(page);
+    if (proof.crashRecovery) {
+      Assert.deepEqual(
+        inspectNativeGeneration(bundledDatabase, databasePath),
+        proof.crashRecovery.generation,
+      );
+      assertBundledPreflight(stateDirectory, databasePath, "ready");
+      proof.crashRecovery.recoveredPreflight = "ready";
+    }
     await page.goto(proof.threadUrl, { waitUntil: "domcontentloaded" });
     proof.completedSnapshots.push({
       checkpoint: "server-restart",
@@ -644,8 +952,44 @@ async function exercise(implementation: Implementation): Promise<void> {
       "Recovered the same durable thread after server restart in a fresh client with the existing session",
     );
     await capture(page, directory, "completed");
+    if (bundledClient && implementation === "native") {
+      starting("find in reopened conversation");
+      const draft = "Draft retained while finding a previous reply";
+      const editor = page.getByTestId("composer-editor");
+      await editor.fill(draft);
+      const requestsBeforeFind = threadFindRequests;
+      await page.keyboard.press("Control+f");
+      const bar = page.getByRole("search", { name: "Find in thread" });
+      const search = bar.getByRole("searchbox", { name: "Find in thread" });
+      const query = "single math module";
+      await search.fill(query);
+      await bar.getByText("1/1", { exact: true }).waitFor({ state: "visible" });
+      Assert.ok(threadFindRequests > requestsBeforeFind, "Find must query the restarted server");
+      await page.waitForFunction(
+        (expected) => Array.from(CSS.highlights.get("t3-thread-find-active") ?? []).some(
+          (range) => range.toString() === expected,
+        ),
+        query,
+      );
+      await page.keyboard.press("Escape");
+      await bar.waitFor({ state: "hidden" });
+      Assert.equal(await editor.innerText(), draft);
+      proof.historyFind = { query, count: "1/1", draftPreserved: true };
+      completed("Found and highlighted the previous reply after restart while retaining the draft");
+    }
+    await page.goto(proof.interrupted.threadUrl, { waitUntil: "domcontentloaded" });
+    await verifyInterruptedShowcase(page, proof.interrupted);
+    completed("Recovered the interrupted turn and partial reply in the new browser session");
+    starting("recorded ACP permission request");
+    proof.capturedApproval = await acceptCapturedApproval(page);
+    completed("Approved the recorded ACP permission request and received its expected reply");
+    if (bundledClient && implementation === "native") {
+      starting("recorded ACP question cancellation");
+      proof.cancelledQuestion = await cancelCapturedQuestion(page);
+      completed("Cancelled the recorded question in the composer and recovered its cancelled request");
+    }
     if (implementation === "native") {
-      Assert.equal(proof.persistence.length, 4);
+      Assert.equal(proof.persistence.length, crashRestart ? 3 : 4);
       completed(
         "Verified canonical omdb rows and event heads through read-only native inspection, with no application SQLite files",
       );

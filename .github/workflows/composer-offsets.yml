@@ -1,0 +1,106 @@
+name: Rust composer browser proof
+
+on:
+  push:
+    branches:
+      - "candidate/t3code-ls-t01-offsets-*"
+      - "candidate/t3code-ls-t01-built-composer-*"
+      - "candidate/t3code-ls-t02-bundled-native-*"
+      - "candidate/t3code-ls-t05-bundled-recovery-*"
+
+permissions:
+  contents: read
+
+jobs:
+  composer-offsets:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      GIT_TERMINAL_PROMPT: "0"
+      NODE_OPTIONS: --max-old-space-size=6144
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+      WASM_BINDGEN_VERSION: "0.2.130"
+      WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
+      BUNDLED_NATIVE: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-') || startsWith(github.ref_name, 'candidate/t3code-ls-t05-bundled-recovery-') }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install the pinned compiler package
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/composer-toolchain"
+      - name: Build the browser binding with the packaged Wasm sysroot
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/composer-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/composer-target"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
+            --release --locked --target wasm32-unknown-unknown -p t3-code-ls-client-text-web
+          archive="wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive.tar.gz" \
+            "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$WASM_BINDGEN_VERSION/$archive.tar.gz"
+          printf '%s  %s\n' "$WASM_BINDGEN_SHA256" "$RUNNER_TEMP/$archive.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$archive.tar.gz" -O "$archive/wasm-bindgen" > "$RUNNER_TEMP/wasm-bindgen"
+          chmod u+x "$RUNNER_TEMP/wasm-bindgen"
+          "$RUNNER_TEMP/wasm-bindgen" --target web --out-name composer_offsets \
+            --out-dir apps/web/public/client-text-wasm \
+            "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/t3_code_ls_client_text_web.wasm"
+          sha256sum apps/web/public/client-text-wasm/composer_offsets.js \
+            apps/web/public/client-text-wasm/composer_offsets_bg.wasm
+      - name: Install the locked web testing dependencies
+        run: |
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+      - name: Exercise the composer with the retained offset mapper
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-offsets-')
+        working-directory: apps/web
+        run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/ComposerPromptEditorTiptap.input.browser.test.tsx
+      - name: Exercise the real composer with Rust offset mapping
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-offsets-')
+        env:
+          VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
+        working-directory: apps/web
+        run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/ComposerPromptEditorTiptap.input.browser.test.tsx
+      - name: Build and open the application with the Rust composer binding
+        if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
+        env:
+          T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
+          T3_CODE_LS_CRASH_RESTART_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-bundled-recovery-') }}
+          VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
+        run: |
+          proof="$RUNNER_TEMP/built-composer-proof"
+          mkdir "$proof"
+          node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/hybrid-client-persistence-tsconfig.json
+          pnpm --dir apps/web run build
+          implementation=upstream
+          if [[ "$BUNDLED_NATIVE" == true ]]; then
+            implementation=native
+            export CARGO_HOME="$RUNNER_TEMP/bundled-cargo-home"
+            export CARGO_TARGET_DIR="$RUNNER_TEMP/bundled-target"
+            T3_CODE_LS_IMPLEMENTATION=native node tools/build-native.mjs
+            node tools/check-hybrid.mjs --verify-binaries
+            T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$GITHUB_WORKSPACE/bin" \
+              pnpm --dir apps/server run build:bundle
+            sha256sum bin/manifest.json apps/server/dist/native-bin/manifest.json > "$proof/native.sha256"
+          else
+            env -u T3_CODE_LS_TOOLCHAIN -u T3_CODE_LS_SYSROOT T3_CODE_LS_IMPLEMENTATION=upstream \
+              pnpm --dir apps/server run build:bundle
+          fi
+          sha256sum apps/web/dist/client-text-wasm/composer_offsets.js \
+            apps/web/dist/client-text-wasm/composer_offsets_bg.wasm apps/server/dist/bin.mjs \
+            > "$proof/application.sha256"
+          node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
+      - name: Retain the bundled browser evidence
+        if: always() && (env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-'))
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: built-composer-proof
+          path: ${{ runner.temp }}/built-composer-proof/
+          if-no-files-found: warn
+          retention-days: 14
