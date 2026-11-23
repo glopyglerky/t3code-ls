@@ -2059,7 +2059,11 @@
         "infra/task-cache/rust/src/lib.rs",
         "infra/task-cache/rust/web/src/lib.rs"
       ],
-      "adapter_paths": ["infra/task-cache/src/Savings.ts", "infra/task-cache/src/SavingsFold.ts"],
+      "adapter_paths": [
+        "infra/task-cache/src/Savings.ts",
+        "infra/task-cache/src/SavingsFold.ts",
+        ".github/workflows/thread-recovery.yml"
+      ],
       "platform_routes": [
         {
           "targets": ["linux-x64"],
@@ -2070,6 +2074,9 @@
         }
       ],
       "acceptance_tests": ["infra/task-cache/scripts/verify-savings-native.ts"],
+      "hosted_acceptance": {
+        "infra/task-cache/scripts/verify-savings-native.ts": ".github/workflows/thread-recovery.yml"
+      },
       "retired_paths": [],
       "notes": "T15/J32 savings policy with a no_std allocation-free fold, Wasm binding and the existing Savings service. D1 owns atomic receipt deduplication and totals publication. The deployed worker uses its retained fold. Wasm packaging, Cloudflare execution and performance remain unqualified.",
       "rust_crates": ["infra/task-cache/rust", "infra/task-cache/rust/web"]
