@@ -433,6 +433,43 @@ async function verifyPairing(implementation: Implementation, renderer: PairingRe
     Assert.equal(await form.count(), 0, "The pairing form must leave the authenticated page");
     const authenticated = await context.request.get(sessionUrl.href);
     Assert.equal((await authenticated.json()).authenticated, true);
+    const welcomeControls = renderer === "dioxus"
+      ? await verifyWelcomeControlUpdates(page)
+      : undefined;
+    if (renderer === "dioxus-fallback") {
+      await page.getByRole("alert").filter({ hasText: "Could not open setup controls" })
+        .waitFor({ state: "visible" });
+      await page.getByRole("button", { name: "Use standard setup", exact: true }).click();
+    }
+    const heading = page.getByRole("heading", { name: "Welcome to T3 Code", exact: true });
+    const welcome = page.getByRole("main").filter({ has: heading });
+    const controls = welcome.locator('[data-welcome-renderer="dioxus-wasm"]');
+    if (renderer === "dioxus") await controls.waitFor({ state: "visible" });
+    else Assert.equal(await controls.count(), 0);
+    await welcome.getByText(/^Looking for projects in your .* history…$/u)
+      .waitFor({ state: "hidden" });
+    const importProjects = welcome.getByRole("checkbox", { name: /^Import (?:\d+ )?projects? and their threads\b/u });
+    if (await importProjects.isVisible()) await importProjects.uncheck();
+    const start = welcome.getByRole("button", { name: "Start", exact: true });
+    await start.waitFor({ state: "visible" });
+    const completion = await start.isEnabled()
+      ? start
+      : welcome.getByRole("button", { name: "Start without an agent", exact: true });
+    await completion.focus();
+    await completion.press("Enter");
+    await heading.waitFor({ state: "hidden" });
+    Assert.equal(await controls.count(), 0, "The welcome Rust mount must leave the completed page");
+    const workspace = NodePath.join(stateDirectory, "welcome-fixture");
+    NodeFS.mkdirSync(workspace);
+    await page.getByRole("button", { name: "Add project", exact: true }).first().click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByText("Local folder", { exact: true }).click();
+    await dialog.getByRole("combobox").fill(workspace);
+    await dialog.getByRole("button", { name: /^Add \(/u }).click();
+    await dialog.waitFor({ state: "hidden" });
+    await page.getByRole("button", { name: "New thread in welcome-fixture", exact: true }).click();
+    await page.waitForURL((url) => url.pathname.startsWith("/draft/"));
+    await page.getByTestId("composer-editor").waitFor({ state: "visible" });
     Assert.equal(wasmRequests, renderer === "retained" ? 0 : 1);
 
     writeJson(NodePath.join(directory, "proof.json"), {
@@ -444,6 +481,9 @@ async function verifyPairing(implementation: Implementation, renderer: PairingRe
       invalidExchange: invalidExchange.status(),
       validExchange: validExchange.status(),
       sessionEstablished: true,
+      welcomeControls,
+      welcomeCompletedByKeyboard: true,
+      projectDraftOpened: true,
     });
   } catch (error) {
     const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -454,6 +494,56 @@ async function verifyPairing(implementation: Implementation, renderer: PairingRe
     await context.close();
     NodeFS.rmSync(stateDirectory, { recursive: true, force: true });
   }
+}
+
+async function verifyWelcomeControlUpdates(page: Page) {
+  return page.evaluate(async () => {
+    const bindings = await import(new URL("/pairing-wasm/local_pairing.js", location.origin).href);
+    const root = document.createElement("div");
+    document.body.appendChild(root);
+    let activations = 0;
+    const mount = bindings.mount_welcome_controls(root, false, false, 2, 2, () => { activations++; });
+    let released = false;
+    const waitFor = async (check: () => boolean) => {
+      for (let frame = 0; frame < 120; frame++) {
+        if (check()) return;
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      throw new Error("The Rust welcome controls did not apply their current state");
+    };
+    const button = () => root.querySelector<HTMLButtonElement>("#welcome-start")!;
+    try {
+      await waitFor(() => button()?.textContent === "Import 2 projects and start");
+      if (!button().disabled) throw new Error("Start must require a ready agent");
+      button().click();
+      if (activations !== 0) throw new Error("A disabled Start invoked setup");
+      root.querySelector<HTMLButtonElement>("#welcome-without-agent")!.focus();
+      mount.update(true, false, 2, 0);
+      await waitFor(() => button().textContent === "Import threads and start" && document.activeElement === button());
+      const original = button();
+      mount.update(true, true, 2, 0);
+      await waitFor(() => button().textContent === "Importing…" && button().disabled);
+      if (button() !== original) throw new Error("A state update replaced the focused control");
+      mount.update(true, true, 0, 0);
+      await waitFor(() => button().textContent === "Starting…");
+      mount.update(true, false, 1, 1);
+      await waitFor(() => button().textContent === "Import 1 project and start" && !button().disabled);
+      button().click();
+      button().click();
+      if (activations !== 1) throw new Error("Setup activation must be single while pending");
+      mount.free();
+      released = true;
+      if (root.childElementCount !== 0) throw new Error("A released welcome mount retained its controls");
+      root.appendChild(original);
+      original.disabled = false;
+      original.click();
+      if (activations !== 1) throw new Error("A released welcome mount retained an activation");
+      return { countUpdates: true, agentReadiness: true, pending: true, focusRetained: true, released: true };
+    } finally {
+      if (!released) mount.free();
+      root.remove();
+    }
+  });
 }
 
 async function capture(page: Page, directory: string, name: string): Promise<void> {

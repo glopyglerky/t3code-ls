@@ -1,35 +1,9 @@
 import { startTransition, useEffect, useEffectEvent, useRef, useState } from "react";
 
 import { peekPairingTokenFromUrl, stripPairingTokenFromUrl } from "../../environments/primary";
+import { loadOnboardingBindings, type DioxusMount } from "../../onboarding/dioxusBindings";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
-
-interface PairingMount {
-  free(): void;
-}
-
-interface PairingBindings {
-  default(): Promise<unknown>;
-  mount_pairing_form(
-    root: HTMLDivElement,
-    token: string,
-    initialError: string,
-    submitCredential: (credential: string) => Promise<string | null>,
-    onAuthenticated: () => void,
-  ): PairingMount;
-}
-
-async function initializePairingBindings(): Promise<PairingBindings> {
-  const url = new URL(
-    `${import.meta.env.BASE_URL}pairing-wasm/local_pairing.js`,
-    window.location.origin,
-  );
-  const bindings: PairingBindings = await import(/* @vite-ignore */ url.href);
-  await bindings.default();
-  return bindings;
-}
-
-let pairingBindings: Promise<PairingBindings> | undefined;
 
 export function DioxusPairingForm({
   initialErrorMessage,
@@ -52,8 +26,8 @@ export function DioxusPairingForm({
     const root = host.current;
     if (!root) return;
     let disposed = false;
-    let mount: PairingMount | undefined;
-    void (pairingBindings ??= initializePairingBindings())
+    let mount: DioxusMount | undefined;
+    void loadOnboardingBindings()
       .then((bindings) => {
         if (disposed) return;
         const token = peekPairingTokenFromUrl() ?? "";

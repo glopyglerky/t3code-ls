@@ -280,3 +280,209 @@ async fn exchange_credential(request: Function, credential: String) -> Option<St
         Err(_) => Some(FAILED.to_owned()),
     }
 }
+
+#[derive(Clone, Copy)]
+struct WelcomeState {
+    agent_ready: bool,
+    importing: bool,
+    selected: u32,
+    new_projects: u32,
+}
+
+struct WelcomeModel {
+    state: Cell<WelcomeState>,
+    update: Cell<Option<Callback<WelcomeState>>>,
+    focus_start: Cell<bool>,
+}
+
+#[wasm_bindgen]
+pub struct WelcomeMount {
+    mount: PairingMount,
+    model: Rc<WelcomeModel>,
+}
+
+impl Drop for WelcomeMount {
+    fn drop(&mut self) {
+        self.model.update.set(None);
+    }
+}
+
+#[wasm_bindgen]
+impl WelcomeMount {
+    pub fn update(&self, agent_ready: bool, importing: bool, selected: u32, new_projects: u32) {
+        let state = WelcomeState {
+            agent_ready,
+            importing,
+            selected,
+            new_projects,
+        };
+        if agent_ready && !self.model.state.get().agent_ready {
+            self.model.focus_start.set(
+                self.mount
+                    .root
+                    .owner_document()
+                    .and_then(|document| document.active_element())
+                    .is_some_and(|active| active.id() == "welcome-without-agent"),
+            );
+        }
+        self.model.state.set(state);
+        if let Some(update) = self.model.update.get() {
+            update.call(state);
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub fn mount_welcome_controls(
+    root: DomElement,
+    agent_ready: bool,
+    importing: bool,
+    selected: u32,
+    new_projects: u32,
+    on_start: Function,
+) -> Result<WelcomeMount, JsValue> {
+    let listeners = AbortController::new()?;
+    let (renderer, registration) = AbortHandle::new_pair();
+    let model = Rc::new(WelcomeModel {
+        state: Cell::new(WelcomeState {
+            agent_ready,
+            importing,
+            selected,
+            new_projects,
+        }),
+        update: Cell::new(None),
+        focus_start: Cell::new(false),
+    });
+    let dom = VirtualDom::new_with_props(
+        welcome_controls,
+        WelcomeProps {
+            root: root.clone(),
+            lifetime: listeners.signal(),
+            model: model.clone(),
+            on_start,
+        },
+    );
+    let config = dioxus_web::Config::new().rootelement(root.clone());
+    spawn_local(async move {
+        let _ = Abortable::new(dioxus_web::run(dom, config), registration).await;
+    });
+    Ok(WelcomeMount {
+        mount: PairingMount {
+            root,
+            listeners,
+            renderer,
+        },
+        model,
+    })
+}
+
+#[derive(Clone)]
+struct WelcomeProps {
+    root: DomElement,
+    lifetime: AbortSignal,
+    model: Rc<WelcomeModel>,
+    on_start: Function,
+}
+
+fn welcome_controls(props: WelcomeProps) -> Element {
+    let model = props.model.clone();
+    let mut state = use_signal(|| model.state.get());
+    let update = use_callback(move |next| state.set(next));
+    let model = props.model.clone();
+    use_hook(move || model.update.set(Some(update)));
+    let model = props.model.clone();
+    let lifetime = props.lifetime.clone();
+    let activate = use_callback(move |without_agent: bool| {
+        let current = model.state.get();
+        if lifetime.aborted() || current.importing || (!without_agent && !current.agent_ready) {
+            return;
+        }
+        let pending = WelcomeState {
+            importing: true,
+            ..current
+        };
+        model.state.set(pending);
+        update.call(pending);
+        let _ = props.on_start.call0(&JsValue::UNDEFINED);
+    });
+    let root = props.root.clone();
+    let lifetime = props.lifetime;
+    let listeners = use_hook(move || {
+        ScopedListener::new(&root, &lifetime, "click", move |event| {
+            let button = event
+                .target()
+                .and_then(|target| target.dyn_into::<DomElement>().ok());
+            match button.as_ref().map(DomElement::id).as_deref() {
+                Some("welcome-start") => activate.call(false),
+                Some("welcome-without-agent") => activate.call(true),
+                _ => {}
+            }
+        })
+        .ok()
+        .map(Rc::new)
+    });
+    let root = props.root;
+    let model = props.model;
+    use_effect(move || {
+        let _ = state.read();
+        if model.focus_start.replace(false) {
+            if let Some(button) = root
+                .query_selector("#welcome-start")
+                .ok()
+                .flatten()
+                .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+            {
+                let _ = button.focus();
+            }
+        }
+    });
+    if listeners.is_none() {
+        return rsx! { p { role: "alert", "Could not open setup controls. Reload the app to try again." } };
+    }
+    let current = state.read();
+    let label = if current.importing {
+        if current.selected > 0 {
+            "Importing…".to_owned()
+        } else {
+            "Starting…".to_owned()
+        }
+    } else if current.new_projects > 0 {
+        format!(
+            "Import {} {} and start",
+            current.new_projects,
+            if current.new_projects == 1 {
+                "project"
+            } else {
+                "projects"
+            }
+        )
+    } else if current.selected > 0 {
+        "Import threads and start".to_owned()
+    } else {
+        "Start".to_owned()
+    };
+    rsx! {
+        div {
+            "data-welcome-renderer": "dioxus-wasm",
+            class: "mt-6 flex flex-wrap items-center justify-between gap-3",
+            aria_busy: "{current.importing}",
+            if current.agent_ready { span {} } else {
+                button {
+                    id: "welcome-without-agent", r#type: "button", disabled: current.importing,
+                    class: "h-9 rounded-lg px-3 text-sm text-muted-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-64",
+                    "Start without an agent"
+                }
+            }
+            div { class: "flex items-center gap-3",
+                if !current.agent_ready {
+                    span { class: "text-xs text-muted-foreground", "Set up one agent to start." }
+                }
+                button {
+                    id: "welcome-start", r#type: "button", disabled: !current.agent_ready || current.importing,
+                    class: "h-9 rounded-lg border border-primary bg-primary px-3 text-sm font-medium text-primary-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-64",
+                    "{label}"
+                }
+            }
+        }
+    }
+}

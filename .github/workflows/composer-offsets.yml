@@ -89,6 +89,9 @@ jobs:
             if [[ "$renderer" == dioxus ]]; then
               find apps/web/dist/pairing-wasm -type f -print0 | sort -z | xargs -0 sha256sum >> "$proof/$renderer.sha256"
             fi
+            # apps/web/src/components/onboarding/WelcomePage.import.browser.test.tsx
+            pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
+              src/components/onboarding/WelcomePage.import.browser.test.tsx
             mkdir "$proof/$renderer"
             T3_CODE_LS_PAIRING_PROOF="$renderer" \
               node apps/web/scripts/verify-hybrid-client.ts "$proof/$renderer" upstream

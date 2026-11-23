@@ -1833,6 +1833,10 @@
         {
           "path": "apps/web/src/components/auth/PairingRouteSurface.tsx",
           "blob": "8bedc8b2e711761ff52b7faafd3d8e09da54ab8f"
+        },
+        {
+          "path": "apps/web/src/components/onboarding/WelcomePage.tsx",
+          "blob": "48171ccf944579103d00f50d8e1844a12a655626"
         }
       ],
       "rust_paths": ["apps/web/rust/pairing/src/lib.rs"],
@@ -1840,6 +1844,9 @@
         ".github/workflows/composer-offsets.yml",
         "apps/web/src/components/auth/DioxusPairingForm.tsx",
         "apps/web/src/components/auth/PairingRouteSurface.tsx",
+        "apps/web/src/components/onboarding/DioxusWelcomeControls.tsx",
+        "apps/web/src/components/onboarding/WelcomePage.tsx",
+        "apps/web/src/onboarding/dioxusBindings.ts",
         "apps/web/src/vite-env.d.ts"
       ],
       "platform_routes": [
@@ -1851,9 +1858,16 @@
           "acceptance_evidence": {}
         }
       ],
-      "acceptance_tests": ["apps/web/scripts/verify-hybrid-client.ts"],
+      "acceptance_tests": [
+        "apps/web/scripts/verify-hybrid-client.ts",
+        "apps/web/src/components/onboarding/WelcomePage.import.browser.test.tsx"
+      ],
+      "hosted_acceptance": {
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/onboarding/WelcomePage.import.browser.test.tsx": ".github/workflows/composer-offsets.yml"
+      },
       "retired_paths": [],
-      "notes": "T01, T11 and J36. VITE_T3_CODE_LS_PAIRING_RENDERER=dioxus selects the local pairing form only. The browser adapter uses Dioxus 0.8.0-alpha.3 release cb27832398e8a3fa30a0fc8d6917c6d8a86fa71a, an ancestor of research pin 0a7242a2a72b08975584bf8ecb05076a5ee0b9c7. Cargo.lock records release artifact checksums. The bundled Chromium proof has yet to run.",
+      "notes": "T01, T11 and J36. VITE_T3_CODE_LS_PAIRING_RENDERER=dioxus selects local pairing and welcome completion controls. Rust renders current readiness, selected-project counts and pending state, with mount-owned activation and focus. Existing application owners retain import, permission, durable completion and navigation. Explicit standard controls are available if the Wasm module cannot load. The browser adapter uses Dioxus 0.8.0-alpha.3 release cb27832398e8a3fa30a0fc8d6917c6d8a86fa71a, an ancestor of research pin 0a7242a2a72b08975584bf8ecb05076a5ee0b9c7. Cargo.lock records release artifact checksums. The bundled Chromium proof has yet to run.",
       "rust_crates": ["apps/web/rust/pairing"]
     },
     {
