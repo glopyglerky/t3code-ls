@@ -52,6 +52,7 @@ node_modules/
 
 /target/
 /apps/web/public/client-text-wasm/
+/apps/web/public/pairing-wasm/
 .lust-cache/
 .lust-daemon-*.sock
 __pycache__/

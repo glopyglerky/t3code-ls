@@ -29,6 +29,7 @@ import {
 } from "./hybrid-client-turn.ts";
 
 type Implementation = "upstream" | "native";
+type PairingRenderer = "retained" | "dioxus";
 type OwnedApplication = { pid: number; pairingUrl: string; stop: () => Promise<void> };
 type InterruptedShowcase = ReplayTurnIdentity & {
   threadId: string;
@@ -46,6 +47,7 @@ const replayMarker = "This turn is a replay.";
 const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
 const spliceNegotiationProof = process.env.T3_CODE_LS_SPLICE_NEGOTIATION_PROOF === "true";
 const splitPtyProof = process.env.T3_CODE_LS_SPLIT_PTY_PROOF === "true";
+const pairingProof = process.env.T3_CODE_LS_PAIRING_PROOF;
 const multiTabDraftProof = process.env.T3_CODE_LS_MULTI_TAB_DRAFT_PROOF === "true";
 const draftStorageProof = process.env.T3_CODE_LS_DRAFT_STORAGE_PROOF === "true";
 const fileEditorProof = process.env.T3_CODE_LS_FILE_EDITOR_PROOF === "true";
@@ -86,6 +88,13 @@ if (process.platform !== "linux") {
   throw new Error(
     "This acceptance runner qualifies Linux only; other platforms require their own gate.",
   );
+}
+if (pairingProof !== undefined && (!bundledClient || !isPairingRenderer(pairingProof))) {
+  throw new Error("The pairing proof requires the bundled client and renderer retained or dioxus.");
+}
+
+function isPairingRenderer(value: string): value is PairingRenderer {
+  return value === "retained" || value === "dioxus";
 }
 
 function outsideCheckout(path: string): void {
@@ -313,6 +322,132 @@ async function startApplication(
     throw error;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+async function verifyPairing(implementation: Implementation, renderer: PairingRenderer) {
+  const directory = NodePath.join(proofRoot, `${implementation}-pairing-${renderer}`);
+  NodeFS.mkdirSync(directory, { recursive: true });
+  const stateDirectory = NodeFS.mkdtempSync(NodePath.join(runRoot, "pairing-"));
+  const [serverPort, webPort] = await availablePorts();
+  Assert.ok(serverPort && webPort);
+  const context = await browser!.newContext();
+  const page = await context.newPage();
+  page.setDefaultTimeout(15_000);
+  const wasmPath = "/pairing-wasm/local_pairing_bg.wasm";
+  const exchangePath = "/api/auth/browser-session";
+  let token = "";
+
+  try {
+    const application = await startApplication(
+      implementation,
+      stateDirectory,
+      serverPort,
+      webPort,
+      NodePath.join(directory, "startup.log"),
+    );
+    const pairingUrl = new URL(application.pairingUrl);
+    token = new URLSearchParams(pairingUrl.hash.slice(1)).get("token") ?? "";
+    Assert.ok(token.length > 0, "The owned server must issue a pairing credential");
+    pairingUrl.hash = "";
+
+    let wasmRequests = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === wasmPath) wasmRequests++;
+    });
+    const [wasm] = await Promise.all([
+      renderer === "dioxus"
+        ? page.waitForResponse((response) => new URL(response.url()).pathname === wasmPath)
+        : undefined,
+      page.goto(pairingUrl.href),
+    ]);
+    let wasmSha256: string | undefined;
+    if (wasm) {
+      Assert.ok(wasm.ok(), "The bundled server must serve the pairing Wasm");
+      const sha256 = (bytes: Buffer) => NodeCrypto.createHash("sha256").update(bytes).digest("hex");
+      wasmSha256 = sha256(await wasm.body());
+      const builtWasm = NodeFS.readFileSync(NodePath.join(repoRoot, "apps/web/dist", wasmPath));
+      Assert.equal(wasmSha256, sha256(builtWasm), "The page must load the built Wasm bytes");
+    }
+
+    const input = page.getByLabel("Pairing token", { exact: true });
+    const form = page.locator("form").filter({ has: input });
+    await form.waitFor({ state: "visible" });
+    Assert.equal(
+      await form.getAttribute("data-pairing-renderer"),
+      renderer === "dioxus" ? "dioxus-wasm" : null,
+    );
+    Assert.equal(await input.getAttribute("autocomplete"), "off");
+    Assert.equal(await input.evaluate((element) => (element as HTMLInputElement).type), "text");
+    await form.locator('label[for="pairing-token"]').click();
+    Assert.ok(await input.evaluate((element) => element === document.activeElement));
+
+    const waitForExchange = () =>
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === exchangePath && response.request().method() === "POST",
+      );
+    const gate = Promise.withResolvers<void>();
+    await page.route(
+      `**${exchangePath}`,
+      async (route) => {
+        await gate.promise;
+        await route.continue();
+      },
+      { times: 1 },
+    );
+    await input.fill("invalid-pairing-proof-credential");
+    const rejectInvalidCredential = async () => {
+      try {
+        await input.press("Enter");
+        const pending = form.getByRole("button", { name: "Pairing...", exact: true });
+        await pending.waitFor({ state: "visible" });
+        Assert.ok(await pending.isDisabled());
+        Assert.ok(await input.isDisabled());
+      } finally {
+        gate.resolve();
+      }
+    };
+    const [invalidExchange] = await Promise.all([waitForExchange(), rejectInvalidCredential()]);
+    Assert.equal(invalidExchange.status(), 401);
+    await form
+      .getByRole("alert")
+      .filter({ hasText: "Invalid pairing token" })
+      .waitFor({ state: "visible" });
+    const sessionUrl = new URL("/api/auth/session", pairingUrl);
+    const unauthenticated = await context.request.get(sessionUrl.href);
+    Assert.equal((await unauthenticated.json()).authenticated, false);
+
+    await input.fill(token);
+    const [validExchange] = await Promise.all([waitForExchange(), input.press("Enter")]);
+    Assert.equal(validExchange.status(), 200);
+    await page.waitForURL(new URL("/", pairingUrl).href);
+    await page
+      .getByRole("heading", { name: "Welcome to T3 Code", exact: true })
+      .waitFor({ state: "visible" });
+    Assert.equal(await form.count(), 0, "The pairing form must leave the authenticated page");
+    const authenticated = await context.request.get(sessionUrl.href);
+    Assert.equal((await authenticated.json()).authenticated, true);
+    Assert.equal(wasmRequests, renderer === "dioxus" ? 1 : 0);
+
+    writeJson(NodePath.join(directory, "proof.json"), {
+      source,
+      renderer,
+      implementation,
+      chromium: browser!.version(),
+      wasmSha256,
+      invalidExchange: invalidExchange.status(),
+      validExchange: validExchange.status(),
+      sessionEstablished: true,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    throw new Error(token ? message.replaceAll(token, "[REDACTED]") : message);
+  } finally {
+    await activeApplication?.stop();
+    activeApplication = undefined;
+    await context.close();
+    NodeFS.rmSync(stateDirectory, { recursive: true, force: true });
   }
 }
 
@@ -1669,6 +1804,7 @@ const run = {
   requested,
   passed: [] as Implementation[],
   source,
+  pairingRenderer: pairingProof,
   runRoot,
   error: null as string | null,
 };
@@ -1677,7 +1813,11 @@ try {
   browser = await chromium.launch(executablePath ? { executablePath } : {});
   console.log(`Original client acceptance: ${requested.join(", ")}; Chromium ${browser.version()}`);
   for (const implementation of requested) {
-    await exercise(implementation);
+    if (pairingProof && isPairingRenderer(pairingProof)) {
+      await verifyPairing(implementation, pairingProof);
+    } else {
+      await exercise(implementation);
+    }
     run.passed.push(implementation);
   }
   run.status = "passed";

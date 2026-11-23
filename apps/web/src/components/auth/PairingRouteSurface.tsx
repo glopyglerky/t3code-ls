@@ -14,6 +14,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { StandalonePage, StandalonePageHeader } from "../ui/standalone-page";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { DioxusPairingForm } from "./DioxusPairingForm";
 
 export function PairingPendingSurface() {
   return (
@@ -35,9 +36,41 @@ export function PairingRouteSurface({
   initialErrorMessage?: string;
   onAuthenticated: () => void;
 }) {
+  const formProps = { initialErrorMessage: initialErrorMessage ?? "", onAuthenticated };
+  return (
+    <StandalonePage>
+      <StandalonePageHeader
+        title="Pair with this environment"
+        description={describeAuthGate(auth.bootstrapMethods)}
+      />
+
+      {import.meta.env.VITE_T3_CODE_LS_PAIRING_RENDERER === "dioxus" ? (
+        <DioxusPairingForm {...formProps} submitCredential={exchangePairingCredential} />
+      ) : (
+        <RetainedPairingForm {...formProps} />
+      )}
+
+      <div className="mt-6 rounded-lg border border-border/70 bg-background/55 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
+        {describeSupportedMethods(auth.bootstrapMethods)}
+      </div>
+    </StandalonePage>
+  );
+}
+
+function exchangePairingCredential(credential: string): Promise<string | null> {
+  return submitServerAuthCredential(credential).then(() => null, errorMessageFromUnknown);
+}
+
+function RetainedPairingForm({
+  initialErrorMessage,
+  onAuthenticated,
+}: {
+  initialErrorMessage: string;
+  onAuthenticated: () => void;
+}) {
   const [autoPairToken] = useState(peekPairingTokenFromUrl);
   const [credential, setCredential] = useState(autoPairToken ?? "");
-  const [errorMessage, setErrorMessage] = useState(initialErrorMessage ?? "");
+  const [errorMessage, setErrorMessage] = useState(initialErrorMessage);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const autoSubmitAttemptedRef = useRef(false);
 
@@ -45,10 +78,7 @@ export function PairingRouteSurface({
     setIsSubmitting(true);
     setErrorMessage("");
 
-    const submitError = await submitServerAuthCredential(nextCredential).then(
-      () => null,
-      (error) => errorMessageFromUnknown(error),
-    );
+    const submitError = await exchangePairingCredential(nextCredential);
 
     setIsSubmitting(false);
 
@@ -83,56 +113,45 @@ export function PairingRouteSurface({
   }, [autoPairToken]);
 
   return (
-    <StandalonePage>
-      <StandalonePageHeader
-        title="Pair with this environment"
-        description={describeAuthGate(auth.bootstrapMethods)}
-      />
-
-      <form className="mt-6 space-y-4" onSubmit={(event) => void handleSubmit(event)}>
-        <div className="space-y-2">
-          <label className="text-sm font-medium" htmlFor="pairing-token">
-            Pairing token
-          </label>
-          <Input
-            id="pairing-token"
-            autoCapitalize="none"
-            autoComplete="off"
-            autoCorrect="off"
-            disabled={isSubmitting}
-            nativeInput
-            onChange={(event) => setCredential(event.currentTarget.value)}
-            placeholder="Paste a one-time token or pairing secret"
-            spellCheck={false}
-            value={credential}
-          />
-        </div>
-
-        {errorMessage ? (
-          <Alert variant="error">
-            <AlertDescription>{errorMessage}</AlertDescription>
-          </Alert>
-        ) : null}
-
-        <div className="flex flex-wrap gap-2">
-          <Button disabled={isSubmitting} size="sm" type="submit">
-            {isSubmitting ? "Pairing..." : "Continue"}
-          </Button>
-          <Button
-            disabled={isSubmitting}
-            onClick={() => window.location.reload()}
-            size="sm"
-            variant="outline"
-          >
-            Reload app
-          </Button>
-        </div>
-      </form>
-
-      <div className="mt-6 rounded-lg border border-border/70 bg-background/55 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
-        {describeSupportedMethods(auth.bootstrapMethods)}
+    <form className="mt-6 space-y-4" onSubmit={(event) => void handleSubmit(event)}>
+      <div className="space-y-2">
+        <label className="text-sm font-medium" htmlFor="pairing-token">
+          Pairing token
+        </label>
+        <Input
+          id="pairing-token"
+          autoCapitalize="none"
+          autoComplete="off"
+          autoCorrect="off"
+          disabled={isSubmitting}
+          nativeInput
+          onChange={(event) => setCredential(event.currentTarget.value)}
+          placeholder="Paste a one-time token or pairing secret"
+          spellCheck={false}
+          value={credential}
+        />
       </div>
-    </StandalonePage>
+
+      {errorMessage ? (
+        <Alert variant="error">
+          <AlertDescription>{errorMessage}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={isSubmitting} size="sm" type="submit">
+          {isSubmitting ? "Pairing..." : "Continue"}
+        </Button>
+        <Button
+          disabled={isSubmitting}
+          onClick={() => window.location.reload()}
+          size="sm"
+          variant="outline"
+        >
+          Reload app
+        </Button>
+      </div>
+    </form>
   );
 }
 
