@@ -5,6 +5,7 @@ on:
     branches:
       - "candidate/t3code-ls-t14-cli-contract-*"
       - "candidate/t3code-ls-t14-windows-cli-*"
+      - "candidate/t3code-ls-t14-windows-shim-oracle-*"
       - "candidate/t3code-ls-t05-packaged-preparation-*"
       - "candidate/t3code-ls-t06-gix-packaged-*"
       - "candidate/t3code-ls-t10-packaged-guest-*"
@@ -16,7 +17,9 @@ permissions:
 
 jobs:
   archive:
-    if: ${{ !startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-cli-') }}
+    if: >-
+      !startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-cli-') &&
+      !startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-shim-oracle-')
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
     timeout-minutes: 25
     env:
@@ -192,7 +195,47 @@ jobs:
           path: ${{ runner.temp }}/cli-proof/
           retention-days: 14
 
+  windows-shim-oracle:
+    if: >-
+      startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-cli-') ||
+      startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-shim-oracle-') ||
+      startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['windows-2025'] || 'windows-2025' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Check cmd argument and exit preservation
+        shell: pwsh
+        env:
+          ORACLE_MATRIX: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-shim-oracle-') }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $proof = New-Item -ItemType Directory "$env:RUNNER_TEMP/windows-shim-oracle"
+          git rev-parse HEAD 'HEAD^{tree}' | Set-Content -Encoding ascii (Join-Path $proof.FullName 'source.txt')
+          $oracleArgs = @('scripts/windows-shim-oracle.mjs')
+          if ($env:ORACLE_MATRIX -eq 'true') { $oracleArgs += '--matrix' }
+          $log = Join-Path $proof.FullName 'oracle.log'
+          $PSNativeCommandUseErrorActionPreference = $false
+          node @oracleArgs > $log
+          $oracleExit = $LASTEXITCODE
+          Get-Content -LiteralPath $log
+          if ($oracleExit -ne 0) { throw "Windows shim oracle failed with exit $oracleExit." }
+      - if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: windows-shim-oracle
+          path: ${{ runner.temp }}/windows-shim-oracle/
+          if-no-files-found: error
+          retention-days: 14
+
   windows-amd64-monitor:
+    needs: windows-shim-oracle
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-cli-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['windows-2025'] || 'windows-2025' }}
     timeout-minutes: 12
@@ -383,6 +426,17 @@ jobs:
             signedRelease = $false
           } | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 "$proof/artifact.json"
           node scripts/smoke-cli-archive.ts --archive $archive --expect-version $version --expect-upstream | Tee-Object "$proof/smoke.log"
+          $managed = @(Select-String -Path "$proof/smoke.log" -Pattern '^WINDOWS_MANAGED_LIFECYCLE ')
+          if ($managed.Count -ne 1) { throw 'Missing exact managed Windows lifecycle proof' }
+          $lifecycle = $managed[0].Line.Substring('WINDOWS_MANAGED_LIFECYCLE '.Length) | ConvertFrom-Json
+          if ($lifecycle.version -ne $version -or -not $lifecycle.installedShim -or -not $lifecycle.foreignShimRefused -or
+              -not $lifecycle.ownershipReceipt -or -not $lifecycle.shimVersionRan -or -not $lifecycle.shimUninstallRan -or
+              -not $lifecycle.detachedRemovalObserved -or -not $lifecycle.originalStatePreserved -or
+              -not $lifecycle.sessionsReopened -or -not $lifecycle.unrelatedFilePreserved -or -not $lifecycle.appDataUnchanged -or
+              $lifecycle.serviceInstallRequested -ne $false -or $lifecycle.pathOrRegistryCommandRequested -ne $false) {
+            throw 'Managed Windows lifecycle did not satisfy its ownership and preservation contract'
+          }
+          $lifecycle | ConvertTo-Json -Depth 4 | Set-Content -Encoding utf8 "$proof/managed-lifecycle.json"
       - name: Retain exact Windows archive evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

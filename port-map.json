@@ -1757,6 +1757,7 @@
         "apps/server/src/serverRuntimeStartup.test.ts",
         "apps/server/src/serverRuntimeStartup.autoPull.test.ts",
         "scripts/smoke-cli-archive.ts",
+        "scripts/windows-shim-oracle.mjs",
         "tools/service-launcher-trial.test.mjs"
       ],
       "hosted_acceptance": {
@@ -1764,6 +1765,7 @@
         "apps/server/src/serverRuntimeStartup.autoPull.test.ts": ".github/workflows/thread-recovery.yml",
         "apps/web/scripts/verify-packaged-fork-history.mjs": ".github/workflows/composer-offsets.yml",
         "scripts/smoke-cli-archive.ts": ".github/workflows/cli-archive-proof.yml",
+        "scripts/windows-shim-oracle.mjs": ".github/workflows/cli-archive-proof.yml",
         "tools/service-launcher-trial.test.mjs": ".github/workflows/cli-archive-proof.yml"
       },
       "retired_paths": [],
