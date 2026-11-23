@@ -147,3 +147,8 @@ construction or observer delay. No current result authorizes changing reads,
 transactions, integrity checks, activation or durability. The independently
 qualified engine read counters remain the source for logical backend read
 attribution, not evidence of physical device traffic.
+
+The completed-work probe separately validates all 200 retained messages and the
+authoritative bounded window used by the web client's cache. The cache must
+match that window's ordered message IDs, roles, text and selected-thread
+cursor. The bounded read runs in preparation, before the timed reopen.

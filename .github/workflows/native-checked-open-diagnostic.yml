@@ -720,7 +720,7 @@ jobs:
               ' _ "$scratch/stock" "$scratch/full-stock" "$scratch/native" "$(id -un)" \
                 env -u REDB_CHECKED_OPEN_DIAGNOSTICS -u T3_CODE_LS_DIAGNOSTIC_DB T16_COMPLETED_WORK=1 \
                 "$probe" probe-reopen "$(command -v node)" "$root/apps/server/dist/bin.mjs" \
-                "$trial" "$driver" "$chrome" "$mode" > "$sample"
+                "$trial" "$driver" "$chrome" "$mode" > "$sample" 2> >(tee "$evidence/plain-$round-$variant.stderr.log" >&2)
               jq -er --argjson round "$round" --argjson position "$((position + 1))" --arg variant "$variant" '
                 select(.journey == "J02" and .snapshot.valid
                   and .cached_paint_attribution_qualified == false

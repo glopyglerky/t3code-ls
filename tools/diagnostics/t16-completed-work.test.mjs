@@ -125,19 +125,29 @@ for (const exit of ["Success", "Failure"]) {
   assert.equal(timing.visitOverflow,true); assert.equal(socket.sent.length,9);
 }
 const cacheSource = readFileSync(`${process.argv[2]}/tools/src/startup_probe/browser/reopen-cache-exact.js`,"utf8");
-const messages = [{id:"m1",role:"user",text:"one"},{id:"m2",role:"assistant",text:"two"}];
-async function cacheHarness(change = ()=>{}) {
+const messages = [
+  { id: "m0", role: "assistant", text: "outside the bounded view" },
+  { id: "m1", role: "user", text: "one" },
+  { id: "m2", role: "assistant", text: "two" },
+];
+async function cacheHarness(change = () => {}) {
+  const bounded = { snapshotSequence: 12, projection: { thread: { id: "selected" }, messages: structuredClone(messages.slice(1)) } };
   const shell={schemaVersion:3,environmentId:"local",snapshot:{snapshotSequence:12,threads:[{id:"selected",projectId:"reopen-fixture"}]}};
-  const thread={schemaVersion:5,environmentId:"local",threadId:"selected",snapshot:{snapshotSequence:12,projection:{thread:{id:"selected"},messages:structuredClone(messages)}}};
-  change(shell,thread);
+  const thread={schemaVersion:5,environmentId:"local",threadId:"selected",snapshot:structuredClone(bounded)};
+  change(shell, thread, bounded);
   let reads=[];
   const result=await new Promise(resolve=>{
     const tx={objectStore: store=>({get: key=>{reads.push([store,key]);return {result:JSON.stringify(store==="shell"?shell:thread)};}})};
     const db={objectStoreNames:{contains:()=>true},close(){},transaction(stores,mode){assert.equal(mode,"readonly");queueMicrotask(()=>tx.oncomplete());return tx;}};
     const indexedDB={open(name){assert.equal(name,"t3code:connection-runtime");const request={result:db};queueMicrotask(()=>request.onsuccess());return request;}};
-    vm.runInNewContext(`(function(){${cacheSource}}).apply(null,args)`,{indexedDB,location:new URL("http://localhost/local/selected"),args:["selected",{shellSequence:12,threadSequence:12,messages},resolve]});
+    const fetch = async (path, options) => {
+      assert.equal(path, "/api/orchestration/threads/selected/bounded?deferWork=1");
+      assert.equal(options.headers["x-t3-orchestration-protocol"], "2");
+      return { ok: true, json: async () => bounded };
+    };
+    vm.runInNewContext(`(function(){${cacheSource}}).apply(null,args)`,{fetch,indexedDB,location:new URL("http://localhost/local/selected"),args:["selected",{shellSequence:12,threadSequence:12,messages},resolve]});
   });
-  assert.deepEqual(reads,[["shell","local"],["thread","local:selected"]]);
+  assert.deepEqual(reads, result.reason === "bounded-content" ? [] : [["shell","local"],["thread","local:selected"]]);
   return result;
 }
 assert.equal((await cacheHarness()).valid,true);
@@ -147,5 +157,9 @@ for (const change of [
   (a,b)=>b.snapshot.snapshotSequence=11, (a,b)=>a.snapshot.snapshotSequence=13,
   (a,b)=>b.snapshot.projection.messages.reverse(), (a,b)=>b.schemaVersion=6,
   (a,b)=>a.snapshot.threads[0].projectId="foreign",
+  (a,b)=>b.snapshot.projection.messages = structuredClone(messages),
+  (a,b,c)=>c.snapshotSequence=11,
+  (a,b,c)=>c.projection.thread.id="foreign",
+  (a,b,c)=>c.projection.messages.reverse(),
 ]) assert.equal((await cacheHarness(change)).valid,false);
 console.log("completed-work faults: foreign/pending/rejected/interrupted/excess visits and exact scoped cache passed");

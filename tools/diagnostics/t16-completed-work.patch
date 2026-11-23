@@ -124,36 +124,64 @@
 +})();
 --- a/tools/src/startup_probe/browser/reopen-cache-exact.js
 +++ b/tools/src/startup_probe/browser/reopen-cache-exact.js
-@@ -0,0 +1,29 @@
+@@ -0,0 +1,57 @@
 +const [threadId, expected, done] = arguments;
 +const environmentId = decodeURIComponent(location.pathname.split('/')[1]);
-+const request = indexedDB.open('t3code:connection-runtime');
-+request.onerror = () => done({valid:false, reason:'open'});
-+request.onsuccess = () => {
-+  const db = request.result;
-+  if (!db.objectStoreNames.contains('thread') || !db.objectStoreNames.contains('shell')) {
-+    db.close(); done({valid:false, reason:'stores'}); return;
++const sameMessages = (left, right) => left.length === right.length &&
++  left.every((row, index) => row.id === right[index].id &&
++    row.role === right[index].role && row.text === right[index].text);
++
++async function readBoundedWindow() {
++  const response = await fetch(
++    `/api/orchestration/threads/${encodeURIComponent(threadId)}/bounded?deferWork=1`,
++    {headers: {'x-t3-orchestration-protocol': '2'}, cache: 'no-store'},
++  );
++  if (!response.ok) return done({valid:false, reason:'bounded-http', status:response.status});
++  const bounded = await response.json();
++  const rows = bounded.projection?.messages;
++  if (bounded.projection?.thread?.id !== threadId ||
++      bounded.snapshotSequence !== expected.threadSequence ||
++      !Array.isArray(rows) || rows.length === 0 || rows.length > expected.messages.length ||
++      !sameMessages(rows, expected.messages.slice(-rows.length))) {
++    return done({valid:false, reason:'bounded-content', boundedSequence:bounded.snapshotSequence,
++      boundedMessageCount:rows?.length, fullMessageCount:expected.messages.length});
 +  }
-+  const tx = db.transaction(['shell','thread'], 'readonly');
-+  const shell = tx.objectStore('shell').get(environmentId);
-+  const thread = tx.objectStore('thread').get(`${environmentId}:${threadId}`);
-+  tx.oncomplete = () => {
-+    db.close();
-+    try {
-+      const a = JSON.parse(shell.result), b = JSON.parse(thread.result);
-+      const messages = b.snapshot.projection.messages.map(({id,role,text}) => ({id,role,text}));
-+      done({valid: a.schemaVersion === 3 && b.schemaVersion === 5 &&
-+        a.environmentId === environmentId && b.environmentId === environmentId && b.threadId === threadId &&
-+        b.snapshot.projection.thread.id === threadId &&
-+        a.snapshot.threads.some(t => t.id === threadId && t.projectId === 'reopen-fixture') &&
-+        a.snapshot.snapshotSequence === expected.shellSequence &&
-+        b.snapshot.snapshotSequence === expected.threadSequence &&
-+        JSON.stringify(messages) === JSON.stringify(expected.messages),
-+        environmentId, threadId, shellSequence:a.snapshot.snapshotSequence, threadSequence:b.snapshot.snapshotSequence});
-+    } catch (error) { done({valid:false, reason:String(error)}); }
++  const request = indexedDB.open('t3code:connection-runtime');
++  request.onerror = () => done({valid:false, reason:'open'});
++  request.onsuccess = () => {
++    const db = request.result;
++    if (!db.objectStoreNames.contains('thread') || !db.objectStoreNames.contains('shell')) {
++      db.close(); done({valid:false, reason:'stores'}); return;
++    }
++    const tx = db.transaction(['shell','thread'], 'readonly');
++    const shell = tx.objectStore('shell').get(environmentId);
++    const thread = tx.objectStore('thread').get(`${environmentId}:${threadId}`);
++    tx.oncomplete = () => {
++      db.close();
++      try {
++        const a = JSON.parse(shell.result), b = JSON.parse(thread.result);
++        const cacheRows = b.snapshot.projection.messages;
++        const schemaMatches = a.schemaVersion === 3 && b.schemaVersion === 5;
++        const identityMatches = a.environmentId === environmentId &&
++          b.environmentId === environmentId && b.threadId === threadId &&
++          b.snapshot.projection.thread.id === threadId &&
++          a.snapshot.threads.some(t => t.id === threadId && t.projectId === 'reopen-fixture');
++        const cursorMatches = a.snapshot.snapshotSequence === expected.shellSequence &&
++          b.snapshot.snapshotSequence === expected.threadSequence;
++        const contentMatches = Array.isArray(cacheRows) && sameMessages(cacheRows, rows);
++        done({valid:schemaMatches && identityMatches && cursorMatches && contentMatches,
++          schemaMatches, identityMatches, cursorMatches, contentMatches,
++          environmentId, threadId, shellSequence:a.snapshot.snapshotSequence,
++          threadSequence:b.snapshot.snapshotSequence, boundedMessageCount:rows.length,
++          cachedMessageCount:cacheRows?.length});
++      } catch {
++        done({valid:false, reason:'cache-decode'});
++      }
++    };
++    tx.onabort = tx.onerror = () => { db.close(); done({valid:false, reason:'transaction'}); };
 +  };
-+  tx.onabort = tx.onerror = () => { db.close(); done({valid:false, reason:'transaction'}); };
-+};
++}
++void readBoundedWindow().catch(() => done({valid:false, reason:'bounded-decode'}));
 --- a/tools/src/startup_probe/browser/reopen.rs
 +++ b/tools/src/startup_probe/browser/reopen.rs
 @@ -1,9 +1,61 @@
