@@ -62,6 +62,112 @@ let ownsScratch = false;
 let ownsAdb = false;
 let failure: unknown;
 
+type FixturePhase = "seed" | "reopen-remove" | "reopen-empty";
+
+const launchedPids = new Set<string>();
+
+function fixturePid(): string | null {
+  const result = device(["shell", "pidof", packageName], true);
+  const pid = result.stdout.trim();
+  if (result.status === 1 && pid === "" && result.stderr === "") return null;
+  Assert.equal(result.status, 0, `Could not inspect the fixture process: ${result.stderr}`);
+  Assert.match(pid, /^[1-9][0-9]*$/u, "Expected one fixture process");
+  return pid;
+}
+
+async function launchFixture(label: string, fixturePhase: FixturePhase) {
+  checkpoint(`${label}:launch`);
+  device(["logcat", "-c"]);
+  device([
+    "shell", "am", "start", "-W", "-n", `${packageName}/.MainActivity`,
+    "--es", "t3OutboxRuntimeProofPhase", fixturePhase,
+  ]);
+  const pid = fixturePid();
+  Assert.ok(pid !== null && !launchedPids.has(pid), `${label}: expected a new app process`);
+  launchedPids.add(pid);
+  report[`${label}Process`] = { pid, stopped: false };
+  checkpoint(`${label}:await-receipt`);
+  const deadline = Date.now() + 60_000;
+  while (true) {
+    abort.signal.throwIfAborted();
+    const read = device([
+      "logcat", "-d", "-v", "raw", `--pid=${pid}`, "-s", "T3OutboxRuntimeProof:I", "*:S",
+    ]);
+    const frames = read.stdout.split("\n").filter((line) => line.startsWith("{"));
+    Assert.ok(frames.length <= 1, `${label}: expected one receipt from PID ${pid}`);
+    const frame = frames[0];
+    if (frame !== undefined) {
+      const receipt = JSON.parse(frame) as Record<string, unknown>;
+      report[label] = receipt;
+      save();
+      FS.writeFileSync(
+        Path.join(proof, `${label}-logcat.txt`),
+        device(["logcat", "-d", "-t", "300"]).stdout,
+      );
+      Assert.equal(receipt.schema, 2);
+      Assert.equal(receipt.phase, fixturePhase);
+      return { pid, receipt };
+    }
+    Assert.equal(fixturePid(), pid, `${label}: fixture exited before recording a receipt`);
+    Assert.ok(Date.now() < deadline, `${label}: installed app receipt timed out`);
+    await delay(500, undefined, { signal: abort.signal });
+  }
+}
+
+async function stopFixture(label: string, pid: string) {
+  checkpoint(`${label}:force-stop`);
+  Assert.equal(fixturePid(), pid, `${label}: receipt process must still be running`);
+  device(["shell", "am", "force-stop", packageName]);
+  const deadline = Date.now() + 10_000;
+  while (fixturePid() !== null) {
+    Assert.ok(Date.now() < deadline, `${label}: process survived force-stop`);
+    await delay(250, undefined, { signal: abort.signal });
+  }
+  report[`${label}Process`] = { pid, stopped: true };
+  save();
+}
+
+function assertCompleted(receipt: Record<string, unknown>) {
+  Assert.equal(receipt.status, "passed", JSON.stringify(receipt));
+  Assert.equal(receipt.checkpoint, "complete");
+}
+
+function assertSeededDraft(receipt: Record<string, unknown>) {
+  const attachmentBytes = Buffer.from("T12 offline attachment\nπ 🙂\n", "utf8");
+  Assert.equal(receipt.threadKey, "t12-offline-environment:t12-offline-thread");
+  Assert.equal(receipt.attachmentBase64, attachmentBytes.toString("base64"));
+  Assert.equal(receipt.offlineAction, "wait");
+  const message = receipt.message;
+  Assert.ok(message !== null && typeof message === "object" && "attachments" in message);
+  Assert.ok(Array.isArray(message.attachments) && message.attachments.length === 1);
+  const [attachment] = message.attachments;
+  Assert.ok(attachment !== null && typeof attachment === "object");
+  Assert.equal(typeof attachment.id, "string");
+  Assert.match(attachment.id, /^[0-9a-f-]{36}$/u);
+  Assert.equal(typeof attachment.fileUri, "string");
+  const uri = new URL(attachment.fileUri);
+  Assert.equal(uri.protocol, "file:");
+  Assert.match(uri.pathname, /\/t3-composer-attachments\/[0-9a-f-]{36}-t12-offline\.txt$/u);
+  Assert.deepEqual(message, {
+    environmentId: "t12-offline-environment",
+    threadId: "t12-offline-thread",
+    messageId: "t12-offline-message",
+    commandId: "t12-offline-command",
+    text: "T12 offline draft",
+    attachments: [{
+      id: attachment.id,
+      type: "file",
+      name: "t12-offline.txt",
+      mimeType: "text/plain;charset=utf-8",
+      sizeBytes: attachmentBytes.length,
+      fileUri: attachment.fileUri,
+      source: { _tag: "pasted-text" },
+    }],
+    dispatchMode: "queue",
+    createdAt: "2026-01-01T00:00:00.000Z",
+  });
+}
+
 async function unusedPort(port: number) {
   const server = Net.createServer();
   await new Promise<void>((resolve, reject) => server.once("error", reject).listen(port, "127.0.0.1", resolve));
@@ -142,7 +248,7 @@ try {
     Assert.equal(admission.emulatorVersion, report.emulatorVersion);
     Assert.equal(admission.adbVersion, report.adbVersion);
     report.source = run("git", ["-C", root, "rev-parse", "HEAD", "HEAD^{tree}"]).stdout.trim().split("\n");
-    for (const variant of ["positive", "missing-library"] as const) {
+    for (const variant of ["missing-library", "positive"] as const) {
       checkpoint(`${variant}:package`);
       const apk = Path.join(temporary, `outbox-runtime-${variant}.apk`);
       const members = run("unzip", ["-Z1", apk]).stdout.split("\n");
@@ -163,40 +269,45 @@ try {
       for await (const data of FS.createReadStream(apk)) hash.update(data);
       report[`${variant}ApkSha256`] = hash.digest("hex"); save();
       checkpoint(`${variant}:install`);
-      if (variant === "missing-library") {
-        device(["shell", "am", "force-stop", packageName]);
-        device(["uninstall", packageName]);
-      }
       run(adb, ["-s", serial, "install", "--no-streaming", apk], { timeout: 120_000 });
-      checkpoint(`${variant}:launch`);
-      device(["logcat", "-c"]);
-      device(["shell", "am", "start", "-W", "-n", `${packageName}/.MainActivity`]);
-      let receipt: Record<string, unknown> | undefined;
-      const deadline = Date.now() + 60_000;
-      while (receipt === undefined) {
-        abort.signal.throwIfAborted();
-        const read = device(["logcat", "-d", "-v", "raw", "-s", "T3OutboxRuntimeProof:I", "*:S"]);
-        const frame = read.stdout.split("\n").find((line) => line.startsWith("{"));
-        if (frame !== undefined) receipt = JSON.parse(frame);
-        else {
-          Assert.ok(Date.now() < deadline, `${variant}: installed JS/JNI receipt timed out`);
-          await delay(500, undefined, { signal: abort.signal });
-        }
+      if (variant === "missing-library") {
+        const rejected = await launchFixture(variant, "seed");
+        Assert.deepEqual(rejected.receipt, {
+          schema: 2,
+          phase: "seed",
+          status: "failed",
+          checkpoint: "select-native",
+          failure: "Native outbox policy is unavailable",
+        });
+        await stopFixture(variant, rejected.pid);
+        checkpoint("missing-library:uninstall");
+        device(["uninstall", packageName]);
+        continue;
       }
-      report[variant] = receipt; save();
-      Assert.equal(receipt.schema, 1);
-      if (variant === "positive") {
-        Assert.equal(receipt.status, "passed");
-        Assert.equal(receipt.checkpoint, "complete");
-        Assert.ok(Array.isArray(receipt.matrix) && receipt.matrix.length === 64);
-        Assert.deepEqual([...new Set(receipt.matrix)].sort(), [0, 1, 2]);
-      } else {
-        Assert.equal(receipt.status, "failed");
-        Assert.equal(receipt.checkpoint, "select-native");
-        Assert.equal(receipt.failure, "Native outbox policy is unavailable");
-      }
-      FS.writeFileSync(Path.join(proof, `${variant}-logcat.txt`),
-        device(["logcat", "-d", "-t", "300"]).stdout);
+
+      const seed = await launchFixture("positive", "seed");
+      assertCompleted(seed.receipt);
+      Assert.ok(Array.isArray(seed.receipt.matrix) && seed.receipt.matrix.length === 64);
+      Assert.deepEqual([...new Set(seed.receipt.matrix)].sort(), [0, 1, 2]);
+      assertSeededDraft(seed.receipt);
+      await stopFixture("positive", seed.pid);
+
+      const reopened = await launchFixture("reopen-remove", "reopen-remove");
+      assertCompleted(reopened.receipt);
+      Assert.equal(reopened.receipt.threadKey, seed.receipt.threadKey);
+      Assert.deepEqual(reopened.receipt.message, seed.receipt.message);
+      Assert.equal(reopened.receipt.attachmentBase64, seed.receipt.attachmentBase64);
+      Assert.equal(reopened.receipt.offlineAction, "wait");
+      Assert.equal(reopened.receipt.reconcileAction, "remove");
+      Assert.equal(reopened.receipt.queueCount, 0);
+      Assert.equal(reopened.receipt.attachmentFileExists, false);
+      await stopFixture("reopen-remove", reopened.pid);
+
+      const empty = await launchFixture("reopen-empty", "reopen-empty");
+      assertCompleted(empty.receipt);
+      Assert.equal(empty.receipt.queueCount, 0);
+      Assert.equal(empty.receipt.attachmentFileCount, 0);
+      await stopFixture("reopen-empty", empty.pid);
     }
   }
   report.status = "passed";
@@ -217,7 +328,10 @@ try {
   catch (error) { report.status = "failed"; report.cleanupFailure = String(error); failure ??= error; }
   finally {
     if (ownsAdb) ChildProcess.spawnSync(adb, ["kill-server"], { env: commandEnvironment, timeout: 5_000, stdio: "ignore" });
-    if (ownsScratch && emulatorClosed) FS.rmSync(scratch, { recursive: true, force: true });
+    if (ownsScratch && emulatorClosed) {
+      FS.rmSync(scratch, { recursive: true, force: true });
+      report.scratchRemoved = !FS.existsSync(scratch);
+    }
     else if (ownsScratch) report.scratchRetained = "outbox-runtime-avd";
     save(); process.off("SIGINT", interrupt); process.off("SIGTERM", interrupt);
   }

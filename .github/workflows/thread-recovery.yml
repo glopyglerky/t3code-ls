@@ -444,8 +444,12 @@ jobs:
           grep -F 'Java_expo_modules_t3nativecontrols_T3OutboxDelivery_resolveV1' "$RUNNER_TEMP/outbox-runtime-proof/jni-symbols.txt"
           git show -s --format='%H %T' > "$RUNNER_TEMP/outbox-runtime-proof/source.txt"
           sha256sum "$library" Cargo.lock apps/mobile/modules/t3-native-controls/rust/src/lib.rs \
+            apps/mobile/modules/t3-native-controls/android/src/main/java/expo/modules/t3nativecontrols/T3NativeControlsModule.kt \
             apps/mobile/src/native/outboxDelivery.ts apps/mobile/src/state/thread-outbox-model.ts \
-            apps/mobile/outbox-runtime-proof.ts > "$RUNNER_TEMP/outbox-runtime-proof/inputs.sha256"
+            apps/mobile/src/state/thread-outbox{,-manager,-storage}.ts \
+            apps/mobile/src/lib/{atomic-file,composerImages}.ts apps/mobile/src/state/use-composer-drafts.ts \
+            apps/mobile/outbox-runtime-proof.ts scripts/verify-android-outbox-runtime.ts \
+            > "$RUNNER_TEMP/outbox-runtime-proof/inputs.sha256"
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
           pnpm --dir apps/mobile exec vp test run --project unit --maxWorkers 2 src/native/outboxDelivery.test.ts
@@ -458,7 +462,7 @@ jobs:
           cp "$apk" "$RUNNER_TEMP/outbox-runtime-missing-library.apk"
           (cd "$RUNNER_TEMP" && sha256sum outbox-runtime-positive.apk outbox-runtime-missing-library.apk) \
             > "$RUNNER_TEMP/outbox-runtime-proof/packages.sha256"
-      - name: Execute JNI matrix and reject absent-library fallback without Metro or a server
+      - name: Reject absent JNI and verify outbox persistence across process restarts
         shell: bash
         run: |
           set -euo pipefail
