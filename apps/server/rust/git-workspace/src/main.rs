@@ -56,8 +56,8 @@ fn discover(cwd: &Path) -> Option<RepositoryPaths> {
     })
 }
 
-fn has_remote_ref(cwd: &Path, name: &str) -> Option<bool> {
-    if !name.starts_with("refs/remotes/") {
+fn has_branch_ref(cwd: &Path, name: &str, namespace: &str) -> Option<bool> {
+    if !name.starts_with(namespace) {
         return None;
     }
     let (_, repo) = open_repository(cwd)?;
@@ -114,11 +114,15 @@ fn main() -> ExitCode {
         }
         [operation, cwd, name] if operation == "has-remote-ref" => reply(
             name.to_str()
-                .and_then(|name| has_remote_ref(Path::new(cwd), name)),
+                .and_then(|name| has_branch_ref(Path::new(cwd), name, "refs/remotes/")),
+        ),
+        [operation, cwd, name] if operation == "has-local-ref" => reply(
+            name.to_str()
+                .and_then(|name| has_branch_ref(Path::new(cwd), name, "refs/heads/")),
         ),
         _ => {
             eprintln!(
-                "Usage: t3-code-ls-git-workspace [has-remote-ref|local-branch-names] ABSOLUTE_DIRECTORY [REF]"
+                "Usage: t3-code-ls-git-workspace [has-remote-ref|has-local-ref|local-branch-names] ABSOLUTE_DIRECTORY [REF]"
             );
             ExitCode::from(2)
         }

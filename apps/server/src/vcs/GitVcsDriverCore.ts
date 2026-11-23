@@ -1325,16 +1325,19 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       ),
     );
 
-  const branchExists = (cwd: string, refName: string): Effect.Effect<boolean, GitCommandError> =>
-    executeGit(
+  const branchExists = Effect.fn("GitVcsDriver.branchExists")(function* (cwd: string, refName: string) {
+    const name = `refs/heads/${refName}`;
+    const native = yield* runGix(cwd, ["has-local-ref", cwd, name]);
+    const exists = native === null ? null : Option.getOrNull(decodeGixRefPresence(native));
+    if (exists !== null) return exists;
+    const result = yield* executeGit(
       "GitVcsDriver.branchExists",
       cwd,
-      ["show-ref", "--verify", "--quiet", `refs/heads/${refName}`],
-      {
-        allowNonZeroExit: true,
-        timeoutMs: 5_000,
-      },
-    ).pipe(Effect.map((result) => result.exitCode === 0));
+      ["show-ref", "--verify", "--quiet", name],
+      { allowNonZeroExit: true, timeoutMs: 5_000 },
+    );
+    return result.exitCode === 0;
+  });
 
   const resolveAvailableBranchName = Effect.fn("resolveAvailableBranchName")(function* (
     cwd: string,

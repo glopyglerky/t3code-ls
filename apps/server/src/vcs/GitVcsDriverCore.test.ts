@@ -822,6 +822,28 @@ it.effect.skipIf(gixFixture === undefined)(
     assert.isTrue(calls.slice(symbolicRenameStart).some((call) => call.args.includes("--format=%(refname:strip=2)")));
     yield* git(cwd, ["symbolic-ref", "--delete", "refs/heads/symbolic-fixture"]);
 
+    // Exact existence drives whether a fetched branch is created or updated.
+    yield* git(cwd, ["remote", "add", "fixture-local", cwd]);
+    yield* git(cwd, ["tag", "fixture-materialized"]);
+    const fetchInput = {
+      cwd: linked, remoteName: "fixture-local", remoteBranch: initialBranch,
+      localBranch: "fixture-materialized",
+    };
+    const expectedTarget = yield* git(cwd, ["rev-parse", `refs/heads/${initialBranch}`]);
+    for (const exists of [false, true]) {
+      const fetchStart = calls.length;
+      yield* native.fetchRemoteBranch(fetchInput);
+      assert.equal(yield* git(cwd, ["rev-parse", "refs/heads/fixture-materialized"]), expectedTarget);
+      const commands = calls.slice(fetchStart);
+      assert.equal(commands.filter((call) =>
+        call.command === gixFixture && call.args[0] === "has-local-ref").length, 1);
+      assert.isFalse(commands.some((call) =>
+        call.args.includes("show-ref") && call.args.includes("refs/heads/fixture-materialized")));
+      assert.equal(commands.some((call) =>
+        call.args.includes("branch") && call.args.includes("--force")), exists);
+      yield* git(cwd, ["pack-refs", "--all", "--prune"]);
+    }
+
     const remote = "origin/team";
     const remoteRef = `refs/remotes/${remote}/release`;
     yield* git(cwd, ["update-ref", remoteRef, "HEAD"]);
