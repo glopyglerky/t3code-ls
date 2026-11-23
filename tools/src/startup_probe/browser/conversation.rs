@@ -22,7 +22,7 @@ impl Browser {
         )?;
         self.click_when(
             "the enabled Add folder button",
-            "return [...document.querySelectorAll('[role=dialog] button')].find(e => /^Add \\(/.test(e.textContent.trim()) && !e.disabled && e.getClientRects().length);",
+            r#"return [...document.querySelectorAll('[role=dialog] button')].find(e => /^Add \(/.test(e.getAttribute('aria-label') ?? '') && !e.disabled && e.getClientRects().length);"#,
         )?;
         self.click_when(
             "the fixture project's New thread control",
