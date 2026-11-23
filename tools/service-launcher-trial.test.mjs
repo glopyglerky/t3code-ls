@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import { registerHooks } from "node:module";
@@ -61,8 +62,8 @@ async function fixture(t) {
   return { runtime, userdata, statePath, starts, install, launcher };
 }
 
-async function readReply(file, running) {
-  for (let attempt = 0; attempt < 200; attempt++) {
+async function readReply(file, running, attempts = 200) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     const reply = await fs.readFile(file, "utf8").catch((error) => {
       if (error.code !== "ENOENT") throw error;
     });
@@ -222,6 +223,143 @@ for (const mode of ["missing capability", "wrong digest", "wrong receipt", "chan
     }
   });
 }
+
+test("compiled Rust helper restores a sealed native trial before launcher startup", {
+  skip: process.env.T3_TEST_SEALED_TRIAL_HELPER === undefined,
+  timeout: 120_000,
+}, async (t) => {
+  const executable = process.env.T3_TEST_SEALED_TRIAL_HELPER;
+  assert.ok(isQualifiedNativeHost(), "The compiled-helper proof requires qualified Linux x64");
+  assert.ok(path.isAbsolute(executable), "Pass the exact compiled helper by absolute path");
+  const f = await fixture(t);
+  const home = path.dirname(f.userdata);
+  const id = "63b13571-13c5-411b-ad39-35db4071a854";
+  const dbPath = path.join(f.userdata, "statev2.omdb");
+  const ready = path.join(f.runtime, "compiled-helper-ready.json");
+  const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+  const runHelper = (args, requests) => {
+    const stdout = execFileSync(executable, args, {
+      env: {}, encoding: "utf8", timeout: 30_000, maxBuffer: 1_048_576,
+      input: requests === undefined ? "" : `${requests.map((row) => JSON.stringify(row)).join("\n")}\n`,
+    });
+    const replies = stdout.trim().split("\n").map((line) => JSON.parse(line));
+    for (const reply of replies) assert.equal(reply.ok, true, JSON.stringify(reply));
+    return replies.map((reply) => reply.result);
+  };
+  const commandId = "sealed-launcher-source";
+  const seeded = runHelper(["initialize-local", dbPath], [
+    { operation: "application_bootstrap" },
+    { operation: "commit", batch: {
+      command_id: commandId, request_digest: digest(JSON.stringify({ command: commandId })),
+      expected_revision: 0,
+      events: [{ id: `event:${commandId}`, payload: { text: "preserve this native event" } }],
+      projections: [{ operation: "put", key: "project:one", payload: { title: commandId } }],
+      effects: [{ id: `effect:${commandId}`, payload: { type: "cleanup" } }],
+      result: { accepted: true },
+    } },
+    { operation: "application_generation_identity" },
+    { operation: "receipt", command_id: commandId },
+    { operation: "shutdown" },
+  ]);
+  assert.equal(seeded.length, 5);
+  assert.deepEqual(seeded[3], seeded[1].receipt);
+  runHelper(["owner-lock", path.join(f.userdata, "server-owner.sqlite")], [
+    { operation: "owner_acquire" }, { operation: "owner_activate" },
+  ]);
+  const sourceBytes = await fs.readFile(dbPath);
+  const sourceIdentity = await fs.stat(dbPath, { bigint: true });
+  const previous = await f.install(activeVersion, `
+    const selection = JSON.parse(fs.readFileSync(${JSON.stringify(f.statePath)}, "utf8"));
+    if (selection.activeVersion !== ${JSON.stringify(activeVersion)} ||
+        selection.update.status !== "rolled-back" || context.update.status !== "rolled-back") process.exit(9);
+    fs.writeFileSync(${JSON.stringify(ready)}, JSON.stringify(context));
+    setInterval(() => {}, 1000);
+  `);
+  const target = await f.install(targetVersion, "process.exit(7);");
+  const helperSha256 = digest(await fs.readFile(executable));
+  for (const directory of [previous, target]) {
+    const nativeDirectory = path.join(directory, "native-bin");
+    await fs.mkdir(nativeDirectory);
+    await fs.copyFile(executable, path.join(nativeDirectory, "t3-code-ls-db"));
+    await fs.writeFile(path.join(nativeDirectory, "manifest.json"), JSON.stringify({
+      target: "linux-x64", rustTarget: "x86_64-unknown-linux-gnu",
+      files: { "t3-code-ls-db": helperSha256 },
+    }));
+  }
+  const [capabilities] = runHelper(["trial-capabilities"]);
+  assert.equal(capabilities.sealedTrialRollback, 1);
+  const [backup] = runHelper(["trial-backup", home, id, seeded[2].catalog_sha256]);
+  const checkpoint = path.join(f.runtime, "native-db-backup", `${id}.omdb`);
+  const checkpointBytes = await fs.readFile(checkpoint);
+  const backupReceipt = path.join(f.runtime, "native-db-backup", `${id}.backup-receipt-v1.json`);
+  const backupReceiptBytes = await fs.readFile(backupReceipt);
+  const pending = { protocol: 5, activeVersion, update: {
+    id, fromVersion: activeVersion, targetVersion, dbPath, status: "pending",
+  } };
+  await fs.writeFile(f.statePath, JSON.stringify(pending));
+  const activation = {
+    update_id: id, from_version: activeVersion, target_version: targetVersion,
+    target_entry_sha256: digest(await fs.readFile(path.join(target, "t3"))),
+    target_helper_sha256: helperSha256, target_schema_sha256: capabilities.targetSchemaSha256,
+  };
+  const [prepared] = runHelper(["trial-prepare-isolated", home, id], [{
+    update_id: id, database: backup.database,
+    checkpoint: { catalog_sha256: seeded[2].catalog_sha256,
+      rows: backup.backup.rows, checksum: backup.backup.checksum },
+    target_schema_sha256: capabilities.targetSchemaSha256, activation,
+  }]);
+  const [published] = runHelper(["trial-publish-sealed", home, id]);
+  assert.deepEqual(published.activation, activation);
+  assert.deepEqual(published.database, prepared.database);
+  const sealedIdentity = await fs.stat(dbPath, { bigint: true });
+  const sealedBytes = await fs.readFile(dbPath);
+  assert.notEqual(sealedIdentity.ino, sourceIdentity.ino);
+  const physicalReceipt = path.join(f.userdata, `.statev2-trial-${id}.receipt-v1.json`);
+  const receiptBytes = await fs.readFile(physicalReceipt);
+  const expectedState = { ...initial, update: {
+    id, fromVersion: activeVersion, targetVersion, status: "rolled-back", reason: "sealed-trial-recovery",
+  } };
+  let committedStateIdentity;
+  for (const restart of [false, true]) {
+    await fs.rm(ready, { force: true });
+    const launcher = f.launcher(restart ? expectedState : pending, {
+      T3_CODE_LS_SEALED_TRIAL_RECOVERY: "1",
+    });
+    const running = launcher.run().then(() => "completed", (error) => error.message);
+    try {
+      const context = await readReply(ready, running, 6000);
+      assert.equal(context.protocol, SERVICE_LAUNCHER_PROTOCOL);
+      assert.equal(context.childVersion, activeVersion);
+      assert.deepEqual(await readServiceState(f.statePath), expectedState);
+      const restored = await fs.stat(dbPath, { bigint: true });
+      assert.equal(restored.dev, sourceIdentity.dev);
+      assert.equal(restored.ino, sourceIdentity.ino);
+      assert.deepEqual(await fs.readFile(dbPath), sourceBytes);
+      const stateIdentity = await fs.stat(f.statePath, { bigint: true });
+      if (restart) {
+        assert.equal(stateIdentity.ino, committedStateIdentity.ino);
+        assert.equal(stateIdentity.mtimeNs, committedStateIdentity.mtimeNs);
+      } else committedStateIdentity = stateIdentity;
+    } finally {
+      await launcher.stop("SIGTERM");
+      await running;
+    }
+  }
+  const failed = path.join(f.userdata, `.statev2-failed-sealed-${id}.omdb`);
+  assert.equal((await fs.stat(failed, { bigint: true })).ino, sealedIdentity.ino);
+  assert.deepEqual(await fs.readFile(failed), sealedBytes);
+  assert.deepEqual(await fs.readFile(checkpoint), checkpointBytes);
+  assert.deepEqual(await fs.readFile(backupReceipt), backupReceiptBytes);
+  assert.deepEqual(await fs.readFile(physicalReceipt), receiptBytes);
+  assert.equal(await fs.readFile(f.starts, "utf8"), `${activeVersion}\n${activeVersion}\n`);
+  const [restoredReceipt] = runHelper(["read-only-local", dbPath], [
+    { operation: "receipt", command_id: commandId }, { operation: "shutdown" },
+  ]);
+  assert.deepEqual(restoredReceipt, seeded[3]);
+  t.diagnostic(JSON.stringify({ helperSha256, sourceSha256: digest(sourceBytes),
+    sealedSha256: digest(sealedBytes), checkpointSha256: digest(checkpointBytes),
+    restoredOriginalInode: true, selectedPreviousRuntime: true, restartPreservedSelection: true }));
+});
 
 for (const source of ["native", "unknown"]) {
   processTest(`refuses a live ${source} update before stopping the active child`, async (t) => {
