@@ -60,3 +60,20 @@ export function linkToRootPath(href: string, toAction: (href: string) => Navigat
     });
   });
 }
+
+/** App services may acknowledge a retained input only after its action is dispatched. */
+export function linkToRootPathAndWaitForDispatch(
+  href: string,
+  toAction: (href: string) => NavigationAction,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    whenRootNavigationReady(() => {
+      try {
+        linkToRootPath(href, toAction);
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}

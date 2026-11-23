@@ -108,7 +108,7 @@ describe("routeAgentNotificationResponseOnce", () => {
   it("retries a failed initial response and deduplicates it after navigation succeeds", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const response = responseWithData({ deepLink: "/threads/env/thread" }) as NotificationResponse;
-    const handledResponseIds = new Set<string>();
+    const responses = new Map<string, Promise<void>>();
     const navigate = vi.fn().mockImplementationOnce(() => {
       throw new Error("navigation not ready");
     });
@@ -118,11 +118,11 @@ describe("routeAgentNotificationResponseOnce", () => {
         getLastResponse: () => Promise.resolve(response),
         clearLastResponse,
         handleResponse: (response) =>
-          routeAgentNotificationResponseOnce({ handledResponseIds, response, navigate }),
+          routeAgentNotificationResponseOnce({ responses, response, navigate }),
       });
 
     await consume();
-    expect(handledResponseIds.size).toBe(0);
+    expect(responses.size).toBe(0);
     expect(clearLastResponse).not.toHaveBeenCalled();
 
     await consume();
@@ -130,7 +130,7 @@ describe("routeAgentNotificationResponseOnce", () => {
     expect(navigate).toHaveBeenLastCalledWith("/threads/env/thread");
     expect(clearLastResponse).toHaveBeenCalledOnce();
 
-    routeAgentNotificationResponseOnce({ handledResponseIds, response, navigate });
+    await routeAgentNotificationResponseOnce({ responses, response, navigate });
     expect(navigate).toHaveBeenCalledTimes(2);
   });
 
@@ -139,7 +139,7 @@ describe("routeAgentNotificationResponseOnce", () => {
       environmentId: "env",
       threadId: "\ud800",
     }) as NotificationResponse;
-    const handledResponseIds = new Set<string>();
+    const responses = new Map<string, Promise<void>>();
     const navigate = vi.fn();
     const clearLastResponse = vi.fn(() => Promise.resolve());
 
@@ -147,33 +147,43 @@ describe("routeAgentNotificationResponseOnce", () => {
       getLastResponse: () => Promise.resolve(response),
       clearLastResponse,
       handleResponse: (response) =>
-        routeAgentNotificationResponseOnce({ handledResponseIds, response, navigate }),
+        routeAgentNotificationResponseOnce({ responses, response, navigate }),
     });
 
     expect(navigate).not.toHaveBeenCalled();
     expect(clearLastResponse).toHaveBeenCalledOnce();
-    expect(handledResponseIds.has("notification-1")).toBe(true);
+    expect(responses.has("notification-1")).toBe(true);
   });
 
-  it("does not navigate twice when the initial and listener responses refer to one notification", () => {
-    const handledResponseIds = new Set<string>();
-    const navigations: Array<string> = [];
+  it("waits for dispatch before clearing a retained cold-start tap", async () => {
+    const responses = new Map<string, Promise<void>>();
     const response = responseWithData({
       environmentId: "env",
       threadId: "thread",
+    }) as NotificationResponse;
+    const dispatched = Promise.withResolvers<void>();
+    const started = Promise.withResolvers<void>();
+    const navigate = vi.fn(() => {
+      started.resolve();
+      return dispatched.promise;
     });
+    const clearLastResponse = vi.fn(() => Promise.resolve());
+    const handleResponse = (response: NotificationResponse) =>
+      routeAgentNotificationResponseOnce({ responses, response, navigate });
 
-    routeAgentNotificationResponseOnce({
-      handledResponseIds,
-      response,
-      navigate: (deepLink) => navigations.push(deepLink),
+    const coldStart = consumeLastAgentNotificationResponse({
+      getLastResponse: () => Promise.resolve(response),
+      clearLastResponse,
+      handleResponse,
     });
-    routeAgentNotificationResponseOnce({
-      handledResponseIds,
-      response,
-      navigate: (deepLink) => navigations.push(deepLink),
-    });
+    await started.promise;
+    const liveListener = handleResponse(response);
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/threads/env/thread");
+    expect(clearLastResponse).not.toHaveBeenCalled();
 
-    expect(navigations).toEqual(["/threads/env/thread"]);
+    dispatched.resolve();
+    await Promise.all([coldStart, liveListener]);
+    expect(clearLastResponse).toHaveBeenCalledOnce();
+    expect(navigate).toHaveBeenCalledOnce();
   });
 });

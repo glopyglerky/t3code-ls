@@ -97,6 +97,7 @@ import {
   attachRootNavigation,
   flushRootNavigationQueue,
   linkToRootPath,
+  linkToRootPathAndWaitForDispatch,
   rootNavigationRef,
 } from "./lib/rootNavigation";
 import { pruneNewTaskFlowStates } from "./features/threads/new-task-flow-state";
@@ -204,7 +205,7 @@ const appServiceDisposers = [
   installThreadOutboxDelivery(selectOutboxDeliveryResolver()),
   installComposerAttachmentUploads(),
   startIncomingShareInbox(),
-  installAgentNotificationNavigation(linkToAppPath),
+  installAgentNotificationNavigation((href) => linkToRootPathAndWaitForDispatch(href, appLinkAction)),
   installAppShortcuts(linkToAppPath),
   installAppUpdateChecks(),
   installShowcaseCapture(rootPathnameFromState),

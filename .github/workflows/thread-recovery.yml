@@ -73,6 +73,12 @@ jobs:
           pnpm --filter @t3tools/mobile exec vp test run --project unit --maxWorkers 2 \
             src/connection/environment-owned-data-cleanup.test.ts \
             src/connection/storage.test.ts src/connection/environment-removal-recovery.test.ts
+      - name: Retain cold-start notification taps until navigation dispatches
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-notification-')
+        working-directory: apps/mobile
+        run: |
+          pnpm exec vp test run --project unit --maxWorkers 2 \
+            src/lib/rootNavigation.test.ts src/features/agent-awareness/notificationNavigation.test.ts
       - name: Exercise mobile outbox recovery
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-')
         working-directory: apps/mobile
