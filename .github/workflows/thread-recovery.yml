@@ -154,7 +154,7 @@ jobs:
   mobile-outbox-ios:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
     runs-on: macos-15
-    timeout-minutes: 35
+    timeout-minutes: 75
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
@@ -203,6 +203,7 @@ jobs:
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
       - name: Link the Rust outbox library into the generated iOS app
+        timeout-minutes: 60
         env:
           APP_VARIANT: development
           EXPO_NO_GIT_STATUS: "1"
@@ -224,6 +225,15 @@ jobs:
           workspace="${workspaces[0]}"
           scheme="$(basename "$workspace" .xcworkspace)"
           derived="$RUNNER_TEMP/outbox-ios-derived"
+          (
+            while sleep 30; do
+              printf '%s iOS build progress, %s log lines\n' \
+                "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$(wc -l < "$evidence/xcodebuild.log")"
+              tail -2 "$evidence/xcodebuild.log" | cut -c 1-240
+            done
+          ) &
+          progress_pid=$!
+          trap 'kill "$progress_pid" 2>/dev/null || true; wait "$progress_pid" 2>/dev/null || true' EXIT
           xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Debug \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath "$derived" \
             CODE_SIGNING_ALLOWED=NO ENABLE_DEBUG_DYLIB=NO ARCHS=arm64 -jobs 2 build \
@@ -233,6 +243,9 @@ jobs:
               tail -120 "$evidence/xcodebuild.log"
               exit 1
             }
+          kill "$progress_pid" 2>/dev/null || true
+          wait "$progress_pid" 2>/dev/null || true
+          trap - EXIT
           applications=("$derived"/Build/Products/Debug-iphonesimulator/*.app)
           test "${#applications[@]}" -eq 1
           test -d "${applications[0]}"
