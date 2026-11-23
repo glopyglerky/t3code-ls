@@ -2,7 +2,7 @@ name: Rust composer browser proof
 
 on:
   push:
-    branches: ["candidate/t3code-ls-t01-offsets-*"]
+    branches: ["candidate/t3code-ls-t01-offsets-*", "candidate/t3code-ls-t01-built-composer-*"]
 
 permissions:
   contents: read
@@ -16,6 +16,7 @@ jobs:
       CARGO_INCREMENTAL: "0"
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       GIT_TERMINAL_PROMPT: "0"
+      NODE_OPTIONS: --max-old-space-size=6144
       VP_REMOTE_CACHE: "off"
       VP_REMOTE_CACHE_URL: ""
       WASM_BINDGEN_VERSION: "0.2.130"
@@ -52,10 +53,36 @@ jobs:
           pnpm install --frozen-lockfile
           node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
       - name: Exercise the composer with the retained offset mapper
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-offsets-')
         working-directory: apps/web
         run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/ComposerPromptEditorTiptap.input.browser.test.tsx
       - name: Exercise the real composer with Rust offset mapping
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-offsets-')
         env:
           VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
         working-directory: apps/web
         run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/ComposerPromptEditorTiptap.input.browser.test.tsx
+      - name: Build and open the application with the Rust composer binding
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
+        env:
+          T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
+          VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
+        run: |
+          proof="$RUNNER_TEMP/built-composer-proof"
+          mkdir "$proof"
+          node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/hybrid-client-persistence-tsconfig.json
+          pnpm --dir apps/web run build
+          env -u T3_CODE_LS_TOOLCHAIN -u T3_CODE_LS_SYSROOT T3_CODE_LS_IMPLEMENTATION=upstream \
+            pnpm --dir apps/server run build:bundle
+          sha256sum apps/web/dist/client-text-wasm/composer_offsets.js \
+            apps/web/dist/client-text-wasm/composer_offsets_bg.wasm apps/server/dist/bin.mjs \
+            > "$proof/application.sha256"
+          node apps/web/scripts/verify-hybrid-client.ts "$proof" upstream
+      - name: Retain the bundled browser evidence
+        if: always() && startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: built-composer-proof
+          path: ${{ runner.temp }}/built-composer-proof/
+          if-no-files-found: warn
+          retention-days: 14

@@ -34,6 +34,8 @@ const timeoutMs = 90_000;
 const startupTimeoutMs = 180_000;
 const replayPrompt = "Replay: showcase";
 const replayMarker = "This turn is a replay.";
+const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
+const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
 const decodeSnapshot = Schema.decodeUnknownSync(
   Schema.toCodecJson(OrchestrationV2ThreadDetailSnapshot),
 );
@@ -138,7 +140,7 @@ async function startApplication(
   webPort: number,
   logPath: string,
 ): Promise<OwnedApplication> {
-  const env = { ...process.env };
+  const env: NodeJS.ProcessEnv = bundledClient ? { PATH: process.env.PATH } : { ...process.env };
   // Component overrides would invalidate an explicit upstream/native comparison.
   for (const name of Object.keys(env)) {
     if (/^T3_CODE_LS_.*_EXECUTABLE$/.test(name)) delete env[name];
@@ -154,30 +156,45 @@ async function startApplication(
     FORCE_COLOR: "0",
     NO_COLOR: "1",
   });
+  if (bundledClient) Object.assign(env, { HOME: stateDirectory });
   NodeFS.writeFileSync(logPath, "");
+  const args = bundledClient
+    ? [
+        "apps/server/dist/bin.mjs",
+        "serve",
+        "--base-dir",
+        stateDirectory,
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String(serverPort),
+        "--no-browser",
+        "--no-auto-bootstrap-project-from-cwd",
+      ]
+    : [
+        "scripts/dev-runner.ts",
+        "dev",
+        "--home-dir",
+        stateDirectory,
+        "--no-seed",
+        "--no-auto-bootstrap-project-from-cwd",
+        "--port",
+        String(serverPort),
+      ];
   const child = ChildProcess.spawn(
     process.execPath,
-    [
-      "scripts/dev-runner.ts",
-      "dev",
-      "--home-dir",
-      stateDirectory,
-      "--no-seed",
-      "--no-auto-bootstrap-project-from-cwd",
-      "--port",
-      String(serverPort),
-    ],
+    args,
     { cwd: repoRoot, env, detached: true, stdio: ["ignore", "pipe", "pipe"] },
   );
   const pid = child.pid;
   if (pid === undefined) {
     await new Promise<never>((_, reject) => child.once("error", reject));
-    throw new Error("The development runner did not receive a process ID");
+    throw new Error("The application did not receive a process ID");
   }
 
   let stopping = false;
   let pairingUrl: string | undefined;
-  let viteReady = false;
+  let webReady = bundledClient;
   let readyResolve: () => void;
   let readyReject: (error: Error) => void;
   const ready = new Promise<void>((resolve, reject) => {
@@ -192,7 +209,7 @@ async function startApplication(
   child.once("error", (error) => readyReject(error));
   child.once("exit", (code, signal) => {
     if (!stopping)
-      readyReject(new Error(`Development runner exited (${code ?? signal}); see ${logPath}`));
+      readyReject(new Error(`Application exited (${code ?? signal}); see ${logPath}`));
   });
 
   function consumeLine(raw: string): void {
@@ -201,14 +218,17 @@ async function startApplication(
     const candidate = line.match(/https?:\/\/[^\s"'<>]+\/pair#token=[^\s"'<>]+/u)?.[0];
     if (candidate) {
       const url = new URL(candidate);
-      if (url.origin !== `http://localhost:${webPort}`) {
+      const expectedOrigin = bundledClient
+        ? `http://127.0.0.1:${serverPort}`
+        : `http://localhost:${webPort}`;
+      if (url.origin !== expectedOrigin) {
         readyReject(new Error(`Pairing URL has an unexpected origin: ${url.origin}`));
       } else {
         pairingUrl = candidate;
       }
     }
-    if (/\bready in\b/iu.test(line)) viteReady = true;
-    if (pairingUrl && viteReady) readyResolve();
+    if (/\bready in\b/iu.test(line)) webReady = true;
+    if (pairingUrl && webReady) readyResolve();
   }
 
   for (const stream of [child.stdout, child.stderr]) {
@@ -443,6 +463,23 @@ async function exercise(implementation: Implementation): Promise<void> {
   NodeFS.mkdirSync(directory, { recursive: true });
   const workspace = NodePath.join(runRoot, implementation, "hybrid-fixture");
   const stateDirectory = NodePath.join(runRoot, implementation, "state");
+  if (bundledClient) {
+    const settingsDirectory = NodePath.join(stateDirectory, "userdata");
+    NodeFS.mkdirSync(settingsDirectory, { recursive: true });
+    writeJson(NodePath.join(settingsDirectory, "settings.json"), {
+      providerInstances: {
+        devReplay: {
+          displayName: "Replay (dev)",
+          driver: "acpRegistry",
+          config: {
+            source: "local",
+            commandPath: process.execPath,
+            commandArgs: [NodePath.join(repoRoot, "apps/server/scripts/dev-replay-agent.ts")],
+          },
+        },
+      },
+    });
+  }
   NodeFS.mkdirSync(NodePath.join(workspace, "src"), { recursive: true });
   NodeFS.writeFileSync(
     NodePath.join(workspace, "package.json"),
@@ -476,6 +513,8 @@ async function exercise(implementation: Implementation): Promise<void> {
     schemaVersion: 1,
     status: "running",
     implementation,
+    client: bundledClient ? "built" : "development",
+    composer: "unverified",
     scope:
       "Linux original web client; local project; composer submission; free ACP showcase approval; reload; same-state server restart",
     startedAt: new Date().toISOString(),
@@ -575,6 +614,11 @@ async function exercise(implementation: Implementation): Promise<void> {
     starting("normal composer submission and controlled approval");
     const threadId = await submitShowcase(page);
     proof.threadId = threadId;
+    const usedRustComposer = await page.evaluate(
+      () => performance.getEntriesByName("t3-composer-rust-offsets").length === 1,
+    );
+    Assert.equal(usedRustComposer, expectsRustComposer, "The composer must use the selected mapper");
+    proof.composer = usedRustComposer ? "rust-wasm" : "retained";
     const approval = page.getByRole("button", { name: /^(Yes|Approve)$/u }).first();
     await approval.waitFor({ state: "visible" });
     const pending = await readThreadSnapshot(page, threadId);
