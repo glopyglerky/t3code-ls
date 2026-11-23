@@ -670,6 +670,7 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
     let checkpoint = runtime.join(format!("native-db-backup/{UPDATE}.omdb"));
     let trial = state.join(format!(".statev2-trial-{UPDATE}.omdb"));
     let working = trial.with_extension("staging");
+    let receipt_path = trial.with_extension("receipt-v1.json");
     let before = fs::read(&live).unwrap();
     let original_checkpoint = fs::read(&checkpoint).unwrap();
 
@@ -715,6 +716,9 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
     );
     assert!(!trial.exists());
 
+    // A previous helper may have published the candidate just before it stopped.
+    fs::copy(&checkpoint, &trial).unwrap();
+    assert!(!receipt_path.exists());
     let mut previous_preparation = None;
     for _ in 0..2 {
         let prepared = prepare(&request);
@@ -724,6 +728,10 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
         let trial_bytes = fs::read(&trial).unwrap();
         assert_eq!(prepared["result"]["file_sha256"], sha256(&trial_bytes));
         let receipt = &prepared["result"];
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(&receipt_path).unwrap()).unwrap(),
+            json!({ "request": request, "preparation": receipt })
+        );
         assert_eq!(
             verify(&request, receipt),
             json!({"ok": true, "result": {"verified": true}})
@@ -737,12 +745,13 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
         );
         if let Some(previous) = previous_preparation.replace(receipt.clone()) {
             assert_eq!(
-                verify(&request, &previous)["error"]["kind"],
-                "incompatible_store"
+                previous, *receipt,
+                "Retry must return the same durable trial"
             );
         }
         let owner = OwnerLock::acquire(&owner_path).unwrap();
         assert_eq!(verify(&request, receipt)["error"]["kind"], "writer_busy");
+        assert_eq!(prepare(&request)["error"]["kind"], "writer_busy");
         drop(owner);
         let reopened = Store::open_read_only(&trial).await.unwrap();
         assert!(reopened.read_receipt("original").await.unwrap().is_some());
@@ -760,6 +769,20 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
     }
 
     let old_result = fs::read(&trial).unwrap();
+    let old_receipt = fs::read(&receipt_path).unwrap();
+    fs::write(&receipt_path, vec![b' '; 8 * 1024 + 1]).unwrap();
+    assert_eq!(prepare(&request)["error"]["kind"], "incompatible_store");
+    assert_eq!(fs::read(&trial).unwrap(), old_result);
+    fs::write(&receipt_path, &old_receipt).unwrap();
+
+    let displaced = trial.with_extension("displaced");
+    fs::rename(&trial, &displaced).unwrap();
+    fs::copy(&displaced, &trial).unwrap();
+    assert_eq!(prepare(&request)["error"]["kind"], "incompatible_store");
+    assert_eq!(fs::read(&receipt_path).unwrap(), old_receipt);
+    fs::rename(&displaced, &trial).unwrap();
+    assert_eq!(prepare(&request)["ok"], true);
+
     let store = Store::open_local(&live).await.unwrap();
     store.commit(&batch("later", 1)).await.unwrap();
     store.shutdown().await.unwrap();
@@ -768,6 +791,7 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
     assert_eq!(fs::read(&live).unwrap(), later);
     assert_eq!(fs::read(&checkpoint).unwrap(), original_checkpoint);
     assert_eq!(fs::read(&trial).unwrap(), old_result);
+    assert_eq!(fs::read(&receipt_path).unwrap(), old_receipt);
     assert_eq!(fs::read(&selection).unwrap(), b"existing runtime selection");
 }
 

@@ -1,16 +1,20 @@
 use super::{
-    IsolatedTrialPreparation, IsolatedTrialRequest, MAX_TRIAL_FILE_BYTES, TrialFileIdentity,
-    TrialRestoreDirectories, TrialSnapshot, checked_generation, io_error, trial_file_digest,
-    trial_file_identity, verify_restore_snapshot,
+    IsolatedTrialPreparation, IsolatedTrialRequest, IsolatedTrialVerification,
+    MAX_TRIAL_FILE_BYTES, TrialFileIdentity, TrialRestoreDirectories, TrialSnapshot,
+    checked_generation, io_error, trial_file_digest, trial_file_identity,
+    validate_isolated_trial_preparation, verify_restore_snapshot,
 };
 use crate::application_bootstrap::bootstrap_schema_sha256;
 use crate::application_server_ownership::OwnerLock;
 use crate::backend::{Backend, path_identity};
 use crate::{Error, Result, Store};
 use std::fs;
-use std::io;
-use std::os::unix::fs::MetadataExt;
+use std::io::{self, Read};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+use tempfile::NamedTempFile;
+
+const MAX_RECEIPT_BYTES: u64 = 8 * 1024;
 
 struct TrialInput {
     path: PathBuf,
@@ -52,6 +56,35 @@ fn disposable_file_exists(path: &Path) -> Result<bool> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(io_error(error)),
     }
+}
+
+fn read_preparation_receipt(path: &Path) -> Result<Option<IsolatedTrialVerification>> {
+    let file = match fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
+            return Err(Error::IncompatibleStore);
+        }
+        Err(error) => return Err(io_error(error)),
+    };
+    let metadata = file.metadata().map_err(io_error)?;
+    if !metadata.is_file() || metadata.nlink() != 1 || metadata.len() > MAX_RECEIPT_BYTES {
+        return Err(Error::IncompatibleStore);
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_RECEIPT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(io_error)?;
+    if bytes.len() as u64 > MAX_RECEIPT_BYTES {
+        return Err(Error::IncompatibleStore);
+    }
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|_| Error::IncompatibleStore)
 }
 
 struct TrialLease {
@@ -99,6 +132,24 @@ impl TrialLease {
         self.live.verify()?;
         self.checkpoint.verify()
     }
+
+    async fn verify_candidate(&self, preparation: &IsolatedTrialPreparation) -> Result<()> {
+        let candidate = TrialInput::open(self.trial.clone(), &preparation.snapshot).await?;
+        if candidate.identity != preparation.database || candidate.sha256 != preparation.file_sha256
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        candidate.store.verify_bootstrap_schema().await?;
+        self.verify_inputs()?;
+        candidate.verify()
+    }
+
+    fn sync_publication(&self) -> Result<()> {
+        self.directories
+            .state
+            .sync_all()
+            .map_err(|_| Error::UnknownCommit)
+    }
 }
 
 pub(super) async fn verify(
@@ -107,13 +158,7 @@ pub(super) async fn verify(
     preparation: IsolatedTrialPreparation,
 ) -> Result<()> {
     let lease = TrialLease::open(home, &request).await?;
-    let candidate = TrialInput::open(lease.trial.clone(), &preparation.snapshot).await?;
-    if candidate.identity != preparation.database || candidate.sha256 != preparation.file_sha256 {
-        return Err(Error::IncompatibleStore);
-    }
-    candidate.store.verify_bootstrap_schema().await?;
-    lease.verify_inputs()?;
-    candidate.verify()
+    lease.verify_candidate(&preparation).await
 }
 
 pub(super) async fn prepare(
@@ -122,11 +167,20 @@ pub(super) async fn prepare(
 ) -> Result<IsolatedTrialPreparation> {
     let lease = TrialLease::open(home, &request).await?;
     let trial = &lease.trial;
+    let receipt = trial.with_extension("receipt-v1.json");
+    if let Some(saved) = read_preparation_receipt(&receipt)? {
+        if saved.request != request {
+            return Err(Error::IncompatibleStore);
+        }
+        validate_isolated_trial_preparation(&request, &saved.preparation)?;
+        lease.verify_candidate(&saved.preparation).await?;
+        lease.sync_publication()?;
+        return Ok(saved.preparation);
+    }
     let working = trial.with_extension("staging");
     disposable_file_exists(trial)?;
-    // An interrupted bootstrap may have partially changed its copy. Start
-    // each attempt from the same checkpoint and leave the preceding result
-    // available until a new candidate has been verified.
+    // Without a receipt, restart from the immutable checkpoint. An interrupted
+    // bootstrap may have left a partially changed copy.
     if disposable_file_exists(&working)? {
         fs::remove_file(&working).map_err(io_error)?;
     }
@@ -174,11 +228,7 @@ pub(super) async fn prepare(
     disposable_file_exists(trial)?;
     candidate.db.verify_identity()?;
     fs::rename(&working, trial).map_err(io_error)?;
-    lease
-        .directories
-        .state
-        .sync_all()
-        .map_err(|_| Error::UnknownCommit)?;
+    lease.sync_publication()?;
     lease.verify_inputs().map_err(|_| Error::UnknownCommit)?;
     let published = candidate
         .db
@@ -187,8 +237,8 @@ pub(super) async fn prepare(
     if trial_file_identity(&published).map_err(|_| Error::UnknownCommit)? != (database.clone(), 1) {
         return Err(Error::UnknownCommit);
     }
-    Ok(IsolatedTrialPreparation {
-        update_id: request.update_id,
+    let preparation = IsolatedTrialPreparation {
+        update_id: request.update_id.clone(),
         database,
         snapshot: TrialSnapshot {
             catalog_sha256: generation.catalog_sha256,
@@ -196,6 +246,21 @@ pub(super) async fn prepare(
             checksum: fingerprint.checksum,
         },
         file_sha256,
-        target_schema_sha256: request.target_schema_sha256,
-    })
+        target_schema_sha256: request.target_schema_sha256.clone(),
+    };
+    let verification = IsolatedTrialVerification {
+        request,
+        preparation,
+    };
+    let mut staged_receipt =
+        NamedTempFile::new_in(TrialRestoreDirectories::pinned(&lease.directories.state))
+            .map_err(io_error)?;
+    serde_json::to_writer(staged_receipt.as_file_mut(), &verification)
+        .map_err(|_| Error::UnknownCommit)?;
+    staged_receipt.as_file().sync_all().map_err(io_error)?;
+    staged_receipt
+        .persist_noclobber(receipt)
+        .map_err(|error| io_error(error.error))?;
+    lease.sync_publication()?;
+    Ok(verification.preparation)
 }
