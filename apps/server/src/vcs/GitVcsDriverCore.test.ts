@@ -741,6 +741,9 @@ it.effect.skipIf(gixFixture === undefined)(
     const { initialBranch } = yield* initRepoWithCommit(cwd);
     const linked = path.join(scratch, "linked ");
     yield* git(cwd, ["worktree", "add", "-b", "linked-branch", linked]);
+    for (const name of ["ZZ-last", "aa-first", "作業/修正", "t3-fix/child", "T3-FIX-1"]) {
+      yield* git(cwd, ["branch", name]);
+    }
     const alias = path.join(scratch, "alias");
     NodeFS.symlinkSync(nested, alias);
     const unborn = path.join(scratch, "unborn");
@@ -771,6 +774,53 @@ it.effect.skipIf(gixFixture === undefined)(
     const configuredStart = calls.length;
     assert.deepEqual((yield* configured.listRefs({ cwd: linked })).refs, detached.refs);
     assert.isFalse(calls.slice(configuredStart).some((call) => call.command === gixFixture));
+
+    const readNativeNames = Effect.fn("GitVcsDriver.test.nativeNames")(function* (location: string) {
+      const output = yield* delegate.string(ChildProcess.make(gixFixture!, ["local-branch-names", location]));
+      return Schema.decodeUnknownSync(Schema.fromJsonString(Schema.NullOr(Schema.Array(Schema.String))))(output);
+    });
+    const checkNames = Effect.fn("GitVcsDriver.test.checkNativeNames")(function* (location: string) {
+      const expected = (yield* git(location, ["for-each-ref", "--format=%(refname:strip=2)", "refs/heads/"]))
+        .split("\n").filter(Boolean);
+      assert.deepEqual(yield* readNativeNames(location), expected);
+    });
+    yield* checkNames(cwd);
+    yield* checkNames(linked);
+    assert.deepEqual(yield* readNativeNames(unborn), []);
+    const head = yield* git(cwd, ["rev-parse", "HEAD"]);
+    const manyBranches = Array.from({ length: 400 }, (_, index) =>
+      `update refs/heads/fixture-${String(index).padStart(4, "0")}-${"x".repeat(96)} ${head}`,
+    );
+    yield* gitWithStdin(cwd, ["update-ref", "--stdin"], `${manyBranches.join("\n")}\n`);
+    yield* checkNames(nested);
+    yield* git(cwd, ["pack-refs", "--all", "--prune"]);
+    yield* checkNames(linked);
+    yield* git(cwd, ["branch", "loose-after-pack"]);
+    yield* checkNames(cwd);
+
+    yield* git(cwd, ["branch", "rename-source"]);
+    const renameInput = { cwd: linked, oldBranch: "rename-source", newBranch: "t3-fix" };
+    const expectedName = yield* retained.renameBranch(renameInput);
+    yield* git(cwd, ["branch", "-m", "--", expectedName.branch, "rename-source"]);
+    const renameStart = calls.length;
+    assert.deepEqual(yield* native.renameBranch(renameInput), expectedName);
+    assert.equal(expectedName.branch, "t3-fix-2");
+    assert.equal(calls.slice(renameStart).filter((call) =>
+      call.command === gixFixture && call.args[0] === "local-branch-names").length, 1);
+    assert.isFalse(calls.slice(renameStart).some((call) => call.args.includes("--format=%(refname:strip=2)")));
+    yield* git(cwd, ["branch", "-m", "--", expectedName.branch, "rename-source"]);
+    const configuredRenameStart = calls.length;
+    assert.deepEqual(yield* configured.renameBranch(renameInput), expectedName);
+    assert.isTrue(calls.slice(configuredRenameStart).some((call) => call.args.includes("--format=%(refname:strip=2)")));
+    assert.isFalse(calls.slice(configuredRenameStart).some((call) => call.command === gixFixture));
+
+    yield* git(cwd, ["symbolic-ref", "refs/heads/symbolic-fixture", `refs/heads/${initialBranch}`]);
+    assert.equal(yield* readNativeNames(cwd), null);
+    yield* git(cwd, ["branch", "-m", "--", expectedName.branch, "rename-source"]);
+    const symbolicRenameStart = calls.length;
+    assert.deepEqual(yield* native.renameBranch(renameInput), expectedName);
+    assert.isTrue(calls.slice(symbolicRenameStart).some((call) => call.args.includes("--format=%(refname:strip=2)")));
+    yield* git(cwd, ["symbolic-ref", "--delete", "refs/heads/symbolic-fixture"]);
 
     const remote = "origin/team";
     const remoteRef = `refs/remotes/${remote}/release`;
