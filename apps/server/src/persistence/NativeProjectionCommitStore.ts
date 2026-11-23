@@ -311,7 +311,7 @@ export const make = Effect.gen(function* () {
         const bytes =
           encoded.payload_json.length >= MAX_PROJECTION_BATCH_BYTES
             ? MAX_PROJECTION_BATCH_BYTES + 1
-            : Buffer.byteLength(JSON.stringify(encoded)) + 1;
+            : Buffer.byteLength(yield* encodeJson(encoded)) + 1;
         if (bytes > MAX_PROJECTION_BATCH_BYTES) {
           yield* flush;
           yield* applyOne(encoded);
