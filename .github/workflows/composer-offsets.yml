@@ -137,6 +137,7 @@ jobs:
           trap 'rm -rf -- apps/web/public/pairing-wasm' EXIT
           for renderer in retained dioxus; do
             if [[ "$renderer" == dioxus ]]; then export VITE_T3_CODE_LS_GUEST_NAME_RENDERER=dioxus; fi
+            # apps/web/src/components/guest/GuestNameForm.browser.test.tsx
             pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
               src/components/guest/GuestPage.browser.test.tsx src/components/guest/GuestNameForm.browser.test.tsx
             pnpm --dir apps/web run build
@@ -441,7 +442,7 @@ jobs:
             ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/built-composer-proof/scheduled-relay-$boundary" "$boundary"
           done
       - name: Retain the bundled browser evidence
-        if: always() && (env.PAIRING_PROOF == 'true' || env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-'))
+        if: always() && (env.PAIRING_PROOF == 'true' || env.GUEST_NAME_PROOF == 'true' || env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-'))
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: built-composer-proof

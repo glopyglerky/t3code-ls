@@ -40,5 +40,8 @@ The retained NameForm oracle comes from stock T3
 `9cc690491d3290c5dfbc0f927a1f633cdfec6837`. MIT provenance is preserved. The mandatory
 method SHA-256 is
 `5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
-Runtime browser verification and full T10/T11/J59 acceptance remain with the root
-qualification owner. This source change supplies no platform acceptance receipt.
+
+The hosted browser check passed the retained form, the Dioxus form, and the
+explicit Wasm-load fallback. Full T10/T11/J59 acceptance still requires the
+packaged guest authorization route and broader client qualification.
+[Hosted browser check](https://github.com/glopyglerky/t3code-ls/actions/runs/45186542668)
