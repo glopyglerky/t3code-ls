@@ -258,20 +258,24 @@ removal, detached runtime removal, and all preservation checks passed. The
 executable removes its own installed `.cmd` during uninstall; the old batch
 line then requires cmd to resume from the removed file.
 
-The standalone CLI installer, updater and PowerShell installer now emit
-`"<executable>" %* & exit /b` as one parsed line. The explicit batch exit has no
-numeric argument, so it does not intentionally overwrite the child's status.
-Microsoft documents [cmd command sequencing](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cmd)
-and [exit /b](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/exit).
-Actual status propagation and self-deletion behavior require the Windows oracle
-below; documentation and local syntax checks do not qualify them.
+The first `& exit /b` candidate inadvertently returned 0 for an unaffected child
+that exited 1. A 160-case diagnostic then tested alternatives in actual Windows
+cmd. The standalone CLI installer, updater and PowerShell installer emit
+`goto t3_shim_end 2>nul || "<executable>" %*`. The missing label ends the batch,
+and the parsed failure branch runs the executable before cmd needs to reopen
+the shim. The diagnostic observed exact arguments, working directory, environment,
+stderr and exit status, with and without self-removal, both directly and from a
+calling batch file. [Rejected candidate](https://github.com/glopyglerky/t3code-ls/actions/runs/45191906210) ·
+[Diagnostic matrix](https://github.com/glopyglerky/t3code-ls/actions/runs/45193808459) ·
+[Microsoft goto documentation](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/goto) ·
+[Microsoft cmd documentation](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cmd)
 
 `scripts/windows-shim-oracle.mjs` runs on actual Windows cmd with Node 26.12.1
 and no installed product or package dependencies. It reproduces legacy
 self-deletion at exit zero, checks ordinary legacy statuses, then requires the
-new line to preserve exits 0, 1, 2 and 130 both with and without self-deletion.
-It also requires exact controlled argument forwarding, empty stderr for every
-new-shim case and the expected file-removal state. It uses a bounded owned temp
+new line to preserve exits 0, 1, 2, 130 and 3010 both with and without self-deletion.
+It also checks exact controlled arguments, child stderr and the expected
+file-removal state. It uses a bounded owned temp
 folder, never installs a command or changes PATH, and removes its fixtures in
 `finally`. The focused archive workflow runs this oracle before compilation:
 
@@ -285,9 +289,10 @@ and unchanged unrelated files and synthetic user state. No diagnostic is removed
 or treated as success. Its invocation remains `node scripts/smoke-cli-archive.ts
 --archive <zip> --expect-version <version> --expect-upstream`.
 
-Ownership recognition accepts both the original generated line and the exact
-new tail. Legacy owned shims remain replaceable and removable; executing an old
-shim to uninstall can still show its old continuation failure until it is
+Ownership recognition accepts the original generated line, the rejected
+candidate's exact generated form, and the new command. Legacy owned shims remain
+replaceable and removable. Executing an old shim to uninstall can still show its
+old continuation failure until it is
 rewritten by install/update. Wrappers with extra commands, status-masking tails
 or desktop arguments remain outside this recognition. Desktop launchers are
 unchanged. This slice retains the stock T3 source/provenance pin

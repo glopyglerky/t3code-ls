@@ -447,7 +447,7 @@ const smokeWindowsInstalledLifecycle = Effect.fn("smokeWindowsInstalledLifecycle
   yield* require(Object.values(refusalChecks).every(Boolean), "refusing a foreign Windows shim without an ownership receipt", refusalChecks);
   yield* fs.remove(launcher);
   const installed = yield* run(["install"]);
-  const generated = `@echo off\r\n"${executable}" %* & exit /b`;
+  const generated = `@echo off\r\ngoto t3_shim_end 2>nul || "${executable}" %*`;
   const recorded = yield* fs.readFileString(path.join(runtime, "launchers")).pipe(Effect.option);
   const contents = yield* fs.readFileString(launcher).pipe(Effect.option);
   const receipts = Option.isSome(recorded) ? recorded.value.split(/\r?\n/u).filter(Boolean) : [];

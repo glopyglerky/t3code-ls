@@ -255,7 +255,7 @@ if (Test-Path -LiteralPath $shim) {
 }
 # UTF-8 without a BOM: cmd.exe reads the shim as-is, and ASCII would corrupt
 # non-ASCII characters in the user's home path.
-[System.IO.File]::WriteAllText($shim, "@echo off`r`n`"$(Join-Path $targetDir 't3.exe')`" %* & exit /b", (New-Object System.Text.UTF8Encoding $false))
+[System.IO.File]::WriteAllText($shim, "@echo off`r`ngoto t3_shim_end 2>nul || `"$(Join-Path $targetDir 't3.exe')`" %*", (New-Object System.Text.UTF8Encoding $false))
 # Pruning keeps what this shim points at; a background service cannot see $binDir otherwise.
 $launchers = Join-Path $t3Home "runtime\launchers"
 $shimPath = (Resolve-Path -LiteralPath $shim).Path

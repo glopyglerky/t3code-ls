@@ -117,6 +117,7 @@ it.layer(NodeServices.layer)("t3 uninstall launcher", (it) => {
           );
       assert.equal(yield* windowsOwner(`@echo off\r\n"${exe}" %*`), shim);
       assert.equal(yield* windowsOwner(`@echo off\r\n"${exe}" %* & exit /b`), shim);
+      assert.equal(yield* windowsOwner(`@echo off\r\ngoto t3_shim_end 2>nul || "${exe}" %*`), shim);
       assert.isUndefined(yield* windowsOwner(`@echo off\r\n"${exe}" %* & exit /b 0`));
       assert.isUndefined(yield* windowsOwner(`@echo off\r\n"${exe}" %* && exit /b`));
       assert.isUndefined(yield* windowsOwner(`@echo off\r\nset FOO=1\r\n"${exe}" %*`));

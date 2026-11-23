@@ -508,15 +508,21 @@ export function isVersionExecutable(
 }
 
 /** The executable a `t3.cmd` shim written by the install script or `t3 update` runs. */
-export const windowsShimTarget = (contents: string) => /^"([^"]+)"/m.exec(contents)?.[1];
+/** Recognize only known emitted commands when the caller will replace or remove a shim. */
+export const generatedWindowsShimTarget = (contents: string) => {
+  const match =
+    /^@echo off\r?\n(?:goto t3_shim_end 2>nul \|\| "([^"]+)" %\*|"([^"]+)" %\*(?: & exit \/b)?)\s*$/.exec(
+      contents,
+    );
+  return match?.[1] ?? match?.[2];
+};
 
-/** Like {@link windowsShimTarget}, but only for a shim exactly as written; never a user's wrapper. */
-export const generatedWindowsShimTarget = (contents: string) =>
-  /^@echo off\r?\n"([^"]+)" %\*(?: & exit \/b)?\s*$/.exec(contents)?.[1];
+export const windowsShimTarget = (contents: string) =>
+  generatedWindowsShimTarget(contents) ?? /^"([^"]+)"/m.exec(contents)?.[1];
 
-/** Exit from the already-parsed line even when uninstall removes this batch file. */
+/** End the batch before running its last parsed command, which may remove this file. */
 export const renderWindowsCliShim = (executable: string) =>
-  `@echo off\r\n"${executable}" %* & exit /b`;
+  `@echo off\r\ngoto t3_shim_end 2>nul || "${executable}" %*`;
 
 /** Where the `t3` launchers written by the install scripts and `t3 update` point. */
 const shellLauncherTargets = Effect.fn("cloud.pinned_runtime.shell_launcher_targets")(function* (

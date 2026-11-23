@@ -22,12 +22,14 @@ const candidates = [
   ["conditional-exit-code", `${launch} && exit /b 0 || call exit /b %%errorlevel%%`],
   ["post-launch-goto", `${launch} & (goto) 2>nul`],
   ["goto-before-launch", `(goto) 2>nul & ${launch}`],
-  ["missing-label-before-launch", `goto t3_oracle_missing_label 2>nul || ${launch}`],
+  ["missing-label-before-launch", `goto t3_shim_end 2>nul || ${launch}`],
   ["eof-before-launch", `goto :eof & ${launch}`],
 ];
-const variants = matrix ? [...controls, ...candidates] : controls;
-const exitCodes = matrix ? [0, 1, 2, 130, 3010] : [0, 1, 2, 130];
-const contexts = matrix ? ["direct", "batch-caller"] : ["direct"];
+const selectedCandidate = candidates.find(([name]) => name === "missing-label-before-launch");
+assert.ok(selectedCandidate);
+const variants = matrix ? [...controls, ...candidates] : [controls[0], selectedCandidate];
+const exitCodes = [0, 1, 2, 130, 3010];
+const contexts = ["direct", "batch-caller"];
 const argumentsToEcho = ["two words", "ampersand&literal", "!literal!", "|<>()", ""];
 const resumed = "WINDOWS_SHIM_CALLER_RESUMED";
 const childContext = "WINDOWS_SHIM_CHILD_CONTEXT_PRESERVED";
@@ -136,7 +138,7 @@ process.exitCode = code;
     && removedLegacy.missingBatchDiagnostic && removedLegacy.observedExitCode === 1;
   const explicitExit = results.filter((row) => row.variant === "explicit-exit");
   const rejected = explicitExit.find((row) => row.context === "direct" && !row.remove && row.code === 1);
-  const reproducedPlainExitRegression = rejected.commandCompleted && rejected.argumentsPreserved && rejected.contextPreserved
+  const reproducedPlainExitRegression = rejected?.commandCompleted && rejected.argumentsPreserved && rejected.contextPreserved
     && rejected.callerOutputExact && rejected.removalExpected && rejected.stderrExact
     && rejected.observedExitCode === 0;
   const passingCandidates = candidates.map(([name]) => name).filter((name) => {
@@ -145,7 +147,7 @@ process.exitCode = code;
   });
   const passed = unaffectedLegacy && reproducedLegacyDeletion && (matrix
     ? reproducedPlainExitRegression && passingCandidates.length > 0
-    : explicitExit.every((row) => row.passed));
+    : passingCandidates.includes(selectedCandidate[0]));
   const controlsPassed = { unaffectedLegacy, reproducedLegacyDeletion, reproducedPlainExitRegression };
   console.log(`WINDOWS_SHIM_ORACLE ${JSON.stringify({
     matrix, node: process.version, windows: release(), arch: process.arch,
