@@ -130,7 +130,14 @@ type ComposerPersistState =
   | PersistedComposerDraftStoreState;
 
 const composerDraftBaseStorage =
-  typeof localStorage !== "undefined" ? localStorage : createMemoryStorage();
+  typeof window === "undefined"
+    ? createMemoryStorage()
+    : {
+        getItem: (name: string) => globalThis.localStorage.getItem(name),
+        setItem: (name: string, value: string) => globalThis.localStorage.setItem(name, value),
+        removeItem: (name: string) => globalThis.localStorage.removeItem(name),
+      };
+export const useComposerDraftStorageUnavailable = create<boolean>(() => false);
 
 interface ComposerDraftWrite {
   readonly text: string;
@@ -290,6 +297,7 @@ const composerDebouncedStorage = createDeferredStorage<StorageValue<ComposerPers
       composerDraftBaseStorage.setItem(name, text);
       if (composerDraftPendingWrite?.text === text)
         composerDraftLastWrite = composerDraftPendingWrite;
+      useComposerDraftStorageUnavailable.setState(false);
     },
     removeItem: (name) => {
       composerDraftBaseStorage.removeItem(name);
@@ -299,11 +307,18 @@ const composerDebouncedStorage = createDeferredStorage<StorageValue<ComposerPers
   },
   serializeComposerDraftState,
   COMPOSER_PERSIST_DEBOUNCE_MS,
+  () => useComposerDraftStorageUnavailable.setState(true),
 );
 
 const composerPersistStorage: PersistStorage<ComposerPersistState> = {
   getItem: (name) => {
-    const raw = composerDebouncedStorage.getItem(name);
+    let raw: ReturnType<typeof composerDebouncedStorage.getItem>;
+    try {
+      raw = composerDebouncedStorage.getItem(name);
+    } catch {
+      useComposerDraftStorageUnavailable.setState(true);
+      return null;
+    }
     if (typeof raw !== "string") {
       return null;
     }
@@ -4537,6 +4552,14 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
 composerDraftLoadedState = partializeComposerDraftStoreState(composerDraftStore.getState());
 
 export const useComposerDraftStore = composerDraftStore;
+
+export function retryComposerDraftSave(): void {
+  composerDebouncedStorage.setItem(COMPOSER_DRAFT_STORAGE_KEY, {
+    state: { capturedState: composerDraftStore.getState() },
+    version: COMPOSER_DRAFT_STORAGE_VERSION,
+  });
+  composerDebouncedStorage.flush();
+}
 
 export function subscribeComposerDraftModelReconciliation(input: {
   readonly registry: AtomRegistry.AtomRegistry;

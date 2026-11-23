@@ -46,11 +46,17 @@ export function createDeferredStorage<TValue>(
   baseStorage: Partial<StateStorage> | null | undefined,
   serialize: (value: TValue) => string,
   debounceMs: number = 300,
+  onWriteError?: (cause: unknown) => void,
 ): DeferredStorage<TValue> {
   const resolvedStorage = resolveStorage(baseStorage);
   const debouncedSetItem = new Debouncer(
     (name: string, value: TValue) => {
-      resolvedStorage.setItem(name, serialize(value));
+      try {
+        resolvedStorage.setItem(name, serialize(value));
+      } catch (cause) {
+        if (onWriteError === undefined) throw cause;
+        onWriteError(cause);
+      }
     },
     { wait: debounceMs },
   );
