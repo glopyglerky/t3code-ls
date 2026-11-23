@@ -13,13 +13,36 @@ import { RpcClient, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
 import { makeWsRpcProtocolClient } from "../../../packages/client-runtime/src/rpc/protocol.ts";
 
+if (process.argv.length === 3 && process.argv[2] === "--help") {
+  console.log("Usage: node verify-makepad-thread-snapshot.ts /absolute/makepad [--history] [--server-executable /absolute/packaged/t3]");
+  process.exit(0);
+}
 const executable = process.argv[2];
-const historyMode = process.argv[3] === "--history";
-Assert.ok(executable && Path.isAbsolute(executable) && process.argv.length === (historyMode ? 4 : 3));
+Assert.ok(executable && Path.isAbsolute(executable));
+let historyMode = false;
+let serverExecutable: string | undefined;
+for (let index = 3; index < process.argv.length; index++) {
+  const option = process.argv[index];
+  if (option === "--history" && !historyMode) historyMode = true;
+  else if (option === "--server-executable" && serverExecutable === undefined) {
+    const value = process.argv[++index];
+    Assert.ok(value && Path.isAbsolute(value), "Expected an absolute packaged server executable");
+    FS.accessSync(value, FS.constants.X_OK);
+    serverExecutable = value;
+  } else Assert.fail("Unknown or repeated fixture option");
+}
+if (Path.extname(import.meta.filename) === ".mjs") {
+  Assert.ok(serverExecutable, "The standalone fixture requires --server-executable");
+}
 Assert.equal(process.platform, "darwin");
 Assert.equal(process.arch, "arm64");
 const root = Path.resolve(import.meta.dirname, "../../..");
-const historyFixture = JSON.parse(FS.readFileSync(Path.join(root, "packages/client-runtime/rust/host/fixtures/saved-history.json"), "utf8")) as {
+// The standalone bundle carries this exact fixture next to itself. Development
+// continues to read the repository fixture and launch the development server.
+const historyFixturePath = Path.extname(import.meta.filename) === ".ts"
+  ? Path.join(root, "packages/client-runtime/rust/host/fixtures/saved-history.json")
+  : Path.join(import.meta.dirname, "saved-history.json");
+const historyFixture = JSON.parse(FS.readFileSync(historyFixturePath, "utf8")) as {
   sessionId: string; turnCount: number; promptPrefix: string; replyPrefix: string;
 };
 Assert.equal(historyFixture.turnCount, 40);
@@ -70,8 +93,8 @@ try {
   const port = address.port;
   await new Promise<void>((resolve) => reservation.close(() => resolve()));
   const origin = `http://127.0.0.1:${port}`;
-  server = ChildProcess.spawn(process.execPath,
-    [Path.join(root, "apps/server/dist/bin.mjs"), "start", "--bootstrap-fd", "3"], {
+  server = ChildProcess.spawn(serverExecutable ?? process.execPath,
+    [...(serverExecutable === undefined ? [Path.join(root, "apps/server/dist/bin.mjs")] : []), "start", "--bootstrap-fd", "3"], {
       cwd: workspace,
       env: { HOME: scratch, PATH: "/usr/bin:/bin", CODEX_HOME: codexHome,
         T3_CODE_LS_IMPLEMENTATION: "upstream", T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
@@ -203,7 +226,9 @@ try {
   const digest = (file: string) => Crypto.createHash("sha256").update(FS.readFileSync(file)).digest("hex");
   console.log(JSON.stringify({
     toolkit: "makepad", platform: "darwin-arm64", serverImplementation: "upstream", storage: "sqlite",
-    serverSha256: digest(Path.join(root, "apps/server/dist/bin.mjs")), executableSha256: digest(executable),
+    serverPackaging: serverExecutable === undefined ? "development" : "cli-archive",
+    serverSha256: digest(serverExecutable ?? Path.join(root, "apps/server/dist/bin.mjs")), executableSha256: digest(executable),
+    fixtureDriverSha256: digest(process.argv[1]!), historyFixtureSha256: digest(historyFixturePath),
     workload: historyMode ? "shared-saved-history/40-turns/80-records" : "gpui-snapshot-project/codex-three-records", positiveWindows: 1, refusalWindows: 3,
     scope: historyMode ? "production bounded snapshot plus opaque history pages and native load-older command" : "authenticated production bounded snapshot route and Makepad widget text after native window draw",
     unqualified: ["native macOS storage", "accessibility", "physical input", "live subscription", "provider submission"],
