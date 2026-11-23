@@ -199,7 +199,8 @@ try {
     });
     view.stdin.on("error", () => {});
     view.stdin.write(JSON.stringify({ connection: { port, token, environmentId: descriptor.environmentId, threadId },
-      newest, expected, prefixes: [historyFixture.promptPrefix, historyFixture.replyPrefix] }) + "\n");
+      newest, expected, snapshotSequence: data.snapshotSequence,
+      prefixes: [historyFixture.promptPrefix, historyFixture.replyPrefix] }) + "\n");
   });
   const digest = (file: string) => Crypto.createHash("sha256").update(FS.readFileSync(file)).digest("hex");
   console.log(JSON.stringify({

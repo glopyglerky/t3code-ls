@@ -27,6 +27,22 @@ def body(application):
     return text.getText(0, text.characterCount)
 
 
+def history_records(value, fixture):
+    thread_id = fixture["connection"]["threadId"]
+    header = f"\nThread {thread_id}\nSnapshot {fixture['snapshotSequence']}\n"
+    assert value.count(header) == 1
+    _, rows = value.split(header)
+    lines = rows.splitlines()
+    assert len(lines) % 3 == 0
+    prefixes = dict(zip(("user", "assistant"), fixture["prefixes"], strict=True))
+    result = []
+    for index in range(0, len(lines), 3):
+        separator, role, text = lines[index:index + 3]
+        assert separator == "" and role in prefixes and text.startswith(prefixes[role])
+        result.append(text)
+    return result
+
+
 def assert_no_load_action():
     nodes = accessible_nodes(pyatspi.Registry.getDesktop(0))
     assert all(node.name != "Load older" for node in nodes)
@@ -86,10 +102,7 @@ def main():
                     value = body(application)
                     return value if newest[-1] in value else None
                 initial = wait_for(loaded, "Newest bounded page not displayed", application)
-                assert f"Thread {connection['threadId']}\n" in initial
-                def records(value):
-                    return [line for line in value.splitlines() if line.startswith(tuple(fixture["prefixes"]))]
-                assert records(initial) == newest
+                assert history_records(initial, fixture) == newest
                 find("Saved thread history", application, pyatspi.STATE_FOCUSED)
                 if scenario == "page-refusal":
                     print("T14 STOP OWNED SERVER", flush=True)
@@ -105,12 +118,11 @@ def main():
                         activate_older(application)
                         def advanced():
                             value = body(application)
-                            rows = records(value)
+                            rows = history_records(value, fixture)
                             return (value, rows) if len(rows) > len(previous) else None
                         value, rows = wait_for(advanced, "Older page not displayed", application)
                         assert rows == expected[-len(rows):]
                         assert rows[-len(previous):] == previous
-                        assert f"Thread {connection['threadId']}\n" in value
                         find("Saved thread history", application, pyatspi.STATE_FOCUSED)
                         previous = rows
                         if len(rows) == 80:
