@@ -40,8 +40,8 @@ impl Proof {
                     "Expected a bounded first page"
                 );
                 assert!(
-                    !history.text().contains("GPUI history prompt 000"),
-                    "Oldest record was not paged"
+                    !history.text().contains("\nuser\nGPUI history prompt 000\n"),
+                    "Oldest history row was present on the first page"
                 );
                 self.started = true;
             }
@@ -57,8 +57,8 @@ impl Proof {
             assert!(history.record_count() == 80, "Incomplete history");
             let mut position = 0;
             for turn in 0..40 {
-                for role in ["prompt", "reply"] {
-                    let expected = format!("GPUI history {role} {turn:03}");
+                for (role, label) in [("user", "prompt"), ("assistant", "reply")] {
+                    let expected = format!("\n{role}\nGPUI history {label} {turn:03}\n");
                     let found = history.text()[position..]
                         .find(&expected)
                         .expect("Missing ordered history record");
