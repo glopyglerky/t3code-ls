@@ -44,7 +44,7 @@ test("early SEA identity stays outside the application graph", async (t) => {
         if (context.parentURL?.startsWith(entry.href)) {
           if (specifier === "node:sea") return { url: seaUrl, shortCircuit: true };
           if (specifier === "./entrypoint.ts") return { url: entrypointUrl, shortCircuit: true };
-          if (!["node:module", "node:timers", "node:url", "node:crypto", "../package.json"].includes(specifier)) {
+          if (!["node:module", "node:url", "node:crypto", "../package.json"].includes(specifier)) {
             unexpected.push(specifier);
             throw new Error(`Unexpected bootstrap dependency: ${specifier}`);
           }
