@@ -1877,7 +1877,7 @@
           "acceptance_evidence": {}
         }
       ],
-      "acceptance_tests": ["apps/server/src/orchestration-v2/Adapters/claude_stdio_control.rs"],
+      "acceptance_tests": ["crates/core/tests/claude_stdio_control.rs"],
       "retired_paths": [],
       "notes": "T01 independent stream-JSON control candidate based on the pin of @anthropic-ai/claude-agent-sdk. Covers frame limits, interrupt receipt dispatch, and stale permission replies. The checked-in capture supplies message semantics. No process transport or production query runner is selected here.",
       "rust_crates": ["crates/core"]
