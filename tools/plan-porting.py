@@ -267,6 +267,7 @@ def markdown_summary(plan: dict) -> str:
 
 
 def output_path(root: Path, path: Path) -> Path:
+    root = root.resolve()
     resolved = path.resolve()
     if resolved == root or root in resolved.parents:
         raise nightly.TrackingError("Porting reports must be outside the source checkout.")
