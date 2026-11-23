@@ -57,3 +57,5 @@ jobs:
             -p t3-code-ls-storage --test store isolated_trial_cli
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
             -p t3-code-ls-storage --lib service_trial_backup
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-storage --lib selection_versions_match_the_launcher_order
