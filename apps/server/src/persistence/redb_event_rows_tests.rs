@@ -629,6 +629,56 @@ async fn assistant_text_revisions_store_suffixes_and_replay_exactly_after_rollba
     );
     app.rollback("read").await.unwrap();
 
+    let base_key = event_key(&catalog, 1).unwrap();
+    let suffix_key = event_key(&catalog, 2).unwrap();
+    let mut wrong_base: ApplicationRow = serde_json::from_slice(&physical[0]).unwrap();
+    wrong_base.row.insert(
+        "payload_json".into(),
+        text_cell(
+            &first
+                .payload_json
+                .replace(r#""id":"message""#, r#""id":"another""#),
+        ),
+    );
+    let mut forward: Value = serde_json::from_slice(&physical[1]).unwrap();
+    forward["text_revision"]["previous"]["sequence"] = json!(3);
+    for (key, replacement) in [
+        (base_key.clone(), None),
+        (base_key, Some(encode_row(&wrong_base).unwrap())),
+        (suffix_key, Some(encode(&forward).unwrap())),
+    ] {
+        for through_replay in [false, true] {
+            // Inject a fault inside a disposable transaction. An incompatible
+            // row must abort the read and leave the committed witness untouched.
+            app.begin("damaged").await.unwrap();
+            let mut session = app.take("damaged").unwrap();
+            if let Some(bytes) = &replacement {
+                session
+                    .transaction
+                    .put(key.clone(), bytes.clone())
+                    .await
+                    .unwrap();
+            } else {
+                session.transaction.delete(key.clone()).await.unwrap();
+            }
+            app.finish("damaged", session, Ok(())).await.unwrap();
+            let read = if through_replay {
+                app.events_read(
+                    "damaged",
+                    EventRead {
+                        after_sequence: 1,
+                        ..read_all()
+                    },
+                )
+                .await
+                .map(|_| ())
+            } else {
+                app.get("damaged", EVENTS, &[int_cell(2)]).await.map(|_| ())
+            };
+            assert!(matches!(read, Err(Error::IncompatibleStore)), "{read:?}");
+        }
+    }
+
     app.begin("prune").await.unwrap();
     app.maintenance_write(
         "prune",
