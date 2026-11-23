@@ -380,6 +380,7 @@ export const makeRuntimeLayers = <
         layerThreadManagementProvided,
         layerManagedProjectFoldersProvided,
         layerSecretRequestsProvided,
+        layerCommandReceiptStoreProvided,
       ),
     ),
   );

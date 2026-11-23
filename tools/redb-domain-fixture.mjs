@@ -32,8 +32,8 @@ export function nativeRequest(executable, fixture, mode, request) {
   return response.result;
 }
 
-export function loadUpstream(path, imports, exports) {
-  const original = upstreamSource(path);
+export function loadUpstream(path, imports, exports, oracle) {
+  const original = upstreamSource(path, oracle);
   const source = Module.stripTypeScriptTypes(original, { mode: "strip" })
     .replace(/^import\s[\s\S]*?;\s*$/gm, "")
     .replace(/^export (?=(?:function|const|class) )/gm, "");
@@ -67,7 +67,13 @@ export async function loadUpstreamModule(path, dependencies = {}) {
   return { module, url, source: { path, sha256: hash(original) } };
 }
 
-export async function withNative(executable, fixture, use, wrap = (database) => database) {
+export async function withNative(
+  executable,
+  fixture,
+  use,
+  wrap = (database) => database,
+  { durableRelayWebhooks = false } = {},
+) {
   return Effect.runPromise(
     Effect.gen(function* () {
       const database = yield* NativeDatabase.make({
@@ -76,6 +82,7 @@ export async function withNative(executable, fixture, use, wrap = (database) => 
       });
       const client = yield* RedbClient.make.pipe(
         Effect.provideService(NativeDatabase.NativeDatabase, wrap(database)),
+        Effect.provideService(RedbClient.DurableRelayWebhooks, durableRelayWebhooks),
       );
       return yield* use(client, database).pipe(
         Effect.provideService(RedbClient.RedbClient, client),
@@ -115,6 +122,7 @@ export async function finishProof({
   proofPath,
   checks,
   oracles,
+  oracleCommit,
   sourceHash,
   sourcePaths,
 }) {
@@ -128,7 +136,7 @@ export async function finishProof({
     schema: 1,
     engine: fixture.engineLabel,
     checks,
-    oracle: { commit: upstream.upstream.commit, sources: oracles },
+    oracle: { commit: oracleCommit ?? upstream.upstream.commit, sources: oracles },
     executable_sha256: hash(await FS.readFile(executable)),
     sqlite_source_sha256: sourceHash,
     sources,

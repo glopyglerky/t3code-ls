@@ -66,6 +66,7 @@ import {
 } from "./ScheduledRows.ts";
 import * as SqliteScheduledRows from "./SqliteScheduledRows.ts";
 
+import { CommandReceiptStoreV2 } from "../orchestration-v2/CommandReceiptStore.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as Metrics from "../observability/Metrics.ts";
@@ -104,10 +105,20 @@ const WEBHOOK_DEDUPE_LOG_PER_MINUTE = 10;
 const WEBHOOK_FILTERED_LOG_PER_MINUTE = 10;
 const WEBHOOK_DELIVERY_LOG_BODY_LIMIT = 64 * 1024;
 const WEBHOOK_DELIVERY_LOG_PROMPT_LIMIT = 64 * 1024;
+const loggedWebhookPrompt = (prompt: string) => {
+  const limit = WEBHOOK_DELIVERY_LOG_PROMPT_LIMIT;
+  const before = prompt.charCodeAt(limit - 1);
+  const after = prompt.charCodeAt(limit);
+  const splitsPair = before >= 0xd800 && before <= 0xdbff && after >= 0xdc00 && after <= 0xdfff;
+  return prompt.slice(0, splitsPair ? limit - 1 : limit);
+};
 const WEBHOOK_MAX_QUEUED_PER_TASK = 20;
 // Enforce the relay's per-task/minute limit here too; tunnel hostnames are public.
 const WEBHOOK_RATE_LIMIT_PER_MINUTE = 60;
 const RELAY_CLAIM_RETENTION_HOURS = 48;
+const RELAY_UNRESOLVED_ERROR =
+  "Dispatch could not be confirmed. This delivery will not run again automatically.";
+const webhookFireKey = (taskId: string, deliveryId: string) => `${taskId}:webhook:${deliveryId}`;
 // User replay keys are hex digests, so the relay receipt has its own namespace.
 const relayReceiptKey = (id: string) => `relay-admission:${id}`;
 const LEGACY_DELIVERY_OUTCOMES: ReadonlySet<string> = new Set([
@@ -218,6 +229,9 @@ const decodeHeadersJson = Schema.decodeUnknownOption(HeadersJson);
 const decodeMissingFieldsJson = Schema.decodeUnknownOption(MissingFieldsJson);
 const encodeHeadersJson = Schema.encodeSync(HeadersJson);
 const encodeMissingFieldsJson = Schema.encodeSync(MissingFieldsJson);
+const RelayPromptJson = Schema.fromJsonString(Schema.String);
+const encodeRelayPrompt = Schema.encodeEffect(RelayPromptJson);
+const decodeRelayPrompt = Schema.decodeUnknownEffect(RelayPromptJson);
 
 /**
  * Clients that predate thread modes send none, and may send a thread loaded before the first run
@@ -513,6 +527,7 @@ export const layerWithRows = Layer.effect(
     const mac = yield* Mac.Mac;
     const threadLaunch = yield* ThreadLaunchService.ThreadLaunchService;
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
+    const commandReceipts = yield* Effect.serviceOption(CommandReceiptStoreV2);
     const serviceScope = yield* Effect.scope;
     const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
     const secretRequests = yield* SecretRequests.SecretRequests;
@@ -544,7 +559,7 @@ export const layerWithRows = Layer.effect(
     const webhookDedupeLogWindows = yield* Ref.make<
       ReadonlyMap<ScheduledTaskId, ReadonlyArray<number>>
     >(new Map());
-    const pendingInFlight = yield* Ref.make<ReadonlySet<string>>(new Set());
+    const pendingInFlight = yield* Ref.make<ReadonlyMap<string, boolean>>(new Map());
     const webhookFilteredLogWindows = yield* Ref.make<
       ReadonlyMap<ScheduledTaskId, ReadonlyArray<number>>
     >(new Map());
@@ -701,6 +716,7 @@ export const layerWithRows = Layer.effect(
       readonly status: "succeeded" | "failed";
       readonly error: string | null;
       readonly startedAtIso: string;
+      readonly webhook?: { readonly deliveryId: string; readonly createdAt: string };
     }) =>
       patchTask(
         input.id,
@@ -710,7 +726,16 @@ export const layerWithRows = Layer.effect(
           last_run_status: input.status,
           last_run_error: input.error,
         },
-        { last_run_status: "running", last_run_at: input.startedAtIso },
+        {
+          last_run_status: "running",
+          last_run_at: input.startedAtIso,
+          ...(input.webhook === undefined
+            ? {}
+            : {
+                last_run_webhook_delivery_id: input.webhook.deliveryId,
+                created_at: input.webhook.createdAt,
+              }),
+        },
         {},
         true,
       ).pipe(
@@ -802,10 +827,11 @@ export const layerWithRows = Layer.effect(
     // A dispatch is recorded once the message is accepted; the provider can still
     // reject the turn after that, so follow the run and record its failure.
     const recordRunFailure = Effect.fn("ScheduledTaskService.recordRunFailure")(function* (
-      taskId: ScheduledTaskId,
+      task: ScheduledTask,
       startedAtIso: string,
       threadId: ThreadId,
       messageId: MessageId,
+      deliveryId?: string,
     ) {
       const shell = yield* threadManagement.getThreadShell(threadId);
       if (shell === null) return;
@@ -837,9 +863,14 @@ export const layerWithRows = Layer.effect(
       const error =
         latestRootProviderFailure(run, turnItems)?.message ?? UNSUCCESSFUL_RUN_ERRORS[run.status];
       const updated = yield* patchTask(
-        taskId,
+        task.id,
         { last_run_status: "failed", last_run_error: error },
-        { last_run_at: startedAtIso, last_run_status: "succeeded" },
+        {
+          created_at: task.createdAt,
+          last_run_at: startedAtIso,
+          last_run_status: "succeeded",
+          last_run_webhook_delivery_id: deliveryId ?? null,
+        },
       );
       if (updated.length > 0) yield* notifyChanged;
     });
@@ -866,22 +897,68 @@ export const layerWithRows = Layer.effect(
         )
         .pipe(Effect.mapError(dedupeError));
 
+    const checkWebhookTask = (active: ScheduledTask | null, admitted: ScheduledTask) => {
+      const reason =
+        active === null
+          ? "The task was deleted before this delivery ran."
+          : active.createdAt !== admitted.createdAt
+            ? "The task was replaced before this delivery ran."
+            : active.schedule.type !== "webhook"
+              ? "The task's trigger changed before this delivery ran."
+              : (webhookPolicyBlock ??
+                (active.enabled ? null : "The task was paused before this delivery ran."));
+      return active === null || reason !== null
+        ? Effect.fail(new WebhookDeliverySkipped({ reason: reason! }))
+        : Effect.succeed(active);
+    };
+
+    const claimReadyRelay = (task: ScheduledTask, deliveryId: string, startedAtIso: string) =>
+      transactions.withTransaction(
+        Effect.gen(function* () {
+          const [row] = yield* getRows(task.id);
+          const active = yield* checkWebhookTask(
+            row === undefined ? null : yield* decodeRow(row),
+            task,
+          );
+          const claimed = yield* store.write(
+            {
+              kind: "patch_pending",
+              delivery_id: deliveryId,
+              states: ["relay_ready"],
+              patch: { state: "relay_running", task_json: yield* encodePendingTask(active) },
+            },
+            AnyRows,
+          );
+          if (claimed.length === 0) {
+            return yield* new WebhookDeliverySkipped({
+              reason: "This delivery is no longer ready.",
+            });
+          }
+          yield* markRunning(active.id, startedAtIso, deliveryId);
+          return active;
+        }),
+      );
+
     const runTask = Effect.fn("ScheduledTaskService.runTask")(function* (
       task: ScheduledTask,
       trigger: "scheduled" | "manual" | "webhook",
       webhook?: {
         readonly deliveryId: string;
         readonly prompt: string;
-        readonly dispatched: Ref.Ref<boolean>;
+        readonly dispatched: Ref.Ref<ThreadId | null>;
         readonly immediateRelayId?: string;
+        readonly durableRelay?: boolean;
       },
     ) {
       // Read before reserving: nothing between the reservation and its release may fail.
       const startedAt = yield* localNow;
       const startedAtIso = iso(startedAt);
+      const durableRelay = webhook?.durableRelay === true;
       const run = Effect.gen(function* () {
         // Re-read stale poll snapshots so deleted, paused or postponed tasks cannot fire.
-        const active = yield* findTask(task.id);
+        const active = yield* durableRelay
+          ? claimReadyRelay(task, webhook.deliveryId, startedAtIso)
+          : findTask(task.id);
         if (active === null) {
           if (webhook !== undefined) {
             return yield* new WebhookDeliverySkipped({
@@ -895,6 +972,7 @@ export const layerWithRows = Layer.effect(
         }
         if (
           webhook !== undefined &&
+          !durableRelay &&
           (yield* store.read(
             {
               kind: "pending",
@@ -933,23 +1011,9 @@ export const layerWithRows = Layer.effect(
           yield* rescheduleMissedRun(active, startedAt, "previous occurrence still queued");
           return { task: active, threadId: null, dispatchFailed: false };
         }
-        // Reject queued deliveries after pause, same-id recreation or trigger changes.
-        if (webhook !== undefined) {
-          const reason =
-            active.createdAt !== task.createdAt
-              ? "The task was replaced before this delivery ran."
-              : active.schedule.type !== "webhook"
-                ? "The task's trigger changed before this delivery ran."
-                : webhookPolicyBlock !== undefined
-                  ? webhookPolicyBlock
-                  : !active.enabled
-                    ? "The task was paused before this delivery ran."
-                    : null;
-          if (reason !== null) return yield* new WebhookDeliverySkipped({ reason });
-        }
-
         if (webhook === undefined) yield* markRunning(active.id, startedAtIso);
-        else
+        else if (!durableRelay) {
+          yield* checkWebhookTask(active, task);
           yield* transactions
             .withTransaction(
               Effect.gen(function* () {
@@ -970,13 +1034,14 @@ export const layerWithRows = Layer.effect(
                 taskError("Could not start webhook run.", { taskId: task.id, cause }),
               ),
             );
+        }
 
         yield* notifyChanged;
 
         const fireKey =
           webhook === undefined
             ? `${active.id}:${DateTime.toEpochMillis(startedAt)}:${trigger}`
-            : `${active.id}:webhook:${webhook.deliveryId}`;
+            : webhookFireKey(active.id, webhook.deliveryId);
         const commandId = CommandId.make(`scheduled-task:${fireKey}`);
         const messageId = MessageId.make(`scheduled-task-message:${fireKey}`);
         const prompt = webhook?.prompt ?? active.prompt;
@@ -1057,7 +1122,9 @@ export const layerWithRows = Layer.effect(
               );
 
         const runSucceeded = result._tag === "Success";
-        if (webhook !== undefined && runSucceeded) yield* Ref.set(webhook.dispatched, true);
+        if (webhook !== undefined && runSucceeded) yield* Ref.set(webhook.dispatched, result.value);
+        if (durableRelay && !runSucceeded)
+          return { task: active, threadId: null, dispatchFailed: true };
         const completedAt = yield* localNow;
         const lastRunStatus = runSucceeded ? ("succeeded" as const) : ("failed" as const);
         const lastRunError = runSucceeded ? null : errorMessage(result.cause);
@@ -1094,9 +1161,26 @@ export const layerWithRows = Layer.effect(
             status: lastRunStatus,
             error: lastRunError,
             startedAtIso,
+            ...(durableRelay
+              ? { webhook: { deliveryId: webhook.deliveryId, createdAt: active.createdAt } }
+              : {}),
           });
           let written = false;
-          if (webhook === undefined) written = yield* completion;
+          if (durableRelay) {
+            written = yield* completion;
+            if (written) {
+              yield* recordRelayReceipt(
+                active.id,
+                webhook.immediateRelayId!,
+                webhook.deliveryId,
+                completedAt,
+              );
+              yield* store.write(
+                { kind: "delete_pending", delivery_id: webhook.deliveryId },
+                AnyRows,
+              );
+            }
+          } else if (webhook === undefined) written = yield* completion;
           else {
             const pending = yield* store.read(
               { kind: "pending", delivery_id: webhook.deliveryId, first: false },
@@ -1143,7 +1227,13 @@ export const layerWithRows = Layer.effect(
           );
         if (written) yield* notifyChanged;
         if (written && threadId !== null) {
-          yield* recordRunFailure(active.id, startedAtIso, threadId, messageId).pipe(
+          yield* recordRunFailure(
+            active,
+            startedAtIso,
+            threadId,
+            messageId,
+            webhook?.deliveryId,
+          ).pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("Could not record scheduled run outcome", {
                 taskId: active.id,
@@ -1157,7 +1247,9 @@ export const layerWithRows = Layer.effect(
         return { task: recorded, threadId, dispatchFailed: !runSucceeded };
       }).pipe(
         Effect.onError((cause) =>
-          releaseStuckRun(task, startedAtIso, errorMessage(cause), webhook?.deliveryId),
+          durableRelay
+            ? Effect.void
+            : releaseStuckRun(task, startedAtIso, errorMessage(cause), webhook?.deliveryId),
         ),
       );
 
@@ -1199,11 +1291,17 @@ export const layerWithRows = Layer.effect(
         missedRunAt: task.nextRunAt,
         rescheduledTo: next,
       });
-      const updated = yield* patchTask(task.id, {
-        next_run_at: next,
-        updated_at: iso(now),
-        ...(runError === undefined ? {} : { last_run_status: "failed", last_run_error: runError }),
-      }, { next_run_at: task.nextRunAt, last_run_at: task.lastRunAt }).pipe(
+      const updated = yield* patchTask(
+        task.id,
+        {
+          next_run_at: next,
+          updated_at: iso(now),
+          ...(runError === undefined
+            ? {}
+            : { last_run_status: "failed", last_run_error: runError }),
+        },
+        { next_run_at: task.nextRunAt, last_run_at: task.lastRunAt },
+      ).pipe(
         Effect.mapError((cause) =>
           taskError("Could not reschedule missed schedule task run.", { taskId: task.id, cause }),
         ),
@@ -1269,6 +1367,23 @@ export const layerWithRows = Layer.effect(
         stuck,
         (row) =>
           Effect.gen(function* () {
+            if (
+              store.durableRelayWebhooks &&
+              row.task_id !== null &&
+              row.last_run_webhook_delivery_id !== null
+            ) {
+              const runningRelay = yield* store.read(
+                {
+                  kind: "pending",
+                  delivery_id: row.last_run_webhook_delivery_id,
+                  task_id: row.task_id,
+                  states: ["relay_running"],
+                  first: true,
+                },
+                PendingRows,
+              );
+              if (runningRelay.length > 0) return;
+            }
             const decoded = yield* Effect.result(decodeRow(row));
             if (Result.isSuccess(decoded)) {
               yield* store.write(
@@ -1860,7 +1975,9 @@ export const layerWithRows = Layer.effect(
                   signature_verified: input.signatureVerified ? 1 : 0,
                   missing_fields_json: encodeMissingFieldsJson(input.missing),
                   rendered_prompt:
-                    input.renderedPrompt?.slice(0, WEBHOOK_DELIVERY_LOG_PROMPT_LIMIT) ?? null,
+                    input.renderedPrompt === null
+                      ? null
+                      : loggedWebhookPrompt(input.renderedPrompt),
                   error: input.error ?? null,
                 },
               },
@@ -1974,46 +2091,209 @@ export const layerWithRows = Layer.effect(
       (effect) => transactions.withTransaction(effect).pipe(Effect.mapError(dedupeError)),
     );
 
+    const failReadyRelay = (deliveryId: string, reason: string) =>
+      transactions.withTransaction(
+        Effect.gen(function* () {
+          const [ready] = yield* store.read(
+            { kind: "pending", delivery_id: deliveryId, states: ["relay_ready"], first: true },
+            PendingRows,
+          );
+          if (ready === undefined) return;
+          yield* markDeliveryFailed(deliveryId, reason);
+          yield* releaseFailedDelivery(deliveryId);
+          yield* store.write({ kind: "delete_pending", delivery_id: deliveryId }, AnyRows);
+        }),
+      );
+
+    const reconcileRunningRelay = Effect.fn("ScheduledTaskService.reconcileRunningRelay")(
+      function* (
+        entry: (typeof PendingRows.Type)[number],
+        observedThreadId: ThreadId | null = null,
+      ) {
+        const taskId = ScheduledTaskId.make(entry.task_id);
+        const deliveryId = entry.delivery_id;
+        const attempted = yield* decodePendingTask(entry.task_json).pipe(Effect.option);
+        const fireKey = webhookFireKey(taskId, deliveryId);
+        const messageId = MessageId.make(`scheduled-task-message:${fireKey}`);
+        let confirmed = observedThreadId;
+        let rejected = false;
+        // A bound send can be proven by its accepted command and durable message/run.
+        // Fresh launches also need workspace preparation after their message receipt.
+        if (
+          confirmed === null &&
+          Option.isSome(commandReceipts) &&
+          Option.isSome(attempted) &&
+          attempted.value.threadId !== null
+        ) {
+          const threadId = ThreadId.make(attempted.value.threadId);
+          const receipt = yield* commandReceipts.value
+            .getByCommandId(CommandId.make(`scheduled-task:${fireKey}`))
+            .pipe(Effect.orElseSucceed(() => Option.none()));
+          if (
+            Option.isSome(receipt) &&
+            receipt.value.commandType === "message.dispatch" &&
+            receipt.value.threadId === threadId
+          ) {
+            rejected = receipt.value.status === "rejected";
+            if (!rejected) {
+              const projection = yield* threadManagement
+                .getThreadRecords(threadId, ["messages", "runs"], { messageIds: [messageId] })
+                .pipe(Effect.option);
+              if (Option.isSome(projection)) {
+                const { messages, runs } = projection.value;
+                const message = messages.find(
+                  (message) => message.id === messageId && message.scheduledTaskId === taskId,
+                );
+                if (
+                  message &&
+                  runs.some((run) => run.id === message.runId && run.userMessageId === messageId)
+                )
+                  confirmed = threadId;
+              }
+            }
+          }
+        }
+        const failure = rejected ? "The run failed to start." : RELAY_UNRESOLVED_ERROR;
+        const now = yield* localNow;
+        const startedAtIso = yield* transactions.withTransaction(
+          Effect.gen(function* () {
+            const [pending] = yield* store.read(
+              { kind: "pending", delivery_id: deliveryId, states: ["relay_running"], first: true },
+              PendingRows,
+            );
+            if (pending === undefined) return null;
+            const [row] = yield* getRows(taskId);
+            const ownsRun =
+              row !== undefined &&
+              row.last_run_webhook_delivery_id === deliveryId &&
+              row.last_run_status === "running" &&
+              (Option.isNone(attempted) || row.created_at === attempted.value.createdAt);
+            if (ownsRun) {
+              yield* patchTask(
+                taskId,
+                {
+                  last_run_status: confirmed === null ? "failed" : "succeeded",
+                  last_run_error: confirmed === null ? failure : null,
+                  updated_at: iso(now),
+                },
+                {},
+                {},
+                rejected || confirmed !== null,
+              );
+            }
+            if (rejected) {
+              yield* markDeliveryFailed(deliveryId, failure);
+              yield* releaseFailedDelivery(deliveryId);
+              yield* store.write({ kind: "delete_pending", delivery_id: deliveryId }, AnyRows);
+            } else if (confirmed === null) {
+              yield* store.write(
+                {
+                  kind: "patch_pending",
+                  delivery_id: deliveryId,
+                  patch: { state: "relay_unresolved", task_json: "", request_json: "" },
+                },
+                AnyRows,
+              );
+              yield* markDeliveryFailed(deliveryId, RELAY_UNRESOLVED_ERROR);
+            } else {
+              yield* recordRelayReceipt(
+                taskId,
+                deliveryId.slice("delivery:relay:".length),
+                deliveryId,
+                now,
+              );
+              yield* store.write({ kind: "delete_pending", delivery_id: deliveryId }, AnyRows);
+            }
+            return ownsRun ? row.last_run_at : null;
+          }),
+        );
+        yield* notifyChanged;
+        if (confirmed !== null && startedAtIso !== null && Option.isSome(attempted)) {
+          yield* recordRunFailure(
+            attempted.value,
+            startedAtIso,
+            confirmed,
+            messageId,
+            deliveryId,
+          ).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Could not record scheduled run outcome", { taskId, cause }),
+            ),
+            Effect.forkIn(serviceScope),
+          );
+        }
+      },
+    );
+
     const runWebhookDelivery = Effect.fn("ScheduledTaskService.runWebhookDelivery")(function* (
       task: ScheduledTask,
       deliveryId: string,
       prompt: string,
       immediateRelayId?: string,
+      durableRelay = false,
     ) {
       const runOutcome = (outcome: "started" | "skipped" | "failed") =>
         Effect.all([
           Effect.annotateCurrentSpan({ "scheduled_task.webhook.run_outcome": outcome }),
           Metrics.increment(Metrics.webhookRunsTotal, { outcome }),
         ]);
-      const dispatched = yield* Ref.make(false);
+      const dispatched = yield* Ref.make<ThreadId | null>(null);
       return yield* runTask(task, "webhook", {
         deliveryId,
         prompt,
         dispatched,
         ...(immediateRelayId === undefined ? {} : { immediateRelayId }),
+        durableRelay,
       }).pipe(
-        Effect.flatMap(({ dispatchFailed }) =>
-          dispatchFailed
-            ? runOutcome("failed").pipe(
+        Effect.flatMap(({ dispatchFailed }) => {
+          if (!dispatchFailed) return runOutcome("started").pipe(Effect.as(true));
+          const failed = runOutcome("failed");
+          return durableRelay
+            ? failed.pipe(Effect.as(false))
+            : failed.pipe(
                 Effect.andThen(markDeliveryFailed(deliveryId, "The run failed to start.")),
                 Effect.andThen(releaseFailedDelivery(deliveryId)),
-              )
-            : runOutcome("started"),
-        ),
+                Effect.as(true),
+              );
+        }),
         Effect.catchTags({
           WebhookDeliverySkipped: (skipped) =>
             runOutcome("skipped").pipe(
-              Effect.andThen(markDeliveryFailed(deliveryId, skipped.reason)),
-              Effect.andThen(releaseFailedDelivery(deliveryId)),
+              Effect.andThen(
+                durableRelay
+                  ? failReadyRelay(deliveryId, skipped.reason)
+                  : markDeliveryFailed(deliveryId, skipped.reason).pipe(
+                      Effect.andThen(releaseFailedDelivery(deliveryId)),
+                    ),
+              ),
+              Effect.as(true),
             ),
         }),
-        Effect.as(true),
         // Dispatch success owns the replay key even if later bookkeeping fails.
         Effect.catchCause((cause) =>
           Effect.gen(function* () {
-            const started = yield* Ref.get(dispatched);
-            yield* Effect.logWarning("Webhook dispatch failed", { taskId: task.id, cause });
+            const observedThreadId = yield* Ref.get(dispatched);
+            const started = observedThreadId !== null;
+            if (durableRelay && Cause.hasInterruptsOnly(cause)) return yield* Effect.interrupt;
+            yield* Effect.logWarning(
+              "Webhook dispatch failed",
+              durableRelay ? { taskId: task.id, deliveryId } : { taskId: task.id, cause },
+            );
             yield* runOutcome(started ? "started" : "failed");
+            if (durableRelay) {
+              if (observedThreadId === null) return false;
+              const [running] = yield* store.read(
+                {
+                  kind: "pending",
+                  delivery_id: deliveryId,
+                  states: ["relay_running"],
+                  first: true,
+                },
+                PendingRows,
+              );
+              if (running !== undefined) yield* reconcileRunningRelay(running, observedThreadId);
+              return true;
+            }
             yield* markDeliveryFailed(
               deliveryId,
               started
@@ -2144,6 +2424,7 @@ export const layerWithRows = Layer.effect(
           : `delivery:relay:${request.relayDeliveryId}`,
       );
       const relayId = request.relayDeliveryId;
+      const durableRelay = relayId !== undefined && store.durableRelayWebhooks === true;
       const receipt = (ownerId: string = deliveryId) =>
         relayId === undefined ? Effect.void : recordRelayReceipt(task.id, relayId, ownerId, now);
       const releaseClaim = <A>(result: A) =>
@@ -2181,6 +2462,15 @@ export const layerWithRows = Layer.effect(
       const admitDelivery = Effect.fnUntraced(
         function* () {
           if (relayId !== undefined) {
+            if (durableRelay) {
+              const [current] = yield* getRows(task.id).pipe(Effect.mapError(dedupeError));
+              if (
+                current?.created_at !== task.createdAt ||
+                current.webhook_token !== row.webhook_token
+              ) {
+                return yield* notFound;
+              }
+            }
             const claimed = yield* store
               .write(
                 {
@@ -2211,6 +2501,22 @@ export const layerWithRows = Layer.effect(
               if (receipts.length > 0) {
                 yield* observe("duplicate");
                 return { _tag: "accepted" as const, deliveryId, outcome: "duplicate" as const };
+              }
+              if (durableRelay) {
+                const ready = yield* store
+                  .read(
+                    {
+                      kind: "pending",
+                      task_id: task.id,
+                      delivery_id: deliveryId,
+                      states: ["relay_ready"],
+                      first: true,
+                    },
+                    PendingRows,
+                  )
+                  .pipe(Effect.mapError(dedupeError));
+                if (ready.length > 0)
+                  return { _tag: "start_pending" as const, outcome: "duplicate" as const };
               }
               return {
                 _tag: "claimed" as const,
@@ -2441,6 +2747,7 @@ export const layerWithRows = Layer.effect(
           const reserveImmediate = Effect.gen(function* () {
             yield* checkCapacity;
             yield* reserve;
+            if (durableRelay) return;
             yield* Ref.update(webhookQueued, (counts) =>
               new Map(counts).set(queueKey, (counts.get(queueKey) ?? 0) + 1),
             );
@@ -2458,12 +2765,25 @@ export const layerWithRows = Layer.effect(
               if (outcome === "duplicate") {
                 if (yield* takeDedupeLogSlot(task.id, DateTime.toEpochMillis(now)))
                   yield* log("duplicate", { signatureVerified: signature !== null });
-              } else
+              } else {
+                if (durableRelay)
+                  yield* store.write(
+                    {
+                      kind: "insert_ready_relay",
+                      delivery_id: deliveryId,
+                      task_id: task.id,
+                      due_at: DateTime.toEpochMillis(now),
+                      task_json: yield* encodePendingTask(task),
+                      prompt_json: yield* encodeRelayPrompt(rendered.prompt),
+                    },
+                    AnyRows,
+                  );
                 yield* log("accepted", {
                   signatureVerified: signature !== null,
                   missing: rendered.missing,
                   renderedPrompt: rendered.prompt,
                 });
+              }
               return outcome;
             }),
           ).pipe(Effect.onError(() => release));
@@ -2485,6 +2805,7 @@ export const layerWithRows = Layer.effect(
               outcome: "duplicate",
             } as const);
           }
+          if (durableRelay) return { _tag: "start_pending" as const, outcome: "accepted" as const };
           if (relayId !== undefined) {
             handoff = yield* Deferred.make<boolean>();
             const current = handoff;
@@ -2497,17 +2818,24 @@ export const layerWithRows = Layer.effect(
         (effect) =>
           relayId === undefined
             ? effect
-            : transactions.withTransaction(effect).pipe(
-                Effect.mapError((cause) =>
-                  isScheduledTaskError(cause) ? cause : dedupeError(cause),
+            : transactions
+                .withTransaction(effect)
+                .pipe(
+                  Effect.mapError((cause) =>
+                    isScheduledTaskError(cause) ? cause : dedupeError(cause),
+                  ),
                 ),
-              ),
       );
       return yield* Effect.uninterruptible(
         Effect.gen(function* () {
           // The transaction settles the claim and admission before a retry can observe either.
           // Wait for an immediate handoff outside the transaction so its worker can write.
           const admission = yield* admitDelivery();
+          if (admission._tag === "start_pending") {
+            yield* dispatchPendingTask(task.id, true);
+            yield* observe(admission.outcome);
+            return { _tag: "accepted" as const, deliveryId, outcome: admission.outcome };
+          }
           if (admission._tag === "claimed") {
             if (admission.handoff !== undefined && (yield* Deferred.await(admission.handoff))) {
               yield* observe("duplicate");
@@ -2539,6 +2867,173 @@ export const layerWithRows = Layer.effect(
       );
     });
 
+    const dispatchPendingTask = (
+      taskId: ScheduledTaskId,
+      wakeCurrent = false,
+    ): Effect.Effect<void> => {
+      // One worker per task waits on its permit, then drains persisted rows in order.
+      // Other tasks remain independent and ticks never reload an active task's payloads.
+      const dispatch = Effect.gen(function* () {
+        while (true) {
+          const [entry] = yield* store.read(
+            {
+              kind: "pending",
+              task_id: taskId,
+              states: [
+                "dispatching",
+                "running",
+                "completed",
+                "failed",
+                "relay_ready",
+                "relay_running",
+              ],
+              first: true,
+            },
+            PendingRows,
+          );
+          if (entry === undefined) return;
+          if (entry.state === "relay_running") {
+            yield* reconcileRunningRelay(entry);
+            continue;
+          }
+          if (entry.state === "relay_ready") {
+            const payload = yield* Effect.all({
+              task: decodePendingTask(entry.task_json),
+              prompt: decodeRelayPrompt(entry.request_json),
+            }).pipe(Effect.option);
+            if (Option.isNone(payload)) {
+              yield* failReadyRelay(
+                entry.delivery_id,
+                "The pending webhook payload could not be prepared.",
+              );
+              continue;
+            }
+            if (
+              yield* runWebhookDelivery(
+                payload.value.task,
+                entry.delivery_id,
+                payload.value.prompt,
+                entry.delivery_id.slice("delivery:relay:".length),
+                true,
+              )
+            )
+              continue;
+            const [running] = yield* store.read(
+              {
+                kind: "pending",
+                delivery_id: entry.delivery_id,
+                states: ["relay_running"],
+                first: true,
+              },
+              PendingRows,
+            );
+            if (running === undefined) return;
+            yield* reconcileRunningRelay(running);
+            continue;
+          }
+          const remove = store.write(
+            { kind: "delete_pending", delivery_id: entry.delivery_id },
+            AnyRows,
+          );
+          if (entry.state === "completed" || entry.state === "failed") {
+            if (entry.state === "failed") {
+              yield* markDeliveryFailed(entry.delivery_id, "The run failed to start.");
+              yield* releaseFailedDelivery(entry.delivery_id);
+            }
+            yield* remove;
+            continue;
+          }
+          const prepared = yield* Effect.gen(function* () {
+            // A running row was already sent, so recovery keeps the prompt it was sent with.
+            const current = entry.state === "dispatching" ? yield* findTask(taskId) : null;
+            const snapshot = yield* decodePendingTask(entry.task_json);
+            // The snapshot keeps the identity runTask checks; the prompt is the one saved now.
+            const task =
+              current?.createdAt === snapshot.createdAt && current.prompt !== snapshot.prompt
+                ? { ...snapshot, prompt: current.prompt }
+                : snapshot;
+            const request = yield* decodePendingRequest(entry.request_json);
+            const frameId = Buffer.from(yield* random.randomBytes(6)).toString("hex");
+            return {
+              task,
+              taskJson: task === snapshot ? null : yield* encodePendingTask(task),
+              rendered: renderWebhookPrompt(task.prompt, request, frameId),
+            };
+          }).pipe(Effect.exit);
+          if (Exit.isFailure(prepared)) {
+            if (Cause.hasInterruptsOnly(prepared.cause))
+              return yield* Effect.failCause(prepared.cause);
+            yield* markDeliveryFailed(
+              entry.delivery_id,
+              "The pending webhook payload could not be prepared.",
+            );
+            yield* releaseFailedDelivery(entry.delivery_id);
+            yield* remove;
+            continue;
+          }
+          const { task, taskJson, rendered } = prepared.value;
+          if (rendered.prompt.trim().length > PROVIDER_SEND_TURN_MAX_INPUT_CHARS) {
+            yield* markDeliveryFailed(entry.delivery_id, PROMPT_TOO_LONG);
+            yield* releaseFailedDelivery(entry.delivery_id);
+          } else {
+            if (taskJson !== null)
+              yield* store.write(
+                {
+                  kind: "patch_pending",
+                  delivery_id: entry.delivery_id,
+                  patch: { task_json: taskJson },
+                },
+                AnyRows,
+              );
+            yield* store.write(
+              {
+                kind: "patch_delivery",
+                delivery_id: entry.delivery_id,
+                patch: {
+                  outcome: "accepted",
+                  error: null,
+                  rendered_prompt: loggedWebhookPrompt(rendered.prompt),
+                  missing_fields_json: encodeMissingFieldsJson(rendered.missing),
+                },
+              },
+              AnyRows,
+            );
+            if (!(yield* runWebhookDelivery(task, entry.delivery_id, rendered.prompt))) return;
+          }
+          yield* remove;
+        }
+      });
+      // A commit can arrive while the worker is finishing its final empty read.
+      // Remember that wakeup so the exiting worker hands it off without waiting for a tick.
+      return Effect.acquireUseRelease(
+        Ref.modify(pendingInFlight, (active) =>
+          active.has(taskId)
+            ? ([false, wakeCurrent ? new Map(active).set(taskId, true) : active] as const)
+            : ([true, new Map(active).set(taskId, false)] as const),
+        ),
+        (reserved) =>
+          reserved
+            ? webhookPermit(taskId).pipe(
+                Effect.flatMap((permit) => dispatch.pipe(permit.withPermits(1))),
+                Effect.catch((cause) =>
+                  Effect.logWarning("Pending webhook dispatch failed", { cause }),
+                ),
+                Effect.withSpan("ScheduledTaskService.dispatchPendingWebhook", { root: true }),
+              )
+            : Effect.void,
+        (reserved) =>
+          reserved
+            ? Ref.modify(pendingInFlight, (active) => {
+                const next = new Map(active);
+                next.delete(taskId);
+                return [active.get(taskId) === true, next] as const;
+              }).pipe(
+                Effect.flatMap((wake) => (wake ? dispatchPendingTask(taskId, true) : Effect.void)),
+              )
+            : Effect.void,
+      ).pipe(Effect.interruptible, Effect.forkIn(serviceScope), Effect.asVoid);
+    };
+
     const dispatchPending = Effect.fn("ScheduledTaskService.dispatchPendingWebhooks")(function* () {
       const now = DateTime.toEpochMillis(yield* localNow);
       if (yield* pendingWebhooks.isIdle(now)) return;
@@ -2552,124 +3047,10 @@ export const layerWithRows = Layer.effect(
       }
       yield* Effect.forEach(
         tasks,
-        ({ task_id }) => {
-          const taskId = ScheduledTaskId.make(task_id);
-          // One worker per task waits on its permit, then drains persisted rows in order.
-          // Other tasks remain independent and ticks never reload an active task's payloads.
-          const dispatch = Effect.gen(function* () {
-            while (true) {
-              const [entry] = yield* store.read(
-                {
-                  kind: "pending",
-                  task_id: taskId,
-                  states: ["dispatching", "running", "completed", "failed"],
-                  first: true,
-                },
-                PendingRows,
-              );
-              if (entry === undefined) return;
-              const remove = store.write(
-                { kind: "delete_pending", delivery_id: entry.delivery_id },
-                AnyRows,
-              );
-              if (entry.state === "completed" || entry.state === "failed") {
-                if (entry.state === "failed") {
-                  yield* markDeliveryFailed(entry.delivery_id, "The run failed to start.");
-                  yield* releaseFailedDelivery(entry.delivery_id);
-                }
-                yield* remove;
-                continue;
-              }
-              const prepared = yield* Effect.gen(function* () {
-                // A running row was already sent, so recovery keeps the prompt it was sent with.
-                const current = entry.state === "dispatching" ? yield* findTask(taskId) : null;
-                const snapshot = yield* decodePendingTask(entry.task_json);
-                // The snapshot keeps the identity runTask checks; the prompt is the one saved now.
-                const task =
-                  current?.createdAt === snapshot.createdAt && current.prompt !== snapshot.prompt
-                    ? { ...snapshot, prompt: current.prompt }
-                    : snapshot;
-                const request = yield* decodePendingRequest(entry.request_json);
-                const frameId = Buffer.from(yield* random.randomBytes(6)).toString("hex");
-                return {
-                  task,
-                  taskJson: task === snapshot ? null : yield* encodePendingTask(task),
-                  rendered: renderWebhookPrompt(task.prompt, request, frameId),
-                };
-              }).pipe(Effect.exit);
-              if (Exit.isFailure(prepared)) {
-                if (Cause.hasInterruptsOnly(prepared.cause))
-                  return yield* Effect.failCause(prepared.cause);
-                yield* markDeliveryFailed(
-                  entry.delivery_id,
-                  "The pending webhook payload could not be prepared.",
-                );
-                yield* releaseFailedDelivery(entry.delivery_id);
-                yield* remove;
-                continue;
-              }
-              const { task, taskJson, rendered } = prepared.value;
-              if (rendered.prompt.trim().length > PROVIDER_SEND_TURN_MAX_INPUT_CHARS) {
-                yield* markDeliveryFailed(entry.delivery_id, PROMPT_TOO_LONG);
-                yield* releaseFailedDelivery(entry.delivery_id);
-              } else {
-                if (taskJson !== null)
-                  yield* store.write(
-                    {
-                      kind: "patch_pending",
-                      delivery_id: entry.delivery_id,
-                      patch: { task_json: taskJson },
-                    },
-                    AnyRows,
-                  );
-                yield* store.write(
-                  {
-                    kind: "patch_delivery",
-                    delivery_id: entry.delivery_id,
-                    patch: {
-                      outcome: "accepted",
-                      error: null,
-                      rendered_prompt: rendered.prompt.slice(0, WEBHOOK_DELIVERY_LOG_PROMPT_LIMIT),
-                      missing_fields_json: encodeMissingFieldsJson(rendered.missing),
-                    },
-                  },
-                  AnyRows,
-                );
-                if (!(yield* runWebhookDelivery(task, entry.delivery_id, rendered.prompt))) return;
-              }
-              yield* remove;
-            }
-          });
-          // The worker owns its reservation, so an interrupt anywhere still releases it.
-          return Effect.acquireUseRelease(
-            Ref.modify(pendingInFlight, (active) =>
-              active.has(taskId)
-                ? ([false, active] as const)
-                : ([true, new Set(active).add(taskId)] as const),
-            ),
-            (reserved) =>
-              reserved
-                ? webhookPermit(taskId).pipe(
-                    Effect.flatMap((permit) => dispatch.pipe(permit.withPermits(1))),
-                    Effect.catch((cause) =>
-                      Effect.logWarning("Pending webhook dispatch failed", { cause }),
-                    ),
-                    Effect.withSpan("ScheduledTaskService.dispatchPendingWebhook", {
-                      root: true,
-                    }),
-                  )
-                : Effect.void,
-            (reserved) =>
-              reserved
-                ? Ref.update(pendingInFlight, (active) => {
-                    const next = new Set(active);
-                    next.delete(taskId);
-                    return next;
-                  })
-                : Effect.void,
-          ).pipe(Effect.forkIn(serviceScope));
+        ({ task_id }) => dispatchPendingTask(ScheduledTaskId.make(task_id)),
+        {
+          discard: true,
         },
-        { discard: true },
       );
     });
     yield* scheduler.register("webhook-coalescing", dispatchPending());

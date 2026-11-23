@@ -136,6 +136,10 @@ export const make = Effect.gen(function* () {
         return sql`DELETE FROM scheduled_task_webhook_replay_keys WHERE delivery_id=${mutation.delivery_id}`;
       case "insert_pending":
         return sql`INSERT INTO scheduled_task_webhook_pending ${sql.insert(mutation.row)}`;
+      case "insert_ready_relay":
+        return Effect.die(
+          new Error("Durable immediate relay admission requires native scheduled rows."),
+        );
       case "patch_pending":
         return sql`UPDATE scheduled_task_webhook_pending SET ${sql.csv([
           ...assignments(mutation.patch),

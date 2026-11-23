@@ -112,7 +112,10 @@ enum Request {
         transaction_id: String,
         query: ProjectionRecordsQuery,
     },
-    ApplicationScheduledPrepare {},
+    ApplicationScheduledPrepare {
+        #[serde(default)]
+        durable_relay: bool,
+    },
     ApplicationScheduledRead {
         transaction_id: String,
         query: ScheduledRead,
@@ -939,8 +942,8 @@ async fn evaluate(
         Request::ApplicationAuthPrepare {} => {
             serde_json::to_value(store.prepare_application_auth().await?)
         }
-        Request::ApplicationScheduledPrepare {} => {
-            serde_json::to_value(store.prepare_application_scheduled().await?)
+        Request::ApplicationScheduledPrepare { durable_relay } => {
+            serde_json::to_value(store.prepare_application_scheduled(durable_relay).await?)
         }
         Request::ApplicationProjectionReadsPrepare {} => {
             serde_json::to_value(store.prepare_application_projection_reads().await?)
