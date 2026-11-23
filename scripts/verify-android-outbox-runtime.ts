@@ -8,11 +8,13 @@ import * as OS from "node:os";
 import * as Path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-const [phase, proofArgument, variant] = process.argv.slice(2);
+const [phase, proofArgument, variant, reconnectArgument] = process.argv.slice(2);
 Assert.ok(phase === "admit" || phase === "run");
 const normalApp = variant === "--normal-app";
 Assert.ok(variant === undefined || (phase === "run" && normalApp), "Invalid proof variant");
-Assert.equal(process.argv.length, normalApp ? 5 : 4);
+const pairReconnect = reconnectArgument === "--pair-reconnect";
+Assert.ok(reconnectArgument === undefined || (normalApp && pairReconnect));
+Assert.equal(process.argv.length, pairReconnect ? 6 : normalApp ? 5 : 4);
 Assert.equal(process.env.GITHUB_ACTIONS, "true", "Only the admitted hosted lane may operate this fixture");
 Assert.equal(process.platform, "linux");
 Assert.equal(process.arch, "x64");
@@ -64,7 +66,7 @@ let ownsScratch = false;
 let ownsAdb = false;
 let failure: unknown;
 
-type FixturePhase = "seed" | "seed-creation" | "reopen-remove" | "reopen-empty";
+type FixturePhase = "pair-reconnect" | "seed" | "seed-creation" | "reopen-remove" | "reopen-empty";
 const pendingTaskTitle = "T12 offline pending task";
 
 const launchedPids = new Set<string>();
@@ -90,7 +92,7 @@ async function launchFixture(label: string, fixturePhase: FixturePhase) {
   launchedPids.add(pid);
   report[`${label}Process`] = { pid, stopped: false };
   checkpoint(`${label}:await-receipt`);
-  const deadline = Date.now() + 60_000;
+  const deadline = Date.now() + (fixturePhase === "pair-reconnect" ? 240_000 : 60_000);
   while (true) {
     abort.signal.throwIfAborted();
     const read = device([
@@ -103,11 +105,11 @@ async function launchFixture(label: string, fixturePhase: FixturePhase) {
       const receipt = JSON.parse(frame) as Record<string, unknown>;
       report[label] = receipt;
       save();
-      FS.writeFileSync(
+      if (fixturePhase !== "pair-reconnect") FS.writeFileSync(
         Path.join(proof, `${label}-logcat.txt`),
         device(["logcat", "-d", "-t", "300"]).stdout,
       );
-      Assert.equal(receipt.schema, 2);
+      Assert.equal(receipt.schema, fixturePhase === "pair-reconnect" ? 3 : 2);
       Assert.equal(receipt.phase, fixturePhase);
       return { pid, receipt };
     }
@@ -395,6 +397,33 @@ try {
       Assert.equal(empty.receipt.attachmentFileCount, 0);
       await stopFixture("reopen-empty", empty.pid);
       if (normalApp) await verifyNormalApp(apk);
+      if (pairReconnect) {
+        checkpoint("pair-reconnect:prepare-server");
+        const { withAndroidPairingFixture } = await import("./android-pairing-fixture.ts");
+        await withAndroidPairingFixture({ temporary, signal: abort.signal,
+          device: (args) => { device(args); },
+          cleanupDevice: (args) => {
+            const result = ChildProcess.spawnSync(adb, ["-s", serial, ...args], {
+              env: commandEnvironment, timeout: 5_000, stdio: "ignore",
+            });
+            Assert.equal(result.status, 0, "Could not remove owned reverse mapping");
+          },
+          execute: async () => {
+            const result = await launchFixture("pair-reconnect", "pair-reconnect");
+            assertCompleted(result.receipt);
+            Assert.equal(typeof result.receipt.environmentId, "string");
+            const observations = result.receipt.observations as Array<{ phase: string; generation: number; authenticated: boolean | null }>;
+            Assert.deepEqual(observations.map((item) => item.phase),
+              ["connected", "disconnected", "connected", "disconnected", "connected"]);
+            Assert.deepEqual(observations.map((item) => item.authenticated), [true, null, true, null, true]);
+            Assert.ok(observations[2]!.generation > observations[0]!.generation);
+            Assert.ok(observations[4]!.generation > observations[2]!.generation);
+            await stopFixture("pair-reconnect", result.pid);
+            return result.receipt.environmentId;
+          },
+          record: (receipt) => { report.pairingServer = receipt; save(); },
+        });
+      }
     }
   }
   report.status = "passed";
@@ -403,7 +432,7 @@ try {
   report.status = "failed";
   report.failure = error instanceof Error ? error.message : String(error);
   failure = error;
-  if (child !== undefined) {
+  if (child !== undefined && !String(report.checkpoint).startsWith("pair-reconnect")) {
     const diagnostic = ChildProcess.spawnSync(adb, ["-s", serial, "logcat", "-d", "-t", "300"], {
       env: commandEnvironment, timeout: 5_000, encoding: "utf8", maxBuffer: 1_048_576,
     });

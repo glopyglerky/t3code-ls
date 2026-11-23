@@ -9,7 +9,7 @@ import {
   type QueuedThreadMessage,
 } from "./src/state/thread-outbox-model";
 
-type Phase = "seed" | "seed-creation" | "reopen-remove" | "reopen-empty";
+type Phase = "pair-reconnect" | "seed" | "seed-creation" | "reopen-remove" | "reopen-empty";
 
 interface NativeProof {
   getOutboxRuntimeProofPhase: () => string | null;
@@ -43,6 +43,87 @@ function verifyMatrix(
     throw new Error("Native input bound mismatch");
   }
   return matrix;
+}
+
+async function runPairingProof(native: NativeProof): Promise<string> {
+  const report: Record<string, unknown> = { schema: 3, phase: "pair-reconnect", status: "running", checkpoint: "pair" };
+  const control = "http://127.0.0.1:47831";
+  const request = async (path: string) => {
+    const response = await fetch(control + path, { method: path === "/config" ? "GET" : "POST" });
+    if (!response.ok) throw new Error("Fixture control refused transition");
+    return response.json();
+  };
+  const releases: Array<() => void> = [];
+  try {
+    // Select exactly the same JNI policy before loading the real connection runtime.
+    selectOutboxDeliveryResolver({ requireNative: true });
+    const { runAtomCommand } = await import("@t3tools/client-runtime/state/runtime");
+    const { AsyncResult } = await import("effect/reactivity");
+    const { sessionGrantsScope } = await import("@t3tools/contracts");
+    const { appAtomRegistry } = await import("./src/state/atom-registry");
+    const { connectPairingUrl } = await import("./src/connection/onboarding");
+    const { environmentCatalog } = await import("./src/connection/catalog");
+    const { environmentSession } = await import("./src/state/session");
+    const config = await request("/config");
+    if (typeof config.environmentId !== "string" || typeof config.pairingUrl !== "string") {
+      throw new Error("Invalid fixture configuration");
+    }
+    const url = new URL(config.pairingUrl);
+    if (url.origin !== "http://127.0.0.1:47832" || url.pathname !== "/") {
+      throw new Error("Fixture pairing must remain on owned loopback");
+    }
+    const environmentId = EnvironmentId.make(config.environmentId);
+    const paired = await runAtomCommand(appAtomRegistry, connectPairingUrl,
+      { pairingUrl: config.pairingUrl, expectedEnvironmentId: environmentId }, { reportFailure: false });
+    if (!AsyncResult.isSuccess(paired) || paired.value !== environmentId) throw new Error("Pairing failed");
+    report.environmentId = environmentId;
+    const state = environmentCatalog.stateAtom(environmentId);
+    const session = environmentSession.sessionStateAtom(environmentId);
+    releases.push(appAtomRegistry.subscribe(state, () => {}));
+    releases.push(appAtomRegistry.subscribe(session, () => {}));
+    let lastAuthenticatedSession: unknown;
+    const wait = async (connected: boolean, afterGeneration = -1) => {
+      const deadline = Date.now() + 45_000;
+      while (Date.now() < deadline) {
+        const current = appAtomRegistry.get(state);
+        const auth = appAtomRegistry.get(session);
+        if (AsyncResult.isSuccess(current)) {
+          if (!connected && current.value.phase !== "connected") return current.value.generation;
+          if (connected && current.value.phase === "connected" && current.value.generation > afterGeneration &&
+              AsyncResult.isSuccess(auth) && !auth.waiting && auth.value.authenticated &&
+              sessionGrantsScope(auth.value, "orchestration:read") && auth.value !== lastAuthenticatedSession) {
+            lastAuthenticatedSession = auth.value;
+            return current.value.generation;
+          }
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error("Installed connection transition timed out");
+    };
+    let generation = await wait(true);
+    const observations: Array<{ phase: string; generation: number; authenticated: boolean | null }> =
+      [{ phase: "connected", generation, authenticated: true }];
+    for (let cycle = 1; cycle <= 2; cycle++) {
+      report.checkpoint = `disconnect-${cycle}`;
+      await request(`/drop-${cycle}`);
+      const disconnectedGeneration = await wait(false);
+      observations.push({ phase: "disconnected", generation: disconnectedGeneration, authenticated: null });
+      await request(`/restore-${cycle}`);
+      generation = await wait(true, generation);
+      observations.push({ phase: "connected", generation, authenticated: true });
+    }
+    report.observations = observations;
+    report.status = "passed";
+    report.checkpoint = "complete";
+  } catch {
+    // Never serialize pairing URLs, bearer credentials or error causes in Android receipts.
+    report.status = "failed";
+    report.failure = "Installed pairing/reconnect failed at the recorded checkpoint";
+  } finally {
+    for (const release of releases.reverse()) release();
+  }
+  native.recordOutboxRuntimeProof(JSON.stringify(report));
+  return String(report.status);
 }
 
 async function runProof(native: NativeProof, phase: Phase): Promise<string> {
@@ -189,13 +270,13 @@ function InstalledOutboxProof() {
     const native = requireNativeModule<NativeProof>("T3NativeControls");
     const phase = native.getOutboxRuntimeProofPhase();
     if (
-      phase !== "seed" && phase !== "seed-creation" &&
+      phase !== "pair-reconnect" && phase !== "seed" && phase !== "seed-creation" &&
       phase !== "reopen-remove" && phase !== "reopen-empty"
     ) {
       setStatus("invalid fixture phase");
       return;
     }
-    void runProof(native, phase).then(setStatus);
+    void (phase === "pair-reconnect" ? runPairingProof(native) : runProof(native, phase)).then(setStatus);
   }, []);
   return createElement(
     View,
