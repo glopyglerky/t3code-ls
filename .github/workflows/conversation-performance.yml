@@ -2,7 +2,7 @@ name: Paired conversation measurement
 
 on:
   push:
-    branches: ["measure/t3code-ls-t16-conversation-*"]
+    branches: ["measure/t3code-ls-t16-conversation-*", "measure/t3code-ls-t16-reopen-*"]
 
 permissions:
   contents: read
@@ -31,6 +31,7 @@ jobs:
       TRACE_SERVER_SPANS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-diagnose-server-') }}
       COMPARE_CATALOG: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-catalog-') }}
       COMPARE_SINGLE_READS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') }}
+      REOPEN_WORKSPACE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -120,6 +121,7 @@ jobs:
           diff -qr ../candidate/apps/web/dist apps/web/dist
           diff -qr --exclude=native-bin ../candidate/apps/server/dist apps/server/dist
       - name: Measure completed fixture turns in alternating order
+        if: env.REOPEN_WORKSPACE != 'true'
         shell: bash
         run: |
           export CARGO_HOME="$RUNNER_TEMP/conversation-cargo-home"
@@ -211,6 +213,69 @@ jobs:
               diff <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-stock.json") \
                 <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-$profile.json")
             done
+          done
+      - name: Measure a saved workspace in alternating order
+        if: env.REOPEN_WORKSPACE == 'true'
+        shell: bash
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/conversation-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/conversation-target"
+          cd measurement
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
+            --release --locked -p t3code-ls-tools
+          cd ..
+          node_path="$(command -v node)"
+          chrome="$(command -v google-chrome)"
+          driver="$(command -v chromedriver || printf '%s/chromedriver' "$CHROMEWEBDRIVER")"
+          test -x "$driver"
+          probe="$CARGO_TARGET_DIR/release/t3code-ls-tools"
+          evidence="$RUNNER_TEMP/conversation-evidence"
+          mkdir "$evidence"
+          sha256sum "$probe" > "$evidence/probe.sha256"
+          for profile in stock candidate; do
+            (
+              cd "$profile"
+              sha256sum pnpm-lock.yaml
+              find apps/web/dist apps/server/dist -type f -print0 | sort -z | xargs -0 -r sha256sum
+            ) > "$evidence/$profile.sha256"
+          done
+          jq -n --arg stock "$STOCK_COMMIT" --arg stockTree "$STOCK_TREE" \
+            --arg candidate "$CANDIDATE_COMMIT" --arg candidateTree "$CANDIDATE_TREE" \
+            --arg probe "$(git -C measurement rev-parse HEAD)" --arg node "$(node --version)" \
+            --arg chrome "$("$chrome" --version)" --arg driver "$("$driver" --version)" \
+            --arg image "${ImageOS:-unknown}/${ImageVersion:-unknown}" --arg kernel "$(uname -r)" \
+            --arg cpu "$(LC_ALL=C lscpu | sed -n 's/^Model name:[[:space:]]*//p')" \
+            --arg systemLoad "$(uptime)" --argjson cpus "$(nproc)" \
+            '{journey:"J02",stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,workload:{threads:32,messagesPerThread:200},cache:"same browser and saved profile per trial, unmanaged filesystem cache after import"}' \
+            > "$evidence/inputs.json"
+          printf 'pair\tposition\tprofile\tdescriptor_us\tshell_visible_ms\tselected_visible_ms\tauthoritative_shell_ms\tauthoritative_thread_ms\n' > "$evidence/reopen.tsv"
+          trial_root="$RUNNER_TEMP/reopen-trials"
+          mkdir "$trial_root"
+          trap 'rm -r "${trial_root:?}"' EXIT
+          for ((pair=1; pair<=6; pair++)); do
+            profiles=(stock candidate)
+            if (( pair % 2 == 0 )); then profiles=(candidate stock); fi
+            for ((position=0; position<${#profiles[@]}; position++)); do
+              profile="${profiles[$position]}"
+              mode=stock
+              if [[ "$profile" == candidate ]]; then mode=native; fi
+              trial="$pair-$profile"
+              result="$evidence/sample-$trial.json"
+              sudo -n unshare --net -- bash -euc '
+                ip link set dev lo up
+                user="$1"
+                shift
+                exec runuser -u "$user" -- "$@"
+              ' _ "$(id -un)" "$probe" probe-reopen "$node_path" \
+                "$PWD/$profile/apps/server/dist/bin.mjs" "$trial_root/$trial" \
+                "$driver" "$chrome" "$mode" | tee "$result" > /dev/null
+              jq -er --argjson pair "$pair" --argjson position "$((position + 1))" --arg profile "$profile" \
+                'select(.journey == "J02" and .snapshot.valid and .fixture.total_messages == 6400) | [$pair,$position,$profile,.descriptor_micros,.browser.firstShellVisibleMillis,.browser.selectedTextVisibleMillis,.browser.authoritativeShellHttpMillis,.browser.authoritativeThreadHttpMillis] | @tsv' \
+                "$result" >> "$evidence/reopen.tsv"
+              rm -r "${trial_root:?}/${trial:?}"
+            done
+            diff <(jq -c '.snapshot | {valid,threadCount,messageCount,selectedThreadId}' "$evidence/sample-$pair-stock.json") \
+              <(jq -c '.snapshot | {valid,threadCount,messageCount,selectedThreadId}' "$evidence/sample-$pair-candidate.json")
           done
       - name: Retain exact artifacts and matched observations
         if: always()

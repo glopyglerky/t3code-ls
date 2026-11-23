@@ -13,6 +13,7 @@ use std::{
 use super::OwnedChild;
 
 mod conversation;
+mod reopen;
 
 const WINDOW_WAIT: Duration = Duration::from_secs(30);
 const ELEMENT: &str = "element-6066-11e4-a52e-4f735466cecf";
@@ -75,6 +76,7 @@ impl Browser {
                     },
                 }},
             })),
+            25,
         )?;
         let session = result["sessionId"]
             .as_str()
@@ -179,6 +181,7 @@ impl Browser {
             method,
             &format!("/session/{}{path}", self.session),
             body,
+            25,
         )
     }
 
@@ -202,7 +205,13 @@ impl Drop for Browser {
     }
 }
 
-fn request(origin: &str, method: &str, path: &str, body: Option<Value>) -> Result<Value> {
+fn request(
+    origin: &str,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+    timeout_seconds: u64,
+) -> Result<Value> {
     let mut command = Command::new("curl");
     command
         .args([
@@ -211,7 +220,7 @@ fn request(origin: &str, method: &str, path: &str, body: Option<Value>) -> Resul
             "*",
             "--silent",
             "--max-time",
-            "25",
+            &timeout_seconds.to_string(),
             "--request",
             method,
         ])

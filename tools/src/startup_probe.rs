@@ -1,4 +1,5 @@
 mod browser;
+pub(crate) mod reopen;
 
 use crate::Result;
 use serde_json::{Value, json};
