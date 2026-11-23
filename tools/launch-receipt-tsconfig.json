@@ -1,0 +1,9 @@
+{
+  "extends": "../apps/server/tsconfig.json",
+  "include": [
+    "../apps/server/src/orchestration-v2/ThreadLaunchService.test.ts",
+    "../apps/server/src/orchestration-v2/ThreadMessageIntake.ts",
+    "../apps/server/src/ws.ts",
+    "../apps/server/scripts/verify-packaged-guest-authorization.ts"
+  ]
+}

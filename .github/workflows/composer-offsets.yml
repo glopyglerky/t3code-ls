@@ -110,7 +110,7 @@ jobs:
             packages/client-runtime/src/connection/registry.test.ts packages/client-runtime/src/state/threadDetail.test.ts
           pnpm --filter @t3tools/contracts run typecheck
           pnpm --filter @t3tools/client-runtime run typecheck
-          pnpm --dir apps/server run typecheck
+          node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/launch-receipt-tsconfig.json
       - name: Exercise local pairing in the retained and Dioxus browser builds
         if: env.PAIRING_PROOF == 'true'
         env:

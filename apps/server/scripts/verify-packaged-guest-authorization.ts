@@ -476,7 +476,7 @@ try {
     title: "Packaged guest fixture",
     workspaceRoot: workspace,
   });
-  const { threadId, projection } = await client.rpc((rpc) =>
+  const launched = await client.rpc((rpc) =>
     rpc[ORCHESTRATION_V2_WS_METHODS.launchThread]({
       title: "Guest fixture thread",
       projectId,
@@ -488,6 +488,8 @@ try {
       generateTitle: false,
     }),
   );
+  Assert.ok("projection" in launched, "The legacy thread launch must return its projection");
+  const { threadId, projection } = launched;
   Assert.equal(projection.runs.length, 0);
   Assert.equal(projection.messages.length, 0);
   const { url, share } = await client.rpc((rpc) => rpc[WS_METHODS.guestShareCreate]({ threadId }));
