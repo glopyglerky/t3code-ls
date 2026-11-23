@@ -494,6 +494,13 @@ impl Store {
         Ok(store)
     }
 
+    /// Open a read-only service whose independent roots each take a fresh snapshot.
+    pub async fn open_current_reader(path: impl AsRef<Path>) -> Result<Self> {
+        Ok(Self {
+            db: Backend::open_current_reader(path).await?,
+        })
+    }
+
     pub async fn shutdown(self) -> Result<()> {
         self.db.shutdown().await
     }

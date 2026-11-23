@@ -261,7 +261,7 @@ export const make = Effect.fn("Omdb.make")(
       }
       yield* database.request({ operation: "application_bootstrap" }, Bootstrap);
       const readDatabase = options.independentReads
-        ? yield* NativeDatabase.make({ ...options, mode: "read-only-local", requestTimeout: "15 minutes" })
+        ? yield* NativeDatabase.make({ ...options, mode: "current-read-local", requestTimeout: "15 minutes" })
         : undefined;
       const client = yield* RedbClient.make.pipe(
         Effect.provideService(NativeDatabase.NativeDatabase, database),

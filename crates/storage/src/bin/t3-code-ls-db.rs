@@ -1669,10 +1669,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         [mode, path] if mode == "initialize-local" => Store::initialize_local(path).await,
         [mode, path] if mode == "local" => Store::open_local(path).await,
         [mode, path] if mode == "read-only-local" => Store::open_read_only(path).await,
+        [mode, path] if mode == "current-read-local" => Store::open_current_reader(path).await,
         [mode, path] if mode == "exclusive-local" => Store::open_exclusive(path).await,
         _ => {
             return Err(Error::Invalid(
-                "usage: t3-code-ls-db initialize-local PATH | local PATH | read-only-local PATH | exclusive-local PATH | owner-lock PATH | trial-backup HOME UPDATE_ID CATALOG_SHA256 | trial-prepare-isolated HOME UPDATE_ID < REQUEST_JSON | trial-verify-isolated HOME UPDATE_ID < RECEIPT_JSON | trial-inspect-selection HOME UPDATE_ID FROM_VERSION TARGET_VERSION | trial-publish-sealed HOME UPDATE_ID | trial-prepare-restore HOME UPDATE_ID < REQUEST_JSON | trial-publish-restore-offline HOME UPDATE_ID < WITNESSED_REQUEST_JSON".into(),
+                "usage: t3-code-ls-db initialize-local PATH | local PATH | read-only-local PATH | current-read-local PATH | exclusive-local PATH | owner-lock PATH | trial-backup HOME UPDATE_ID CATALOG_SHA256 | trial-prepare-isolated HOME UPDATE_ID < REQUEST_JSON | trial-verify-isolated HOME UPDATE_ID < RECEIPT_JSON | trial-inspect-selection HOME UPDATE_ID FROM_VERSION TARGET_VERSION | trial-publish-sealed HOME UPDATE_ID | trial-prepare-restore HOME UPDATE_ID < REQUEST_JSON | trial-publish-restore-offline HOME UPDATE_ID < WITNESSED_REQUEST_JSON".into(),
             )
             .into());
         }

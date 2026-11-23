@@ -173,6 +173,7 @@ export const make = Effect.fn("NativeDatabase.make")(function* (config: {
     | "local"
     | "initialize-local"
     | "read-only-local"
+    | "current-read-local"
     | "exclusive-local"
     | "owner-lock";
   /** Ownership handles must never silently reacquire a lost lifetime lock. */
@@ -182,9 +183,14 @@ export const make = Effect.fn("NativeDatabase.make")(function* (config: {
   const { executable, databasePath } = config;
   const mode = config.mode ?? "local";
   if (
-    !["local", "initialize-local", "read-only-local", "exclusive-local", "owner-lock"].includes(
-      mode,
-    )
+    ![
+      "local",
+      "initialize-local",
+      "read-only-local",
+      "current-read-local",
+      "exclusive-local",
+      "owner-lock",
+    ].includes(mode)
   ) {
     return yield* new NativeDatabaseInputError({ stage: "configuration" });
   }
