@@ -350,7 +350,7 @@ jobs:
             <(jq -S 'del(.files["t3-code-ls-db"])' apps/server/dist/native-bin/manifest.json) \
             <(jq -S 'del(.files["t3-code-ls-db"])' apps/server/dist-checked-open-control/native-bin/manifest.json)
       - name: Compare stock and both packaged native reopen variants
-        if: env.PAIRED_REUSE_PROOF == 'true'
+        if: env.PAIRED_REUSE_PROOF == 'true' && env.STRICT_PROOF != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -519,6 +519,11 @@ jobs:
           evidence="$RUNNER_TEMP/checked-open-evidence"
           verifier="$CARGO_TARGET_DIR/release/t16-strict-control"
           probe="$CARGO_TARGET_DIR/release/t3code-ls-tools"
+          (
+            cd "$scratch/stock"
+            sha256sum pnpm-lock.yaml
+            find apps/server/dist apps/web/dist -type f -print0 | sort -z | xargs -0 -r sha256sum
+          ) > "$evidence/arm-stock.sha256"
           # Frozen stock and its built denominator remain untouched.
           git clone --quiet --shared --no-checkout "$scratch/stock" "$scratch/strict-stock"
           git -C "$scratch/strict-stock" checkout --detach "$STOCK_COMMIT"

@@ -65,3 +65,7 @@ balanced same-host design, demonstrate completed equivalent work, bound observer
 overhead and identify the actual limiter. Keep the strict diagnostic overhead
 and durability/fault-injection gaps explicit. The existing workflow cleanup owns
 all strict staging, dependencies and profiles and records filesystem free space.
+
+The strict selector runs its own two pairs. The separately selected three-arm
+comparison retains its original matching conditions and measures a different
+configuration.
