@@ -267,6 +267,7 @@ export const deliverDue = Effect.fn("HookInboxStore.deliverDue")(function* <R>(
   let failures = target.failures;
   let sent = 0;
   let delivered = 0;
+  let expiredCount = expired.length;
   let unreadable = 0;
   let longestWaitMs = 0;
   const busyHooks = new Set<string>();
@@ -279,7 +280,7 @@ export const deliverDue = Effect.fn("HookInboxStore.deliverDue")(function* <R>(
       "relay.inbox.sent": sent,
       "relay.inbox.delivered": delivered,
       "relay.inbox.busy_hooks": busyHooks.size,
-      "relay.inbox.expired": expired.length,
+      "relay.inbox.expired": expiredCount,
       "relay.inbox.unreadable": unreadable,
       "relay.inbox.consecutive_failures": failures,
       "relay.inbox.longest_wait_ms": longestWaitMs,
@@ -301,6 +302,12 @@ export const deliverDue = Effect.fn("HookInboxStore.deliverDue")(function* <R>(
       if (!(yield* stillHeld(row.seq))) {
         yield* annotateRun("cleared");
         return null;
+      }
+      const sendAt = yield* Clock.currentTimeMillis;
+      if (row.received_at < iso(sendAt - HOOK_INBOX_TTL_MS)) {
+        yield* sql`DELETE FROM held_hooks WHERE seq = ${row.seq}`;
+        expiredCount += 1;
+        continue;
       }
       const headers = decodeHeaders(row.headers);
       if (Option.isNone(headers)) {
@@ -341,7 +348,7 @@ export const deliverDue = Effect.fn("HookInboxStore.deliverDue")(function* <R>(
       yield* sql`DELETE FROM held_hooks WHERE seq = ${row.seq}`;
       delivered += 1;
       const receivedAtMs = DateTime.toEpochMillis(DateTime.makeUnsafe(row.received_at));
-      longestWaitMs = Math.max(longestWaitMs, startedAt - receivedAtMs);
+      longestWaitMs = Math.max(longestWaitMs, sendAt - receivedAtMs);
     }
     batch = yield* readPage(batch.at(-1)!.seq, busyHooks);
   }
