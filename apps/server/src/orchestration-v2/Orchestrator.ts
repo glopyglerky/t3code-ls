@@ -407,11 +407,7 @@ export interface OrchestratorV2Shape {
     input: OrchestrationV2SearchThreadInput,
   ) => Effect.Effect<OrchestrationV2SearchThreadResult, OrchestratorV2Error>;
   readonly getThreadHistoryPage: (
-    threadId: ThreadId,
-    cursor: string,
-    throughEntryId?: string,
-    conversationOnly?: boolean,
-    workMode?: "deferred" | "work",
+    ...args: Parameters<ProjectionStoreV2["Service"]["getThreadHistoryPage"]>
   ) => Effect.Effect<OrchestrationV2ThreadHistoryPage, OrchestratorV2Error>;
   readonly getTimelinePage: (
     threadId: ThreadId,
@@ -459,11 +455,7 @@ export interface OrchestratorV2Shape {
     threadId: ThreadId,
     options: Parameters<ProjectionStoreV2["Service"]["getThreadSnapshotWindow"]>[1],
   ) => Effect.Effect<
-    {
-      readonly schemaVersion: number;
-      readonly snapshotSequence: number;
-      readonly projection: OrchestrationV2ThreadProjection;
-    },
+    Effect.Success<ReturnType<ProjectionStoreV2["Service"]["getThreadSnapshotWindow"]>>,
     OrchestratorV2Error
   >;
   readonly getPullRequestSnapshot: (
@@ -15788,9 +15780,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         );
     }),
     getThreadHistoryPage: Effect.fn("OrchestratorV2.getThreadHistoryPage")(
-      function (threadId, cursor, throughEntryId, conversationOnly, workMode) {
+      function (...args: Parameters<OrchestratorV2Shape["getThreadHistoryPage"]>) {
+        const [threadId] = args;
         return projectionStore
-          .getThreadHistoryPage(threadId, cursor, throughEntryId, conversationOnly, workMode)
+          .getThreadHistoryPage(...args)
           .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })));
       },
     ),

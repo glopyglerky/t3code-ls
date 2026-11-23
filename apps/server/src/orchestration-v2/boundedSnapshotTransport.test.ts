@@ -56,6 +56,7 @@ import { watchForkHistory } from "./ForkHistoryInvalidations.ts";
 import * as OrchestrationHttp from "./http.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import { encodeThreadHistoryCursor } from "./threadHistoryPaging.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 
 const decodeBounded = Schema.decodeUnknownSync(
@@ -98,10 +99,7 @@ const management = Layer.unwrap(
       getThreadSnapshot: (id) => projections.getThreadSnapshot(id).pipe(Effect.orDie),
       getThreadSnapshotWindow: (id, options) =>
         projections.getThreadSnapshotWindow(id, options).pipe(Effect.orDie),
-      getThreadHistoryPage: (id, cursor, throughEntryId, conversationOnly) =>
-        projections
-          .getThreadHistoryPage(id, cursor, throughEntryId, conversationOnly)
-          .pipe(Effect.orDie),
+      getThreadHistoryPage: (...args) => projections.getThreadHistoryPage(...args).pipe(Effect.orDie),
       streamStoredEventsFrom: (input) =>
         input?.threadId === BODIES
           ? Stream.fromIterable(bodiesLiveTail())
@@ -612,6 +610,89 @@ it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("HTTP: fork history view revision changes across an ancestor-only commit", () =>
+    Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const at = yield* DateTime.now;
+      const parent = ThreadId.make("thread:compact-transport:http-parent");
+      const child = ThreadId.make("thread:compact-transport:http-child");
+      const cutoff = RunId.make("run:compact-transport:http-cutoff");
+      const edit = itemUpdated(parent, cutoff, "inherited-notice", 1, at, "system_notice");
+      if (edit.type !== "turn-item.updated" || edit.payload.type !== "system_notice") {
+        throw new Error("Expected an inherited notice fixture");
+      }
+      yield* eventSink.write({
+        events: [
+          threadCreated(parent, at),
+          runCreated(parent, cutoff, at),
+          edit,
+          threadCreated(child, at, cutoff, parent),
+        ],
+      });
+      const laterRun = RunId.make("run:compact-transport:http-after-fork");
+      const base = `/api/orchestration/threads/${encodeURIComponent(child)}`;
+      const bounded = () =>
+        withHttp(async (get) => {
+          const response = await get(`${base}/bounded?compactIds=1`);
+          assert.equal(response.status, 200);
+          return decodeBounded(await response.text());
+        });
+      const page = (cursor: string) =>
+        withHttp(async (get) => {
+          const response = await get(
+            `${base}/history?cursor=${encodeURIComponent(cursor)}&compactIds=1`,
+          );
+          assert.equal(response.status, 200);
+          return decodeHistoryPage(await response.text());
+        });
+      const before = yield* bounded();
+      const cursor = encodeThreadHistoryCursor({
+        snapshotSequence: before.snapshotSequence,
+        sourceThreadId: parent,
+        sourceItemId: edit.payload.id,
+        position: 0,
+        inclusive: true,
+      });
+      const firstPage = yield* page(cursor);
+      assert.isNumber(before.historyViewRevision);
+      assert.equal(firstPage.historyViewRevision, before.historyViewRevision);
+      assert.include(JSON.stringify(firstPage.items), '"message":"inherited-notice"');
+
+      const [stored] = yield* eventSink.write({
+        events: [
+          {
+            ...edit,
+            id: EventId.make("event:compact-transport:http-ancestor-edit"),
+            payload: { ...edit.payload, message: "Ancestor revised for HTTP" },
+          },
+        ],
+      });
+      const secondPage = yield* page(cursor);
+      assert.equal(secondPage.snapshotSequence, before.snapshotSequence);
+      assert.notEqual(secondPage.historyViewRevision, before.historyViewRevision);
+      assert.equal(secondPage.historyViewRevision, stored!.sequence);
+      assert.include(JSON.stringify(secondPage.items), "Ancestor revised for HTTP");
+      const after = yield* bounded();
+      assert.equal(after.historyViewRevision, secondPage.historyViewRevision);
+      assert.equal(after.snapshotSequence, before.snapshotSequence);
+
+      yield* eventSink.write({
+        events: [
+          runCreated(parent, laterRun, at, 2),
+          itemUpdated(parent, laterRun, "http-outside-cutoff", 100, at),
+        ],
+      });
+      const outside = yield* bounded();
+      const outsidePage = yield* page(cursor);
+      assert.deepStrictEqual(outside.projection, after.projection);
+      assert.deepStrictEqual(outsidePage.items, secondPage.items);
+      // The ancestry watermark is conservative even when the cutoff excludes new rows.
+      assert.notEqual(outside.historyViewRevision, after.historyViewRevision);
+      assert.equal(outsidePage.historyViewRevision, outside.historyViewRevision);
+      assert.equal(outsidePage.snapshotSequence, before.snapshotSequence);
+    }),
+  );
+
   describe.each([
     ["fork", FORK],
     ["long run with a retained interrupt request", LONG],
@@ -678,6 +759,7 @@ it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
         assert.isNumber(wire.projection.thread.id);
         assert.isBelow(tableBody.length, plainBody.length);
         const decoded = decodeBounded(tableBody);
+        if (threadId === LONG) assert.notProperty(wire, "historyViewRevision");
         assert.deepStrictEqual(decoded, decodeBounded(plainBody));
 
         // Only the long thread has older history to page.
@@ -688,6 +770,7 @@ it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
         const tablePage = await (await get(`${history}&compactIds=1`)).text();
         assert.isArray(JSON.parse(tablePage).ids);
         const page = decodeHistoryPage(tablePage);
+        assert.notProperty(JSON.parse(tablePage), "historyViewRevision");
         assert.isAbove(page.items.length, 0);
         assert.deepStrictEqual(page, decodeHistoryPage(plainPage));
       }),

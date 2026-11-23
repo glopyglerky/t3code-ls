@@ -11,6 +11,7 @@ import * as Schema from "effect/Schema";
 
 import type { ProjectionRecordRowsError, ProjectionRecordWindow } from "./ProjectionRecordRows.ts";
 import type { PersistenceTransactionsShape } from "../persistence/PersistenceTransactions.ts";
+import type { ThreadFindRows } from "./ThreadFindRows.ts";
 
 export const ProjectionTimelineRow = Schema.Struct({
   turn_item_id: Schema.String,
@@ -57,6 +58,7 @@ export interface ProjectionSnapshotRows {
   readonly snapshotSequence: (
     threadId: ThreadId,
   ) => Effect.Effect<number, ProjectionRecordRowsError>;
+  readonly historyRevision: ThreadFindRows["revision"];
 }
 
 export const ProjectionMaterializedRow = Schema.Struct({
@@ -74,6 +76,7 @@ export type ProjectionAttachmentOwner = typeof ProjectionAttachmentOwner.Type;
 export interface ProjectionTimelineRows {
   readonly withReadTransaction: PersistenceTransactionsShape["withReadTransaction"];
   readonly snapshotSequence: ProjectionSnapshotRows["snapshotSequence"];
+  readonly historyRevision: ProjectionSnapshotRows["historyRevision"];
   readonly materialize: (
     sources: string,
   ) => Effect.Effect<ReadonlyArray<ProjectionMaterializedRow>, ProjectionRecordRowsError>;

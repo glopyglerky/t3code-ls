@@ -1069,11 +1069,13 @@ describe("EnvironmentThreads", () => {
       request: Parameters<typeof HttpClientResponse.fromWeb>[0],
       items: OrchestrationV2ThreadProjection["visibleTurnItems"],
       nextCursor: string | null,
+      historyViewRevision?: number,
     ) =>
       HttpClientResponse.fromWeb(
         request,
         Response.json({
           snapshotSequence: CACHED_SNAPSHOT_SEQUENCE,
+          historyViewRevision,
           items,
           nextCursor,
           hasMoreHistory: nextCursor !== null,
@@ -1125,6 +1127,7 @@ describe("EnvironmentThreads", () => {
             _tag: "present",
             snapshot: { projection, snapshotSequence: CACHED_SNAPSHOT_SEQUENCE },
             history,
+            historyViewRevision: 8,
           },
           historyHttpClient: HttpClient.make((request, url) => {
             const cursor = url.searchParams.get("cursor");
@@ -1132,7 +1135,7 @@ describe("EnvironmentThreads", () => {
             if (cursor === "cursor-one" && anchor === null)
               return Effect.succeed(historyPage(request, [inherited("Before edit")], "cursor-two"));
             if (cursor === "cursor-one" && anchor === "inherited-prompt")
-              return Effect.succeed(historyPage(request, [inherited("After edit")], "cursor-two"));
+              return Effect.succeed(historyPage(request, [inherited("After edit")], "cursor-two", 8));
             if (cursor === "cursor-two")
               return Deferred.succeed(started, undefined).pipe(
                 Effect.andThen(Deferred.await(release)),
@@ -1186,6 +1189,75 @@ describe("EnvironmentThreads", () => {
         expect(Option.getOrThrow(advanced.data).thread.title).toBe("Child changed");
         expect(Option.getOrThrow(advanced.data).visibleTurnItems[0]?.item)
           .toMatchObject({ type: "user_message", text: "After edit" });
+      }),
+    );
+
+    it.effect.each([
+      { boundedRevision: 8, pageRevision: 9, profile: "an ancestor commit between reads" },
+      { pageRevision: 9, profile: "a missing bounded revision" },
+      { boundedRevision: 8, profile: "a missing page revision" },
+      { profile: "an older server" },
+    ])("keeps the bounded fork view on $profile", ({ boundedRevision, pageRevision }) =>
+      Effect.gen(function* () {
+        const parent = ThreadId.make("history-source");
+        const tail = command("child-tail", "completed");
+        const older = (id: string) => ({
+          ...localRow({ ...command(id, "completed"), threadId: parent }, 0),
+          sourceThreadId: parent,
+          visibility: "inherited" as const,
+        });
+        const initial = cachedItem(tail);
+        const projection = {
+          ...initial,
+          thread: {
+            ...initial.thread,
+            forkedFrom: { type: "run" as const, threadId: parent, runId: RunId.make("fork-run") },
+          },
+        };
+        const history = { historyCursor: "initial-cursor", hasMoreHistory: true };
+        const fresh = { ...projection, thread: { ...projection.thread, title: "Refreshed fork" } };
+        const harness = yield* makeHarness({
+          cached: projection,
+          initialConfig: Effect.succeed({ threadHistoryInvalidation: true }),
+          fullSubscribeSnapshot: () => ({
+            ...snapshot(projection, CACHED_SNAPSHOT_SEQUENCE),
+            ...history,
+          }),
+          httpSnapshot: {
+            _tag: "present",
+            snapshot: { projection: fresh, snapshotSequence: CACHED_SNAPSHOT_SEQUENCE },
+            history: { ...history, historyCursor: "fresh-cursor" },
+            ...(boundedRevision === undefined ? {} : { historyViewRevision: boundedRevision }),
+          },
+          historyHttpClient: HttpClient.make((request, url) => {
+            const cursor = url.searchParams.get("cursor");
+            const anchor = url.searchParams.get("throughEntryId");
+            const id =
+              cursor === "initial-cursor"
+                ? "before-edit"
+                : anchor === null
+                  ? "retried-page"
+                  : "incompatible-page";
+            return Effect.succeed(historyPage(request, [older(id)], null, pageRevision));
+          }),
+        });
+        yield* awaitThreadState(harness.observed, (value) => value.status === "live");
+        expect(yield* harness.loadEarlier()).toEqual({ _tag: "loaded" });
+
+        yield* Queue.offer(harness.inputs, { kind: "history-invalidated" });
+        const refreshed = yield* awaitThreadState(
+          harness.observed,
+          (value) => Option.getOrNull(value.data)?.thread.title === "Refreshed fork",
+        );
+        expect(refreshed.sequence).toBe(CACHED_SNAPSHOT_SEQUENCE);
+        expect(refreshed.history).toMatchObject({ historyCursor: "fresh-cursor", expanded: false });
+        expect(Option.getOrThrow(refreshed.data).visibleTurnItems.map((row) => row.sourceItemId))
+          .toEqual([tail.id]);
+
+        expect(yield* harness.loadEarlier()).toEqual({ _tag: "loaded" });
+        const paged = yield* SubscriptionRef.get(harness.threadState);
+        expect(Option.getOrThrow(paged.data).visibleTurnItems.map((row) => row.sourceItemId))
+          .toEqual([older("retried-page").sourceItemId, tail.id]);
       }),
     );
 

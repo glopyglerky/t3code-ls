@@ -6,7 +6,7 @@ import { applyThreadPullRequestLinkUpdate } from "../sourceControl/threadPullReq
 import { projectTurnItemForWire } from "./WireProjection.ts";
 import * as Stream from "effect/Stream";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
-import { makeThreadFind } from "./ThreadFind.ts";
+import { makeThreadFind, readSqliteThreadFindRevision } from "./ThreadFind.ts";
 import type { ProjectionLookupRows } from "./ProjectionLookupRows.ts";
 import * as SqliteProjectionLookupRows from "./SqliteProjectionLookupRows.ts";
 import {
@@ -516,6 +516,7 @@ export interface ProjectionStoreV2Shape {
     throughEntryId?: string,
     conversationOnly?: boolean,
     workMode?: "deferred" | "work",
+    options?: { readonly includeHistoryViewRevision?: boolean },
   ) => Effect.Effect<OrchestrationV2ThreadHistoryPage, ProjectionStoreV2Error>;
   readonly getTimelinePage: (
     threadId: ThreadId,
@@ -781,11 +782,13 @@ export interface ProjectionStoreV2Shape {
       readonly anchorItemId?: TurnItemId | undefined;
       readonly anchorThreadId?: ThreadId | undefined;
       readonly requiredRunId?: RunId | undefined;
+      readonly includeHistoryViewRevision?: boolean | undefined;
     },
   ) => Effect.Effect<
     {
       readonly schemaVersion: number;
       readonly snapshotSequence: number;
+      readonly historyViewRevision?: number;
       readonly projection: OrchestrationV2ThreadProjection;
     },
     ProjectionStoreV2Error
@@ -794,7 +797,7 @@ export interface ProjectionStoreV2Shape {
 
 export type ProjectionWindow = Omit<
   Parameters<ProjectionStoreV2Shape["getThreadSnapshotWindow"]>[1],
-  "anchorThreadId"
+  "anchorThreadId" | "includeHistoryViewRevision"
 > & {
   readonly suppressLocal?: boolean | undefined;
   readonly forkCreatedAt?: DateTime.Utc | undefined;
@@ -4020,6 +4023,10 @@ export function makeProjectionSnapshots(
         schemaVersion: ORCHESTRATION_V2_PROJECTION_SCHEMA_VERSION,
         snapshotSequence: yield* rows.snapshotSequence(threadId),
         projection: windowProjection,
+        // The revision covers older pages even when a filled local window skips ancestry rows.
+        ...(options.includeHistoryViewRevision && inheritedRunFork(projection.thread) !== null
+          ? { historyViewRevision: yield* rows.historyRevision([threadId]) }
+          : {}),
       };
     },
     (effect, threadId, _options) =>
@@ -4509,6 +4516,7 @@ export function makeProjectionTimelinePages(
     throughEntryId,
     conversationOnly,
     workMode,
+    options,
   ) =>
     persistence
       .withReadTransaction(
@@ -4610,8 +4618,13 @@ export function makeProjectionTimelinePages(
             ...row,
             position,
           }));
+          const versioned =
+            options?.includeHistoryViewRevision && inheritedRunFork(index.records.thread) !== null;
           return {
             snapshotSequence,
+            ...(versioned
+              ? { historyViewRevision: yield* persistence.historyRevision([threadId]) }
+              : {}),
             items: conversationOnly
               ? pageItems.filter((row) => isConversationHistoryItem(row.item))
               : pageItems,
@@ -7076,6 +7089,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
     } = contexts;
 
     const { getTurnStartHistory } = lookups;
+    const historyRevision: ProjectionSnapshotRows["historyRevision"] = (threadIds) =>
+      readSqliteThreadFindRevision(sql, threadIds);
 
     const { getThreadProjection, getThreadSnapshot, getThreadSnapshotWindow } =
       makeProjectionSnapshots(readProjection, {
@@ -7105,6 +7120,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             Effect.map((rows) => rows[0]?.snapshot_sequence ?? 0),
             Effect.mapError((cause) => new ProjectionRecordRowsError({ cause })),
           ),
+        historyRevision,
       });
 
     const { getThread } = lookups;
@@ -7186,8 +7202,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         ),
     );
 
-    const { searchThread, searchThreadStream } = yield* makeThreadFind((threadId) =>
-      readTimelineIndex(threadId, new Set()).pipe(Effect.map((index) => index.visible)),
+    const { searchThread, searchThreadStream } = yield* makeThreadFind(
+      (threadId) => readTimelineIndex(threadId, new Set()).pipe(Effect.map((index) => index.visible)),
     );
 
     const { getThreadHistoryPage, getTimelinePage } = makeProjectionTimelinePages(
@@ -7200,6 +7216,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             Effect.map((rows) => rows[0]?.sequence ?? 0),
             Effect.mapError((cause) => new ProjectionRecordRowsError({ cause })),
           ),
+        historyRevision,
         materialize: (sources) =>
           sql<ProjectionMaterializedRow>`
         SELECT item.thread_id, item.turn_item_id, item.payload_json

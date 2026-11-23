@@ -68,6 +68,15 @@ jobs:
           pnpm exec vp test run --maxWorkers 2 \
             apps/server/src/orchestration-v2/boundedSnapshotTransport.test.ts \
             -t 'an open run-fork grandchild'
+      - name: Check fork history view revisions through SQLite HTTP and client decoding
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-coherent-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm exec vp test run --maxWorkers 2 \
+            apps/server/src/orchestration-v2/boundedSnapshotTransport.test.ts \
+            packages/client-runtime/src/state/boundedThreadSnapshotHttp.test.ts \
+            -t 'HTTP: fork history view revision changes|HTTP: legacy, ignored and opted-in|HTTP: the ID table is opt-in|requests compact turnItems and loads'
       - name: Exercise thread replay and recovery
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t03-text-revision-') || startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
         run: |
@@ -78,7 +87,7 @@ jobs:
       - name: Install the pinned compiler for inherited history
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-')
         run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/history-toolchain"
-      - name: Check anchored inherited windows across an ancestor commit
+      - name: Check native inherited window and page revisions across ancestor commits
         id: anchored-history
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-')
         shell: bash
