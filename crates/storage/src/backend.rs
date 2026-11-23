@@ -475,6 +475,7 @@ impl ExclusiveTrialFile {
             return Err(Error::WriterBusy);
         }
         let lease = Self {
+            inherited: self.inherited.try_clone().map_err(storage_error)?,
             file: self.file.clone(),
             path: self.path.clone(),
             identity: path_identity(&self.path)?,
