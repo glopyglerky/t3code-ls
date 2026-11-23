@@ -864,10 +864,14 @@ async function verifyComposerStop(
   Assert.equal(requests.length, 0, "Rendering or selecting a fallback must never stop a run");
   const originalStop = await stop.elementHandle();
   await editor.fill(draft);
-  if (renderer === "dioxus-fallback") {
-    await footer.getByRole("button", { name: "Use standard Send button", exact: true }).click();
-  }
   const send = footer.locator('button[type="submit"]:enabled');
+  if (renderer === "dioxus-fallback") {
+    const fallback = footer.getByRole("button", { name: "Use standard Send button", exact: true });
+    // The initial Send already chose the standard renderer. Select it again only if the footer remounted.
+    await send.or(fallback).first().waitFor({ state: "visible" });
+    if (await fallback.isVisible()) await fallback.click();
+    Assert.equal(await send.getAttribute("data-composer-submit-renderer"), null);
+  }
   await send.waitFor({ state: "visible" });
   const originalSend = await send.elementHandle();
   await editor.press("End");
