@@ -316,6 +316,228 @@ impl StorageBackend for ExclusiveSnapshot {
     }
 }
 
+/// Owns the physical lock independently of redb's read and write handles.
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) struct ExclusiveTrialFile {
+    file: Arc<redb::backends::FileBackend>,
+    path: PathBuf,
+    identity: same_file::Handle,
+    max_bytes: u64,
+}
+
+#[cfg(all(test, target_os = "linux"))]
+#[derive(Debug)]
+struct LeasedTrialBackend {
+    file: Arc<redb::backends::FileBackend>,
+    writable: bool,
+}
+
+#[cfg(all(test, target_os = "linux"))]
+type VerifyTrialOpen = Box<dyn FnOnce(&File) -> Result<()> + Send>;
+
+#[cfg(all(test, target_os = "linux"))]
+enum TrialOpen {
+    Snapshot,
+    RecoveryCopy(PathBuf),
+    Writer(VerifyTrialOpen),
+}
+
+#[cfg(all(test, target_os = "linux"))]
+impl StorageBackend for LeasedTrialBackend {
+    fn len(&self) -> io::Result<u64> {
+        self.file.len()
+    }
+
+    fn read(&self, offset: u64, out: &mut [u8]) -> io::Result<()> {
+        self.file.read(offset, out)
+    }
+
+    fn set_len(&self, len: u64) -> io::Result<()> {
+        if !self.writable {
+            return Err(io::ErrorKind::PermissionDenied.into());
+        }
+        self.file.set_len(len)
+    }
+
+    fn write(&self, offset: u64, data: &[u8]) -> io::Result<()> {
+        if !self.writable {
+            return Err(io::ErrorKind::PermissionDenied.into());
+        }
+        self.file.write(offset, data)
+    }
+
+    fn sync_data(&self) -> io::Result<()> {
+        if !self.writable {
+            return Err(io::ErrorKind::PermissionDenied.into());
+        }
+        self.file.sync_data()
+    }
+
+    // Only the whole-storage fallback is supported. The engine takes and
+    // releases no physical locks here, so close cannot puncture the lease.
+    fn try_lock_range(
+        &self,
+        start: Bound<u64>,
+        end: Bound<u64>,
+    ) -> std::result::Result<bool, BackendError> {
+        if !self.writable {
+            return Err(BackendError::Unsupported);
+        }
+        self.try_lock_shared_range(start, end)
+    }
+
+    fn try_lock_shared_range(
+        &self,
+        start: Bound<u64>,
+        end: Bound<u64>,
+    ) -> std::result::Result<bool, BackendError> {
+        match (start, end) {
+            (Bound::Unbounded | Bound::Included(0), Bound::Unbounded) => Ok(true),
+            _ => Err(BackendError::Unsupported),
+        }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+impl ExclusiveTrialFile {
+    pub(crate) fn acquire(path: PathBuf, max_bytes: u64) -> Result<Self> {
+        // Keep the identity handle on an independent file description. The
+        // last lease/backend drop must close the locked description.
+        let identity = path_identity(&path)?;
+        let file = open_regular_file(&path, OpenOptions::new().read(true).write(true))?;
+        if file_identity(&file)? != identity {
+            return Err(Error::IncompatibleStore);
+        }
+        // Keep flock compatibility with engines that predate the OFD ranges.
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(std::fs::TryLockError::WouldBlock) => return Err(Error::WriterBusy),
+            Err(error) => return Err(storage_error(error)),
+        }
+        let file = redb::backends::FileBackend::new(file).map_err(storage_error)?;
+        if !file
+            .try_lock_range(Bound::Unbounded, Bound::Unbounded)
+            .map_err(storage_error)?
+        {
+            return Err(Error::WriterBusy);
+        }
+        let lease = Self {
+            file: Arc::new(file),
+            path,
+            identity,
+            max_bytes,
+        };
+        lease.verified_file()?;
+        Ok(lease)
+    }
+
+    pub(crate) fn verified_file(&self) -> Result<File> {
+        use std::os::unix::fs::MetadataExt;
+
+        let file = open_regular_file(&self.path, OpenOptions::new().read(true))?;
+        let metadata = file.metadata().map_err(storage_error)?;
+        if self.identity != file_identity(&file)?
+            || metadata.nlink() != 1
+            || metadata.len() == 0
+            || metadata.len() > self.max_bytes
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(file)
+    }
+
+    pub(crate) async fn snapshot(&self) -> Result<Backend> {
+        self.open_handle(TrialOpen::Snapshot).await
+    }
+
+    pub(crate) async fn recover_copy(&self, directory: PathBuf) -> Result<Backend> {
+        self.open_handle(TrialOpen::RecoveryCopy(directory)).await
+    }
+
+    pub(crate) async fn open_checked_writer(
+        &self,
+        verify: impl FnOnce(&File) -> Result<()> + Send + 'static,
+    ) -> Result<Backend> {
+        self.open_handle(TrialOpen::Writer(Box::new(verify))).await
+    }
+
+    async fn open_handle(&self, mode: TrialOpen) -> Result<Backend> {
+        if Arc::strong_count(&self.file) != 1 {
+            return Err(Error::WriterBusy);
+        }
+        let lease = Self {
+            file: self.file.clone(),
+            path: self.path.clone(),
+            identity: path_identity(&self.path)?,
+            max_bytes: self.max_bytes,
+        };
+        if lease.identity != self.identity {
+            return Err(Error::IncompatibleStore);
+        }
+        tokio::task::spawn_blocking(move || {
+            let mut file = lease.verified_file()?;
+            let mut options = builder();
+            options.set_concurrency_mode(ConcurrencyMode::ExclusiveWriter);
+            let writable = matches!(&mode, TrialOpen::Writer(_));
+            let exclusive = !matches!(&mode, TrialOpen::RecoveryCopy(_));
+            let (reader, writer) = match mode {
+                TrialOpen::Snapshot => {
+                    let reader = options
+                        .open_read_only_with_backend(LeasedTrialBackend {
+                            file: lease.file,
+                            writable: false,
+                        })
+                        .map_err(|error| match error {
+                            redb::DatabaseError::RepairAborted => Error::RecoveryRequired,
+                            other => storage_error(other),
+                        })?;
+                    (Some(reader), None)
+                }
+                TrialOpen::RecoveryCopy(directory) => {
+                    // Repair may write during open. Inspect an unlinked copy
+                    // before admitting those writes on the canonical file.
+                    let mut scratch = tempfile::tempfile_in(directory).map_err(storage_error)?;
+                    let mut input = io::Read::take(&mut file, lease.max_bytes.saturating_add(1));
+                    let bytes = io::copy(&mut input, &mut scratch).map_err(storage_error)?;
+                    if bytes == 0 || bytes > lease.max_bytes {
+                        return Err(Error::IncompatibleStore);
+                    }
+                    let scratch =
+                        redb::backends::FileBackend::new(scratch).map_err(storage_error)?;
+                    let database = options
+                        .create_with_backend(scratch)
+                        .map_err(storage_error)?;
+                    (None, Some(Arc::new(database)))
+                }
+                TrialOpen::Writer(verify) => {
+                    verify(&file)?;
+                    lease.verified_file()?;
+                    let database = options
+                        .create_with_backend(LeasedTrialBackend {
+                            file: lease.file,
+                            writable: true,
+                        })
+                        .map_err(storage_error)?;
+                    (None, Some(Arc::new(database)))
+                }
+            };
+            let handles = Arc::new(DatabaseHandles {
+                path: lease.path,
+                exclusive,
+                read_only: !writable,
+                identity: Some(lease.identity),
+                reader,
+                writer: Mutex::new(writer),
+                opening: Mutex::new(()),
+            });
+            validate_tables(&handles.begin_read()?)?;
+            Ok(Backend { handles })
+        })
+        .await
+        .map_err(worker_error)?
+    }
+}
+
 pub(crate) fn open_regular_file(path: &Path, options: &mut OpenOptions) -> Result<File> {
     #[cfg(unix)]
     options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
@@ -757,7 +979,7 @@ impl Backend {
                 .map_err(storage_error)?;
             let (rows, checksum) = {
                 let mut output = write.open_table(TABLE).map_err(storage_error)?;
-                snapshot_digest(&source, |key, value| {
+                snapshot_digest(&source, &[], |key, value| {
                     output.insert(key, value).map_err(storage_error)?;
                     Ok(())
                 })?
@@ -775,7 +997,7 @@ impl Backend {
                 .map_err(storage_error)?;
             let verify = backup.begin_read().map_err(storage_error)?;
             validate_tables(&verify)?;
-            let (verified_rows, verified_checksum) = snapshot_digest(&verify, |_, _| Ok(()))?;
+            let (verified_rows, verified_checksum) = snapshot_digest(&verify, &[], |_, _| Ok(()))?;
             if rows != verified_rows || checksum != verified_checksum {
                 return Err(Error::IncompatibleStore);
             }
@@ -814,14 +1036,22 @@ impl Backend {
     }
 
     pub(crate) async fn storage_fingerprint(&self) -> Result<StorageBackup> {
-        self.fingerprint(|_, _| Ok(())).await
+        self.fingerprint(Vec::new(), |_, _| Ok(())).await
     }
 
     #[cfg(unix)]
     pub(crate) async fn bounded_storage_fingerprint(&self) -> Result<StorageBackup> {
+        self.bounded_storage_fingerprint_with(Vec::new()).await
+    }
+
+    #[cfg(unix)]
+    pub(crate) async fn bounded_storage_fingerprint_with(
+        &self,
+        replacements: Vec<Pair>,
+    ) -> Result<StorageBackup> {
         let mut rows_left = MAX_BATCH_RECORDS;
         let mut bytes_left = MAX_BATCH_BYTES;
-        self.fingerprint(move |key, value| {
+        self.fingerprint(replacements, move |key, value| {
             rows_left = rows_left
                 .checked_sub(1)
                 .ok_or_else(|| Error::Invalid("trial restore database exceeds row limit".into()))?;
@@ -836,11 +1066,12 @@ impl Backend {
 
     async fn fingerprint(
         &self,
+        replacements: Vec<Pair>,
         meter: impl FnMut(&[u8], &[u8]) -> Result<()> + Send + 'static,
     ) -> Result<StorageBackup> {
         let handles = self.handles.clone();
         tokio::task::spawn_blocking(move || {
-            let (rows, checksum) = snapshot_digest(&handles.begin_read()?, meter)?;
+            let (rows, checksum) = snapshot_digest(&handles.begin_read()?, &replacements, meter)?;
             let bytes = std::fs::metadata(&handles.path)
                 .map_err(storage_error)?
                 .len();
@@ -1009,6 +1240,7 @@ impl Backend {
 
 fn snapshot_digest(
     snapshot: &ReadTransaction,
+    replacements: &[Pair],
     mut copy: impl FnMut(&[u8], &[u8]) -> Result<()>,
 ) -> Result<(u64, String)> {
     let mut rows = 0u64;
@@ -1022,6 +1254,10 @@ fn snapshot_digest(
         let (key, value) = entry.map_err(storage_error)?;
         let (key, value) = (key.value(), value.value());
         copy(key, value)?;
+        let value = replacements
+            .iter()
+            .find(|(candidate, _)| candidate.as_slice() == key)
+            .map_or(value, |(_, replacement)| replacement.as_slice());
         digest.update((key.len() as u64).to_le_bytes());
         digest.update(key);
         digest.update((value.len() as u64).to_le_bytes());
@@ -1722,6 +1958,69 @@ mod tests {
         CommitBatch, ProjectionMutation, Store, request_digest, store_key,
         test_support::TestFixture,
     };
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn exclusive_trial_keeps_peer_locks_across_engine_handles() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("candidate.omdb");
+        let backend = Backend::open(&path, true).await.unwrap();
+        let mut tx = backend.begin().await.unwrap();
+        let key = store_key("test/trial-lease");
+        tx.put(key.clone(), b"sealed".to_vec()).await.unwrap();
+        tx.commit().await.unwrap();
+        backend.shutdown().await.unwrap();
+        let before = std::fs::read(&path).unwrap();
+
+        let lease = ExclusiveTrialFile::acquire(path.clone(), 128 * 1024 * 1024).unwrap();
+        let peer_excluded = || {
+            assert!(matches!(
+                builder().open_read_only(&path),
+                Err(redb::DatabaseError::DatabaseAlreadyOpen)
+            ));
+            let legacy = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&path)
+                .unwrap();
+            assert!(matches!(
+                legacy.try_lock(),
+                Err(std::fs::TryLockError::WouldBlock)
+            ));
+        };
+        peer_excluded();
+        let reader = lease.snapshot().await.unwrap();
+        assert_eq!(
+            reader.read(&key).await.unwrap().as_deref(),
+            Some(&b"sealed"[..])
+        );
+        assert!(matches!(
+            lease.open_checked_writer(|_| Ok(())).await,
+            Err(Error::WriterBusy)
+        ));
+        reader.shutdown().await.unwrap();
+        peer_excluded();
+        assert!(matches!(
+            lease
+                .open_checked_writer(|_| Err(Error::IncompatibleStore))
+                .await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        peer_excluded();
+
+        let writer = lease.open_checked_writer(|_| Ok(())).await.unwrap();
+        peer_excluded();
+        writer.shutdown().await.unwrap();
+        peer_excluded();
+        drop(lease);
+        Backend::open_read_only(&path)
+            .await
+            .unwrap()
+            .shutdown()
+            .await
+            .unwrap();
+    }
 
     #[test]
     fn checked_open_preserves_internal_lock_waits_after_writer_acquisition() {

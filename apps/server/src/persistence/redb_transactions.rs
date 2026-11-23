@@ -561,6 +561,93 @@ impl ApplicationTransactions {
         transaction.commit().await
     }
 
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) async fn verify_forward_catalog(
+        &self,
+        prepared: &PreparedServiceActivation,
+        marker: &ForwardServiceActivation,
+        expected: &crate::application_storage::TrialSnapshot,
+    ) -> Result<bool> {
+        let mut tx = self.store.db.begin_read_only().await?;
+        let bytes = tx
+            .get(&schema_key())
+            .await?
+            .ok_or(Error::IncompatibleStore)?;
+        let mut catalog = decode_catalog(&bytes)?;
+        read_generation_identity(&mut tx, &catalog, &bytes).await?;
+        if encode_catalog(&catalog)? != bytes {
+            return Err(Error::IncompatibleStore);
+        }
+        tx.rollback().await?;
+
+        let reused = match (
+            &catalog.prepared_service_activation_v1,
+            &catalog.forward_service_activation_v1,
+        ) {
+            (Some(binding), None) if binding == prepared => false,
+            (None, Some(binding)) if binding == marker => true,
+            _ => return Err(Error::IncompatibleStore),
+        };
+        if reused {
+            // Project the two changed values back to their exact sealed
+            // encoding so the original receipt still covers every record.
+            catalog.forward_service_activation_v1 = None;
+            catalog.prepared_service_activation_v1 = Some(prepared.clone());
+        }
+        let sealed = encode_catalog(&catalog)?;
+        let identity = generation_identity(&catalog, &sealed);
+        let replacements = if reused {
+            vec![
+                (schema_key(), sealed),
+                (
+                    generation_identity_key(&catalog),
+                    bounded_encode(&identity)?,
+                ),
+            ]
+        } else {
+            Vec::new()
+        };
+        let fingerprint = self
+            .store
+            .db
+            .bounded_storage_fingerprint_with(replacements)
+            .await?;
+        if identity.catalog_sha256 != expected.catalog_sha256
+            || fingerprint.rows != expected.rows
+            || fingerprint.checksum != expected.checksum
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(reused)
+    }
+
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) async fn mark_forward_catalog(
+        &self,
+        prepared: &PreparedServiceActivation,
+        marker: ForwardServiceActivation,
+        verify: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        self.store.db.require_exclusive()?;
+        let mut tx = self.store.db.begin().await?;
+        let bytes = tx
+            .get(&schema_key())
+            .await?
+            .ok_or(Error::IncompatibleStore)?;
+        let mut catalog = decode_catalog(&bytes)?;
+        read_generation_identity(&mut tx, &catalog, &bytes).await?;
+        if catalog.prepared_service_activation_v1.as_ref() != Some(prepared) {
+            return Err(Error::IncompatibleStore);
+        }
+        catalog.prepared_service_activation_v1 = None;
+        catalog.forward_service_activation_v1 = Some(marker);
+        let encoded = encode_catalog(&catalog)?;
+        record_generation_identity(&mut tx, &catalog, &encoded).await?;
+        tx.put(schema_key(), encoded).await?;
+        verify()?;
+        tx.commit().await
+    }
+
     pub async fn initialize(&mut self, schema: ApplicationSchema) -> Result<bool> {
         validate_schema(&schema)?;
         let mut transaction = self.store.db.begin().await?;
