@@ -12,7 +12,7 @@ use rustix::fs::{SealFlags, fcntl_get_seals};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::Read;
-use std::os::fd::AsFd;
+use std::os::fd::{AsFd, AsRawFd};
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
@@ -28,11 +28,19 @@ pub(crate) fn verify_image(file: &File, expected: &str) -> Result<()> {
         .map_err(|_| Error::IncompatibleStore)?
         .contains(image_seals())
         || metadata.mode() & 0o111 == 0
-        || trial_executable_digest(file)? != expected
     {
         return Err(Error::IncompatibleStore);
     }
+    // Opening this live descriptor gives each verification its own file offset.
+    let image = open_readonly_image(file)?;
+    if trial_executable_digest(&image)? != expected {
+        return Err(Error::IncompatibleStore);
+    }
     Ok(())
+}
+
+fn open_readonly_image(file: &File) -> Result<File> {
+    File::open(format!("/proc/self/fd/{}", file.as_raw_fd())).map_err(|_| Error::IncompatibleStore)
 }
 
 /// Require the actual executing helper to have the selected immutable identity.
@@ -48,8 +56,6 @@ pub(crate) fn verify_running_image(expected: &str) -> Result<()> {
 /// authority, proves a package format or grants execution authority.
 pub(crate) fn stage_image(source: &Path, expected: &str) -> Result<File> {
     use rustix::fs::{MemfdFlags, fcntl_add_seals, memfd_create};
-    use std::io::Seek;
-    use std::os::fd::AsRawFd;
     let source = crate::backend::open_regular_file(source, fs::OpenOptions::new().read(true))?;
     let limit = crate::application_storage::MAX_TRIAL_EXECUTABLE_BYTES;
     let metadata = source.metadata().map_err(|_| Error::IncompatibleStore)?;
@@ -69,10 +75,9 @@ pub(crate) fn stage_image(source: &Path, expected: &str) -> Result<File> {
         return Err(Error::IncompatibleStore);
     }
     fcntl_add_seals(&image, image_seals()).map_err(|_| Error::IncompatibleStore)?;
-    image.rewind().map_err(|_| Error::IncompatibleStore)?;
     verify_image(&image, expected)?;
-    // Return a fresh read-only description; the writable description is closed.
-    File::open(format!("/proc/self/fd/{}", image.as_raw_fd())).map_err(|_| Error::IncompatibleStore)
+    // The writable description is closed when staging returns.
+    open_readonly_image(&image)
 }
 
 #[derive(Deserialize, Serialize)]
@@ -327,8 +332,7 @@ pub async fn commit(home: &Path, encoded: &str) -> Result<()> {
 mod image_tests {
     use super::*;
     use rustix::fs::{MemfdFlags, fcntl_add_seals, memfd_create};
-    use std::io::Write;
-    use std::os::fd::AsRawFd;
+    use std::io::{Seek, SeekFrom, Write};
     use std::os::unix::fs::FileExt;
 
     #[test]
@@ -336,8 +340,13 @@ mod image_tests {
         let mut source = tempfile::NamedTempFile::new().unwrap();
         source.write_all(b"synthetic image bytes").unwrap();
         let digest = trial_document_sha256(b"synthetic image bytes");
-        let image = stage_image(source.path(), &digest)
+        let mut image = stage_image(source.path(), &digest)
             .expect("qualification requires Linux 6.3+ executable memfd permission");
+        verify_image(&image, &digest).unwrap();
+        verify_image(&image, &digest).unwrap();
+        image.seek(SeekFrom::Start(7)).unwrap();
+        verify_image(&image, &digest).unwrap();
+        assert_eq!(image.stream_position().unwrap(), 7);
         let path = format!("/proc/self/fd/{}", image.as_raw_fd());
         assert!(fcntl_get_seals(&image).unwrap().contains(image_seals()));
         let writer = fs::OpenOptions::new().write(true).open(&path).unwrap();
