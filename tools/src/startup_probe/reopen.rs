@@ -127,10 +127,16 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     }
     let navigation_started_micros = started.elapsed().as_micros();
     let result = browser.reopen(&origin, &route, SELECTED_THREAD, THREADS, MESSAGES)?;
-    if before["messages"] != result["snapshot"]["messages"]
-        || before["threadSequence"] != result["snapshot"]["threadSequence"]
-    {
-        let after = &result["snapshot"];
+    let after = &result["snapshot"];
+    let before_cursor = before["threadSequence"]
+        .as_u64()
+        .filter(|sequence| *sequence > 0)
+        .ok_or("invalid saved thread cursor")?;
+    let after_cursor = after["threadSequence"]
+        .as_u64()
+        .ok_or("invalid reopened thread cursor")?;
+    // A stock restart can advance the replay cursor with the same ordered history.
+    if before["messages"] != after["messages"] || after_cursor < before_cursor {
         let first_differing_message = before["messages"]
             .as_array()
             .zip(after["messages"].as_array())
@@ -155,6 +161,7 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
             "fixture": {"threads": THREADS, "messages_per_thread": MESSAGES, "total_messages": THREADS * MESSAGES, "transcript_bytes": fixture_bytes},
             "descriptor_micros": descriptor_micros, "html_micros": html_micros,
             "navigation_started_micros": navigation_started_micros, "database_migration": migration,
+            "saved_thread_sequence": before_cursor,
             "browser": result["timing"], "snapshot": snapshot,
             "cache": "same authenticated browser profile with observed persisted shell and selected-thread records",
             "filesystem_cache": "unmanaged, after fixture import and clean stop",
