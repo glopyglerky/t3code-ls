@@ -176,20 +176,20 @@ jobs:
             fi
             if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-* ]]; then
               for accepted in valid parent-retry; do
-                grep -F "T05 packaged readiness $accepted: exit 0" "$proof/forward-catalog.log"
+                grep -F "T05 packaged observation $accepted, commit refusal false: exit 0" "$proof/forward-catalog.log"
               done
               for rejected in lost reopened foreign stale wrong-image wrong-database; do
-                grep -F "T05 packaged readiness $rejected: exit 78" "$proof/forward-catalog.log"
+                grep -F "T05 packaged observation $rejected, commit refusal false: exit 78" "$proof/forward-catalog.log"
               done
-              grep -F 'T05 packaged readiness output-failure: exit 1' "$proof/forward-catalog.log"
+              grep -F 'T05 packaged observation output-failure, commit refusal false: exit 1' "$proof/forward-catalog.log"
             fi
             if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-* ]]; then
               for rejected in mutable-image source-changed; do
-                grep -F "T05 packaged readiness $rejected: exit 78" "$proof/forward-catalog.log"
+                grep -F "T05 packaged observation $rejected, commit refusal false: exit 78" "$proof/forward-catalog.log"
               done
             fi
             if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-catalog-* ]]; then
-              grep -F 'T05 packaged readiness foreign-lease: exit 78' "$proof/forward-catalog.log"
+              grep -F 'T05 packaged observation foreign-lease, commit refusal false: exit 78' "$proof/forward-catalog.log"
               grep -F 'T05 packaged inherited catalog corpus coherent: expected readiness true' "$proof/forward-catalog.log"
               for rejected in catalog generation marker snapshot; do
                 grep -F "T05 packaged inherited catalog corpus $rejected: expected readiness false" "$proof/forward-catalog.log"
