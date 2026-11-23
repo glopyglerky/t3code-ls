@@ -41,6 +41,7 @@ import { verifyGuestNameForm } from "./hybrid-client-guest-name.ts";
 import { verifyBundledVoiceDraft } from "./hybrid-client-voice.ts";
 import {
   inspectNativeApprovalReceipt,
+  inspectNativeLaunchReceipt,
   inspectNativeMessageUpdates,
   inspectNativeTextUpdates,
   inspectNativeReplay,
@@ -106,6 +107,7 @@ const dioxusFindProof = process.env.T3_CODE_LS_DIOXUS_FIND_PROOF;
 const composerSubmitRenderer = process.env.T3_CODE_LS_COMPOSER_SUBMIT_PROOF;
 const threadLinkProof = process.env.T3_CODE_LS_THREAD_LINK_PROOF;
 Assert.ok(threadLinkProof === undefined || (bundledClient && ["dioxus", "dioxus-fallback"].includes(threadLinkProof)), "Thread navigation requires an explicit packaged renderer");
+const launchReceiptProof = process.env.T3_CODE_LS_LAUNCH_RECEIPT_PROOF === "true";
 const composerStopProof = process.env.T3_CODE_LS_COMPOSER_STOP_PROOF === "true";
 const formattedAssistantProof = process.env.T3_CODE_LS_ASSISTANT_INLINE_PROOF === "true";
 const formattedAssistantText = "**Bold** *calm* 雪.";
@@ -2627,6 +2629,7 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
     interrupted: null as InterruptedShowcase | null,
     capturedApproval: null as Awaited<ReturnType<typeof acceptCapturedApproval>> | null,
     approvalReceipt: null as ReturnType<typeof inspectNativeApprovalReceipt> | null,
+    launchReceipt: null as ReturnType<typeof inspectNativeLaunchReceipt> | null,
     cancelledQuestion: null as Awaited<ReturnType<typeof cancelCapturedQuestion>> | null,
     historyFind: null as {
       query: string;
@@ -2737,6 +2740,12 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
   }>();
   const wireMessages = new Map<string, Array<{ sequence: number; length: number; streaming: boolean }>>();
   const fileWrites = new EventEmitter();
+  const launches: Array<{
+    commandId: string;
+    threadId: string;
+    responseMode: unknown;
+    value: Record<string, unknown> | undefined;
+  }> = [];
   let observeBytes = false;
   const wire = { sentFrames: 0, receivedFrames: 0, sentPayloadBytes: 0, receivedPayloadBytes: 0 };
   const countPayload = (direction: "sent" | "received", payload: string | Buffer) => {
@@ -2758,9 +2767,23 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       if (voiceDraftProof && new URL(socket.url()).host !== new URL(current.url()).host) {
         voiceAlternateSocketHosts.push(new URL(socket.url()).host);
       }
+      const launchRequests = new Map<string, (typeof launches)[number]>();
       socket.on("framesent", ({ payload }) => {
         countPayload("sent", payload);
         const json = payload.toString();
+        if (launchReceiptProof && json.includes(ORCHESTRATION_V2_WS_METHODS.launchThread)) {
+          const request = JSON.parse(json);
+          if (request.tag === ORCHESTRATION_V2_WS_METHODS.launchThread && request.payload?.initialMessage) {
+            const launch = {
+              commandId: request.payload.commandId,
+              threadId: request.payload.threadId,
+              responseMode: request.payload.responseMode,
+              value: undefined,
+            };
+            launchRequests.set(String(request.id), launch);
+            launches.push(launch);
+          }
+        }
         if (voiceDraftProof && (
           json.includes(ORCHESTRATION_V2_WS_METHODS.launchThread) ||
           json.includes(ORCHESTRATION_V2_WS_METHODS.dispatchCommand)
@@ -2807,6 +2830,17 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       socket.on("framereceived", ({ payload }) => {
         countPayload("received", payload);
         const json = payload.toString();
+        if (launchRequests.size > 0 && json.includes('"Exit"')) {
+          const reply = JSON.parse(json);
+          if (reply._tag === "Exit") {
+            const id = String(reply.requestId);
+            const launch = launchRequests.get(id);
+            if (launch !== undefined && reply.exit?._tag === "Success") {
+              launch.value = reply.exit.value;
+            }
+            launchRequests.delete(id);
+          }
+        }
         if (json.includes('"kind":"message-text-append"')) {
           messageAppendFrames += 1;
         }
@@ -3227,6 +3261,25 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
     });
     Assert.equal(page.url(), proof.threadUrl);
     inspectPersistence("server-restart");
+    if (launchReceiptProof) {
+      Assert.equal(implementation, "native");
+      const selected = launches.filter((launch) => launch.threadId === threadId);
+      Assert.equal(selected.length, 1, "The first conversation must send one launch request");
+      const [launch] = selected;
+      Assert.ok(launch);
+      Assert.equal(launch.responseMode, "receipt");
+      const acknowledgement = launch.value;
+      Assert.ok(acknowledgement);
+      Assert.equal(acknowledgement.responseMode, "receipt");
+      Assert.equal(acknowledgement.threadId, threadId);
+      Assert.equal(acknowledgement.resumed, false);
+      Assert.equal(Object.hasOwn(acknowledgement, "projection"), false);
+      const sequence = acknowledgement.sequence;
+      Assert.ok(typeof sequence === "number" && Number.isSafeInteger(sequence) && sequence > 0);
+      proof.launchReceipt = inspectNativeLaunchReceipt(
+        nativeExecutable("db"), stateDirectory, launch.commandId, threadId, sequence,
+      );
+    }
     completed(
       "Recovered the same durable thread after server restart in a fresh client with the existing session",
     );
