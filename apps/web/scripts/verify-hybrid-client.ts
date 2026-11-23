@@ -21,6 +21,7 @@ import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 import { chromium, type Browser, type Locator, type Page } from "playwright";
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
+import { verifyBundledVoiceDraft } from "./hybrid-client-voice.ts";
 import { inspectNativeMessageUpdates, inspectNativeReplay } from "./hybrid-client-database.ts";
 import {
   assertReplayTurnLinks,
@@ -58,6 +59,7 @@ const fileEditorProof = process.env.T3_CODE_LS_FILE_EDITOR_PROOF === "true";
 const tasksFile = "fixture-tasks.md";
 const initialTasks = "- [ ] First milestone\n- [ ] Second milestone\n- [ ] Keep the draft\n";
 const durableTextProof = process.env.T3_CODE_LS_DURABLE_TEXT_PROOF === "true";
+const voiceDraftProof = process.env.T3_CODE_LS_VOICE_DRAFT_PROOF === "true";
 const pdfLinkProof = process.env.T3_CODE_LS_PDF_LINK_PROOF === "true";
 const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
 const capturedApproval = {
@@ -1486,6 +1488,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     capturedApproval: null as Awaited<ReturnType<typeof acceptCapturedApproval>> | null,
     cancelledQuestion: null as Awaited<ReturnType<typeof cancelCapturedQuestion>> | null,
     historyFind: null as { query: string; count: string; draftPreserved: boolean } | null,
+    voiceDraft: null as Awaited<ReturnType<typeof verifyBundledVoiceDraft>> | null,
     draftMerge: null as Awaited<ReturnType<typeof verifyDraftMerge>> | null,
     draftStorage: null as Awaited<ReturnType<typeof verifyDraftStorageRecovery>> | null,
     messageAppends: null as {
@@ -1691,6 +1694,14 @@ async function exercise(implementation: Implementation): Promise<void> {
     await dialog.waitFor({ state: "hidden" });
     await page.getByText("hybrid-fixture", { exact: true }).first().waitFor({ state: "visible" });
     completed("Created local project through the normal client");
+    if (voiceDraftProof) {
+      Assert.ok(bundledClient && implementation === "native" && expectsRustComposer);
+      starting("capture synthetic microphone audio into an unsent draft");
+      proof.voiceDraft = await verifyBundledVoiceDraft(page);
+      completed("Preserved the unsent Unicode draft through dictated insertion and cancellation");
+      proof.status = "passed";
+      return;
+    }
     if (multiTabDraftProof) {
       starting("two-tab unsent draft and model merge");
       proof.draftMerge = await verifyDraftMerge(page);
@@ -2032,7 +2043,12 @@ const run = {
 };
 try {
   const executablePath = process.env.T3_CODE_LS_CHROMIUM_EXECUTABLE;
-  browser = await chromium.launch(executablePath ? { executablePath } : {});
+  browser = await chromium.launch({
+    ...(executablePath ? { executablePath } : {}),
+    ...(voiceDraftProof
+      ? { channel: "chromium", args: ["--use-fake-device-for-media-stream"] }
+      : {}),
+  });
   console.log(`Original client acceptance: ${requested.join(", ")}; Chromium ${browser.version()}`);
   for (const implementation of requested) {
     if (pairingProof && isPairingRenderer(pairingProof)) {

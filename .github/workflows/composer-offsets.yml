@@ -71,6 +71,9 @@ jobs:
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
           node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+      - name: Install Chromium with microphone support
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-voice-')
+        run: node apps/web/node_modules/playwright/cli.js install --with-deps --no-shell chromium
       - name: Compare Codex import canonicalization with the retained scanner behavior
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t08-import-compressed-rust-')
         env:
@@ -256,6 +259,18 @@ jobs:
             done
           fi
           node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
+          if [[ "$INTEGRATED_NATIVE" == true || "$GITHUB_REF_NAME" == candidate/t3code-ls-t02-bundled-native-t13-voice-* ]]; then
+            mkdir "$proof/voice"
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- env \
+                T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 T3_CODE_LS_VOICE_DRAFT_PROOF=true \
+                VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
+                "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
+            ' _ "$(id -un)" "$(command -v node)" "$proof/voice"
+            jq -e '.status == "passed" and .voiceDraft.rustSelection and .voiceDraft.draftPreserved and .voiceDraft.transcriptionRequests == 1 and .voiceDraft.cancellationPreservedDraft and .voiceDraft.remainedUnsent' \
+              "$proof/voice/native/proof.json"
+          fi
       - name: Exercise PDF link handling in the browser
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-')
         working-directory: apps/web
