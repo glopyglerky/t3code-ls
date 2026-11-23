@@ -106,6 +106,9 @@ const dioxusFindProof = process.env.T3_CODE_LS_DIOXUS_FIND_PROOF;
 const composerSubmitRenderer = process.env.T3_CODE_LS_COMPOSER_SUBMIT_PROOF;
 const threadLinkProof = process.env.T3_CODE_LS_THREAD_LINK_PROOF;
 Assert.ok(threadLinkProof === undefined || (bundledClient && ["dioxus", "dioxus-fallback"].includes(threadLinkProof)), "Thread navigation requires an explicit packaged renderer");
+// Explicit combined subset only. Individual lanes keep their own control flow.
+const compositionProof = process.env.T3_CODE_LS_BROWSER_COMPOSITION_PROOF;
+Assert.ok(compositionProof === undefined || ["dioxus", "dioxus-fallback"].includes(compositionProof));
 const composerStopProof = process.env.T3_CODE_LS_COMPOSER_STOP_PROOF === "true";
 const formattedAssistantProof = process.env.T3_CODE_LS_ASSISTANT_INLINE_PROOF === "true";
 const formattedAssistantText = "**Bold** *calm* 雪.";
@@ -220,6 +223,19 @@ Assert.ok(!durableByteProof || (bundledClient && mode === "native" && expectsRus
   pairingProof !== undefined, guestNameProof !== undefined, dioxusFindProof !== undefined,
   composerSubmitRenderer !== undefined, composerStopProof,
 ].every((enabled) => !enabled)), "Byte receipt requires its own packaged native Rust-composer run");
+
+if (compositionProof !== undefined) {
+  Assert.ok(bundledClient && mode === "native" && expectsRustComposer && expectsRustDrafts);
+  Assert.equal(composerSubmitRenderer, compositionProof);
+  Assert.equal(process.env.T3_CODE_LS_APPROVAL_PROOF, compositionProof);
+  Assert.ok(composerStopProof && formattedAssistantProof);
+  Assert.equal(process.env.T3_CODE_LS_ASSISTANT_TEXT_PROOF, "true");
+  for (const owner of ["PAIRING", "THREAD_FIND", "THREAD_LINK", "COMPOSER_SUBMIT", "APPROVAL", "ASSISTANT_TEXT"]) {
+    Assert.equal(process.env[`VITE_T3_CODE_LS_${owner}_RENDERER`], "dioxus");
+  }
+  Assert.ok([pairingProof, guestNameProof, threadLinkProof, dioxusFindProof].every((flag) => flag === undefined),
+    "Composition must reach the shared exercise instead of an individual lane's early return");
+}
 
 function isPairingRenderer(value: string): value is PairingRenderer {
   return value === "retained" || value === "dioxus" || value === "dioxus-fallback";
@@ -804,6 +820,16 @@ async function submitReplay(
   await search.waitFor({ state: "hidden" });
 
   const editor = page.getByTestId("composer-editor");
+  // All shared mounts use one Wasm module. A denied module also affects the
+  // later navigation/approval fixture submissions in this same profile.
+  if (compositionProof && !composerSubmit) {
+    const footer = page.locator('[data-chat-composer-footer="true"]:visible');
+    if (compositionProof === "dioxus-fallback") {
+      await footer.getByRole("button", { name: "Use standard Send button", exact: true }).click();
+    } else {
+      await footer.locator('[data-composer-submit-renderer="dioxus-wasm"]').waitFor({ state: "visible" });
+    }
+  }
   const submit = composerSubmit
     ? await verifyComposerSubmitRefusal(page, editor, composerSubmit)
     : page.getByRole("button", { name: "Submit message", exact: true });
@@ -2535,7 +2561,7 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
             commandPath: process.execPath,
             commandArgs: [
               NodePath.join(repoRoot, "apps/server/scripts/dev-replay-agent.ts"),
-              ...(composerStopProof ? ["--hold-for-interrupt"] : []),
+              ...(composerStopProof ? ["--hold-for-interrupt", ...(compositionProof ? ["--hold-for-interrupt-model=formatted-text"] : [])] : []),
               ...(byteProfile ? ["--extend-text-appends"] : []),
             ],
           },
@@ -2580,6 +2606,7 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
   const proof = {
     schemaVersion: 1,
     status: "running",
+    composition: null as Record<string, unknown> | null,
     implementation,
     client: bundledClient ? "built" : "development",
     composer: "unverified",
@@ -2598,7 +2625,9 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
     previewBrowser,
     previewLifetime: null as Awaited<ReturnType<typeof verifyPreviewLifetime>> | null,
     pdfExternalOnly: pdfExternalOnlyProof,
-    scope: composerStopProof
+    scope: compositionProof
+      ? "Linux packaged browser with selected Dioxus controls and Rust draft reconciliation"
+      : composerStopProof
       ? "Linux packaged native application; authenticated Send and keyboard Stop, captured replay, and draft-preserving reopen"
       : composerSubmitRenderer
       ? "Linux packaged native application; authenticated ordinary Send, local refusal, and one controlled replay turn"
@@ -2892,7 +2921,7 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
         if (new URL(response.url()).pathname === composerSubmitWasmPath) composerWasm = response;
       });
     } else if (composerSubmit?.renderer === "dioxus-fallback") {
-      await page.route(`**${composerSubmitWasmPath}`, (route) => {
+      await (compositionProof ? context : page).route(`**${composerSubmitWasmPath}`, (route) => {
         refusedComposerWasmRequests += 1;
         return route.abort("blockedbyclient");
       });
@@ -2911,7 +2940,38 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
     );
     proof.processGroups.push(application.pid);
     starting("initial setup");
-    await page.goto(application.pairingUrl, { waitUntil: "domcontentloaded" });
+    let composedPairing: { renderer: string; authenticated: boolean } | undefined;
+    if (compositionProof) {
+      const url = new URL(application.pairingUrl);
+      const token = new URLSearchParams(url.hash.slice(1)).get("token");
+      Assert.ok(token);
+      url.hash = "";
+      await page.goto(url.href, { waitUntil: "domcontentloaded" });
+      if (compositionProof === "dioxus-fallback") {
+        await page.getByRole("button", { name: "Use standard pairing", exact: true }).click();
+      }
+      const input = page.getByLabel("Pairing token", { exact: true });
+      const form = page.locator("form").filter({ has: input });
+      await form.waitFor({ state: "visible" });
+      Assert.equal(await form.getAttribute("data-pairing-renderer"),
+        compositionProof === "dioxus" ? "dioxus-wasm" : null);
+      await input.fill(token);
+      const [exchange] = await Promise.all([
+        page.waitForResponse((response) => new URL(response.url()).pathname === "/api/auth/browser-session"
+          && response.request().method() === "POST"),
+        input.press("Enter"),
+      ]);
+      Assert.equal(exchange.status(), 200);
+      await page.getByRole("heading", { name: "Welcome to T3 Code", exact: true }).waitFor({ state: "visible" });
+      if (compositionProof === "dioxus-fallback") {
+        await page.getByRole("button", { name: "Use standard setup", exact: true }).click();
+      } else {
+        await page.locator('[data-welcome-renderer="dioxus-wasm"]').waitFor({ state: "visible" });
+      }
+      composedPairing = { renderer: compositionProof, authenticated: true };
+    } else {
+      await page.goto(application.pairingUrl, { waitUntil: "domcontentloaded" });
+    }
     await completeInitialSetup(page);
     completed(
       "Completed initial setup through the normal UI without agent sign-in or project import",
@@ -2963,6 +3023,108 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       proof.byteAccounting = { profile: byteProfile, artifacts, updates, dialogue, wire };
       byteSamples.push(proof.byteAccounting);
       completed("Compared the completed Unicode dialogue and ordered durable updates after reload");
+      proof.status = "passed";
+      return;
+    }
+    if (compositionProof && composerSubmit) {
+      starting("composed pairing, draft reconciliation, Send, Stop, text, navigation, find and approval");
+      Assert.ok(composedPairing?.authenticated);
+      const fixture = NodeFS.readFileSync(NodePath.join(repoRoot, capturedStop.path));
+      Assert.equal(NodeCrypto.createHash("sha256").update(fixture).digest("hex"), capturedStop.sha256);
+      proof.draftMerge = await verifyDraftMerge(page);
+      Assert.equal(proof.draftMerge.rustReconciliation, true);
+      const stoppedId = await submitReplay(page, capturedStop.modelLabel, capturedStop.prompt, undefined, composerSubmit);
+      Assert.equal(composerSubmit.requests.length, 1);
+      const stopSend = composerSubmit.requests[0]!;
+      Assert.equal(stopSend.threadId, stoppedId);
+      Assert.ok(stopSend.commandId && stopSend.messageId);
+      Assert.equal(await page.evaluate(() => performance.getEntriesByName("t3-composer-rust-offsets").length), 1);
+      proof.composer = "rust-wasm";
+      // Hash before Stop reload discards the response body.
+      let wasmSha256: string | null = null;
+      if (compositionProof === "dioxus") {
+        Assert.ok(composerWasm?.ok());
+        wasmSha256 = NodeCrypto.createHash("sha256").update(await composerWasm.body()).digest("hex");
+        Assert.equal(wasmSha256, NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(
+          NodePath.join(repoRoot, "apps/web/dist/pairing-wasm/local_pairing_bg.wasm"))).digest("hex"));
+      } else Assert.ok(refusedComposerWasmRequests > 0);
+      proof.composerStop = await verifyComposerStop(page, stoppedId, composerSubmit.renderer, stopRequests);
+      Assert.equal(proof.composerStop.sentMessageId, stopSend.messageId);
+      const stoppedUrl = page.url();
+      proof.composerSubmit = { renderer: composerSubmit.renderer, requests: [stopSend], wasmSha256,
+        refusedWasmRequests: refusedComposerWasmRequests, localRefusalPreservedDraft: true };
+      const targetId = stoppedId;
+      const targetUrl = stoppedUrl;
+      const navigationId = await submitReplay(page, "Thread navigation", `Navigation target: ${targetId}`);
+      await page.getByText("Synthetic navigation ready.", { exact: true }).waitFor({ state: "visible" });
+      proof.threadNavigation = await verifyThreadNavigation(page,
+        page.locator(`a[href=${JSON.stringify(new URL(targetUrl).pathname)}]:visible`),
+        targetUrl, formattedAssistantDisplay, composerSubmit.renderer);
+      proof.capturedApproval = await acceptCapturedApproval(page);
+      const approval = proof.capturedApproval;
+      Assert.ok("approvalAction" in approval && approval.approvalAction);
+      const [decision] = approval.approvalAction.decisions;
+      Assert.ok(decision);
+      proof.approvalReceipt = inspectNativeApprovalReceipt(nativeExecutable("db"), stateDirectory,
+        decision.commandId, decision.threadId, approval.snapshotSequence);
+      const approvalUrl = page.url();
+      // Reopen the same omdb profile through the ordinary packaged entry.
+      await application.stop();
+      application = await startApplication(implementation, stateDirectory, serverPort, webPort,
+        NodePath.join(directory, "composition-restart.log"));
+      proof.processGroups.push(application.pid);
+      await page.goto(approvalUrl, { waitUntil: "domcontentloaded" });
+      await assertCompleted(page, decision.threadId, approval, capturedApproval.reply);
+      Assert.deepEqual(inspectNativeApprovalReceipt(nativeExecutable("db"), stateDirectory,
+        decision.commandId, decision.threadId, approval.snapshotSequence), proof.approvalReceipt);
+      const editor = page.getByTestId("composer-editor");
+      const draft = "Composed find must preserve this unsent 雪 draft.";
+      await editor.fill(draft);
+      const requestsBeforeFind = threadFindRequests;
+      await page.keyboard.press("Control+f");
+      const bar = page.getByRole("search", { name: "Find in thread" });
+      await bar.waitFor({ state: "visible" });
+      Assert.equal(await bar.getAttribute("data-thread-find-renderer"),
+        compositionProof === "dioxus" ? "dioxus-wasm" : null);
+      const query = capturedApproval.reply;
+      await bar.getByRole("searchbox", { name: "Find in thread" }).fill(query);
+      await bar.getByText("1/1", { exact: true }).waitFor({ state: "visible" });
+      Assert.ok(threadFindRequests > requestsBeforeFind);
+      await page.waitForFunction((expected) => Array.from(CSS.highlights.get("t3-thread-find-active") ?? [])
+        .some((range) => range.toString() === expected), query);
+      await bar.getByRole("button", { name: "Close find", exact: true }).click();
+      await bar.waitFor({ state: "hidden" });
+      Assert.equal(await editor.innerText(), draft);
+      proof.historyFind = { query, count: "1/1", draftPreserved: true,
+        renderer: compositionProof === "dioxus" ? "dioxus-wasm" : "retained",
+        refusedWasmRequests: refusedComposerWasmRequests };
+      await page.goto(stoppedUrl, { waitUntil: "domcontentloaded" });
+      await page.waitForFunction(() => document.querySelector<HTMLElement>('[data-testid="composer-editor"]')
+        ?.innerText === "This unsent draft must survive Stop and reopen.");
+      const stopped = await readThreadSnapshot(page, stoppedId);
+      Assert.equal(stopped.projection.runs.length, 1);
+      Assert.equal(stopped.projection.runs[0]?.status, "interrupted");
+      Assert.equal(stopped.projection.messages.find((message) => message.id === stopSend.messageId)?.text, capturedStop.prompt);
+      if (compositionProof === "dioxus") {
+        await assertNativeAssistantText(page, stoppedId, stopped.projection.messages.find((message) => message.role === "assistant")!.id);
+      }
+      Assert.equal(stopRequests.length, 1, "Later mounts and restart must not repeat Stop");
+      Assert.equal(composerSubmit.requests.length, 3, "Only Stop, navigation and approval turns may launch");
+      Assert.equal(new Set(composerSubmit.requests.map((request) => request.commandId)).size, 3);
+      Assert.ok(composerSubmit.requests.every((request) => request.method === ORCHESTRATION_V2_WS_METHODS.launchThread));
+      proof.composition = { renderer: compositionProof, completeDioxusClient: false,
+        pairing: composedPairing, rustDrafts: true, rustComposer: true, navigationId,
+        commands: composerSubmit.requests, stop: stopRequests[0],
+        approvalCommandId: decision.commandId, sameStoreRestart: true, stoppedDraftReopened: true,
+        wasmSha256, refusedWasmRequests: refusedComposerWasmRequests,
+        artifacts: Object.fromEntries([
+          "apps/server/dist/bin.mjs", "apps/server/dist/native-bin/manifest.json",
+          "apps/server/scripts/dev-replay-agent.ts", capturedStop.path, capturedApproval.path,
+          "apps/web/dist/index.html", "apps/web/dist/client-text-wasm/composer_offsets_bg.wasm",
+          "apps/web/dist/pairing-wasm/local_pairing_bg.wasm",
+        ].map((path) => [path, NodeCrypto.createHash("sha256")
+          .update(NodeFS.readFileSync(NodePath.join(repoRoot, path))).digest("hex")])) };
+      completed("Reopened the composed subset and exact approval receipt after same-store server restart");
       proof.status = "passed";
       return;
     }

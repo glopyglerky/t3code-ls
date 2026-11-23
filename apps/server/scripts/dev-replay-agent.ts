@@ -204,6 +204,14 @@ function permissionRejectedToolCallId(request: LogicalFrame, answer: unknown): s
 
 function runAgent(): void {
   const holdForInterrupt = process.argv.includes("--hold-for-interrupt");
+  // A composed browser proof can hold its Stop model while other replay models
+  // still complete. The original flag alone retains its all-model behavior.
+  const holdModelArgument = process.argv.find((argument) => argument.startsWith("--hold-for-interrupt-model="));
+  const holdForInterruptModel = holdModelArgument?.slice("--hold-for-interrupt-model=".length);
+  if (holdModelArgument !== undefined && (!holdForInterrupt || !holdForInterruptModel ||
+      !SCENARIOS.some((model) => model.id === holdForInterruptModel))) {
+    throw new Error("A held replay model requires --hold-for-interrupt and a known model");
+  }
   const extendTextAppends = process.argv.includes("--extend-text-appends");
   const turnsByScenario = new Map<string, ReadonlyArray<ReplayTurn>>();
   const loadTurns = (scenarioId: string) => {
@@ -305,7 +313,8 @@ function runAgent(): void {
               : { ...params, update: { ...params.update, content: { ...content, text: chunk } } },
         });
       }
-      if (holdForInterrupt && params.update.sessionUpdate === "agent_message_chunk") {
+      if (holdForInterrupt && (holdForInterruptModel === undefined || session.model === holdForInterruptModel) &&
+          params.update.sessionUpdate === "agent_message_chunk") {
         if (!signal.aborted) {
           await new Promise<void>((resolve) =>
             signal.addEventListener("abort", () => resolve(), { once: true }),
