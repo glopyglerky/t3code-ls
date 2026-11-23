@@ -1,10 +1,11 @@
 ---
+import { readFileSync } from "node:fs";
 import type { ComponentProps } from "astro/types";
 import { Image } from "astro:assets";
 import iconStable from "../../assets/icon.webp";
 import iconNightly from "../../assets/icon-nightly.webp";
 import Layout from "../../layouts/Layout.astro";
-import { RELEASES_URL } from "../../lib/releases";
+import { RELEASES_URL, type ReleaseChannel } from "../../lib/releases";
 import { ANDROID_PLAY_STORE_URL, IOS_APP_STORE_URL } from "../../lib/site";
 import { breadcrumbJsonLd, softwareJsonLd } from "../../lib/seo";
 import { messagesFor } from "../../i18n";
@@ -14,6 +15,18 @@ export const getStaticPaths = localeStaticPaths;
 
 const { locale } = Astro.props;
 const t = messagesFor(locale).download;
+
+// Optional build input emitted by the Rust release-catalog command.
+type StaticRelease = { tag: string; release: string; downloads: Record<string, string> };
+const snapshotPath = process.env.T3_CODE_LS_MARKETING_RELEASE_CATALOG;
+const catalog: Partial<Record<ReleaseChannel, StaticRelease | null>> =
+  snapshotPath ? JSON.parse(readFileSync(snapshotPath, "utf8")) : {};
+const download = (target: string) => ({
+  href: catalog.stable?.downloads[target] ?? RELEASES_URL,
+  "data-asset": target,
+  "data-stable-download": catalog.stable?.downloads[target],
+  "data-nightly-download": catalog.nightly?.downloads[target],
+});
 
 const imageProps = {
   alt: "",
@@ -43,6 +56,10 @@ const imageProps = {
     data-channel="stable"
     data-built-ago={t.builtAgo}
     data-releases-fallback={t.releasesFallback}
+    data-stable-release={catalog.stable?.release}
+    data-stable-tag={catalog.stable?.tag}
+    data-nightly-release={catalog.nightly?.release}
+    data-nightly-tag={catalog.nightly?.tag}
   >
     <header class="download-head">
       <div class="sky" aria-hidden="true"></div>
@@ -59,8 +76,8 @@ const imageProps = {
         <button type="button" role="tab" data-channel="nightly" aria-selected="false">{t.nightly}</button>
       </div>
       <p class="head-meta" data-rise style="--d:180ms">
-        <a id="changelog-link" class="changelog-link" href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
-          <span id="version-label">&nbsp;</span><span aria-hidden="true"> &#8599;</span>
+        <a id="changelog-link" class="changelog-link" href={catalog.stable?.release ?? RELEASES_URL} target="_blank" rel="noopener noreferrer">
+          <span id="version-label">{catalog.stable?.tag ?? "\u00a0"}</span><span aria-hidden="true"> &#8599;</span>
         </a>
       </p>
     </header>
@@ -72,7 +89,7 @@ const imageProps = {
           <h2 class="platform-name">macOS</h2>
         </div>
         <div class="download-cards">
-          <a class="download-card" data-asset="arm64.dmg" href={RELEASES_URL}>
+          <a class="download-card" {...download("arm64.dmg")}>
             <span class="card-icon">
               <Image class="card-icon--stable" src={iconStable} width={28} height={28} loading="lazy" {...imageProps} />
               <Image class="card-icon--nightly" src={iconNightly} width={28} height={28} loading="lazy" {...imageProps} />
@@ -85,7 +102,7 @@ const imageProps = {
         </div>
         <p class="intel-note">
           {templateParts(t.intelNote).map((part) =>
-            typeof part === "string" ? part : <a data-asset="x64.dmg" href={RELEASES_URL}>{t.intelLink}</a>,
+            typeof part === "string" ? part : <a {...download("x64.dmg")}>{t.intelLink}</a>,
           )}
         </p>
       </section>
@@ -96,7 +113,7 @@ const imageProps = {
           <h2 class="platform-name">Windows</h2>
         </div>
         <div class="download-cards">
-          <a class="download-card" data-asset="x64.exe" href={RELEASES_URL}>
+          <a class="download-card" {...download("x64.exe")}>
             <span class="card-icon">
               <Image class="card-icon--stable" src={iconStable} width={28} height={28} loading="lazy" {...imageProps} />
               <Image class="card-icon--nightly" src={iconNightly} width={28} height={28} loading="lazy" {...imageProps} />
@@ -115,7 +132,7 @@ const imageProps = {
           <h2 class="platform-name">Linux</h2>
         </div>
         <div class="download-cards">
-          <a class="download-card" data-asset="amd64.deb" href={RELEASES_URL}>
+          <a class="download-card" {...download("amd64.deb")}>
             <span class="card-icon">
               <Image class="card-icon--stable" src={iconStable} width={28} height={28} loading="lazy" {...imageProps} />
               <Image class="card-icon--nightly" src={iconNightly} width={28} height={28} loading="lazy" {...imageProps} />
@@ -125,7 +142,7 @@ const imageProps = {
               <span class="card-format">.deb</span>
             </span>
           </a>
-          <a class="download-card" data-asset="x86_64.AppImage" href={RELEASES_URL}>
+          <a class="download-card" {...download("x86_64.AppImage")}>
             <span class="card-icon">
               <Image class="card-icon--stable" src={iconStable} width={28} height={28} loading="lazy" {...imageProps} />
               <Image class="card-icon--nightly" src={iconNightly} width={28} height={28} loading="lazy" {...imageProps} />
@@ -139,8 +156,8 @@ const imageProps = {
         <p class="intel-note">
           {templateParts(t.armNote).map((part) =>
             typeof part === "string" ? part
-            : part.key === "deb" ? <a data-asset="arm64.deb" href={RELEASES_URL}>.deb</a>
-            : <a data-asset="arm64.AppImage" href={RELEASES_URL}>AppImage</a>,
+            : part.key === "deb" ? <a {...download("arm64.deb")}>.deb</a>
+            : <a {...download("arm64.AppImage")}>AppImage</a>,
           )}
         </p>
       </section>
@@ -224,10 +241,14 @@ const imageProps = {
     page.dataset.channel = channel;
     tabs.forEach((tab) => tab.setAttribute("aria-selected", String(tab.dataset.channel === channel)));
     releasesPageLink.href = fallback;
-    changelogLink.href = fallback;
-    versionLabel.textContent = "\u00a0";
+    const staticRelease = channel === "nightly" ? page.dataset.nightlyRelease : page.dataset.stableRelease;
+    const staticTag = channel === "nightly" ? page.dataset.nightlyTag : page.dataset.stableTag;
+    const fallbackDownload = (card: HTMLAnchorElement) =>
+      (channel === "nightly" ? card.dataset.nightlyDownload : card.dataset.stableDownload) ?? fallback;
+    changelogLink.href = staticRelease ?? fallback;
+    versionLabel.textContent = staticTag ?? "\u00a0";
     cards.forEach((card) => {
-      card.href = fallback;
+      card.href = fallbackDownload(card);
     });
 
     try {
@@ -242,10 +263,11 @@ const imageProps = {
       if (release.html_url) changelogLink.href = release.html_url;
       cards.forEach((card) => {
         const match = (release.assets ?? []).find((a) => a.name.endsWith(`-${card.dataset.asset}`));
-        card.href = match?.browser_download_url ?? fallback;
+        card.href = match?.browser_download_url ?? fallbackDownload(card);
       });
     } catch {
-      if (page.dataset.channel === channel) versionLabel.textContent = page.dataset.releasesFallback!;
+      if (page.dataset.channel === channel && staticTag === undefined)
+        versionLabel.textContent = page.dataset.releasesFallback!;
     }
   }
 
