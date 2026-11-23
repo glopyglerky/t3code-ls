@@ -61,6 +61,22 @@ impl BridgeClient {
             .ok_or(BridgeError::Response)
     }
 
+    pub async fn resume_agent(&self, agent_id: &str, options: Value) -> Result<(), BridgeError> {
+        if agent_id.is_empty() {
+            return Err(BridgeError::Response);
+        }
+        let result = self
+            .unary(
+                "ResumeAgent",
+                json!({ "agentId": agent_id, "options": options }),
+            )
+            .await?;
+        if result["agentId"].as_str() != Some(agent_id) {
+            return Err(BridgeError::Response);
+        }
+        Ok(())
+    }
+
     pub async fn close_agent(&self, agent_id: &str) -> Result<(), BridgeError> {
         self.unary("CloseAgent", json!({ "agentId": agent_id }))
             .await?;
