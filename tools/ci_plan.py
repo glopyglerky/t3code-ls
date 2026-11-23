@@ -199,6 +199,10 @@ def select_checks(changed: list[str], mapping: dict, old_mapping: dict, names: d
         for test, workflow in port.get("hosted_acceptance", {}).items():
             if test not in port.get("acceptance_tests", []) or workflow not in port.get("adapter_paths", []):
                 raise ValueError(f"Hosted acceptance needs a declared test and workflow owner: {test}")
+            if test.endswith(".rs"):
+                crate, separator, _ = test.rpartition("/tests/")
+                if not separator or crate in names or crate not in port.get("rust_crates", []):
+                    raise ValueError(f"Hosted Rust acceptance needs a standalone Cargo owner: {test}")
             hosted_tests.add(test)
     acceptance_evidence = {path for port in ports for route in port.get("platform_routes", [])
                            for path in route.get("acceptance_evidence", {}).values()}
@@ -208,7 +212,7 @@ def select_checks(changed: list[str], mapping: dict, old_mapping: dict, names: d
     for path in sorted(acceptance_tests):
         nightly.require_relative_path(path)
         if path.endswith(".rs"):
-            if not rust_members(path, names):
+            if path not in hosted_tests and not rust_members(path, names):
                 raise ValueError(f"Acceptance test is outside the Cargo workspace: {path}")
             continue
         if path in HYBRID_ACCEPTANCE_TESTS or path in hosted_tests:

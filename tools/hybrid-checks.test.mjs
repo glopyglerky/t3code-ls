@@ -11,12 +11,16 @@ import {
   selectAdapterPorts,
 } from "./hybrid-checks.mjs";
 
-Test.test("default adapter selection covers every mapped production Rust port", () => {
+Test.test("production Rust ports use the default adapters or a dedicated hosted route", () => {
   const map = JSON.parse(FS.readFileSync(new URL("../port-map.json", import.meta.url), "utf8"));
   const productionPorts = map.ports.filter((port) => port.state !== "candidate" &&
     port.platform_routes.some((route) => route.implementation === "rust"),
+  );
+  const defaultPorts = productionPorts.filter((port) =>
+    port.acceptance_tests.length === 0 ||
+    !port.acceptance_tests.every((test) => Object.hasOwn(port.hosted_acceptance ?? {}, test)),
   ).map((port) => port.id).sort();
-  Assert.deepEqual([...adapterPortIds].sort(), productionPorts);
+  Assert.deepEqual([...adapterPortIds].sort(), defaultPorts);
   Assert.deepEqual(parseHybridArguments(["--adapters", "/tmp/proof"]).selectedPorts, adapterPortIds);
 });
 
