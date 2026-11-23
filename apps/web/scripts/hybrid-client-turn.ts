@@ -23,6 +23,7 @@ export function assertReplayTurnLinks(
 
 export function replayTurnIdentity(
   snapshot: OrchestrationV2ThreadDetailSnapshot,
+  model = "showcase",
 ): ReplayTurnIdentity {
   Assert.equal(
     snapshot.projection.runs.length,
@@ -31,7 +32,7 @@ export function replayTurnIdentity(
   );
   const run = snapshot.projection.runs[0]!;
   Assert.equal(run.providerInstanceId, "devReplay");
-  Assert.equal(run.modelSelection.model, "showcase");
+  Assert.equal(run.modelSelection.model, model);
   Assert.ok(run.activeAttemptId, "The replay approval must belong to an active attempt");
   const attempt = snapshot.projection.attempts.find((item) => item.id === run.activeAttemptId);
   Assert.ok(attempt);
