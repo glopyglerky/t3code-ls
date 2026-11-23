@@ -108,6 +108,9 @@ jobs:
             if [[ "$renderer" == dioxus ]]; then
               find apps/web/dist/pairing-wasm -type f -print0 | sort -z | xargs -0 sha256sum >> "$proof/$renderer.sha256"
             fi
+            # apps/web/src/components/onboarding/WelcomePage.import.browser.test.tsx
+            pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
+              src/components/onboarding/WelcomePage.import.browser.test.tsx
             mkdir "$proof/$renderer"
             T3_CODE_LS_PAIRING_PROOF="$renderer" \
               node apps/web/scripts/verify-hybrid-client.ts "$proof/$renderer" upstream
@@ -243,6 +246,9 @@ jobs:
             apps/web/dist/client-text-wasm/composer_offsets_bg.wasm apps/server/dist/bin.mjs \
             > "$proof/application.sha256"
           if [[ "$INTEGRATED_NATIVE" == true ]]; then
+            # apps/web/src/components/onboarding/WelcomePage.import.browser.test.tsx
+            pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
+              src/components/onboarding/WelcomePage.import.browser.test.tsx
             for renderer in dioxus dioxus-fallback; do
               mkdir "$proof/$renderer"
               T3_CODE_LS_PAIRING_PROOF="$renderer" \
