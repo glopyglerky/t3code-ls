@@ -430,6 +430,11 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
         const imported = outcomes.find((outcome) => outcome._tag === "Importable");
         expect(imported?.source).toMatchObject({ filePath, size: compressed.byteLength });
         expect(imported?.thread.messages).toMatchObject([{ role: "user", text: prompt }]);
+
+        yield* fs.writeFile(filePath, compressed.subarray(0, -1));
+        yield* fs.utimes(filePath, seconds, seconds);
+        const afterTruncation = yield* runRecentThreads({ ...input, workspaceRoot: workspace });
+        expect(afterTruncation).toEqual([]);
       }),
     );
 
