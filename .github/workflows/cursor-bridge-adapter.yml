@@ -2,7 +2,9 @@ name: Cursor Rust adapter fixture
 
 on:
   push:
-    branches: ["candidate/t3code-ls-t01-cursor-adapter-*"]
+    branches:
+      - "candidate/t3code-ls-t01-cursor-adapter-*"
+      - "candidate/t3code-ls-t02-bundled-native-integrated-*"
 
 permissions:
   contents: read
@@ -42,6 +44,7 @@ jobs:
             "$CARGO_TARGET_DIR/debug/t3-code-ls-cursor-bridge-host" >> "$GITHUB_ENV"
       - name: Run the real Cursor adapter with the SDK blocked
         run: |
+          # packages/provider-cursor/src/server/CursorBridge.integration.test.ts
           pnpm --filter @t3tools/provider-cursor test src/server/CursorBridge.integration.test.ts
           status=0
           pnpm --filter @t3tools/provider-cursor typecheck > "$RUNNER_TEMP/cursor-typecheck.log" 2>&1 || status=$?
