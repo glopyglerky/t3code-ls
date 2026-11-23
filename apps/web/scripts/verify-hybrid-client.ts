@@ -48,6 +48,7 @@ const multiTabDraftProof = process.env.T3_CODE_LS_MULTI_TAB_DRAFT_PROOF === "tru
 const fileEditorProof = process.env.T3_CODE_LS_FILE_EDITOR_PROOF === "true";
 const tasksFile = "fixture-tasks.md";
 const initialTasks = "- [ ] First milestone\n- [ ] Second milestone\n- [ ] Keep the draft\n";
+const durableTextProof = process.env.T3_CODE_LS_DURABLE_TEXT_PROOF === "true";
 const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
 const capturedApproval = {
   path: "apps/server/src/orchestration-v2/testkit/fixtures/tool_call_read_only_on_request/registry_transcript.ndjson",
@@ -767,11 +768,46 @@ async function verifyFileEditor(page: Page, workspace: string, writes: EventEmit
   return { path: tasksFile, confirmedEdits: 2, externalChangePreserved: true, draftPreserved: true };
 }
 
+function textRevisionIdentity(stateDirectory: string, initialize = false) {
+  const executable = NodePath.join(repoRoot, "apps/server/dist/native-bin/t3-code-ls-db");
+  const databasePath = NodePath.join(stateDirectory, "userdata", "statev2.omdb");
+  if (initialize) {
+    Assert.equal(NodeFS.existsSync(databasePath), false, "Text revisions require a fresh fixture");
+  }
+  const requests = [
+    ...(initialize
+      ? [{ operation: "application_bootstrap", event_layout: "assistant_text_revisions_v1" }]
+      : []),
+    { operation: "application_generation_identity" },
+  ];
+  const mode = initialize ? "initialize-local" : "read-only-local";
+  const run = ChildProcess.spawnSync(executable, [mode, databasePath], {
+    input: requests.map((request) => JSON.stringify(request)).join("\n") + "\n",
+    env: {},
+    encoding: "utf8",
+    timeout: 15_000,
+    maxBuffer: 65_536,
+  });
+  Assert.ifError(run.error);
+  Assert.equal(run.status, 0, run.stderr);
+  const responses = run.stdout.trim().split("\n").map((line) => JSON.parse(line));
+  Assert.equal(responses.length, requests.length);
+  for (const response of responses) Assert.equal(response.ok, true, JSON.stringify(response.error));
+  if (initialize) Assert.equal(responses[0].result.initialized, true);
+  const identity = responses.at(-1).result;
+  Assert.equal(identity.engine, "omdb");
+  Assert.equal(identity.generation, "native");
+  Assert.equal(identity.layout, "t3-application-keyspace-v1+assistant-text-revisions-v1");
+  Assert.match(identity.catalog_sha256, /^[a-f0-9]{64}$/u);
+  return { layout: identity.layout as string, catalogSha256: identity.catalog_sha256 as string };
+}
+
 async function exercise(implementation: Implementation): Promise<void> {
   const directory = NodePath.join(proofRoot, implementation);
   NodeFS.mkdirSync(directory, { recursive: true });
   const workspace = NodePath.join(runRoot, implementation, "hybrid-fixture");
   const stateDirectory = NodePath.join(runRoot, implementation, "state");
+  Assert.ok(!durableTextProof || (bundledClient && implementation === "native"));
   if (bundledClient) {
     const settingsDirectory = NodePath.join(stateDirectory, "userdata");
     NodeFS.mkdirSync(settingsDirectory, { recursive: true });
@@ -826,6 +862,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     implementation,
     client: bundledClient ? "built" : "development",
     composer: "unverified",
+    textRevisionProfile: null as ReturnType<typeof textRevisionIdentity> | null,
     scope:
       "Linux original web client; local project; composer submission; free ACP showcase approval and interruption; reload; same-state server restart",
     startedAt: new Date().toISOString(),
@@ -987,6 +1024,11 @@ async function exercise(implementation: Implementation): Promise<void> {
   observePage(page);
 
   try {
+    if (durableTextProof) {
+      starting("initialize the opted-in assistant text layout");
+      proof.textRevisionProfile = textRevisionIdentity(stateDirectory, true);
+      completed("Initialized the assistant text revision layout for this fresh omdb profile");
+    }
     let application = await startApplication(
       implementation,
       stateDirectory,
@@ -1077,6 +1119,9 @@ async function exercise(implementation: Implementation): Promise<void> {
     );
     proof.processGroups.push(application.pid);
     starting("durable recovery in a fresh client");
+    if (proof.textRevisionProfile !== null) {
+      Assert.deepEqual(textRevisionIdentity(stateDirectory), proof.textRevisionProfile);
+    }
     // Keep only the authenticated session cookies. A fresh client cannot satisfy recovery
     // from localStorage or IndexedDB, and must retrieve the old thread from the restarted server.
     // Do not consume the restart's new pairing token or persist the session cookies in proof.
