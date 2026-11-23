@@ -122,6 +122,7 @@ try {
   git(workspace, ...fixtureIdentity, "commit", "--quiet", "-m", "Fixture");
   git(workspace, "branch", "作業/修正");
   git(workspace, "worktree", "add", "--quiet", "-b", "linked-branch", linked);
+  FS.writeFileSync(Path.join(linked, "README"), "Dirty linked checkout\n");
   FS.mkdirSync(bare);
   git(bare, "init", "--quiet", "--bare", "--initial-branch=main");
   for (const checkout of [configuredWorktree, symlinkedWorktree]) {
@@ -135,6 +136,7 @@ try {
   git(symlinkedWorktree, "config", "core.worktree", "portal/..");
   const phases: unknown[] = [];
   const observations: unknown[] = [];
+  const linkedStatusByMode = new Map<string, unknown>();
   report.phases = phases;
   report.observations = observations;
   for (const mode of ["native", "config", "included", "upstream", "hash-refusal", "manifest-refusal"] as const) {
@@ -177,10 +179,20 @@ try {
         { label: "linked", cwd: linked }, { label: "bare", cwd: bare },
         { label: "configured-worktree", cwd: configuredWorktree },
         { label: "symlinked-worktree", cwd: symlinkedWorktree }]
-      : [{ label: "root", cwd: workspace }];
+      : [{ label: "root", cwd: workspace }, ...(mode === "upstream" ? [{ label: "linked", cwd: linked }] : [])];
     for (const { label, cwd } of locations) {
       checkpoint(`${mode}:${label}:rpc`);
       const result = await client.rpc((rpc) => rpc[WS_METHODS.vcsListRefs]({ cwd, refresh: true, refKind: "local" }));
+      if (label === "linked") {
+        // The ordinary refresh waits for both status halves without timing the poller.
+        const status = await client.rpc((rpc) => rpc[WS_METHODS.vcsRefreshStatus]({ cwd }));
+        Assert.equal(status.refName, "linked-branch");
+        Assert.equal(status.hasWorkingTreeChanges, true);
+        Assert.equal(git(cwd, "status", "--porcelain"), "M README", "The linked fixture stays dirty");
+        linkedStatusByMode.set(mode, status);
+        if (mode === "upstream") Assert.deepEqual(status, linkedStatusByMode.get("native"));
+        report.linkedStatus = Object.fromEntries(linkedStatusByMode);
+      }
       // Match stock's normal application admission, before GitVcsDriverCore.
       // A valid bare Git database is not a supported application work tree.
       const detection = ChildProcess.spawnSync("/usr/bin/git", ["-C", cwd, "rev-parse",
@@ -234,6 +246,10 @@ try {
             usesRetainedDiscovery, `${mode}:${label}: retained ${argument}`);
         }
       }
+      Assert.ok(nativeCalls.some((call) => call.cwd === linked && call.line.includes('"branch-head"')),
+        "Authenticated status refresh must execute the native branch read");
+      Assert.ok(!calls.some((call) => call.cwd === linked && call.line.includes('"--symbolic-full-name", "HEAD"')),
+        "Ordinary linked branch status must avoid retained HEAD lookup");
       Assert.ok(!nativeCalls.some((call) => call.cwd === bare || call.line.includes(JSON.stringify(bare))),
         "The bare repository must be rejected by normal admission before helper execution");
     } else if (mode === "included") {
@@ -242,6 +258,10 @@ try {
     } else {
       Assert.equal(nativeCalls.length, 0, "Configuration overrides and retained mode must bypass native reads");
       Assert.ok(coreDiscovery.some((call) => call.cwd === workspace), `${mode}: retained Core Git discovery must execute`);
+      if (mode === "upstream") {
+        Assert.ok(calls.some((call) => call.cwd === linked && call.line.includes('"--symbolic-full-name", "HEAD"')),
+          "Retained linked branch status must execute Git HEAD lookup");
+      }
     }
     phases.push({ mode, locations: locations.length, nativeCalls: nativeCalls.length,
       registryProbes: registryProbes.length, retainedCoreDiscoveryCalls: coreDiscovery.length });

@@ -109,6 +109,31 @@ fn local_branch_names(cwd: &Path) -> Option<Vec<String>> {
     (serde_json::to_vec(&names).ok()?.len() <= MAX_OUTPUT_BYTES).then_some(names)
 }
 
+// Only the ordinary, born local-branch case is admitted. Git owns all other
+// HEAD diagnostics, including ambiguous pseudoref names and symbolic branches.
+fn branch_head(cwd: &Path) -> Option<String> {
+    discover(cwd)?;
+    let (_, repo) = open_repository(cwd)?;
+    for name in [
+        "refs/HEAD",
+        "refs/tags/HEAD",
+        "refs/heads/HEAD",
+        "refs/remotes/HEAD",
+        "refs/remotes/HEAD/HEAD",
+    ] {
+        if repo.try_find_reference(name).ok()?.is_some() {
+            return None;
+        }
+    }
+    let head = repo.head_name().ok()??;
+    let name = std::str::from_utf8(head.as_bstr()).ok()?;
+    name.strip_prefix("refs/heads/")?;
+    let reference = repo.try_find_reference(name).ok()??;
+    let id = reference.try_id()?;
+    let header = repo.try_find_header(id).ok()??;
+    (header.kind() == gix::objs::Kind::Commit).then(|| name.to_owned())
+}
+
 fn reply(value: impl Serialize) -> ExitCode {
     match serde_json::to_writer(std::io::stdout().lock(), &value) {
         Ok(()) => ExitCode::SUCCESS,
@@ -120,6 +145,7 @@ fn main() -> ExitCode {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
     match args.as_slice() {
         [cwd] => reply(discover(Path::new(cwd))),
+        [operation, cwd] if operation == "branch-head" => reply(branch_head(Path::new(cwd))),
         [operation, cwd] if operation == "local-branch-names" => {
             reply(local_branch_names(Path::new(cwd)))
         }
@@ -133,7 +159,7 @@ fn main() -> ExitCode {
         ),
         _ => {
             eprintln!(
-                "Usage: t3-code-ls-git-workspace [has-remote-ref|has-local-ref|local-branch-names] ABSOLUTE_DIRECTORY [REF]"
+                "Usage: t3-code-ls-git-workspace [has-remote-ref|has-local-ref|local-branch-names|branch-head] ABSOLUTE_DIRECTORY [REF]"
             );
             ExitCode::from(2)
         }
