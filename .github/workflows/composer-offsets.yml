@@ -83,11 +83,16 @@ jobs:
         if: env.INTEGRATED_NATIVE == 'true'
         working-directory: apps/mobile
         run: pnpm exec vp test run --project unit --maxWorkers 2 src/persistence/mobile-database.test.ts
+      - name: Exercise terminal attachment and parser continuity
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-split-')
+        working-directory: apps/server
+        run: pnpm exec vp test run --maxWorkers 2 src/terminal/Manager.test.ts
       - name: Build and open the application with the Rust composer binding
         if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
         env:
           T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
           T3_CODE_LS_SPLICE_NEGOTIATION_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-splice-') }}
+          T3_CODE_LS_SPLIT_PTY_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-split-') }}
           T3_CODE_LS_MULTI_TAB_DRAFT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-') }}
           T3_CODE_LS_DRAFT_STORAGE_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-storage-') }}
           T3_CODE_LS_FILE_EDITOR_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
