@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+#[path = "../../../apps/server/src/orchestration-v2/Adapters/claude_stdio_control.rs"]
+pub mod claude_stdio_control;
 pub mod codex_generation;
 pub mod codex_generation_wire;
 pub mod command_policy;
