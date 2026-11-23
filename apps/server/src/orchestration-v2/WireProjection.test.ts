@@ -27,6 +27,7 @@ import * as Schema from "effect/Schema";
 import { coalesceLiveUpdatedEvents } from "./ThreadLiveEventCoalescer.ts";
 import {
   makeLiveBodyDeduper,
+  makeMessageTextAppendEncoder,
   projectTurnItemForWire,
   projectTurnItemForDetail,
   projectDomainEventForWire,
@@ -471,6 +472,33 @@ describe("live body deduper", () => {
     });
   const payloadOf = (item: OrchestrationV2ThreadStreamItem) =>
     item.kind === "event" ? item.event.payload : undefined;
+
+  it("uses the last delivered prefix and sends a replacement in full", () => {
+    const prefix = "日本語 exact prefix 🐟 ".repeat(6);
+    const initial = message(10, prefix);
+    const extended = message(17, prefix + "tail 🐈");
+    const replacement = message(18, "Rewritten answer.");
+    const encode = makeMessageTextAppendEncoder();
+    expect(encode(initial)).toBe(initial);
+    expect(encode(extended)).toEqual({
+      kind: "message-text-append",
+      baseSequence: 10,
+      sequence: 17,
+      event: { ...extended.event, payload: { ...extended.event.payload, text: "tail 🐈" } },
+    });
+    expect(encode(replacement)).toBe(replacement);
+    expect(makeMessageTextAppendEncoder()(extended)).toBe(extended);
+  });
+
+  it("keeps an oversized or malformed base on the full JSON path", () => {
+    const encode = makeMessageTextAppendEncoder();
+    for (const prefix of ["界".repeat(25_000), "a".repeat(80) + "\uD800"]) {
+      const first = message(1, prefix);
+      const next = message(2, prefix + "tail");
+      expect(encode(first)).toBe(first);
+      expect(encode(next)).toBe(next);
+    }
+  });
 
   it("blanks a reply that repeats the message delivered before it, after coalescing", () => {
     const delivered = coalesceLiveUpdatedEvents([
