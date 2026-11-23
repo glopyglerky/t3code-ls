@@ -114,7 +114,9 @@ jobs:
           pnpm install --frozen-lockfile --store-dir "$DIAGNOSTIC_WORK/pnpm-store"
           pnpm --dir apps/web run build
           pnpm --dir apps/server run build:bundle
-          test -f apps/server/dist/client/index.html
+          # Stock resolves the deployed monorepo client from apps/web/dist.
+          test -f apps/web/dist/index.html
+          test -f apps/server/dist/bin.mjs
           git diff --exit-code
           git show -s --format='%H %T' > "$RUNNER_TEMP/checked-open-evidence/stock-source.txt"
       - name: Build the pinned packaged route and diagnostic
@@ -360,7 +362,9 @@ jobs:
             (
               cd "$root"
               sha256sum pnpm-lock.yaml
-              find "apps/server/$directory" -type f -print0 | sort -z | xargs -0 -r sha256sum
+              bundle_paths=("apps/server/$directory")
+              if [[ "$arm" == stock ]]; then bundle_paths+=(apps/web/dist); fi
+              find "${bundle_paths[@]}" -type f -print0 | sort -z | xargs -0 -r sha256sum
             ) > "$evidence/arm-$variant.sha256"
           done
           {
