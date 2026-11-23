@@ -843,6 +843,14 @@ async fn verify_restore_snapshot(path: &Path, expected: &TrialSnapshot) -> Resul
 }
 
 #[cfg(unix)]
+async fn verify_generic_restore_target(path: &Path, expected: &TrialSnapshot) -> Result<Store> {
+    let store = verify_restore_snapshot(path, expected).await?;
+    // Sealed candidates can only be rolled back by the owner of the trial receipt.
+    ApplicationTransactions::new(store.clone()).schema().await?;
+    Ok(store)
+}
+
+#[cfg(unix)]
 async fn prepare_trial_restore(
     home: PathBuf,
     request: TrialRestoreRequest,
@@ -855,7 +863,7 @@ async fn prepare_trial_restore(
     let checkpoint_path = backups.join(format!("{}.omdb", request.update_id));
     let checkpoint = verify_restore_snapshot(&checkpoint_path, &request.checkpoint).await?;
     let live_path = state.join("statev2.omdb");
-    let live = verify_restore_snapshot(&live_path, &request.target).await?;
+    let live = verify_generic_restore_target(&live_path, &request.target).await?;
     if trial_file_identity(&live.db.open_verified_offline_file(&live_path)?)?
         != (request.database, 1)
     {
@@ -1091,7 +1099,7 @@ async fn publish_trial_restore(
         } else {
             (&live, &stage)
         };
-        let failed = verify_restore_snapshot(failed_path, &restore.target).await?;
+        let failed = verify_generic_restore_target(failed_path, &restore.target).await?;
         let prepared = verify_restore_snapshot(prepared_path, &restore.checkpoint).await?;
         let failed_links = if !reused && has_preserved { 2 } else { 1 };
         let failed_file = verify_trial_file(&failed, failed_path, &restore.database, failed_links)?;
@@ -1378,6 +1386,80 @@ mod tests {
             .await
             .unwrap();
         panic!("fixture did not interrupt publication");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn isolated_trial_refuses_generic_pre_activation_restore() {
+        let fixture = TrialFixture::start().await;
+        let mut request = fixture.publication_request().await;
+        let stage = fixture.restore_stage();
+        let checkpoint = fixture.backups.join(format!("{UPDATE}.omdb"));
+        let backup_receipt = fixture
+            .backups
+            .join(format!("{UPDATE}.backup-receipt-v1.json"));
+        let checkpoint_bytes = fs::read(&checkpoint).unwrap();
+        let backup_receipt_bytes = fs::read(&backup_receipt).unwrap();
+        let stage_bytes = fs::read(&stage).unwrap();
+        let stage_inode = path_identity(&stage).unwrap();
+        let live_inode = path_identity(&fixture.database).unwrap();
+
+        let candidate = Store::open_exclusive(&fixture.database).await.unwrap();
+        let schema = crate::application_bootstrap::bootstrap_schema_sha256();
+        // The generic restore update ID cannot stand in for the catalog seal.
+        ApplicationTransactions::new(candidate.clone())
+            .seal_service_trial(PreparedServiceActivation {
+                update_id: "ba212c2b-63d4-4b28-97e4-1c1d6dc6d281".into(),
+                from_version: "1.2.3".into(),
+                target_version: "1.2.4".into(),
+                target_entry_sha256: "a".repeat(64),
+                target_helper_sha256: "b".repeat(64),
+                target_schema_sha256: schema,
+            })
+            .await
+            .unwrap();
+        candidate.shutdown().await.unwrap();
+        let (sealed, identity) = checked_checkpoint(&fixture.database).await.unwrap();
+        let fingerprint = sealed.db.bounded_storage_fingerprint().await.unwrap();
+        request.restore.target = TrialSnapshot {
+            catalog_sha256: identity.catalog_sha256,
+            rows: fingerprint.rows,
+            checksum: fingerprint.checksum,
+        };
+        let file = sealed
+            .db
+            .open_verified_offline_file(&fixture.database)
+            .unwrap();
+        let target_file_sha256 = trial_file_digest(&file).unwrap();
+        assert_eq!(
+            trial_file_identity(&file).unwrap(),
+            (request.restore.database.clone(), 1)
+        );
+        request.witness = TrialRestoreWitness::OfflinePreActivation { target_file_sha256 };
+        drop(file);
+        sealed.shutdown().await.unwrap();
+        let sealed_bytes = fs::read(&fixture.database).unwrap();
+
+        let saved_stage = stage.with_extension("saved");
+        fs::rename(&stage, &saved_stage).unwrap();
+        assert!(matches!(
+            fixture.prepare(request.restore.clone()).await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert!(!stage.exists());
+        assert!(!stage.with_extension("staging").exists());
+        fs::rename(&saved_stage, &stage).unwrap();
+        assert!(matches!(
+            fixture.publish(&request).await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert!(!fixture.failed_trial().exists());
+        assert_eq!(fs::read(&stage).unwrap(), stage_bytes);
+        assert_eq!(path_identity(&stage).unwrap(), stage_inode);
+        assert_eq!(fs::read(&fixture.database).unwrap(), sealed_bytes);
+        assert_eq!(path_identity(&fixture.database).unwrap(), live_inode);
+        assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);
+        assert_eq!(fs::read(&backup_receipt).unwrap(), backup_receipt_bytes);
     }
 
     #[cfg(target_os = "linux")]
