@@ -21,6 +21,8 @@ use std::path::{Path, PathBuf};
 
 #[cfg(unix)]
 const MAX_TRIAL_FILE_BYTES: u64 = 128 * 1024 * 1024;
+#[cfg(unix)]
+const MAX_TRIAL_EXECUTABLE_BYTES: u64 = 256 * 1024 * 1024;
 
 #[cfg(target_os = "linux")]
 #[path = "redb_isolated_trial.rs"]
@@ -492,12 +494,39 @@ fn trial_file_identity(file: &fs::File) -> Result<(TrialFileIdentity, u64)> {
 
 #[cfg(unix)]
 fn trial_file_digest(file: &fs::File) -> Result<String> {
-    let mut input = file.take(MAX_TRIAL_FILE_BYTES + 1);
+    bounded_trial_digest(file, MAX_TRIAL_FILE_BYTES)
+}
+
+#[cfg(unix)]
+fn trial_executable_digest(file: &fs::File) -> Result<String> {
+    // The SEA includes Node and the application. Its bound is independent of
+    // the database snapshot and native helper bounds.
+    bounded_trial_digest(file, MAX_TRIAL_EXECUTABLE_BYTES)
+}
+
+#[cfg(unix)]
+fn bounded_trial_digest(file: &fs::File, limit: u64) -> Result<String> {
+    let before = file.metadata().map_err(io_error)?;
+    if !before.is_file() || before.len() > limit {
+        return Err(Error::IncompatibleStore);
+    }
+    let mut input = file.take(limit + 1);
     let mut digest = Sha256::new();
     let mut buffer = [0; 32 * 1024];
     loop {
         let count = input.read(&mut buffer).map_err(io_error)?;
         if count == 0 {
+            let after = file.metadata().map_err(io_error)?;
+            if before.dev() != after.dev()
+                || before.ino() != after.ino()
+                || before.len() != after.len()
+                || before.mtime() != after.mtime()
+                || before.mtime_nsec() != after.mtime_nsec()
+                || before.ctime() != after.ctime()
+                || before.ctime_nsec() != after.ctime_nsec()
+            {
+                return Err(Error::IncompatibleStore);
+            }
             return Ok(digest
                 .finalize()
                 .iter()
@@ -1063,6 +1092,35 @@ mod tests {
     use crate::test_support::TestFixture;
 
     const UPDATE: &str = "aa212c2b-63d4-4b28-97e4-1c1d6dc6d281";
+
+    #[cfg(unix)]
+    #[test]
+    fn service_trial_executable_hash_has_an_independent_bound() {
+        use std::io::Seek;
+
+        let mut file = tempfile::tempfile().unwrap();
+        file.set_len(MAX_TRIAL_FILE_BYTES + 1).unwrap();
+        assert!(matches!(
+            trial_file_digest(&file),
+            Err(Error::IncompatibleStore)
+        ));
+        assert_eq!(trial_executable_digest(&file).unwrap().len(), 64);
+        file.rewind().unwrap();
+        file.set_len(MAX_TRIAL_EXECUTABLE_BYTES + 1).unwrap();
+        assert!(matches!(
+            trial_executable_digest(&file),
+            Err(Error::IncompatibleStore)
+        ));
+
+        let file = tempfile::tempfile().unwrap();
+        file.set_len(8).unwrap();
+        assert!(bounded_trial_digest(&file, 8).is_ok());
+        file.set_len(9).unwrap();
+        assert!(matches!(
+            bounded_trial_digest(&file, 8),
+            Err(Error::IncompatibleStore)
+        ));
+    }
 
     struct TrialFixture {
         _temp: TestFixture,

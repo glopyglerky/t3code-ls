@@ -283,6 +283,10 @@ test("compiled Rust helper restores a sealed native trial before launcher startu
   const preparationEntry = process.env.T3_TEST_PREPARE_ENTRY;
   if (preparationEntry !== undefined) {
     assert.ok(path.isAbsolute(preparationEntry));
+    const runtimeEntryBytes = (await fs.stat(preparationEntry)).size;
+    t.diagnostic(JSON.stringify({ runtimeEntryBytes, installedRuntimeLimitBytes: 256 * 1024 * 1024 }));
+    assert.ok(runtimeEntryBytes <= 256 * 1024 * 1024,
+      "The installed runtime must fit its independent 256 MiB artifact hash limit");
     await fs.copyFile(preparationEntry, path.join(target, "t3"));
     await fs.chmod(path.join(target, "t3"), 0o700);
   }

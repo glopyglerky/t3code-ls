@@ -2,7 +2,7 @@ use super::{
     IsolatedTrialPreparation, IsolatedTrialPublication, IsolatedTrialRequest,
     IsolatedTrialSelection, IsolatedTrialVerification, MAX_TRIAL_FILE_BYTES, TrialBackupReceipt,
     TrialFileIdentity, TrialRestoreDirectories, TrialSnapshot, checked_generation, io_error,
-    read_trial_receipt, trial_file_digest, trial_file_identity,
+    read_trial_receipt, trial_executable_digest, trial_file_digest, trial_file_identity,
     validate_isolated_trial_preparation, validate_isolated_trial_request, verify_restore_snapshot,
     write_trial_receipt,
 };
@@ -294,15 +294,20 @@ impl TrialLease {
             .parent()
             .ok_or(Error::IncompatibleStore)?
             .join("native-bin/t3-code-ls-db");
-        for (path, sha256) in [
-            (&entry, &activation.target_entry_sha256),
-            (&helper, &activation.target_helper_sha256),
+        for (path, sha256, executable) in [
+            (&entry, &activation.target_entry_sha256, true),
+            (&helper, &activation.target_helper_sha256, false),
         ] {
             if fs::canonicalize(path).map_err(io_error)? != *path {
                 return Err(Error::IncompatibleStore);
             }
             let file = crate::backend::open_regular_file(path, &mut options)?;
-            if trial_file_digest(&file)? != *sha256 {
+            let digest = if executable {
+                trial_executable_digest(&file)?
+            } else {
+                trial_file_digest(&file)?
+            };
+            if digest != *sha256 {
                 return Err(Error::IncompatibleStore);
             }
         }
