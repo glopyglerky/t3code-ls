@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::application::{ApplicationTransactions, Session};
-use crate::application_events::EventLatest;
+use crate::application_events::latest_agent_sequence_for_threads;
 use crate::application_projections::read_index;
 use crate::application_rows::{nullable, read_row, text, text_cell};
 use crate::{Error, Result};
@@ -120,7 +120,7 @@ async fn payloads(session: &mut Session, sources: Vec<ThreadFindSource>) -> Resu
     Ok(json!(result))
 }
 
-async fn source_threads(session: &mut Session, sources: Vec<String>) -> Result<Vec<String>> {
+async fn source_threads(session: &mut Session, sources: Vec<String>) -> Result<BTreeSet<String>> {
     let mut visited = BTreeSet::new();
     let mut pending = sources;
     while let Some(thread_id) = pending.pop() {
@@ -147,36 +147,12 @@ async fn source_threads(session: &mut Session, sources: Vec<String>) -> Result<V
             }
         }
     }
-    Ok(visited.into_iter().collect())
+    Ok(visited)
 }
 
 impl ApplicationTransactions {
     pub async fn thread_find(&mut self, id: &str, query: ThreadFindQuery) -> Result<Value> {
         let mut session = self.take(id)?;
-        if let ThreadFindQuery::Revision { thread_ids } = query {
-            let sources = async {
-                read_index::ensure_ready(&mut session).await?;
-                source_threads(&mut session, thread_ids).await
-            }
-            .await;
-            let sources = self.finish(id, session, sources).await?;
-            let mut sequence = 0;
-            // Each call returns the same session to its owner; it never opens
-            // another snapshot or commits the current transaction.
-            for thread_id in sources {
-                sequence = sequence.max(
-                    self.events_latest(
-                        id,
-                        EventLatest {
-                            kind: "agent".into(),
-                            thread_id: Some(thread_id),
-                        },
-                    )
-                    .await?,
-                );
-            }
-            return Ok(json!(sequence));
-        }
         let result = async {
             read_index::ensure_ready(&mut session).await?;
             match query {
@@ -184,7 +160,11 @@ impl ApplicationTransactions {
                     active_thread(&mut session, &thread_id).await
                 }
                 ThreadFindQuery::Payloads { sources } => payloads(&mut session, sources).await,
-                ThreadFindQuery::Revision { .. } => unreachable!(),
+                ThreadFindQuery::Revision { thread_ids } => {
+                    let sources = source_threads(&mut session, thread_ids).await?;
+                    let sequence = latest_agent_sequence_for_threads(&mut session, sources).await?;
+                    Ok(json!(sequence))
+                }
             }
         }
         .await;
