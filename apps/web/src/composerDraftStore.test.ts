@@ -828,6 +828,40 @@ describe("composerDraftStore context persistence", () => {
       }
     },
   );
+
+  it("keeps a cleared prompt empty when a stale tab changes its model", async () => {
+    const sharedStorage = createMemoryStorage();
+    vi.stubGlobal("localStorage", sharedStorage);
+    vi.stubGlobal("window", new EventTarget());
+    vi.useFakeTimers();
+    vi.resetModules();
+    try {
+      const editorTab = await import("./composerDraftStore");
+      const editor = editorTab.useComposerDraftStore.getState();
+      const threadKey = scopedThreadKey(threadRef);
+      const readDraft = () => JSON.parse(sharedStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY) as string)
+        .state.draftsByThreadKey[threadKey];
+      editor.setPrompt(threadRef, "Clear this Unicode draft 雪");
+      await vi.advanceTimersByTimeAsync(300);
+      vi.resetModules();
+      const pickerTab = await import("./composerDraftStore");
+      expect(pickerTab.useComposerDraftStore.getState().draftsByThreadKey[threadKey]?.prompt)
+        .toBe("Clear this Unicode draft 雪");
+
+      editor.clearComposerContent(threadRef);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(readDraft()).toBeUndefined();
+      const model = modelSelection(CLAUDE_AGENT_DRIVER, "claude-sonnet-4-6");
+      pickerTab.useComposerDraftStore.getState().setModelSelection(threadRef, model, { explicit: true });
+      await vi.advanceTimersByTimeAsync(300);
+
+      expect(readDraft()).toMatchObject({ prompt: "", attachments: [], activeProvider: model.instanceId });
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
 });
 
 describe("composerDraftStore thread contexts", () => {

@@ -167,17 +167,16 @@ function mergeDraftRecord<V>(
   stored: Readonly<Record<string, V>> | undefined,
   local: Readonly<Record<string, V>>,
   baseline: Readonly<Record<string, V>>,
-  mergeValue?: (stored: V, local: V, baseline: V | undefined) => V | undefined,
+  mergeValue?: (stored: V | undefined, local: V, baseline: V | undefined) => V | undefined,
 ): Record<string, V> {
   const merged = { ...stored };
   for (const key of new Set([...Object.keys(local), ...Object.keys(baseline)])) {
     const localValue = local[key];
     const baselineValue = baseline[key];
     if (Equal.equals(localValue, baselineValue)) continue;
-    const storedValue = merged[key];
     const value =
-      mergeValue && storedValue !== undefined && localValue !== undefined
-        ? mergeValue(storedValue, localValue, baselineValue)
+      mergeValue && localValue !== undefined
+        ? mergeValue(merged[key], localValue, baselineValue)
         : localValue;
     if (value === undefined) delete merged[key];
     else merged[key] = value;
@@ -211,7 +210,7 @@ function splitComposerThreadDraft({
 }
 
 function mergeComposerThreadDraft(
-  storedDraft: PersistedComposerThreadDraftState,
+  storedDraft = EMPTY_PERSISTED_COMPOSER_THREAD_DRAFT,
   localDraft: PersistedComposerThreadDraftState,
   baselineDraft = EMPTY_PERSISTED_COMPOSER_THREAD_DRAFT,
 ): PersistedComposerThreadDraftState | undefined {
