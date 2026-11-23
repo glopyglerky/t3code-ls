@@ -145,6 +145,45 @@ fn continuous_output_keeps_only_the_offered_chunk() {
 }
 
 #[test]
+fn terminate_preserves_a_trapped_graceful_exit_before_reaping() {
+    let mut owner =
+        spawn("trap 'printf terminated; exit 42' TERM; printf ready; while :; do :; done");
+    receive(&mut owner, b"ready");
+    let pid = owner.pid();
+    assert!(owner.terminate().unwrap());
+    receive(&mut owner, b"terminated");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let offered = owner.offer().unwrap();
+        let ended = offered.ended;
+        let end = offered.end;
+        owner.acknowledge(end).unwrap();
+        if ended {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        thread::sleep(Duration::from_millis(2));
+    }
+    let status = owner.close().unwrap().unwrap();
+    assert_eq!(status.exit_code(), 42);
+    assert!(!status.success());
+    assert!(!Path::new(&format!("/proc/{pid}")).exists());
+    assert!(owner.terminate().is_err());
+}
+
+#[test]
+fn close_escalates_when_the_owned_group_ignores_terminate() {
+    let mut owner = spawn("trap '' TERM; printf ready; while :; do :; done");
+    receive(&mut owner, b"ready");
+    let pid = owner.pid();
+    assert!(owner.terminate().unwrap());
+    thread::sleep(Duration::from_millis(20));
+    assert!(Path::new(&format!("/proc/{pid}")).exists());
+    assert!(!owner.close().unwrap().unwrap().success());
+    assert!(!Path::new(&format!("/proc/{pid}")).exists());
+}
+
+#[test]
 fn invalid_spawn_and_failed_exec_return_without_a_child() {
     let env = BTreeMap::new();
     for (executable, cwd, cols) in [

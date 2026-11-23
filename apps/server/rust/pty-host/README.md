@@ -11,7 +11,7 @@ clears the inherited environment before spawning.
 The binary accepts one JSON object per line. Its first request is `spawn` with
 `executable`, `args`, `cwd`, `env`, `cols` and `rows`. A successful response has
 `version: 1` and `pid`. Subsequent requests are `write` with byte-array `bytes`,
-`read`, `acknowledge` with `end`, `resize` with `cols` and `rows`, and `close`.
+`read`, `acknowledge` with `end`, `resize` with `cols` and `rows`, `terminate`, and `close`.
 The operation name goes in `operation`.
 
 A write returns `accepted`, the exact prefix accepted by the PTY kernel. A caller
@@ -20,7 +20,10 @@ prove that a shell command executed. The terminal manager reports a partial or
 lost receipt without replaying input. A read returns `start`, `end`, byte-array
 `bytes` and `ended`. The same nonempty chunk is offered until an exact
 acknowledgement returns `acknowledged`. Resize returns `resized: true`. Close
-returns `exitCode` and `success`, then the transport exits.
+returns `exitCode` and `success`, then the transport exits. Terminate sends SIGTERM
+to the initial, still-owned process group and returns `signalled`. A false value
+means that group had already exited. The owner remains available for output drain
+and a later close that returns the original exit status.
 
 Every response has `version: 1`. Errors print a diagnostic on stderr and exit 2
 without a successful response for that request. EOF closes the owned child.
@@ -28,8 +31,11 @@ A rejected request, a broken output pipe and normal helper return drop the owner
 signal its unreaped process-group leader and reap the direct child. There is no
 replay across helper restart. Linux SIGKILL of the helper, interactive foreground
 job groups, descendants that create another session, and OS restart still require
-containment qualification before default selection. The explicit candidate closes
-the initial process group with SIGKILL on both ordinary and forced terminal close.
+containment qualification before default selection. The selected adapter uses
+terminate for Manager's SIGTERM grace period. During that period it drains output
+even after Manager removes data listeners, so it can observe exit. Ordinary detach
+continues to retain unacknowledged output. A later forced close sends SIGKILL to
+the initial process group and reaps its leader.
 
 The host bounds frames at 128 KiB and chunks at 8 KiB. It keeps one output chunk
 until acknowledgement and advances a byte cursor within the exact JSON integer
