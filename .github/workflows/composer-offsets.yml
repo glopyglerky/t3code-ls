@@ -82,6 +82,7 @@ jobs:
           T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
           T3_CODE_LS_SPLICE_NEGOTIATION_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-splice-') }}
           T3_CODE_LS_MULTI_TAB_DRAFT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-') }}
+          T3_CODE_LS_DRAFT_STORAGE_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-storage-') }}
           T3_CODE_LS_FILE_EDITOR_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
           T3_CODE_LS_DURABLE_TEXT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-durable-') }}
           T3_CODE_LS_PDF_LINK_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-') }}
