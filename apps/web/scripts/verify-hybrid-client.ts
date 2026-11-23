@@ -51,6 +51,8 @@ const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
 const spliceNegotiationProof = process.env.T3_CODE_LS_SPLICE_NEGOTIATION_PROOF === "true";
 const splitPtyProof = process.env.T3_CODE_LS_SPLIT_PTY_PROOF === "true";
 const pairingProof = process.env.T3_CODE_LS_PAIRING_PROOF;
+const dioxusFindProof = process.env.T3_CODE_LS_DIOXUS_FIND_PROOF;
+const expectsDioxusFind = process.env.VITE_T3_CODE_LS_THREAD_FIND_RENDERER === "dioxus";
 const bundledPtyProof = process.env.T3_CODE_LS_BUNDLED_PTY_PROOF === "true";
 const nativePtyHost = bundledPtyProof
   ? NodePath.join(repoRoot, "apps/server/dist/native-bin/t3-code-ls-pty-host")
@@ -1582,7 +1584,13 @@ async function exercise(implementation: Implementation): Promise<void> {
     interrupted: null as InterruptedShowcase | null,
     capturedApproval: null as Awaited<ReturnType<typeof acceptCapturedApproval>> | null,
     cancelledQuestion: null as Awaited<ReturnType<typeof cancelCapturedQuestion>> | null,
-    historyFind: null as { query: string; count: string; draftPreserved: boolean } | null,
+    historyFind: null as {
+      query: string;
+      count: string;
+      draftPreserved: boolean;
+      renderer: "dioxus-wasm" | "retained";
+      refusedWasmRequests: number;
+    } | null,
     voiceDraft: null as Awaited<ReturnType<typeof verifyBundledVoiceDraft>> | null,
     parallelTurns: null as Awaited<ReturnType<typeof verifyParallelShowcases>> | null,
     draftMerge: null as Awaited<ReturnType<typeof verifyDraftMerge>> | null,
@@ -1902,11 +1910,27 @@ async function exercise(implementation: Implementation): Promise<void> {
       starting("find in reopened conversation");
       const draft = "Draft retained while finding a previous reply";
       const editor = page.getByTestId("composer-editor");
+      let refusedWasmRequests = 0;
+      if (dioxusFindProof === "fallback") {
+        await page.route("**/pairing-wasm/*_bg.wasm", (route) => {
+          refusedWasmRequests++;
+          return route.abort();
+        });
+      }
       await editor.fill(draft);
       const requestsBeforeFind = threadFindRequests;
       await page.keyboard.press("Control+f");
       const bar = page.getByRole("search", { name: "Find in thread" });
       const search = bar.getByRole("searchbox", { name: "Find in thread" });
+      const renderer = await bar.getAttribute("data-thread-find-renderer") === "dioxus-wasm"
+        ? "dioxus-wasm" : "retained";
+      if (dioxusFindProof === "dioxus" || (dioxusFindProof === undefined && expectsDioxusFind)) {
+        Assert.equal(renderer, "dioxus-wasm");
+      }
+      if (dioxusFindProof === "fallback") {
+        Assert.equal(renderer, "retained");
+        Assert.ok(refusedWasmRequests > 0);
+      }
       const query = "single math module";
       await search.fill(query);
       await bar.getByText("1/1", { exact: true }).waitFor({ state: "visible" });
@@ -1917,11 +1941,34 @@ async function exercise(implementation: Implementation): Promise<void> {
         ),
         query,
       );
-      await page.keyboard.press("Escape");
+      if (dioxusFindProof !== undefined) {
+        await search.press("Control+f");
+        await page.waitForFunction(() => {
+          const active = document.activeElement;
+          return active instanceof HTMLInputElement && active.type === "search"
+            && active.selectionStart === 0 && active.selectionEnd === active.value.length;
+        });
+        Assert.equal(await search.evaluate((input) => input.dispatchEvent(new window.KeyboardEvent("keydown", {
+          key: "Enter", isComposing: true, bubbles: true, cancelable: true,
+        }))), true, "A composition Enter must not navigate search matches");
+        await search.press("Shift+Enter");
+        await bar.getByRole("button", { name: "Next match", exact: true }).click();
+        await search.fill("No matching words in this deterministic transcript");
+        await bar.getByText("0/0", { exact: true }).waitFor({ state: "visible" });
+        Assert.equal(await bar.getByRole("button", { name: "Next match", exact: true }).isDisabled(), true);
+        await bar.getByRole("button", { name: "Close find", exact: true }).click();
+        await page.waitForFunction(() => document.activeElement?.getAttribute("data-testid") === "composer-editor");
+      } else {
+        await page.keyboard.press("Escape");
+      }
       await bar.waitFor({ state: "hidden" });
       Assert.equal(await editor.innerText(), draft);
-      proof.historyFind = { query, count: "1/1", draftPreserved: true };
+      proof.historyFind = { query, count: "1/1", draftPreserved: true, renderer, refusedWasmRequests };
       completed("Found and highlighted the previous reply after restart while retaining the draft");
+      if (dioxusFindProof !== undefined) {
+        proof.status = "passed";
+        return;
+      }
     }
     if (bundledClient && implementation === "native") {
       starting("interactive terminal reconnect");

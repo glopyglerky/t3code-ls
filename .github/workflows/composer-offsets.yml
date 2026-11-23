@@ -225,6 +225,7 @@ jobs:
           if [[ "$INTEGRATED_NATIVE" == true ]]; then
             cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
             export VITE_T3_CODE_LS_PAIRING_RENDERER=dioxus
+            export VITE_T3_CODE_LS_THREAD_FIND_RENDERER=dioxus
           fi
           pnpm --dir apps/web run build
           implementation=upstream

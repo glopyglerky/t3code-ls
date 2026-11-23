@@ -1922,6 +1922,41 @@
       "rust_crates": ["apps/web/rust/pairing"]
     },
     {
+      "id": "browser-thread-find-dioxus",
+      "state": "candidate",
+      "domain_owner": "apps/web",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/web/src/components/chat/ThreadFindBar.tsx",
+          "blob": "466cd929a7580ac0428201e343f9f4b90a8574c7"
+        }
+      ],
+      "rust_paths": ["apps/web/rust/pairing/src/thread_find.rs"],
+      "adapter_paths": [
+        ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/chat/ThreadFindBar.tsx",
+        "apps/web/src/onboarding/dioxusBindings.ts",
+        "apps/web/src/vite-env.d.ts"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["browser"],
+          "state": "candidate",
+          "implementation": "dioxus-wasm",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": ["apps/web/scripts/verify-hybrid-client.ts"],
+      "hosted_acceptance": {
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
+      },
+      "retired_paths": [],
+      "notes": "T11, J04 and J55. VITE_T3_CODE_LS_THREAD_FIND_RENDERER=dioxus selects the semantic search form, focus and controls in the existing Wasm browser binding. The current thread owner still controls the query, cursor, highlight and transport. Run 45167459425 exercised exact find results, keyboard focus, draft preservation and retained controls after a blocked Wasm request through the bundled Chromium application.",
+      "rust_crates": ["apps/web/rust/pairing"]
+    },
+    {
       "id": "mobile-outbox-delivery",
       "state": "candidate",
       "domain_owner": "apps/mobile/src/state",
