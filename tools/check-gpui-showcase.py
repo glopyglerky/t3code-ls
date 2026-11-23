@@ -124,6 +124,7 @@ def check_thread_compose(executable, approval=False, follow_up=False):
     prompt = "GPUI sends a follow-up in the same thread." if follow_up else "GPUI sends one recorded prompt."
     failure = "Could not confirm submission. Draft kept. Check the thread before retrying."
     unsent = "Keep this unsent draft."
+    streamed_id = None
 
     def projection():
         path = urllib.parse.quote(connection["threadId"], safe="")
