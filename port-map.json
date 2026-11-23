@@ -1934,6 +1934,10 @@
         "apps/mobile/src/App.tsx",
         "apps/mobile/src/state/threadOutboxDelivery.ts",
         "apps/mobile/src/native/outboxDelivery.ts",
+        "apps/mobile/src/connection/platform.ts",
+        "apps/mobile/src/connection/environment-owned-data-cleanup.ts",
+        "packages/client-runtime/src/connection/registry.ts",
+        "packages/client-runtime/src/platform/persistence.ts",
         "apps/mobile/modules/t3-native-controls/ios/T3NativeControlsModule.swift",
         "apps/mobile/modules/t3-native-controls/ios/T3NativeControls.podspec",
         "apps/mobile/modules/t3-native-controls/android/src/main/java/expo/modules/t3nativecontrols/T3NativeControlsModule.kt",
@@ -1950,10 +1954,14 @@
       ],
       "acceptance_tests": [
         "packages/client-runtime/rust/tests/outbox.rs",
-        "apps/mobile/src/native/outboxDelivery.test.ts"
+        "apps/mobile/src/native/outboxDelivery.test.ts",
+        "apps/mobile/src/connection/environment-owned-data-cleanup.test.ts",
+        "packages/client-runtime/src/connection/registry.test.ts"
       ],
       "hosted_acceptance": {
-        "apps/mobile/src/native/outboxDelivery.test.ts": ".github/workflows/thread-recovery.yml"
+        "apps/mobile/src/native/outboxDelivery.test.ts": ".github/workflows/thread-recovery.yml",
+        "apps/mobile/src/connection/environment-owned-data-cleanup.test.ts": ".github/workflows/thread-recovery.yml",
+        "packages/client-runtime/src/connection/registry.test.ts": ".github/workflows/thread-recovery.yml"
       },
       "retired_paths": [],
       "notes": "T12. The Expo adapter can select a versioned scalar binding for the portable outbox decision. Actual packaged iOS and Android restart, persistence and permission checks remain required.",
