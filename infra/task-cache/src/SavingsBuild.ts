@@ -63,13 +63,25 @@ export const savingsBuild = Effect.gen(function* () {
       message: "The native savings artifacts do not match their expected fingerprint",
     }));
   }
+  const wasmModuleId = "\0task-cache-native-savings-wasm";
+  const wasmBridge = {
+    name: "task-cache:compiled-savings-wasm",
+    resolveId(source: string) {
+      return source === "@t3tools/task-cache/native-savings-wasm" ? wasmModuleId : undefined;
+    },
+    load(id: string) {
+      if (id !== wasmModuleId) return undefined;
+      // Alchemy's CompiledWasm hook sees this literal .wasm import after alias resolution.
+      return `import module from ${JSON.stringify(artifacts.wasm)}; export default module;`;
+    },
+  };
   return {
     input: {
+      plugins: [wasmBridge],
       resolve: {
         alias: {
           "./SavingsRuntime.ts": NodeURL.fileURLToPath(new URL("./SavingsRuntime.native.ts", import.meta.url)),
           "@t3tools/task-cache/native-savings-glue": artifacts.glue,
-          "@t3tools/task-cache/native-savings-wasm": artifacts.wasm,
         },
       },
     },
