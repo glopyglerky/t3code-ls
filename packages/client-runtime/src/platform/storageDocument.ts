@@ -26,6 +26,13 @@ export const ConnectionCatalogDocument = Schema.Struct({
   // Pull request routing grants. The field name predates the rename and stays, so older and
   // newer clients sharing this document keep reading and revoking the same grants.
   githubRoutingPermissions: Schema.optionalKey(Schema.Array(StoredPullRequestRoutingPermission)),
+  environmentRemovals: Schema.optionalKey(Schema.Struct({
+    sequence: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+    pending: Schema.Array(Schema.Struct({
+      environmentId: EnvironmentId,
+      sequence: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+    })),
+  })),
   disabledEnvironmentIds: Schema.Array(EnvironmentId).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed([])),
   ),

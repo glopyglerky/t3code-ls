@@ -67,10 +67,12 @@ jobs:
       - name: Qualify removal when a mobile cleanup owner fails
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-cleanup-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
         run: |
-          pnpm exec vp test run --maxWorkers 2 packages/client-runtime/src/connection/registry.test.ts
+          pnpm exec vp test run --maxWorkers 2 packages/client-runtime/src/connection/registry.test.ts \
+            packages/client-runtime/src/platform/storageDocument.test.ts
           # apps/mobile/src/connection/environment-owned-data-cleanup.test.ts
           pnpm --filter @t3tools/mobile exec vp test run --project unit --maxWorkers 2 \
-            src/connection/environment-owned-data-cleanup.test.ts
+            src/connection/environment-owned-data-cleanup.test.ts \
+            src/connection/storage.test.ts src/connection/environment-removal-recovery.test.ts
       - name: Exercise mobile outbox recovery
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-')
         working-directory: apps/mobile
