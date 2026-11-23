@@ -560,18 +560,22 @@ async function terminalMarker(page: Page, prefix: "fixture-pty" | "fixture-reatt
 }
 
 async function verifySplitTerminalReconnect(page: Page, workspace: string, shell: string) {
-  const gate = NodePath.join(workspace, ".fixture-terminal-resume");
   const script = NodePath.join(workspace, "fixture-terminal-fragments.sh");
+  const gate = `${script}.resume`;
+  const startedFile = `${script}.started`;
+  const releasedFile = `${script}.released`;
   NodeFS.writeFileSync(
     script,
     [
+      'printf "%s\\n" "$1" > "$0.started"',
       `printf 'fixture-fragment-start:%s\\n\\033[3' "$1"`,
       "attempt=0",
-      'while [ ! -f "$2" ] && [ "$attempt" -lt 600 ]; do',
+      'while [ ! -f "$0.resume" ] && [ "$attempt" -lt 600 ]; do',
       "  /usr/bin/sleep 0.1",
       "  attempt=$((attempt+1))",
       "done",
-      '[ -f "$2" ] || exit 1',
+      '[ -f "$0.resume" ] || exit 1',
+      'printf "%s\\n" "$1" > "$0.released"',
       `printf '2mfixture-fragment-end:%s \\360\\237' "$1"`,
       "/usr/bin/sleep 0.2",
       "printf '\\246\\200\\033[0m\\n'",
@@ -580,7 +584,7 @@ async function verifySplitTerminalReconnect(page: Page, workspace: string, shell
     { mode: 0o600, flag: "wx" },
   );
   const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-  const command = `/bin/sh ${quote(script)} "$$" ${quote(gate)}`;
+  const command = `/bin/sh ${quote(script)} "$$"`;
   const started = /(?:^|\n)fixture-fragment-start:(\d+)/u;
   const ended = /(?:^|\n)fixture-fragment-end:(\d+) 🦀(?:\r?\n|\s*$)/u;
   const input = await terminalInput(page);
@@ -590,11 +594,16 @@ async function verifySplitTerminalReconnect(page: Page, workspace: string, shell
   await input.press("Enter");
   const [, before] = await waitForTerminalCopy(page, input, started, "before reconnect");
   Assert.equal(before, shell);
+  Assert.equal(NodeFS.readFileSync(startedFile, "utf8").trim(), shell);
   let resumeSnapshot = false;
+  let attachRequests = 0;
   const output = new Set<string>();
   const rendered = new Set<string>();
   const codePoints = (text: string) => Array.from(text, (character) => character.codePointAt(0));
   const observeSocket = (socket: import("playwright").WebSocket) => {
+    socket.on("framesent", ({ payload }) => {
+      if (/"terminal\.(?:attach|observe)"/u.test(payload.toString())) attachRequests += 1;
+    });
     socket.on("framereceived", ({ payload }) => {
       const json = payload.toString();
       if (!json.includes("fixture-fragment-") && !json.includes('"type":"output"')) return;
@@ -637,10 +646,17 @@ async function verifySplitTerminalReconnect(page: Page, workspace: string, shell
       },
     );
     Assert.equal(after, shell);
+    Assert.equal(NodeFS.readFileSync(releasedFile, "utf8").trim(), shell);
     Assert.ok(resumeSnapshot, "The wire snapshot must include the staged control fragment");
     return { sameShell: true, controlSequenceResumed: true, splitUnicode: "🦀" };
   } catch (error) {
-    const receipt = JSON.stringify({ resumeSnapshot, output: [...output], rendered: [...rendered] });
+    const receipt = JSON.stringify({
+      attachRequests,
+      resumeSnapshot,
+      gateReleased: NodeFS.existsSync(releasedFile),
+      output: [...output],
+      rendered: [...rendered],
+    });
     throw new Error(`${error instanceof Error ? error.message : String(error)}. PTY fixture ${receipt}`);
   } finally {
     page.off("websocket", observeSocket);
