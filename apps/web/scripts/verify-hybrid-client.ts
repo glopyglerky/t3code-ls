@@ -687,12 +687,14 @@ async function verifyLinkedPdf(page: Page) {
   Assert.ok(response.ok(), `Signed fixture PDF returned HTTP ${response.status()}`);
   const reader = page.getByRole("region", { name: linkedPdfName, exact: true });
   await page.getByText("1 / 2 pages", { exact: true }).waitFor({ state: "visible" });
+  const destination = reader.getByRole("link", { name: "Page 2", exact: true });
+  await destination.waitFor({ state: "visible" });
   await reader.getByText("See page 2", { exact: true }).click({ force: true });
   const targetPage = page.getByText("2 / 2 pages", { exact: true });
   await targetPage.waitFor({ state: "visible", timeout: 8_000 });
   await reader.getByText("Fixture PDF destination", { exact: true }).waitFor({ state: "visible" });
   await page.getByRole("button", { name: "Previous page", exact: true }).click();
-  await reader.getByRole("link", { name: "Page 2", exact: true }).press("Enter");
+  await destination.press("Enter");
   await targetPage.waitFor({ state: "visible", timeout: 8_000 });
   return { signedAssetStatus: response.status(), pointerDestination: 2, keyboardDestination: 2 };
 }
