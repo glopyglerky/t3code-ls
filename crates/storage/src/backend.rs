@@ -24,6 +24,7 @@ use redb::{
 use sha2::{Digest, Sha256};
 use tokio::sync::oneshot;
 
+use crate::application_storage::StorageBackup;
 use crate::{Error, MAX_BATCH_BYTES, MAX_BATCH_RECORDS, ResourceLimit, Result};
 
 const TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("t3_code_ls_v2");
@@ -274,7 +275,48 @@ impl StorageBackend for NonblockingOpen {
     }
 }
 
-fn open_regular_file(path: &Path, options: &mut OpenOptions) -> Result<File> {
+#[derive(Debug)]
+struct ExclusiveSnapshot(redb::backends::FileBackend);
+
+impl StorageBackend for ExclusiveSnapshot {
+    fn len(&self) -> io::Result<u64> {
+        self.0.len()
+    }
+
+    fn read(&self, offset: u64, out: &mut [u8]) -> io::Result<()> {
+        self.0.read(offset, out)
+    }
+
+    fn set_len(&self, _: u64) -> io::Result<()> {
+        Err(io::ErrorKind::PermissionDenied.into())
+    }
+
+    fn write(&self, _: u64, _: &[u8]) -> io::Result<()> {
+        Err(io::ErrorKind::PermissionDenied.into())
+    }
+
+    fn sync_data(&self) -> io::Result<()> {
+        Err(io::ErrorKind::PermissionDenied.into())
+    }
+
+    fn close(&self) -> io::Result<()> {
+        self.0.close()
+    }
+
+    fn try_lock_shared_range(
+        &self,
+        start: Bound<u64>,
+        end: Bound<u64>,
+    ) -> std::result::Result<bool, BackendError> {
+        // redb's whole-storage fallback uses the exclusive lock already held by this backend.
+        match (start, end) {
+            (Bound::Unbounded | Bound::Included(0), Bound::Unbounded) => Ok(true),
+            _ => Err(BackendError::Unsupported),
+        }
+    }
+}
+
+pub(crate) fn open_regular_file(path: &Path, options: &mut OpenOptions) -> Result<File> {
     #[cfg(unix)]
     options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     #[cfg(windows)]
@@ -301,7 +343,7 @@ fn open_regular_file(path: &Path, options: &mut OpenOptions) -> Result<File> {
     Ok(file)
 }
 
-fn path_identity(path: &Path) -> Result<same_file::Handle> {
+pub(crate) fn path_identity(path: &Path) -> Result<same_file::Handle> {
     let file = open_regular_file(path, OpenOptions::new().read(true))?;
     same_file::Handle::from_file(file).map_err(storage_error)
 }
@@ -473,27 +515,45 @@ impl Backend {
     /// Inspect an existing store without a writable descriptor, integrity repair,
     /// schema initialization, or later promotion to a writer.
     pub(crate) async fn open_read_only(path: impl AsRef<Path>) -> Result<Self> {
-        let path = path.as_ref().to_owned();
+        Self::open_snapshot(path.as_ref().to_owned(), false).await
+    }
+
+    pub(crate) async fn open_offline_snapshot(path: &Path) -> Result<Self> {
+        Self::open_snapshot(path.to_owned(), true).await
+    }
+
+    async fn open_snapshot(path: PathBuf, exclusive: bool) -> Result<Self> {
         if !path.is_absolute() {
             return Err(Error::Invalid("database path must be absolute".into()));
         }
         let handles = tokio::task::spawn_blocking(move || {
-            let file = open_regular_file(&path, OpenOptions::new().read(true))?;
+            let file = open_regular_file(&path, OpenOptions::new().read(true).write(exclusive))?;
             let identity = file_identity(&file)?;
             let file = redb::backends::FileBackend::new(file).map_err(storage_error)?;
-            let reader = builder()
-                .open_read_only_with_backend(file)
-                .map_err(|error| match error {
-                    redb::DatabaseError::RepairAborted => Error::RecoveryRequired,
-                    other => storage_error(other),
-                })?;
+            let reader = if exclusive {
+                if !file
+                    .try_lock_range(Bound::Unbounded, Bound::Unbounded)
+                    .map_err(storage_error)?
+                {
+                    return Err(Error::WriterBusy);
+                }
+                let mut options = builder();
+                options.set_concurrency_mode(ConcurrencyMode::ExclusiveWriter);
+                options.open_read_only_with_backend(ExclusiveSnapshot(file))
+            } else {
+                builder().open_read_only_with_backend(file)
+            }
+            .map_err(|error| match error {
+                redb::DatabaseError::RepairAborted => Error::RecoveryRequired,
+                other => storage_error(other),
+            })?;
             if path_identity(&path)? != identity {
                 return Err(Error::IncompatibleStore);
             }
             validate_tables(&reader.begin_read().map_err(storage_error)?)?;
             Ok::<_, Error>(Arc::new(DatabaseHandles {
                 path,
-                exclusive: false,
+                exclusive,
                 read_only: true,
                 identity: Some(identity),
                 reader: Some(reader),
@@ -596,7 +656,7 @@ impl Backend {
     pub(crate) async fn storage_backup(
         &self,
         destination: PathBuf,
-    ) -> Result<crate::application_storage::StorageBackup> {
+    ) -> Result<(StorageBackup, same_file::Handle)> {
         if !destination.is_absolute() {
             return Err(Error::Invalid("backup path must be absolute".into()));
         }
@@ -620,63 +680,34 @@ impl Backend {
             write
                 .set_durability(Durability::Immediate)
                 .map_err(storage_error)?;
-            let mut count = 0u64;
-            let mut digest = Sha256::new();
-            {
-                let input = source.open_table(TABLE).map_err(storage_error)?;
+            let (rows, checksum) = {
                 let mut output = write.open_table(TABLE).map_err(storage_error)?;
-                for entry in input.iter().map_err(storage_error)? {
-                    let (key, value) = entry.map_err(storage_error)?;
-                    output
-                        .insert(key.value(), value.value())
-                        .map_err(storage_error)?;
-                    digest.update((key.value().len() as u64).to_le_bytes());
-                    digest.update(key.value());
-                    digest.update((value.value().len() as u64).to_le_bytes());
-                    digest.update(value.value());
-                    count = count.checked_add(1).ok_or(Error::IncompatibleStore)?;
-                }
-            }
+                snapshot_digest(&source, |key, value| {
+                    output.insert(key, value).map_err(storage_error)?;
+                    Ok(())
+                })?
+            };
             write.commit().map_err(commit_error)?;
-            drop(backup);
-            let verified_file =
-                open_regular_file(&destination, OpenOptions::new().read(true).write(true))?;
+            backup.close().map_err(storage_error)?;
+            let verified_file = open_regular_file(&destination, OpenOptions::new().read(true))?;
             if file_identity(&verified_file)? != backup_identity {
                 return Err(Error::IncompatibleStore);
             }
             let backup = builder
-                .create_with_backend(
+                .open_read_only_with_backend(
                     redb::backends::FileBackend::new(verified_file).map_err(storage_error)?,
                 )
                 .map_err(storage_error)?;
             let verify = backup.begin_read().map_err(storage_error)?;
             validate_tables(&verify)?;
-            let mut verified_count = 0u64;
-            let mut verified_digest = Sha256::new();
-            for entry in verify
-                .open_table(TABLE)
-                .map_err(storage_error)?
-                .iter()
-                .map_err(storage_error)?
-            {
-                let (key, value) = entry.map_err(storage_error)?;
-                verified_digest.update((key.value().len() as u64).to_le_bytes());
-                verified_digest.update(key.value());
-                verified_digest.update((value.value().len() as u64).to_le_bytes());
-                verified_digest.update(value.value());
-                verified_count = verified_count
-                    .checked_add(1)
-                    .ok_or(Error::IncompatibleStore)?;
-            }
-            let digest = digest.finalize();
-            if count != verified_count || digest != verified_digest.finalize() {
+            let (verified_rows, verified_checksum) = snapshot_digest(&verify, |_, _| Ok(()))?;
+            if rows != verified_rows || checksum != verified_checksum {
                 return Err(Error::IncompatibleStore);
             }
             drop(verify);
-            drop(backup);
+            backup.close().map_err(storage_error)?;
             handles.verify_identity()?;
-            if same_file::Handle::from_path(&destination).map_err(storage_error)? != backup_identity
-            {
+            if path_identity(&destination)? != backup_identity {
                 return Err(Error::IncompatibleStore);
             }
             #[cfg(unix)]
@@ -685,16 +716,39 @@ impl Backend {
                     .and_then(|directory| directory.sync_all())
                     .map_err(storage_error)?;
             }
-            Ok(crate::application_storage::StorageBackup {
-                rows: count,
+            let receipt = StorageBackup {
+                rows,
                 bytes: std::fs::metadata(&destination)
                     .map_err(storage_error)?
                     .len(),
-                checksum: digest.iter().map(|byte| format!("{byte:02x}")).collect(),
+                checksum,
+            };
+            Ok((receipt, backup_identity))
+        })
+        .await
+        .map_err(worker_error)?
+    }
+
+    pub(crate) async fn storage_fingerprint(&self) -> Result<StorageBackup> {
+        let handles = self.handles.clone();
+        tokio::task::spawn_blocking(move || {
+            let (rows, checksum) = snapshot_digest(&handles.begin_read()?, |_, _| Ok(()))?;
+            let bytes = std::fs::metadata(&handles.path)
+                .map_err(storage_error)?
+                .len();
+            handles.verify_identity()?;
+            Ok(StorageBackup {
+                rows,
+                bytes,
+                checksum,
             })
         })
         .await
         .map_err(worker_error)?
+    }
+
+    pub(crate) fn verify_identity(&self) -> Result<()> {
+        self.handles.verify_identity()
     }
 
     pub(crate) async fn storage_compact(
@@ -829,6 +883,35 @@ impl Backend {
         .await
         .map_err(worker_error)?
     }
+}
+
+fn snapshot_digest(
+    snapshot: &ReadTransaction,
+    mut copy: impl FnMut(&[u8], &[u8]) -> Result<()>,
+) -> Result<(u64, String)> {
+    let mut rows = 0u64;
+    let mut digest = Sha256::new();
+    for entry in snapshot
+        .open_table(TABLE)
+        .map_err(storage_error)?
+        .iter()
+        .map_err(storage_error)?
+    {
+        let (key, value) = entry.map_err(storage_error)?;
+        let (key, value) = (key.value(), value.value());
+        copy(key, value)?;
+        digest.update((key.len() as u64).to_le_bytes());
+        digest.update(key);
+        digest.update((value.len() as u64).to_le_bytes());
+        digest.update(value);
+        rows = rows.checked_add(1).ok_or(Error::IncompatibleStore)?;
+    }
+    let checksum = digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok((rows, checksum))
 }
 
 #[derive(Clone)]
