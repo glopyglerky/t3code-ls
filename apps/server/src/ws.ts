@@ -3564,6 +3564,7 @@ export const layer = Layer.unwrap(
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
     const transactions = yield* PersistenceTransactions;
     const linkedThreads = yield* LinkedPullRequestThreads;
+    const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -3638,7 +3639,9 @@ export const layer = Layer.unwrap(
               Layer.provide(DefectReporter.layer),
               Layer.provide(Layer.succeed(PersistenceTransactions, transactions)),
               Layer.provide(Layer.succeed(LinkedPullRequestThreads, linkedThreads)),
-              Layer.provide(AgentSessionScanner.layer),
+              Layer.provide(
+                Layer.succeed(AgentSessionScanner.AgentSessionScanner, agentSessionScanner),
+              ),
               Layer.provide(AcpRegistrySessions.layer),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(Layer.succeed(NpmRelease.NpmRelease, npmRelease)),
