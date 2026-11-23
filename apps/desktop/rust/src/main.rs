@@ -28,6 +28,7 @@ const WORKSPACE_CONTEXT: &str = "ShowcaseWorkspace";
 const TEXTAREA_CONTEXT: &str = "ShowcaseWorkspace > Input";
 const COMPOSER_LABEL: &str = "Message";
 const SUBMIT_LABEL: &str = "Submit message";
+const STOP_LABEL: &str = "Stop";
 const APPROVAL_LABEL: &str = "Allow once";
 const REPLY_LABEL: &str = "Recorded assistant reply";
 const USAGE: &str = "Usage: t3-code-ls-desktop-gpui --fixture showcase | --thread-snapshot | --thread-compose < CONNECTION_JSON";
@@ -60,6 +61,7 @@ struct Workspace {
     _composer_events: Subscription,
     server: Option<Arc<server_submit::Session>>,
     server_attempted: bool,
+    stop_requested: bool,
     cancelled: Arc<AtomicBool>,
     _submission: Option<gpui::Task<()>>,
 }
@@ -124,6 +126,7 @@ impl Workspace {
             _composer_events: composer_events,
             server: server.map(Arc::new),
             server_attempted: false,
+            stop_requested: false,
             cancelled: Arc::new(AtomicBool::new(false)),
             _submission: None,
         }
@@ -188,6 +191,18 @@ impl Workspace {
         self.composer
             .update(cx, |state, cx| state.focus(window, cx));
         cx.notify();
+    }
+
+    fn stop(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.status, Some(SubmissionStatus::Pending))
+            && self
+                .server
+                .as_ref()
+                .is_some_and(|server| server.request_stop())
+        {
+            self.stop_requested = true;
+            cx.notify();
+        }
     }
 
     fn allow_once(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -258,6 +273,20 @@ impl Workspace {
                                     approval,
                                     submitted,
                                 });
+                                cx.notify();
+                            }
+                            Ok(server_submit::Progress::Interrupted(snapshot)) => {
+                                workspace.set_reply(
+                                    snapshot.text,
+                                    server_snapshot::LABEL,
+                                    window,
+                                    cx,
+                                );
+                                workspace.status =
+                                    Some(SubmissionStatus::Refused(server_submit::INTERRUPTED));
+                                workspace
+                                    .composer
+                                    .update(cx, |state, cx| state.focus(window, cx));
                                 cx.notify();
                             }
                             Ok(server_submit::Progress::Completed(snapshot)) => {
@@ -356,6 +385,9 @@ impl Render for Workspace {
             _ => None,
         };
         let (status, status_color) = match &self.status {
+            Some(SubmissionStatus::Pending) if self.stop_requested => {
+                (server_submit::STOP_PENDING, 0x49596a)
+            }
             Some(SubmissionStatus::Pending) => ("Submitting to the selected thread…", 0x49596a),
             Some(SubmissionStatus::AwaitingApproval { .. }) => {
                 ("Command permission requested.", 0x49596a)
@@ -453,7 +485,34 @@ impl Render for Workspace {
                                                 workspace.submit(window, cx);
                                             })),
                                     )
-                                    .child(SHORTCUT),
+                                    .child(SHORTCUT)
+                                    .when(
+                                        self.server
+                                            .as_ref()
+                                            .is_some_and(|server| server.can_stop())
+                                            && matches!(
+                                                self.status,
+                                                Some(SubmissionStatus::Pending)
+                                            ),
+                                        |view| {
+                                            view.child(
+                                                Button::new("stop-run")
+                                                    .accessibility_label(STOP_LABEL)
+                                                    .border_2()
+                                                    .border_color(rgb(0x174887))
+                                                    .focus(|style| {
+                                                        style.border_color(rgb(0xfdd166))
+                                                    })
+                                                    .rounded_md()
+                                                    .px_4()
+                                                    .py_2()
+                                                    .child(STOP_LABEL)
+                                                    .on_click(cx.listener(
+                                                        |workspace, _, _, cx| workspace.stop(cx),
+                                                    )),
+                                            )
+                                        },
+                                    ),
                             ),
                     )
                     .child(

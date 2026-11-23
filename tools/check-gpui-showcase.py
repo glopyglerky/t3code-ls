@@ -119,7 +119,7 @@ def check_thread_snapshot(executable):
     print("GPUI authenticated snapshot passed AT-SPI content and identity, credential and missing-thread refusal checks")
 
 
-def check_thread_compose(executable, approval=False, follow_up=False):
+def check_thread_compose(executable, approval=False, follow_up=False, stop=False):
     connection = json.load(sys.stdin)
     prompt = "GPUI sends a follow-up in the same thread." if follow_up else "GPUI sends one recorded prompt."
     failure = "Could not confirm submission. Draft kept. Check the thread before retrying."
@@ -139,7 +139,7 @@ def check_thread_compose(executable, approval=False, follow_up=False):
     if previous is not None:
         assert len(previous["runs"]) == 1 and previous["runs"][0]["status"] == "completed"
         assert len([message for message in previous["messages"] if message["role"] == "user"]) == 1
-    cases = [(connection, True)] if approval or follow_up else [
+    cases = [(connection, True)] if approval or follow_up or stop else [
         ({**connection, "environmentId": "wrong-environment"}, False),
         ({**connection, "token": "invalid.fixture.token"}, False),
         ({**connection, "projectId": "wrong-project"}, False),
@@ -207,7 +207,35 @@ def check_thread_compose(executable, approval=False, follow_up=False):
                 # Completion may clear only the captured prompt, never a later draft.
                 x11("key", "ctrl+a")
                 x11("type", "--clearmodifiers", unsent)
-            if success:
+            if stop:
+                button = find("Stop", application)
+                assert button.getRole() == pyatspi.ROLE_PUSH_BUTTON
+                for _ in range(8):
+                    if button.getState().contains(pyatspi.STATE_FOCUSED):
+                        break
+                    x11("key", "Tab")
+                    try:
+                        button = find("Stop", application, pyatspi.STATE_FOCUSED, timeout=1)
+                    except AssertionError:
+                        continue
+                assert button.getState().contains(pyatspi.STATE_FOCUSED), "Stop must accept keyboard focus"
+                x11("key", "space")
+                find("Server run interrupted. Draft kept.", application, timeout=60)
+                # Repeated submission stays fenced, and Stop is no longer actionable.
+                x11("key", "ctrl+Return")
+                field = composer.queryText()
+                assert field.getText(0, field.characterCount) == unsent
+                observed = projection()
+                assert len(observed["runs"]) == 1 and observed["runs"][0]["status"] == "interrupted"
+                reply, = [row for row in observed["messages"] if row["id"] == streamed_id]
+                assert reply["role"] == "assistant" and reply["runId"] == run["id"]
+                stop_requests = [item for item in observed["turnItems"] if item["type"] == "run_interrupt_request"]
+                assert len(stop_requests) == 1 and stop_requests[0]["runId"] == run["id"]
+                results = [item for item in observed["turnItems"] if item["type"] == "run_interrupt_result"]
+                assert len(results) == 1 and results[0]["runId"] == run["id"]
+                field = document.queryText()
+                assert f"Message {streamed_id}\n" in field.getText(0, field.characterCount)
+            elif success:
                 try:
                     find("Server submission confirmed.", application, timeout=60)
                 except AssertionError:
@@ -256,7 +284,7 @@ def check_thread_compose(executable, approval=False, follow_up=False):
                 message, = [user for user in users if user["id"] == connection["messageId"]]
                 assert message["text"] == prompt
                 run, = [run for run in observed["runs"] if run["id"] == message["runId"]]
-                assert run["status"] == "completed"
+                assert run["status"] == ("interrupted" if stop else "completed")
             if previous is not None:
                 assert previous["runs"][0] in observed["runs"]
                 assert all(message in observed["messages"] for message in previous["messages"])
@@ -283,7 +311,14 @@ def check_thread_compose(executable, approval=False, follow_up=False):
             document = find("Server thread snapshot", application)
             field = document.queryText()
             body = field.getText(0, field.characterCount)
-            assert f"Message {streamed_id}\n" in body and "todo list fixture complete" in body
+            assert f"Message {streamed_id}\n" in body
+            if stop:
+                assert projection()["runs"][0]["status"] == "interrupted"
+                reply, = [row for row in projection()["messages"] if row["id"] == streamed_id]
+                assert reply["text"] in body
+                assert len([item for item in projection()["turnItems"] if item["type"] == "run_interrupt_request"]) == 1
+            else:
+                assert "todo list fixture complete" in body
             assert len(projection()["runs"]) == 1
             request_window_close(window)
             assert application.wait(timeout=10) == 0
@@ -295,7 +330,8 @@ def check_thread_compose(executable, approval=False, follow_up=False):
                 except subprocess.TimeoutExpired:
                     application.kill()
                     application.wait(timeout=3)
-        print("GPUI stream passed original partial text before completion, same reply identity on final/reopen and unsent draft checks")
+        print("GPUI Stop passed partial/active run, keyboard Stop, interrupted reopen and unsent draft checks" if stop else
+              "GPUI stream passed original partial text before completion, same reply identity on final/reopen and unsent draft checks")
     if approval:
         print("GPUI approval passed named AT-SPI button, X11 decision and same-request completion checks")
     elif follow_up:
@@ -320,6 +356,9 @@ def main():
     )
     if sys.argv[2:] == ["--thread-compose"]:
         check_thread_compose(executable)
+        return
+    if sys.argv[2:] == ["--thread-compose-stop"]:
+        check_thread_compose(executable, stop=True)
         return
     if sys.argv[2:] == ["--thread-compose-approval"]:
         check_thread_compose(executable, approval=True)

@@ -14,8 +14,11 @@ import { Socket } from "effect/socket";
 import { makeWsRpcProtocolClient } from "../../../packages/client-runtime/src/rpc/protocol.ts";
 
 const executable = process.argv[2];
+const stop = process.argv[3] === "--stop";
 const approval = process.argv[3] === "--approval";
-Assert.ok(executable && Path.isAbsolute(executable) && (approval ? process.argv.length === 4 : process.argv.length === 3));
+const databaseExecutable = stop ? process.argv[4] : undefined;
+Assert.ok(executable && Path.isAbsolute(executable) && (stop ? process.argv.length === 5 : approval ? process.argv.length === 4 : process.argv.length === 3));
+if (stop) Assert.ok(databaseExecutable && Path.isAbsolute(databaseExecutable));
 const scratch = FS.mkdtempSync(Path.join(OS.tmpdir(), "gpui-thread-submit-"));
 const root = Path.resolve(import.meta.dirname, "../../..");
 const baseDir = Path.join(scratch, "profile");
@@ -28,6 +31,7 @@ const threadId = ThreadId.make("gpui-fixture-submit-thread");
 const commandId = CommandId.make(Crypto.randomUUID());
 const messageId = Crypto.randomUUID();
 const approvalCommandId = approval ? CommandId.make(Crypto.randomUUID()) : undefined;
+const stopCommandId = stop ? CommandId.make(Crypto.randomUUID()) : undefined;
 let server: ChildProcess.ChildProcess | undefined;
 let closed = Promise.resolve();
 let startupFailed = false;
@@ -140,7 +144,7 @@ try {
     view.once("close", (code) => { clearTimeout(deadline); code === 0 ? resolve() : reject(new Error("GPUI submit view check failed")); });
     view.stdin.on("error", () => {});
     view.stdin.end(JSON.stringify({ port, token, environmentId, threadId, projectId,
-      commandId: command, messageId: message, approvalCommandId }));
+      commandId: command, messageId: message, approvalCommandId, stopCommandId }));
   });
   type SubmissionProjection = {
     thread: { id: string; projectId: string };
@@ -170,38 +174,88 @@ try {
     ));
     return runs[0]!.id;
   };
-  await submitThroughWindow(approval ? "--thread-compose-approval" : "--thread-compose", commandId, messageId);
-  const accepted = await currentProjection();
-  const initialRun = findCompletedRun(accepted, messageId, "GPUI sends one recorded prompt.");
-  Assert.equal(accepted.runs.length, 1);
-  Assert.equal(accepted.messages.filter((message) => message.role === "user").length, 1);
-  if (approval) {
-    Assert.equal(accepted.runtimeRequests.length, 1);
-    const request = accepted.runtimeRequests[0];
-    Assert.equal(request?.kind, "command");
-    Assert.equal(request?.status, "resolved");
-    Assert.equal(request?.decision, "accept");
-    Assert.ok(!FS.existsSync(Path.join(workspace, ".codex-probe-write-action.txt")));
-  } else {
-    const secondMessage = Crypto.randomUUID();
-    await submitThroughWindow("--thread-compose-follow-up", CommandId.make(Crypto.randomUUID()), secondMessage);
+  if (stop) {
+    await submitThroughWindow("--thread-compose-stop", commandId, messageId);
+    const interrupted = await currentProjection();
+    Assert.equal(interrupted.runs.length, 1);
+    Assert.equal(interrupted.runs[0]?.status, "interrupted");
+    Assert.equal(interrupted.messages.filter((row) => row.role === "user").length, 1);
     const reopened = await currentProjection();
-    Assert.equal(reopened.runs.length, 2);
-    Assert.equal(reopened.messages.filter((message) => message.role === "user").length, 2);
-    Assert.equal(findCompletedRun(reopened, messageId, "GPUI sends one recorded prompt."), initialRun);
-    Assert.notEqual(findCompletedRun(reopened, secondMessage, "GPUI sends a follow-up in the same thread."), initialRun);
-    for (const message of accepted.messages) {
-      Assert.deepEqual(reopened.messages.find((row) => row.id === message.id), message);
+    Assert.deepEqual(reopened, interrupted);
+    // All windows have closed. Release the synthetic server's database owner before offline inspection.
+    server.kill("SIGTERM");
+    let closeDeadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([closed, new Promise<never>((_, reject) => {
+        closeDeadline = setTimeout(() => reject(new Error("Synthetic server did not release its database")), 15_000);
+      })]);
+    } finally {
+      if (closeDeadline) clearTimeout(closeDeadline);
     }
+    Assert.ok(databaseExecutable);
+    const transaction = "gpui-stop-receipt-inspection";
+    const requests = [
+      { operation: "application_begin", transaction_id: transaction, mode: "read" },
+      { operation: "application_scan", transaction_id: transaction,
+        table: "orchestration_command_receipts", after: null, limit: 200 },
+      { operation: "application_rollback", transaction_id: transaction },
+      { operation: "shutdown" },
+    ];
+    const output = ChildProcess.execFileSync(databaseExecutable,
+      ["read-only-local", Path.join(userdata, "statev2.omdb")], {
+        input: requests.map((request) => JSON.stringify(request)).join("\n") + "\n",
+        env: {}, encoding: "utf8", timeout: 30_000, maxBuffer: 1024 * 1024,
+      });
+    const responses = output.trim().split("\n").map((line) => JSON.parse(line) as {
+      ok: boolean; result: { rows: { row: Record<string, { value: unknown }> }[]; next: string | null };
+    });
+    Assert.equal(responses.length, requests.length);
+    for (const response of responses) Assert.equal(response.ok, true);
+    const page = responses[1]!.result;
+    Assert.equal(page.next, null, "Synthetic receipt inspection must cover the complete table");
+    const stopReceipts = page.rows.filter(({ row }) => row.command_type?.value === "run.interrupt");
+    Assert.equal(stopReceipts.length, 1);
+    const receipt = stopReceipts[0]!.row;
+    Assert.equal(receipt.command_id?.value, stopCommandId);
+    Assert.equal(receipt.aggregate_id?.value, threadId);
+    Assert.equal(receipt.status?.value, "accepted");
+    console.log(JSON.stringify({ toolkit: "gpui", serverImplementation: "native",
+      commands: ["message.dispatch", "run.interrupt"], runCount: 1, status: "interrupted",
+      selectedProvider: "devReplay/todo-list", liveProvider: false, interruptReceiptCount: 1 }));
+  } else {
+    await submitThroughWindow(approval ? "--thread-compose-approval" : "--thread-compose", commandId, messageId);
+    const accepted = await currentProjection();
+    const initialRun = findCompletedRun(accepted, messageId, "GPUI sends one recorded prompt.");
+    Assert.equal(accepted.runs.length, 1);
+    Assert.equal(accepted.messages.filter((message) => message.role === "user").length, 1);
+    if (approval) {
+      Assert.equal(accepted.runtimeRequests.length, 1);
+      const request = accepted.runtimeRequests[0];
+      Assert.equal(request?.kind, "command");
+      Assert.equal(request?.status, "resolved");
+      Assert.equal(request?.decision, "accept");
+      Assert.ok(!FS.existsSync(Path.join(workspace, ".codex-probe-write-action.txt")));
+    } else {
+      const secondMessage = Crypto.randomUUID();
+      await submitThroughWindow("--thread-compose-follow-up", CommandId.make(Crypto.randomUUID()), secondMessage);
+      const reopened = await currentProjection();
+      Assert.equal(reopened.runs.length, 2);
+      Assert.equal(reopened.messages.filter((message) => message.role === "user").length, 2);
+      Assert.equal(findCompletedRun(reopened, messageId, "GPUI sends one recorded prompt."), initialRun);
+      Assert.notEqual(findCompletedRun(reopened, secondMessage, "GPUI sends a follow-up in the same thread."), initialRun);
+      for (const message of accepted.messages) {
+        Assert.deepEqual(reopened.messages.find((row) => row.id === message.id), message);
+      }
+    }
+    console.log(JSON.stringify({ toolkit: "gpui", serverImplementation: "native", transport: "WebSocket JSON RPC",
+      commands: approval ? ["message.dispatch", "runtime-request.respond"] : ["message.dispatch"],
+      runCount: approval ? 1 : 2, userMessageCount: approval ? 1 : 2, refusalWindows: approval ? 0 : 4,
+      normalCommandAndProjectionRoute: true, followUpInSameThread: !approval,
+      ...(approval ? { approvalDecision: "accept", resolvedRequestCount: 1 } : {}),
+      ...(approval ? {} : { streaming: "original ACP partial before completed run; same message identity final/reopen; later unsent draft retained" }),
+      unqualified: ["live providers", "general stream recovery and delta negotiation", "durable client identity allocation"],
+    }));
   }
-  console.log(JSON.stringify({ toolkit: "gpui", serverImplementation: "native", transport: "WebSocket JSON RPC",
-    commands: approval ? ["message.dispatch", "runtime-request.respond"] : ["message.dispatch"],
-    runCount: approval ? 1 : 2, userMessageCount: approval ? 1 : 2, refusalWindows: approval ? 0 : 4,
-    normalCommandAndProjectionRoute: true, followUpInSameThread: !approval,
-    ...(approval ? { approvalDecision: "accept", resolvedRequestCount: 1 } : {}),
-    ...(approval ? {} : { streaming: "original ACP partial before completed run; same message identity final/reopen; later unsent draft retained" }),
-    unqualified: ["live providers", "general stream recovery and delta negotiation", "durable client identity allocation"],
-  }));
 } finally {
   if (server && server.exitCode === null) server.kill("SIGTERM");
   const terminate = setTimeout(() => { if (server && server.exitCode === null) server.kill("SIGKILL"); }, 8_000);
