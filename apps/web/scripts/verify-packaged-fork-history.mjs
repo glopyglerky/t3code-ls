@@ -245,9 +245,18 @@ try {
     bundle, baseDir, env, signal: abort.signal, port: await reservePort(), logPath: Path.join(proof, `${name}.log`),
   });
 
-  // Commit only the opening state offline. Every observation and later write uses the packaged server.
+  phase("initializing-packaged-profile");
+  application = await start("initialize");
+  await application.ready;
+  assertNativeOwner(application.pid, executable, databasePath);
+  const setup = await authenticatePackagedServer(application, abort.signal);
+  await setup.createProject({ projectId, title: "Fork history fixture", workspaceRoot: workspace });
+  await application.stop();
+  application = undefined;
+
+  // Add history to the project and database already initialized by the normal app.
+  // Every observation and later write uses the packaged server.
   phase("seed");
-  nativeRequest(executable, fixture, "initialize", { operation: "application_bootstrap" });
   const events = seedEvents();
   await withNative(executable, fixture, () => Effect.gen(function* () {
     const sink = yield* EventSinkV2;
@@ -260,7 +269,6 @@ try {
   await application.ready;
   assertNativeOwner(application.pid, executable, databasePath);
   const client = await authenticatePackagedServer(application, abort.signal);
-  await client.createProject({ projectId, title: "Fork history fixture", workspaceRoot: workspace });
   browser = await chromium.launch();
   report.chromium = browser.version();
   const context = await browser.newContext({ viewport: { width: 1200, height: 550 }, reducedMotion: "reduce" });
