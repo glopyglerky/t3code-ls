@@ -210,3 +210,187 @@ async fn ordered_engines_preserve_a_fresh_application_generation()
     }
     Ok(())
 }
+
+fn comparison_error(error: Error) -> crate::Error {
+    match error {
+        Error::UnknownCommit(_) => crate::Error::UnknownCommit,
+        _ => crate::Error::Database("ordered comparison operation failed".into()),
+    }
+}
+
+impl From<Error> for crate::Error {
+    fn from(error: Error) -> Self {
+        comparison_error(error)
+    }
+}
+
+impl crate::backend::CommitTable for redb_bench_compare::ordered::WriteTransaction {
+    fn matches(&self, key: &[u8], expected: Option<&[u8]>) -> crate::Result<bool> {
+        Ok(self.get(key).map_err(comparison_error)?.as_deref() == expected)
+    }
+
+    fn fingerprint(&self, key: &[u8]) -> crate::Result<Option<(usize, [u8; 32])>> {
+        Ok(self
+            .get(key)
+            .map_err(comparison_error)?
+            .as_deref()
+            .map(crate::backend::fingerprint))
+    }
+
+    fn scan(
+        &self,
+        start: &[u8],
+        end: &[u8],
+        limit: usize,
+    ) -> crate::Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        self.scan(start, end, limit).map_err(comparison_error)
+    }
+
+    fn put(&mut self, key: &[u8], value: &[u8]) -> crate::Result<()> {
+        self.put(key, value).map_err(comparison_error)
+    }
+
+    fn delete(&mut self, key: &[u8]) -> crate::Result<()> {
+        self.delete(key).map_err(comparison_error)
+    }
+}
+
+#[tokio::test]
+async fn ordered_engines_apply_an_uncommitted_application_command()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    use crate::backend::apply_staged;
+
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    assert!(store.bootstrap_application().await?.initialized);
+    assert!(store.prepare_application_events().await?.prepared);
+    assert!(store.prepare_application_receipts().await?.prepared);
+    let (start, end) = prefix_range("");
+    let mut initial = store.db.begin_read_only().await?;
+    let seed = initial.scan(&start, &end, MAX_FIXTURE_ROWS + 1).await?;
+    assert!(seed.len() <= MAX_FIXTURE_ROWS);
+    assert!(seed.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() < MAX_FIXTURE_BYTES);
+    initial.rollback().await?;
+
+    let mut app = ApplicationTransactions::new(store.clone());
+    app.begin("prepare").await?;
+    let receipt = ReceiptRow {
+        command_id: COMMAND.into(),
+        aggregate_kind: "thread".into(),
+        aggregate_id: THREAD.into(),
+        command_type: "fixture.command".into(),
+        accepted_at: TIME.into(),
+        result_sequence: 3,
+        status: "accepted".into(),
+        error: None,
+    };
+    assert!(app.receipts_insert("prepare", receipt).await?);
+    for sequence in 1..=3 {
+        app.events_append("prepare", event(sequence), None).await?;
+    }
+    let expected_receipt = app
+        .get("prepare", RECEIPTS, &[text_cell(COMMAND)])
+        .await?
+        .unwrap();
+    let mut expected_events = Vec::new();
+    for sequence in 1..=3 {
+        expected_events.push(
+            app.get("prepare", EVENTS, &[int_cell(sequence)])
+                .await?
+                .unwrap(),
+        );
+    }
+    // This consumes staged domain work and ABORTS the source reservation. It
+    // exports no committed command and does not mirror a production commit.
+    let staged = app.stage_for_comparison("prepare").await?;
+    app.begin_mode("verify", ApplicationTransactionMode::Read, None)
+        .await?;
+    assert!(app.receipts_get("verify", COMMAND).await?.is_none());
+    assert!(app.get("verify", EVENTS, &[int_cell(3)]).await?.is_none());
+    app.rollback("verify").await?;
+    drop(app);
+    let mut unchanged = store.db.begin_read_only().await?;
+    assert_eq!(
+        unchanged.scan(&start, &end, MAX_FIXTURE_ROWS + 1).await?,
+        seed
+    );
+    unchanged.rollback().await?;
+    store.shutdown().await?;
+
+    let catalog_bytes = seed
+        .iter()
+        .find(|(key, _)| *key == schema_key())
+        .unwrap()
+        .1
+        .clone();
+    let catalog = decode_catalog(&catalog_bytes)?;
+    for (engine, name) in [
+        (Engine::Fjall, "command.fjall"),
+        (Engine::DirectRedb, "command.redb"),
+    ] {
+        let path = fixture.path().with_file_name(name);
+        let comparison = Database::open(engine, &path)?;
+        comparison.write(|transaction| {
+            for (key, value) in &seed {
+                transaction.put(key, value)?;
+            }
+            Ok::<_, Error>(())
+        })?;
+        // Abort after the application commit seam has staged the whole group.
+        let aborted = comparison.write(|transaction| {
+            apply_staged(transaction, staged.clone())?;
+            Err::<(), _>(crate::Error::Invalid("injected abort after apply".into()))
+        });
+        assert!(matches!(aborted, Err(crate::Error::Invalid(_))));
+        assert_eq!(
+            comparison
+                .snapshot()?
+                .scan(&start, &end, MAX_FIXTURE_ROWS + 1)?,
+            seed
+        );
+        let old = comparison.snapshot()?;
+        // A separate writer commits while a real engine snapshot remains open.
+        let command = staged.clone();
+        let comparison = std::thread::spawn(move || {
+            comparison.write(|transaction| apply_staged(transaction, command))?;
+            Ok::<_, crate::Error>(comparison)
+        })
+        .join()
+        .expect("comparison writer panicked")?;
+        assert_eq!(old.scan(&start, &end, MAX_FIXTURE_ROWS + 1)?, seed);
+        drop(old);
+        // The unchanged old observations cannot commit against the new state.
+        assert!(matches!(
+            comparison.write(|transaction| apply_staged(transaction, staged.clone())),
+            Err(crate::Error::TransactionConflict)
+        ));
+        drop(comparison);
+        let reopened = Database::open(engine, &path)?;
+        let snapshot = reopened.snapshot()?;
+        assert_eq!(snapshot.get(&schema_key())?, Some(catalog_bytes.clone()));
+        let expected_rows =
+            std::iter::once((RECEIPTS, vec![text_cell(COMMAND)], &expected_receipt)).chain(
+                expected_events
+                    .iter()
+                    .enumerate()
+                    .map(|(index, row)| (EVENTS, vec![int_cell(index as i64 + 1)], row)),
+            );
+        for (name, key, expected) in expected_rows {
+            let key_bytes = row_key(&catalog.generation, name, &key)?;
+            let bytes = snapshot.get(&key_bytes)?.unwrap();
+            let row = decode_row(&catalog, table(&catalog, name)?, &key_bytes, &bytes)?;
+            assert_eq!(row.key, key);
+            assert_eq!(&row.row, expected);
+        }
+        let history = snapshot.scan(&history_key(1), &history_key(4), 8)?;
+        assert_eq!(
+            history
+                .iter()
+                .map(|(_, value)| serde_json::from_slice::<u64>(value).unwrap())
+                .collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+        assert!(snapshot.get(&history_key(4))?.is_none());
+    }
+    Ok(())
+}

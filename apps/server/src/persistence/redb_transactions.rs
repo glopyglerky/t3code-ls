@@ -856,6 +856,24 @@ impl ApplicationTransactions {
         self.finish(transaction_id, session, result).await
     }
 
+    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    pub(crate) async fn stage_for_comparison(
+        &mut self,
+        transaction_id: &str,
+    ) -> Result<crate::backend::StagedCommit> {
+        let session = self.take(transaction_id)?;
+        if !session.savepoints.is_empty() {
+            return self
+                .finish(
+                    transaction_id,
+                    session,
+                    Err(invalid("unreleased savepoints")),
+                )
+                .await;
+        }
+        session.transaction.stage_for_comparison().await
+    }
+
     pub async fn commit(&mut self, transaction_id: &str) -> Result<()> {
         let session = self.take(transaction_id)?;
         if !session.savepoints.is_empty() {

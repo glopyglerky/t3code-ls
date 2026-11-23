@@ -615,20 +615,23 @@ jobs:
           trap 'rm -rf -- "$scratch"' EXIT
           mkdir "$proof" "$scratch/fixtures"
           export CARGO_HOME="$scratch/cargo" CARGO_TARGET_DIR="$scratch/target" TMPDIR="$scratch/fixtures"
-          git rev-parse HEAD HEAD^{tree} > "$proof/source.txt"
+          git rev-parse HEAD "HEAD^{tree}" > "$proof/source.txt"
           sha256sum Cargo.lock database.lock.json toolchain.lock.json > "$proof/inputs.sha256"
           cp "$RUNNER_TEMP/ordered-application-toolchain/installation-proof.json" "$proof/"
           lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
           "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked --release \
             -p t3-code-ls-storage --features ordered-engine-fixture --lib \
-            ordered_engine_fixture::ordered_engines_preserve_a_fresh_application_generation \
-            -- --exact --test-threads=1 2>&1 | tee "$proof/ordered-application.log"
-          grep -F 'ordered_engine_fixture::ordered_engines_preserve_a_fresh_application_generation ... ok' \
-            "$proof/ordered-application.log"
+            ordered_engine_fixture:: -- --test-threads=1 2>&1 | tee "$proof/ordered-application.log"
+          for name in ordered_engines_preserve_a_fresh_application_generation ordered_engines_apply_an_uncommitted_application_command; do
+            grep -F "ordered_engine_fixture::$name ... ok" "$proof/ordered-application.log"
+          done
           "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked --release \
             -p t3-code-ls-storage --lib application_events::tests \
             -- --test-threads=1 2>&1 | tee "$proof/default-events.log"
           grep -Eq 'test result: ok[.] [1-9][0-9]* passed;' "$proof/default-events.log"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked --release \
+            -p t3-code-ls-storage --lib backend::tests -- --test-threads=1 2>&1 | tee "$proof/default-backend.log"
+          grep -Eq 'test result: ok[.] [1-9][0-9]* passed;' "$proof/default-backend.log"
       - name: Retain source, lock and storage test receipts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

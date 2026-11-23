@@ -1411,6 +1411,20 @@ impl Transaction {
         .map_err(|_| Error::UnknownCommit)?
     }
 
+    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    pub(crate) async fn stage_for_comparison(mut self) -> Result<StagedCommit> {
+        self.require_write()?;
+        let staged = StagedCommit {
+            reads: std::mem::take(&mut self.reads),
+            mutation_reads: std::mem::take(&mut self.mutation_reads),
+            writes: std::mem::take(&mut self.writes),
+            ranges: std::mem::take(&mut self.ranges),
+        };
+        // Release the source reservation without committing any command rows.
+        self.rollback().await?;
+        Ok(staged)
+    }
+
     pub(crate) async fn rollback(mut self) -> Result<()> {
         let reserved = self.reserved.take();
         tokio::task::spawn_blocking(move || drop(self))
@@ -1423,47 +1437,82 @@ impl Transaction {
     }
 }
 
-struct StagedCommit {
+#[derive(Clone)]
+pub(crate) struct StagedCommit {
     reads: BTreeMap<Vec<u8>, Option<Vec<u8>>>,
     mutation_reads: BTreeMap<Vec<u8>, Option<(usize, [u8; 32])>>,
     writes: BTreeMap<Vec<u8>, Option<Vec<u8>>>,
     ranges: Vec<ObservedRange>,
 }
 
+/// The caller owns one atomic engine transaction and must abort it on error.
+/// Validation completes before any mutation is applied. Publication belongs to
+/// the caller after the engine acknowledges commit.
+pub(crate) trait CommitTable {
+    fn matches(&self, key: &[u8], expected: Option<&[u8]>) -> Result<bool>;
+    fn fingerprint(&self, key: &[u8]) -> Result<Option<(usize, [u8; 32])>>;
+    fn scan(&self, start: &[u8], end: &[u8], limit: usize) -> Result<Vec<Pair>>;
+    fn put(&mut self, key: &[u8], value: &[u8]) -> Result<()>;
+    fn delete(&mut self, key: &[u8]) -> Result<()>;
+}
+
+impl CommitTable for redb::Table<'_, &'static [u8], &'static [u8]> {
+    fn matches(&self, key: &[u8], expected: Option<&[u8]>) -> Result<bool> {
+        let value = ReadableTable::get(self, key).map_err(storage_error)?;
+        Ok(value.as_ref().map(|value| value.value()) == expected)
+    }
+
+    fn fingerprint(&self, key: &[u8]) -> Result<Option<(usize, [u8; 32])>> {
+        let value = ReadableTable::get(self, key).map_err(storage_error)?;
+        Ok(value.as_ref().map(|value| fingerprint(value.value())))
+    }
+
+    fn scan(&self, start: &[u8], end: &[u8], limit: usize) -> Result<Vec<Pair>> {
+        scan_table(self, start, end, limit)
+    }
+
+    fn put(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
+        self.insert(key, value).map_err(storage_error)?;
+        Ok(())
+    }
+
+    fn delete(&mut self, key: &[u8]) -> Result<()> {
+        self.remove(key).map_err(storage_error)?;
+        Ok(())
+    }
+}
+
 fn commit_staged(transaction: WriteTransaction, staged: StagedCommit) -> Result<()> {
     {
         let mut table = transaction.open_table(TABLE).map_err(storage_error)?;
-        for (key, observed) in staged.reads {
-            let current = table.get(key.as_slice()).map_err(storage_error)?;
-            if current.as_ref().map(|value| value.value()) != observed.as_deref() {
-                return Err(Error::TransactionConflict);
-            }
-        }
-        for (key, observed) in staged.mutation_reads {
-            let current = table.get(key.as_slice()).map_err(storage_error)?;
-            if current.as_ref().map(|value| fingerprint(value.value())) != observed {
-                return Err(Error::TransactionConflict);
-            }
-        }
-        for range in staged.ranges {
-            if scan_table(&table, &range.start, &range.end, range.limit)? != range.rows {
-                return Err(Error::TransactionConflict);
-            }
-        }
-        for (key, value) in staged.writes {
-            match value {
-                Some(value) => {
-                    table
-                        .insert(key.as_slice(), value.as_slice())
-                        .map_err(storage_error)?;
-                }
-                None => {
-                    table.remove(key.as_slice()).map_err(storage_error)?;
-                }
-            }
-        }
+        apply_staged(&mut table, staged)?;
     }
     transaction.commit().map_err(commit_error)
+}
+
+pub(crate) fn apply_staged(table: &mut impl CommitTable, staged: StagedCommit) -> Result<()> {
+    for (key, observed) in staged.reads {
+        if !table.matches(&key, observed.as_deref())? {
+            return Err(Error::TransactionConflict);
+        }
+    }
+    for (key, observed) in staged.mutation_reads {
+        if table.fingerprint(&key)? != observed {
+            return Err(Error::TransactionConflict);
+        }
+    }
+    for range in staged.ranges {
+        if table.scan(&range.start, &range.end, range.limit)? != range.rows {
+            return Err(Error::TransactionConflict);
+        }
+    }
+    for (key, value) in staged.writes {
+        match value {
+            Some(value) => table.put(&key, &value)?,
+            None => table.delete(&key)?,
+        }
+    }
+    Ok(())
 }
 
 struct ReservationState {
@@ -1674,7 +1723,7 @@ fn bounded_copy(value: &[u8]) -> Result<Vec<u8>> {
     Ok(value.to_vec())
 }
 
-fn fingerprint(value: &[u8]) -> (usize, [u8; 32]) {
+pub(crate) fn fingerprint(value: &[u8]) -> (usize, [u8; 32]) {
     let mut digest = [0; 32];
     digest.copy_from_slice(&Sha256::digest(value));
     (value.len(), digest)
