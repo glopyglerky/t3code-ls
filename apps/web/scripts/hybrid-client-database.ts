@@ -175,6 +175,25 @@ export function assertNoApplicationSqlite(stateDirectory: string): void {
   }
 }
 
+export function inspectNativeGeneration(executable: string, databasePath: string) {
+  const result = ChildProcess.spawnSync(executable, ["read-only-local", databasePath], {
+    input: '{"operation":"application_generation_identity"}\n',
+    encoding: "utf8",
+    env: {},
+    timeout: 5_000,
+    maxBuffer: 16_384,
+  });
+  Assert.ifError(result.error);
+  Assert.equal(result.status, 0, result.stderr);
+  const envelope = object(JSON.parse(result.stdout), "Expected one native generation response");
+  Assert.equal(envelope.ok, true, JSON.stringify(envelope.error));
+  const identity = object(envelope.result, "Expected a generation identity for the fresh profile");
+  Assert.equal(identity.engine, "omdb");
+  Assert.equal(identity.generation, "native");
+  Assert.match(String(identity.catalog_sha256), /^[a-f0-9]{64}$/u);
+  return identity;
+}
+
 export function inspectNativeReplay(input: {
   readonly executable: string;
   readonly stateDirectory: string;

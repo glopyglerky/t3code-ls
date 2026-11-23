@@ -20,7 +20,8 @@ import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 import { chromium, type Browser, type Page } from "playwright";
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
-import { inspectNativeReplay } from "./hybrid-client-database.ts";
+import { SERVICE_LAUNCHER_PROTOCOL } from "../../server/src/cloud/serviceProtocol.ts";
+import { inspectNativeGeneration, inspectNativeReplay } from "./hybrid-client-database.ts";
 import {
   assertReplayTurnLinks,
   replayTurnIdentity,
@@ -28,7 +29,11 @@ import {
 } from "./hybrid-client-turn.ts";
 
 type Implementation = "upstream" | "native";
-type OwnedApplication = { pid: number; pairingUrl: string; stop: () => Promise<void> };
+type OwnedApplication = {
+  pid: number;
+  pairingUrl: string;
+  stop: (signal?: "SIGTERM" | "SIGKILL") => Promise<void>;
+};
 type InterruptedShowcase = ReplayTurnIdentity & {
   threadId: string;
   threadUrl: string;
@@ -43,6 +48,8 @@ const startupTimeoutMs = 180_000;
 const replayPrompt = "Replay: showcase";
 const replayMarker = "This turn is a replay.";
 const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
+const crashRestart = process.env.T3_CODE_LS_CRASH_RESTART_PROOF === "true";
+const bundledEntry = "apps/server/dist/bin.mjs";
 const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
 const capturedApproval = {
   path: "apps/server/src/orchestration-v2/testkit/fixtures/tool_call_read_only_on_request/registry_transcript.ndjson",
@@ -77,6 +84,10 @@ if (process.platform !== "linux") {
     "This acceptance runner qualifies Linux only; other platforms require their own gate.",
   );
 }
+Assert.ok(
+  !crashRestart || (bundledClient && mode === "native"),
+  "Crash proof requires the native bundle",
+);
 
 function outsideCheckout(path: string): void {
   const relative = NodePath.relative(repoRoot, path);
@@ -181,7 +192,7 @@ async function startApplication(
   NodeFS.writeFileSync(logPath, "");
   const args = bundledClient
     ? [
-        "apps/server/dist/bin.mjs",
+        bundledEntry,
         "serve",
         "--base-dir",
         stateDirectory,
@@ -265,7 +276,7 @@ async function startApplication(
     });
   }
 
-  const stop = async () => {
+  const stop = async (requestedSignal: "SIGTERM" | "SIGKILL" = "SIGTERM") => {
     if (stopping) return;
     stopping = true;
     const signal = (value: NodeJS.Signals) => {
@@ -275,7 +286,7 @@ async function startApplication(
         if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
       }
     };
-    signal("SIGTERM");
+    signal(requestedSignal);
     const killTimer = setTimeout(() => signal("SIGKILL"), 10_000);
     let deadlineTimer: ReturnType<typeof setTimeout>;
     const deadline = new Promise<never>((_, reject) => {
@@ -286,6 +297,7 @@ async function startApplication(
     });
     try {
       await Promise.race([exited, deadline]);
+      if (requestedSignal === "SIGKILL") Assert.equal(child.signalCode, "SIGKILL");
     } finally {
       clearTimeout(killTimer);
       clearTimeout(deadlineTimer!);
@@ -304,6 +316,63 @@ async function startApplication(
   } finally {
     clearTimeout(timer);
   }
+}
+
+function killOwnedDatabaseWriter(parent: number, executable: string, databasePath: string): void {
+  const children = ChildProcess.spawnSync("ps", ["-o", "pid=", "--ppid", String(parent)], {
+    encoding: "utf8",
+    timeout: 5_000,
+  });
+  Assert.ifError(children.error);
+  Assert.equal(children.status, 0, children.stderr);
+  const writers = children.stdout.split(/\s+/u).filter((pid) => {
+    if (!/^\d+$/u.test(pid)) return false;
+    try {
+      const args = NodeFS.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+      return (
+        args.length === 4 &&
+        ["local", "initialize-local"].includes(args[1]!) &&
+        args[2] === databasePath &&
+        NodeFS.readlinkSync(`/proc/${pid}/exe`) === executable
+      );
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    }
+  });
+  Assert.equal(writers.length, 1, "Expected one native writer child of the fixture server");
+  process.kill(Number(writers[0]), "SIGKILL");
+}
+
+function assertBundledPreflight(
+  stateDirectory: string,
+  databasePath: string,
+  expected: "blocked" | "ready",
+): void {
+  const result = ChildProcess.spawnSync(
+    process.execPath,
+    [
+      bundledEntry,
+      "__service-preflight",
+      "--database-path",
+      databasePath,
+      "--launcher-protocol",
+      String(SERVICE_LAUNCHER_PROTOCOL),
+    ],
+    {
+      cwd: repoRoot,
+      env: { PATH: process.env.PATH, HOME: stateDirectory, T3_CODE_LS_IMPLEMENTATION: "native" },
+      encoding: "utf8",
+      timeout: 15_000,
+    },
+  );
+  Assert.ifError(result.error);
+  Assert.equal(result.status, 0, result.stderr);
+  const preflight = JSON.parse(result.stdout) as Record<string, unknown>;
+  Assert.equal(preflight.status, expected, JSON.stringify(preflight));
+  Assert.equal(typeof preflight.version, "string");
+  if (expected === "blocked") Assert.equal(preflight.code, "recovery_required");
+  else Assert.equal(preflight.launcherProtocol, SERVICE_LAUNCHER_PROTOCOL);
 }
 
 async function capture(page: Page, directory: string, name: string): Promise<void> {
@@ -684,6 +753,12 @@ async function exercise(implementation: Implementation): Promise<void> {
       Awaited<ReturnType<typeof assertCompleted>> & { checkpoint: string }
     >,
     persistence: [] as Array<ReturnType<typeof inspectNativeReplay> & { checkpoint: string }>,
+    crashRecovery: null as {
+      readonly generation: ReturnType<typeof inspectNativeGeneration>;
+      readonly dirtyPreflight: string;
+      readonly dirtyDatabaseUnchanged: boolean;
+      recoveredPreflight: string | null;
+    } | null,
     browserErrors: [] as string[],
     error: null as string | null,
   };
@@ -816,8 +891,28 @@ async function exercise(implementation: Implementation): Promise<void> {
     completed("Reconnected after a client reload with the same completed thread");
 
     starting("owned server restart");
-    await application.stop();
-    inspectPersistence("closed-before-restart", true);
+    const databasePath = NodePath.join(stateDirectory, "userdata", "statev2.omdb");
+    const bundledDatabase = NodePath.join(repoRoot, "apps/server/dist/native-bin/t3-code-ls-db");
+    if (crashRestart) {
+      const generation = inspectNativeGeneration(bundledDatabase, databasePath);
+      killOwnedDatabaseWriter(application.pid, bundledDatabase, databasePath);
+      await application.stop("SIGKILL");
+      const hash = () =>
+        NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(databasePath)).digest("hex");
+      const dirtyHash = hash();
+      assertBundledPreflight(stateDirectory, databasePath, "blocked");
+      Assert.equal(hash(), dirtyHash, "Update preflight must leave the dirty database untouched");
+      proof.crashRecovery = {
+        generation,
+        dirtyPreflight: "recovery_required",
+        dirtyDatabaseUnchanged: true,
+        recoveredPreflight: null,
+      };
+      completed("Killed the bundled server and its native writer and verified read-only preflight refusal");
+    } else {
+      await application.stop();
+      inspectPersistence("closed-before-restart", true);
+    }
     application = await startApplication(
       implementation,
       stateDirectory,
@@ -838,6 +933,17 @@ async function exercise(implementation: Implementation): Promise<void> {
     });
     page = await context.newPage();
     observePage(page);
+    if (proof.crashRecovery) {
+      Assert.deepEqual(
+        inspectNativeGeneration(bundledDatabase, databasePath),
+        proof.crashRecovery.generation,
+      );
+      assertBundledPreflight(stateDirectory, databasePath, "ready");
+      proof.crashRecovery.recoveredPreflight = "ready";
+      Assert.ok(proof.interrupted);
+      await page.goto(proof.interrupted.threadUrl, { waitUntil: "domcontentloaded" });
+      await verifyInterruptedShowcase(page, proof.interrupted);
+    }
     await page.goto(proof.threadUrl, { waitUntil: "domcontentloaded" });
     proof.completedSnapshots.push({
       checkpoint: "server-restart",
@@ -886,7 +992,7 @@ async function exercise(implementation: Implementation): Promise<void> {
       completed("Cancelled the recorded question in the composer and recovered its cancelled request");
     }
     if (implementation === "native") {
-      Assert.equal(proof.persistence.length, 4);
+      Assert.equal(proof.persistence.length, crashRestart ? 3 : 4);
       completed(
         "Verified canonical omdb rows and event heads through read-only native inspection, with no application SQLite files",
       );
