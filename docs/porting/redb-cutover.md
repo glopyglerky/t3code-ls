@@ -651,6 +651,15 @@ remain available.
 The startup fixture covered an uncataloged file, a current file, a schema 88
 upgrade, and recovery after a killed writer. The isolated native trial test
 verified refusal against a sealed catalog. Successful bootstrap still provides
-the migration witness used by serving descriptors. These checks cover
-behavior. A paired startup measurement remains open.
+the migration witness used by serving descriptors.
 [Startup recovery and sealed inspection checks](https://github.com/glopyglerky/t3code-ls/actions/runs/45175802072)
+
+Six balanced rounds reopened the same 32-thread, 6,400-message fixture with
+stock, the pre-change native bundle, and the candidate. Compared with the
+pre-change native bundle, median paired server CPU fell 65 ms across six
+rounds. Descriptor readiness was 14.6 ms later and first selected text was
+22.1 ms later at the paired median. Compared with stock, descriptor readiness
+was 340.2 ms later and server CPU was 2,245 ms higher. Observations use one Linux
+x64 runner, unmanaged filesystem cache, sampled process RSS, and distinct
+stock SQLite WAL/NORMAL and omdb Immediate durability profiles.
+[Paired workspace reopen](https://github.com/glopyglerky/t3code-ls/actions/runs/45177228845)
