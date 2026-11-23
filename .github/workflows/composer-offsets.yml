@@ -82,7 +82,7 @@ jobs:
           pnpm install --frozen-lockfile
           node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
       - name: Exercise a blocked IndexedDB upgrade in Chromium
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-indexeddb-blocked-')
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-indexeddb-blocked-')
         run: |
           pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
             src/connection/storage.blocked.browser.test.ts
@@ -119,7 +119,7 @@ jobs:
           node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/launch-receipt-tsconfig.json
       - name: Type check the full server with the pinned Rust checker
         id: server-types
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t16-root-release-server-types-')
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t16-root-release-server-types-')
         run: node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit --pretty false -p apps/server/tsconfig.json
       - name: Compare a typecheck failure with the pinned Go checker and Effect diagnostics
         if: failure() && steps.server-types.outcome == 'failure'
@@ -132,7 +132,7 @@ jobs:
           echo "Go checker exit status $status"
           node "$checker" diagnostics --project apps/server/tsconfig.json --format text --severity error,warning
       - name: Exercise the selected runtime service graph
-        if: ${{ !cancelled() && steps.server-types.outcome != 'skipped' && startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t16-root-release-server-types-') }}
+        if: ${{ !cancelled() && (steps.server-types.outcome == 'success' || steps.server-types.outcome == 'failure') }}
         env:
           T3_CODE_LS_IMPLEMENTATION: upstream
         run: |
