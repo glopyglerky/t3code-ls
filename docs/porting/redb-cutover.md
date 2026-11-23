@@ -462,10 +462,40 @@ reader refusal with unchanged database bytes, and rollback with the extended
 receipt. The packaged launcher fixture records through the actual installed SEA,
 retries with a fresh launcher, rejects a corrupt observation, then runs its existing
 sealed publication and rollback checks. These added native cases require hosted
-qualification. The local source checks and eight runnable launcher process tests
-passed, while Linux and compiled-artifact cases were skipped on macOS.
+qualification. Hosted Linux run [45158212678](https://github.com/glopyglerky/t3code-ls/actions/runs/45158212678)
+passed both native trial tests and the packaged launcher rollback. Eight local
+launcher process tests passed on macOS, with thirteen Linux cases skipped.
 
 Source lineage remains MIT T3 Code at stock
 `28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`. This increment uses the existing native
 trial receipt and tempfile atomic publication mechanism. Method SHA-256 is
+`5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
+
+### Serving migration metadata
+
+Normal native serving obtains `databaseMigration` from the ordered migrations
+returned by its selected owner's successful `application_bootstrap`. `Omdb.make`
+releases the scoped witness only after index preparation, optional independent
+reader validation and ownership activation succeed. `Omdb.layerConfig` shares
+that witness with both normal environment-layer sites through the same memoized
+persistence owner. No second database owner or persistent status record is added.
+
+The native serving environment requires this dependency before constructing its
+descriptor and refuses a witness for a different database path. Repeated descriptor
+reads reuse the earned head. SQLite serving, the standalone environment CLI,
+preflight and staged candidate pre-admission retain their existing inspection
+paths. The observation is startup metadata, with no new event, replay, migration,
+provider or activation operation.
+
+The startup fixture holds a real native write transaction and injects a bounded
+independent-inspector refusal. It first confirms that the former probe reports no
+head, then requires the scoped serving layer to report the earned head repeatedly
+without another inspection. Existing native inspection tests continue to allow
+independent reads during a writer when the engine grants them. Failed ownership
+activation must return no witness. Environment layer regressions also cover a
+failed persistence dependency and a synthetic head different from the build head.
+Hosted Linux run [45159499480](https://github.com/glopyglerky/t3code-ls/actions/runs/45159499480)
+passed the native startup gate. The separate environment layer unit tests await
+execution. Source lineage remains MIT T3 Code at
+`28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`, under method SHA-256
 `5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.

@@ -536,7 +536,11 @@ const layerProjectFaviconResolver = ProjectFaviconResolver.layer.pipe(
   Layer.provide(T3ProjectFileLoader.layer),
 );
 
-const layerServerEnvironment = ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer));
+const layerServerEnvironment = (
+  SelectedPersistence.selection.kind === "omdb"
+    ? ServerEnvironment.layerServing.pipe(Layer.provide(Omdb.layerConfig))
+    : ServerEnvironment.layer
+).pipe(Layer.provide(ServerSecretStore.layer));
 
 const layerAuth = EnvironmentAuth.layerSelected.pipe(
   Layer.provideMerge(layerPersistence),
@@ -1297,7 +1301,7 @@ const layerMakeServer = (ownership: AcquiredOwnership) =>
         Layer.provideMerge(layerRuntimeServices),
         Layer.provideMerge(
           McpSessionRegistry.layer.pipe(
-            Layer.provide(ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer))),
+            Layer.provide(layerServerEnvironment),
           ),
         ),
         Layer.provide(layerActivation),
