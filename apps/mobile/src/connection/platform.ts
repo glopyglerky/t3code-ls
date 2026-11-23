@@ -30,6 +30,7 @@ import { clearComposerDraftsEnvironment } from "../state/use-composer-drafts";
 import { clearThreadComposerErrorsForEnvironment } from "../state/thread-composer-error";
 import { mobileApplicationActiveWakeup } from "./app-state-wakeups";
 import * as ConnectionStorage from "./storage";
+import { clearEnvironmentOwnedData } from "./environment-owned-data-cleanup";
 
 function networkStatus(state: Network.NetworkState): "unknown" | "offline" | "online" {
   if (state.isConnected === false) {
@@ -259,14 +260,11 @@ const layerEnvironmentOwnedDataCleanup = Layer.succeed(
   Persistence.EnvironmentOwnedDataCleanup,
   Persistence.EnvironmentOwnedDataCleanup.of({
     clear: Effect.fn("Persistence.EnvironmentOwnedDataCleanup.clear")((environmentId) =>
-      Effect.all(
-        [
-          Effect.promise(() => clearThreadOutboxEnvironment(environmentId)),
-          Effect.promise(() => clearComposerDraftsEnvironment(environmentId)),
-          Effect.sync(() => clearThreadComposerErrorsForEnvironment(environmentId)),
-        ],
-        { concurrency: "unbounded", discard: true },
-      ),
+      clearEnvironmentOwnedData(environmentId, {
+        clearOutbox: clearThreadOutboxEnvironment,
+        clearDrafts: clearComposerDraftsEnvironment,
+        clearErrors: clearThreadComposerErrorsForEnvironment,
+      }),
     ),
   }),
 );
