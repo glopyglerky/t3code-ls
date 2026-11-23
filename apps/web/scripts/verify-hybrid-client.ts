@@ -1526,14 +1526,34 @@ async function verifyTerminalContention(
     "",
   ].join("\n"), { mode: 0o600, flag: "wx" });
 
-  type WireView = { output: string; snapshot?: TerminalSessionSnapshot };
-  const before: WireView = { output: "" };
-  const after: WireView = { output: "" };
+  type WireView = {
+    output: string;
+    snapshot?: TerminalSessionSnapshot;
+    sockets: number;
+    parts: number;
+    outputs: number;
+    snapshots: number;
+  };
+  const newWireView = (): WireView => ({ output: "", sockets: 0, parts: 0, outputs: 0, snapshots: 0 });
+  const before = newWireView();
+  const after = newWireView();
   let reattaching = false;
   const observeSocket = (socket: import("playwright").WebSocket) => {
+    const url = new URL(socket.url());
+    if (url.pathname !== "/ws") return;
     const view = reattaching ? after : before;
+    view.sockets++;
+    let pending = "";
     socket.on("framereceived", ({ payload }) => {
-      const json = payload.toString();
+      const frame = payload.toString();
+      // The negotiated RPC transport prefixes every nonfinal JSON part with RS.
+      if (url.searchParams.has("frameParts") && frame.startsWith("\u001e")) {
+        view.parts++;
+        pending += frame.slice(1);
+        return;
+      }
+      const json = pending + frame;
+      pending = "";
       if (!json.includes('"type":"output"') && !json.includes('"type":"snapshot"')) return;
       const envelope = JSON.parse(json) as { values?: TerminalAttachStreamEvent[] };
       for (const event of envelope.values ?? []) {
@@ -1542,6 +1562,7 @@ async function verifyTerminalContention(
           event.snapshot?.threadId === threadId &&
           event.snapshot.terminalId === DEFAULT_TERMINAL_ID
         ) {
+          view.snapshots++;
           view.snapshot = event.snapshot;
         }
         if (
@@ -1549,10 +1570,22 @@ async function verifyTerminalContention(
           event.threadId === threadId &&
           event.terminalId === DEFAULT_TERMINAL_ID
         ) {
+          view.outputs++;
           view.output = (view.output + event.data).slice(-64 * 1024);
         }
       }
     });
+  };
+  const waitForWire = async (view: WireView, checkpoint: string, received: () => boolean) => {
+    const deadline = Date.now() + 10_000;
+    while (!received() && Date.now() < deadline) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+    const { sockets, parts, outputs, snapshots } = view;
+    Assert.ok(received(), `${checkpoint} absent on the browser socket (${JSON.stringify({
+      sockets, parts, outputs, snapshots, rows: rows(view.output).length,
+      snapshotRows: rows(view.snapshot?.history ?? "").length,
+    })})`);
   };
   const paste = async (input: Locator, text: string) => {
     await page.evaluate((line) => navigator.clipboard.writeText(line), text);
@@ -1592,6 +1625,7 @@ async function verifyTerminalContention(
     await paste(input, token);
     const firstScreen = await waitForSelectedTerminalText(page, input, echoLine);
     Assert.deepEqual(rows(firstScreen), firstRows, "The initial burst must render in order");
+    await waitForWire(before, "Initial terminal echo", () => echoLine.test(before.output));
     Assert.deepEqual(rows(before.output), firstRows, "The initial wire burst must be complete and ordered");
     const inputEcho = before.output.match(echoLine)?.[0]?.trimEnd();
     Assert.equal(inputEcho, token);
@@ -1601,6 +1635,7 @@ async function verifyTerminalContention(
     await page.reload({ waitUntil: "domcontentloaded" });
     const reattached = await terminalInput(page);
     Assert.deepEqual(rows(await waitForSelectedTerminalText(page, reattached, echoLine)), firstRows);
+    await waitForWire(after, "Reattach snapshot", () => echoLine.test(after.snapshot?.history ?? ""));
     const snapshot = after.snapshot;
     Assert.ok(snapshot, "A fresh browser socket must receive a terminal snapshot");
     Assert.equal(snapshot.status, "running");
@@ -1649,6 +1684,7 @@ async function verifyTerminalContention(
     Assert.deepEqual(renderedRows, expectedRows);
     const accepted = `j45-accepted:${token}`;
     Assert.ok(finalScreen.includes(accepted));
+    await waitForWire(after, "Terminal drain marker", () => after.output.includes(`j45-drained:${shell}`));
     Assert.ok(after.output.includes(accepted));
     const wireRows = [...rows(before.output), ...rows(after.output)];
     Assert.deepEqual(wireRows, expectedRows);
