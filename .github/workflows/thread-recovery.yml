@@ -538,8 +538,10 @@ jobs:
           export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-server-target"
           export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 T3_CODE_LS_IMPLEMENTATION=native
           trap 'rm -rf -- "$CARGO_HOME" "$CARGO_TARGET_DIR" "$RUNNER_TEMP/outbox-server-components" "$RUNNER_TEMP/outbox-server-toolchain"' EXIT
-          node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/outbox-server-toolchain"
-          export T3_CODE_LS_TOOLCHAIN="$RUNNER_TEMP/outbox-server-toolchain"
+          T3_CODE_LS_TOOLCHAIN=$(node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/outbox-server-toolchain")
+          export T3_CODE_LS_TOOLCHAIN
+          test -x "$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+          test -d "$T3_CODE_LS_TOOLCHAIN/lib/rustlib/x86_64-unknown-linux-gnu/lib"
           pnpm --dir apps/web run build
           node tools/build-native.mjs "$RUNNER_TEMP/outbox-server-components"
           T3_CODE_LS_NATIVE_DIR="$RUNNER_TEMP/outbox-server-components" pnpm --dir apps/server run build:bundle
