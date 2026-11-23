@@ -76,6 +76,153 @@ async function readReply(file, running) {
 // Pinned runtime fixtures are executable Node scripts on Unix.
 const processTest = (name, run) => test(name, { skip: process.platform === "win32" }, run);
 
+async function sealedFixture(t, mode = "success") {
+  const f = await fixture(t);
+  const id = "a43bc4d1-666d-4157-aefd-02153e9c5ad4";
+  const dbPath = path.join(f.userdata, "statev2.omdb");
+  const original = path.join(f.userdata, `.statev2-source-${id}.omdb`);
+  const failed = path.join(f.userdata, `.statev2-failed-sealed-${id}.omdb`);
+  const calls = path.join(f.runtime, "rollback-calls");
+  const ready = path.join(f.runtime, "ready.json");
+  const backup = path.join(f.runtime, "db-backup", `${id}.omdb`);
+  const receipt = path.join(f.userdata, `.statev2-trial-${id}.receipt-v1.json`);
+  const pending = { protocol: 5, activeVersion, update: {
+    id, fromVersion: activeVersion, targetVersion, dbPath, status: "pending",
+  } };
+  await fs.writeFile(dbPath, "sealed candidate fixture");
+  await fs.writeFile(original, "original native fixture");
+  await fs.mkdir(path.dirname(backup), { recursive: true });
+  await fs.writeFile(backup, "original checkpoint fixture");
+  await fs.writeFile(receipt, "original physical trial receipt fixture");
+  await fs.writeFile(path.join(f.userdata, "server-owner.sqlite"), "t3code-omdb-owner-v1\n");
+  await fs.writeFile(f.statePath, JSON.stringify(pending));
+  const active = await f.install(activeVersion, `
+    if (fs.readFileSync(${JSON.stringify(dbPath)}, "utf8") !== "original native fixture") process.exit(9);
+    fs.writeFileSync(${JSON.stringify(ready)}, JSON.stringify(context));
+    setInterval(() => {}, 1000);
+  `);
+  await f.install(targetVersion, "process.exit(7);");
+  const directory = path.join(active, "native-bin");
+  await fs.mkdir(directory);
+  const helper = `#!${process.execPath}\n` + `
+    const fs = require("node:fs");
+    const capabilities = {
+      version: 1, engine: "omdb", engineRevision: "a".repeat(40),
+      targetSchemaSha256: "b".repeat(64),
+      ...( ${JSON.stringify(mode)} === "missing capability" ? {} : { sealedTrialRollback: 1 }),
+    };
+    if (process.argv[2] === "trial-capabilities") {
+      console.log(JSON.stringify({ ok: true, result: capabilities }));
+      process.exit(0);
+    }
+    if (process.argv[2] !== "trial-rollback-sealed" ||
+        process.argv[3] !== ${JSON.stringify(path.dirname(f.userdata))} ||
+        process.argv[4] !== ${JSON.stringify(id)}) process.exit(8);
+    const calls = ${JSON.stringify(calls)};
+    const reused = fs.existsSync(calls);
+    fs.appendFileSync(calls, "rollback\\n");
+    const identity = (file) => {
+      const stat = fs.statSync(file, { bigint: true });
+      return { device: stat.dev.toString(16).padStart(16, "0"),
+        inode: stat.ino.toString(16).padStart(16, "0"), created: stat.birthtimeNs.toString() };
+    };
+    if (!reused) {
+      fs.renameSync(${JSON.stringify(dbPath)}, ${JSON.stringify(failed)});
+      fs.renameSync(${JSON.stringify(original)}, ${JSON.stringify(dbPath)});
+    }
+    if (${JSON.stringify(mode)} === "lost receipt" && !reused) {
+      console.log(JSON.stringify({ ok: false, error: { kind: "unknown_commit" } }));
+      process.exit(0);
+    }
+    if (${JSON.stringify(mode)} === "changed selection") {
+      const state = ${JSON.stringify(pending)};
+      state.update.targetVersion = "1.2.0";
+      fs.writeFileSync(${JSON.stringify(f.statePath)}, JSON.stringify(state));
+    }
+    console.log(JSON.stringify({ ok: true, result: {
+      activation: {
+        update_id: ${JSON.stringify(mode === "wrong receipt" ? "other" : id)},
+        from_version: ${JSON.stringify(activeVersion)}, target_version: ${JSON.stringify(targetVersion)},
+        target_entry_sha256: "c".repeat(64), target_helper_sha256: "d".repeat(64),
+        target_schema_sha256: "e".repeat(64),
+      },
+      database: identity(${JSON.stringify(dbPath)}),
+      preserved_database: identity(${JSON.stringify(failed)}), reused,
+    } }));
+  `;
+  await fs.writeFile(path.join(directory, "t3-code-ls-db"), helper, { mode: 0o700 });
+  await fs.writeFile(path.join(directory, "manifest.json"), JSON.stringify({
+    target: "linux-x64", rustTarget: "x86_64-unknown-linux-gnu",
+    files: { "t3-code-ls-db": mode === "wrong digest" ? "0".repeat(64)
+      : createHash("sha256").update(helper).digest("hex") },
+  }));
+  return { ...f, pending, ready, dbPath, calls, backup, receipt };
+}
+
+for (const mode of ["success", "lost receipt"]) {
+  test(`recovers a sealed native pending trial through its installed helper with ${mode}`, {
+    skip: !isQualifiedNativeHost(),
+  }, async (t) => {
+    const f = await sealedFixture(t, mode);
+    await assert.rejects(readServiceState(f.statePath), /invalid or unsupported/u);
+    const environment = { T3_CODE_LS_SEALED_TRIAL_RECOVERY: "1" };
+    if (mode === "lost receipt") {
+      const failedLauncher = f.launcher(f.pending, environment);
+      await assert.rejects(failedLauncher.run(), /receipt does not match/u);
+      assert.deepEqual(JSON.parse(await fs.readFile(f.statePath, "utf8")), f.pending);
+      assert.equal(await fs.readFile(f.dbPath, "utf8"), "original native fixture");
+      await assert.rejects(fs.stat(f.starts), { code: "ENOENT" });
+    }
+    const launcher = f.launcher(f.pending, environment);
+    const running = launcher.run().then(() => "completed", (error) => error.message);
+    try {
+      const context = await readReply(f.ready, running);
+      assert.equal(context.protocol, SERVICE_LAUNCHER_PROTOCOL);
+      assert.equal(context.childVersion, activeVersion);
+      assert.deepEqual(await readServiceState(f.statePath), {
+        ...initial, update: { id: f.pending.update.id, fromVersion: activeVersion,
+          targetVersion, status: "rolled-back", reason: "sealed-trial-recovery" },
+      });
+      assert.equal(await fs.readFile(f.starts, "utf8"), `${activeVersion}\n`);
+      assert.equal(await fs.readFile(f.calls, "utf8"), "rollback\n".repeat(mode === "lost receipt" ? 2 : 1));
+      assert.equal(await fs.readFile(f.backup, "utf8"), "original checkpoint fixture");
+      assert.equal(await fs.readFile(f.receipt, "utf8"), "original physical trial receipt fixture");
+    } finally {
+      await launcher.stop("SIGTERM");
+      await running;
+    }
+  });
+}
+
+for (const mode of ["missing capability", "wrong digest", "wrong receipt", "changed selection", "missing helper", "noncanonical path", "unknown field", "disabled"]) {
+  test(`preserves a sealed native pending trial after ${mode}`, {
+    skip: mode === "disabled" ? process.platform === "win32" : !isQualifiedNativeHost(),
+  }, async (t) => {
+    const f = await sealedFixture(t, mode);
+    const expected = structuredClone(f.pending);
+    if (mode === "missing helper") {
+      await fs.rm(path.join(f.runtime, "versions", activeVersion, "native-bin", "t3-code-ls-db"));
+    }
+    if (mode === "noncanonical path") expected.update.dbPath += ".different";
+    if (mode === "unknown field") expected.extra = "unsupported";
+    if (mode === "noncanonical path" || mode === "unknown field") {
+      await fs.writeFile(f.statePath, JSON.stringify(expected));
+    }
+    const launcher = f.launcher(f.pending,
+      mode === "disabled" ? {} : { T3_CODE_LS_SEALED_TRIAL_RECOVERY: "1" });
+    await assert.rejects(launcher.run());
+    if (mode === "changed selection") expected.update.targetVersion = "1.2.0";
+    assert.deepEqual(JSON.parse(await fs.readFile(f.statePath, "utf8")), expected);
+    await assert.rejects(fs.stat(f.starts), { code: "ENOENT" });
+    assert.equal(await fs.readFile(f.backup, "utf8"), "original checkpoint fixture");
+    assert.equal(await fs.readFile(f.receipt, "utf8"), "original physical trial receipt fixture");
+    if (["missing capability", "wrong digest", "disabled", "missing helper", "noncanonical path", "unknown field"].includes(mode)) {
+      await assert.rejects(fs.stat(f.calls), { code: "ENOENT" });
+      assert.equal(await fs.readFile(f.dbPath, "utf8"), "sealed candidate fixture");
+    }
+  });
+}
+
 for (const source of ["native", "unknown"]) {
   processTest(`refuses a live ${source} update before stopping the active child`, async (t) => {
     const f = await fixture(t);

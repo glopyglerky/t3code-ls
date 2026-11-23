@@ -629,6 +629,7 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
                 "engine": identity.engine,
                 "engineRevision": identity.engine_revision,
                 "targetSchemaSha256": sha256(definition),
+                "sealedTrialRollback": 1,
             },
         })
     );
