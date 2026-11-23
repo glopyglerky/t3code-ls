@@ -26,11 +26,21 @@ impl Browser {
         if imported["valid"] != true {
             return Err(format!("mature fixture import failed: {imported}").into());
         }
-        let thread = self.wait_element(
-            "the imported selected thread",
-            "return [...document.querySelectorAll('[data-thread-item]')].find(e => e.textContent.includes('Reopen fixture 0000') && e.getClientRects().length);",
+        // Imports are settled. A collapsed Settled shelf renders only its routed thread.
+        // Open the normal app route before filling the selected-thread browser cache.
+        let route = imported["route"]
+            .as_str()
+            .ok_or("missing imported thread route")?;
+        let origin = self.script("return location.origin;")?;
+        let origin = origin.as_str().ok_or("missing fixture browser origin")?;
+        if !route.starts_with('/') || route.starts_with("//") || route.contains(['?', '#']) {
+            return Err("imported thread route is invalid".into());
+        }
+        self.command(
+            "POST",
+            "/url",
+            Some(json!({"url": format!("{origin}{route}")})),
         )?;
-        self.command("POST", &format!("/element/{thread}/click"), Some(json!({})))?;
         self.wait_for("the selected imported history", || {
             self.script("return document.querySelector('main, [role=main]')?.innerText.includes('Reopen fixture 0000 assistant 0199') === true;")
                 .map(|value| value == true)

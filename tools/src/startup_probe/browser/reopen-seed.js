@@ -70,5 +70,12 @@ const fail = (error) => done({ valid: false, error: String(error) });
   if (threads.length !== threadCount || !threads.some((thread) => thread.id === selectedThreadId)) {
     throw new Error("Authoritative shell is missing imported threads");
   }
-  done({ valid: true, scannedThreadCount, imported, shellSequence: shell.snapshotSequence });
+  const descriptorResponse = await fetch("/.well-known/t3/environment", { cache: "no-store" });
+  if (!descriptorResponse.ok) throw new Error(`Descriptor returned ${descriptorResponse.status}`);
+  const descriptor = await descriptorResponse.json();
+  if (typeof descriptor.environmentId !== "string" || descriptor.environmentId.length === 0) {
+    throw new Error("Fixture descriptor is missing its environment ID");
+  }
+  const route = `/${encodeURIComponent(descriptor.environmentId)}/${encodeURIComponent(selectedThreadId)}`;
+  done({ valid: true, scannedThreadCount, imported, shellSequence: shell.snapshotSequence, route });
 })().catch(fail);
