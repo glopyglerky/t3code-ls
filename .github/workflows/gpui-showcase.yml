@@ -102,3 +102,14 @@ jobs:
             exec runuser -u "$1" -- xvfb-run -a -s "-screen 0 1280x1024x24" dbus-run-session -- \
               "$2" apps/server/scripts/verify-gpui-thread-submit.ts "$3" --approval
           ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/gpui-target/debug/t3-code-ls-desktop-gpui"
+      - name: Interrupt a real streamed run and verify the native receipt
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t14-gpui-showcase-stop-')
+        timeout-minutes: 5
+        run: |
+          db="$GITHUB_WORKSPACE/apps/server/dist/native-bin/t3-code-ls-db"
+          test -x "$db"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- xvfb-run -a -s "-screen 0 1280x1024x24" dbus-run-session -- \
+              "$2" apps/server/scripts/verify-gpui-thread-submit.ts "$3" --stop "$4"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/gpui-target/debug/t3-code-ls-desktop-gpui" "$db"

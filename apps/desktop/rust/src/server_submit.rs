@@ -4,7 +4,10 @@ use serde_json::{Value, json};
 use std::{
     io::{self, Read, Write},
     net::{Ipv4Addr, SocketAddr, TcpStream},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 use t3_code_ls_client_text::text_revision::{TextChange, TextEdit, TextRevision};
@@ -12,6 +15,10 @@ use tungstenite::{Message, client::IntoClientRequest, protocol::WebSocketConfig}
 
 pub const FAILED: &str =
     "Could not confirm submission. Draft kept. Check the thread before retrying.";
+pub const INTERRUPTED: &str = "Server run interrupted. Draft kept.";
+pub const STOP_UNKNOWN: &str =
+    "Could not confirm interruption. Draft kept. Check the server thread before retrying.";
+pub const STOP_PENDING: &str = "Stop requested. Waiting for server interruption.";
 pub const CONFIRMED: &str = "Server submission confirmed.";
 pub const APPROVAL_UNCONFIRMED: &str =
     "Could not confirm approval and turn completion. Draft kept. Check the server thread.";
@@ -23,6 +30,7 @@ const ACCEPT_ONCE: &str = "accept";
 
 pub enum Progress {
     Completed(Snapshot),
+    Interrupted(Snapshot),
     Approval(Approval),
 }
 
@@ -36,12 +44,21 @@ pub struct Approval {
     pub detail: String,
 }
 
+#[derive(Default)]
+struct StopState {
+    active: Option<String>,
+    requested: Option<String>,
+    attempted: bool,
+}
+
 pub struct Session {
     connection: Connection,
     project_id: String,
     command_id: String,
     message_id: String,
     approval_command_id: Option<String>,
+    stop_command_id: Option<String>,
+    stop: Mutex<StopState>,
     attempted: AtomicBool,
     approval_attempted: AtomicBool,
 }
@@ -60,7 +77,8 @@ impl Session {
         let value: Value = serde_json::from_slice(&bytes).map_err(|_| FAILED)?;
         let object = value.as_object().ok_or(FAILED)?;
         let has_approval = object.contains_key("approvalCommandId");
-        let expected_fields = if has_approval { 8 } else { 7 };
+        let has_stop = object.contains_key("stopCommandId");
+        let expected_fields = 7 + usize::from(has_approval) + usize::from(has_stop);
         if object.len() != expected_fields {
             return Err(FAILED);
         }
@@ -78,6 +96,13 @@ impl Session {
         let approval_command_id = has_approval
             .then(|| identity("approvalCommandId"))
             .transpose()?;
+        let stop_command_id = has_stop.then(|| identity("stopCommandId")).transpose()?;
+        if stop_command_id
+            .as_ref()
+            .is_some_and(|id| id == &command_id || Some(id) == approval_command_id.as_ref())
+        {
+            return Err(FAILED);
+        }
         if approval_command_id.as_deref() == Some(command_id.as_str()) {
             return Err(FAILED);
         }
@@ -87,9 +112,65 @@ impl Session {
             command_id,
             message_id: identity("messageId")?,
             approval_command_id,
+            stop_command_id,
+            stop: Mutex::new(StopState::default()),
             attempted: AtomicBool::new(false),
             approval_attempted: AtomicBool::new(false),
         })
+    }
+
+    pub fn can_stop(&self) -> bool {
+        self.stop_command_id.is_some()
+            && self.stop.lock().is_ok_and(|state| {
+                state.active.is_some() && state.requested.is_none() && !state.attempted
+            })
+    }
+
+    // Only queue a confirmed streamed identity. The transport revalidates it before dispatch.
+    pub fn request_stop(&self) -> bool {
+        let Ok(mut state) = self.stop.lock() else {
+            return false;
+        };
+        if self.stop_command_id.is_none() || state.requested.is_some() || state.attempted {
+            return false;
+        }
+        let Some(run) = state.active.take() else {
+            return false;
+        };
+        state.requested = Some(run);
+        true
+    }
+
+    fn stop_attempted(&self) -> bool {
+        self.stop.lock().map_or(true, |state| state.attempted)
+    }
+
+    fn dispatch_stop(
+        &self,
+        snapshot: &Value,
+        text: &str,
+        cancelled: &AtomicBool,
+    ) -> Result<bool, &'static str> {
+        let requested = {
+            let mut state = self.stop.lock().map_err(|_| STOP_UNKNOWN)?;
+            let Some(run) = state.requested.take() else {
+                return Ok(false);
+            };
+            state.attempted = true;
+            run
+        };
+        let run = self.selected_run(snapshot, text).ok_or(STOP_UNKNOWN)?;
+        if run["id"].as_str() != Some(requested.as_str())
+            || run["status"].as_str() != Some("running")
+        {
+            return Err(STOP_UNKNOWN);
+        }
+        // No retry after a lost acknowledgement. Only a fresh interrupted projection confirms Stop.
+        let _receipt = self.dispatch(json!({
+            "type":"run.interrupt", "commandId":self.stop_command_id.as_ref().ok_or(STOP_UNKNOWN)?,
+            "threadId":self.connection.thread_id(), "runId":requested,
+        }), cancelled);
+        Ok(true)
     }
 
     pub fn submit(&self, text: &str, cancelled: &AtomicBool) -> Result<Progress, &'static str> {
@@ -148,13 +229,29 @@ impl Session {
         });
         // Even an RPC error can follow a committed dispatch. Reconcile only by reading this identity.
         let _receipt = self.dispatch(command, cancelled);
-        self.observe(cancelled, text, stream.as_mut(), |snapshot| {
+        let result = self.observe(cancelled, text, stream.as_mut(), |snapshot| {
             let run = self.selected_run(snapshot, text)?;
+            if self.stop_attempted() {
+                return (run["status"].as_str() == Some("interrupted"))
+                    .then(|| self.completed(snapshot).ok().map(Progress::Interrupted))
+                    .flatten();
+            }
             if run["status"].as_str() == Some("completed") {
                 return self.completed(snapshot).ok().map(Progress::Completed);
             }
             self.approval_command_id.as_ref()?;
             self.pending_approval(snapshot, run).map(Progress::Approval)
+        });
+        result.map_err(|error| {
+            if self
+                .stop
+                .lock()
+                .is_ok_and(|state| state.attempted || state.requested.is_some())
+            {
+                STOP_UNKNOWN
+            } else {
+                error
+            }
         })
     }
 
@@ -235,13 +332,28 @@ impl Session {
         mut stream: Option<&mut Delivery<'_>>,
         observed: impl Fn(&Value) -> Option<T>,
     ) -> Result<T, &'static str> {
-        let started = Instant::now();
+        let mut started = Instant::now();
         while started.elapsed() < RPC_DEADLINE {
             self.check_cancelled(cancelled)?;
             if let Ok(snapshot) = self.bound_projection() {
+                if self.dispatch_stop(&snapshot, submitted, cancelled)? {
+                    started = Instant::now();
+                }
+                if self.stop_attempted()
+                    && self.selected_run(&snapshot, submitted).is_some_and(|run| {
+                        matches!(
+                            run["status"].as_str(),
+                            Some("completed" | "failed" | "cancelled" | "rolled_back")
+                        )
+                    })
+                {
+                    return Err(STOP_UNKNOWN);
+                }
                 if let Some(delivery) = stream.as_mut() {
                     self.check_cancelled(cancelled)?;
-                    delivery.receive(self, submitted, &snapshot, cancelled)?;
+                    if !self.stop_attempted() {
+                        delivery.receive(self, submitted, &snapshot, cancelled)?;
+                    }
                 }
                 if let Some(result) = observed(&snapshot) {
                     self.check_cancelled(cancelled)?;
@@ -260,11 +372,15 @@ impl Session {
                     return Ok(result);
                 }
             }
-            if stream.is_none() {
+            if stream.is_none() || self.stop_attempted() {
                 std::thread::sleep(Duration::from_millis(100));
             }
         }
-        Err(FAILED)
+        Err(if self.stop_attempted() {
+            STOP_UNKNOWN
+        } else {
+            FAILED
+        })
     }
 
     fn check_cancelled(&self, cancelled: &AtomicBool) -> Result<(), &'static str> {
@@ -681,6 +797,12 @@ impl Delivery<'_> {
             })
             .map_err(|_| FAILED)?;
         session.check_cancelled(cancelled)?;
+        if session.stop_command_id.is_some() && run["status"].as_str() == Some("running") {
+            let mut stop = session.stop.lock().map_err(|_| FAILED)?;
+            if !stop.attempted && stop.requested.is_none() {
+                stop.active = checked_identity(&run["id"]).map(str::to_owned);
+            }
+        }
         (self.deliver)(Snapshot {
             text: format!(
                 "Thread {}\nMessage {}\nassistant\n{}\n",
@@ -884,6 +1006,104 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    fn stop_input(port: u16) -> Vec<u8> {
+        let mut value: Value = serde_json::from_slice(&input(port)).unwrap();
+        value["stopCommandId"] = json!("fixture-stop-command");
+        serde_json::to_vec(&value).unwrap()
+    }
+
+    #[test]
+    fn stop_exact_run_once_reconciles_ack_and_lost_ack_without_treating_cancel_as_interrupt() {
+        for (terminal, acknowledge) in [
+            ("interrupted", true),
+            ("interrupted", false),
+            ("cancelled", true),
+        ] {
+            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let peer = thread::spawn(move || {
+                let mut active = projection(true);
+                active["projection"]["runs"][0]["status"] = json!("running");
+                read_projection_value(&listener, active);
+                let mut socket = command_socket(&listener);
+                let command: Value =
+                    serde_json::from_str(socket.read().unwrap().to_text().unwrap()).unwrap();
+                assert_eq!(command["tag"], "orchestration.dispatchCommand");
+                assert_eq!(
+                    command["payload"],
+                    json!({"type":"run.interrupt", "commandId":"fixture-stop-command",
+                    "threadId":THREAD, "runId":"fixture-run"})
+                );
+                if acknowledge {
+                    socket.send(Message::Text(json!({"_tag":"Exit","requestId":"1","exit":{"_tag":"Success","value":{"sequence":8}}}).to_string().into())).unwrap();
+                }
+                drop(socket);
+                let mut after = projection(true);
+                after["projection"]["runs"][0]["status"] = json!(terminal);
+                read_projection_value(&listener, after);
+                // The listener owns exactly one interrupt dispatch; repeats must stay local.
+                thread::sleep(Duration::from_millis(50));
+                assert!(listener.accept().is_err());
+            });
+            let session = Session::read(stop_input(port).as_slice()).unwrap();
+            assert!(!session.request_stop());
+            session.stop.lock().unwrap().active = Some("fixture-run".into());
+            assert!(session.can_stop());
+            assert!(session.request_stop());
+            assert!(!session.request_stop());
+            let result = session.observe(&AtomicBool::new(false), PROMPT, None, |snapshot| {
+                let run = session.selected_run(snapshot, PROMPT)?;
+                (run["status"].as_str() == Some("interrupted"))
+                    .then(|| session.completed(snapshot).unwrap())
+            });
+            if terminal == "interrupted" {
+                assert!(result.unwrap().text.contains("Message fixture-reply"));
+            } else {
+                assert_eq!(result.err(), Some(STOP_UNKNOWN));
+            }
+            assert!(!session.can_stop());
+            assert!(!session.request_stop());
+            peer.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn stale_stop_and_local_cancel_never_send_interrupt() {
+        for changed in [false, true] {
+            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let peer = thread::spawn(move || {
+                let mut value = projection(true);
+                if changed {
+                    value["projection"]["runs"][0]["id"] = json!("replacement-run");
+                    value["projection"]["messages"][0]["runId"] = json!("replacement-run");
+                    value["projection"]["runs"][0]["status"] = json!("running");
+                }
+                read_projection_value(&listener, value);
+                thread::sleep(Duration::from_millis(50));
+                assert!(listener.accept().is_err());
+            });
+            let session = Session::read(stop_input(port).as_slice()).unwrap();
+            session.stop.lock().unwrap().active = Some("fixture-run".into());
+            assert!(session.request_stop());
+            let result = session.observe::<()>(&AtomicBool::new(false), PROMPT, None, |_| None);
+            assert_eq!(result.err(), Some(STOP_UNKNOWN));
+            assert!(!session.request_stop());
+            peer.join().unwrap();
+        }
+        let session = Session::read(stop_input(1).as_slice()).unwrap();
+        session.stop.lock().unwrap().active = Some("fixture-run".into());
+        assert!(session.request_stop());
+        assert!(
+            session
+                .observe::<()>(&AtomicBool::new(true), PROMPT, None, |_| None)
+                .is_err()
+        );
+        assert!(!session.stop_attempted());
     }
 
     #[test]
