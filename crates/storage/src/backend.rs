@@ -803,15 +803,15 @@ impl Backend {
     }
 
     #[cfg(unix)]
-    pub(crate) fn offline_file_metadata(&self) -> Result<std::fs::Metadata> {
+    pub(crate) fn open_verified_offline_file(&self, path: &Path) -> Result<File> {
         if !self.handles.exclusive || !self.handles.read_only {
             return Err(Error::IncompatibleStore);
         }
-        let file = open_regular_file(&self.handles.path, OpenOptions::new().read(true))?;
+        let file = open_regular_file(path, OpenOptions::new().read(true))?;
         if self.handles.identity.as_ref() != Some(&file_identity(&file)?) {
             return Err(Error::IncompatibleStore);
         }
-        file.metadata().map_err(storage_error)
+        Ok(file)
     }
 
     pub(crate) fn verify_identity(&self) -> Result<()> {
