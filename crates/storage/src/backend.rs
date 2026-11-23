@@ -404,7 +404,7 @@ pub(crate) struct ExclusiveTrialFile {
     max_bytes: u64,
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(target_os = "linux")]
 #[derive(Debug)]
 struct LeasedTrialBackend {
     file: Arc<redb::backends::FileBackend>,
@@ -421,7 +421,7 @@ enum TrialOpen {
     Writer(VerifyTrialOpen),
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(target_os = "linux")]
 impl StorageBackend for LeasedTrialBackend {
     fn len(&self) -> io::Result<u64> {
         self.file.len()
@@ -479,7 +479,7 @@ impl StorageBackend for LeasedTrialBackend {
 
 // Both fixture owners use the same native engine open. The adapter deliberately
 // never forwards close/unlock to the physical lease owner.
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(target_os = "linux")]
 fn open_leased_trial_writer(file: Arc<redb::backends::FileBackend>) -> Result<Database> {
     let mut options = builder();
     options.set_concurrency_mode(ConcurrencyMode::ExclusiveWriter);
@@ -491,7 +491,7 @@ fn open_leased_trial_writer(file: Arc<redb::backends::FileBackend>) -> Result<Da
         .map_err(storage_error)
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(target_os = "linux")]
 fn verify_inherited_trial_lease(file: &File, max_bytes: u64) -> Result<()> {
     use std::io::Read;
     use std::os::fd::AsRawFd;
@@ -533,7 +533,7 @@ fn verify_inherited_trial_lease(file: &File, max_bytes: u64) -> Result<()> {
     Ok(())
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(target_os = "linux")]
 impl Backend {
     /// Synthetic writer-open seam, not an activation or serving authority.
     /// The supervisor must retain its owners and serialize ALL engine handles
@@ -1385,7 +1385,7 @@ impl Backend {
         result
     }
 
-    #[cfg(all(test, target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     pub(crate) async fn shutdown_for_handoff(self) -> Result<()> {
         self.shutdown_owned(true).await
     }

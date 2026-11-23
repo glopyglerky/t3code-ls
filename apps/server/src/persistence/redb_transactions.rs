@@ -736,7 +736,7 @@ impl ApplicationTransactions {
         Ok(reused)
     }
 
-    #[cfg(all(test, target_os = "linux"))]
+    #[cfg(target_os = "linux")]
     pub(crate) async fn mark_forward_catalog(
         &self,
         prepared: &PreparedServiceActivation,

@@ -1,4 +1,4 @@
-//! Linux synthetic readiness adapter. It reads the inherited lease and never serves.
+//! Linux synthetic catalog receiver. It adopts the inherited lease and never serves.
 //! The supervising fixture retains home, selection and database ownership.
 use crate::application::{
     ApplicationTransactions, ForwardServiceActivation, PreparedServiceActivation,
@@ -119,9 +119,18 @@ fn executable_digest(path: &Path) -> Result<String> {
     trial_executable_digest(&File::open(path).map_err(|_| Error::IncompatibleStore)?)
 }
 
-/// A successful return is only a synthetic observation. Caller-supplied hashes
-/// do not grant ownership, authorize a writer, or permit seal release.
-pub async fn verify(home: &Path, encoded: &str) -> Result<()> {
+// Shared synthetic input checks. Neither hashes nor descriptors grant serving
+// authority. The parent owns admission, engine serialization and reconciliation.
+fn validate(
+    home: &Path,
+    encoded: &str,
+    check_digest: bool,
+) -> Result<(
+    ReadinessRequest,
+    IsolatedTrialVerification,
+    ForwardServiceActivation,
+    File,
+)> {
     if encoded.len() > 16 * 1024
         || !home.is_absolute()
         || !home
@@ -231,7 +240,7 @@ pub async fn verify(home: &Path, encoded: &str) -> Result<()> {
         || format!("{:016x}", held.dev()) != request.database.device
         || format!("{:016x}", held.ino()) != request.database.inode
         || created != request.database.created
-        || inherited_digest(&inherited)? != request.database_sha256
+        || (check_digest && inherited_digest(&inherited)? != request.database_sha256)
     {
         return Err(Error::IncompatibleStore);
     }
@@ -243,20 +252,67 @@ pub async fn verify(home: &Path, encoded: &str) -> Result<()> {
     ) {
         return Err(Error::IncompatibleStore);
     }
+    Ok((request, saved, marker, inherited))
+}
+
+/// Read-only observation of the permanent marker. Never admits serving.
+pub async fn verify(home: &Path, encoded: &str) -> Result<()> {
+    let (request, saved, marker, inherited) = validate(home, encoded, true)?;
     let store = Store {
         db: crate::backend::Backend::inherited_trial_reader(inherited, MAX_TRIAL_FILE_BYTES)
             .await?,
     };
-    // Reuse the production decoder, generation validation and bounded full
-    // record fingerprint. A prepared-only catalog cannot report readiness.
     let checked = ApplicationTransactions::new(store.clone())
-        .verify_forward_catalog(activation, &marker, &saved.preparation.snapshot)
+        .verify_forward_catalog(&request.activation, &marker, &saved.preparation.snapshot)
         .await;
-    store.shutdown().await?;
+    store.db.shutdown_for_handoff().await?;
     if !checked? {
         return Err(Error::IncompatibleStore);
     }
     Ok(())
+}
+
+/// Synthetic one-transaction receiver. The admitted fixture supervisor retains
+/// the real owners and every engine handle is closed before it can reopen.
+/// A request or inherited descriptor alone never permits ordinary serving.
+pub async fn commit(home: &Path, encoded: &str) -> Result<()> {
+    let (request, saved, marker, inherited) = validate(home, encoded, true)?;
+    let preview = Store {
+        db: crate::backend::Backend::inherited_trial_reader(inherited, MAX_TRIAL_FILE_BYTES)
+            .await?,
+    };
+    let checked = ApplicationTransactions::new(preview.clone())
+        .verify_forward_catalog(&request.activation, &marker, &saved.preparation.snapshot)
+        .await;
+    preview.db.shutdown_for_handoff().await?;
+    // Recovery and already committed observations belong to the parent owner.
+    // Never replay the writer after uncertain delivery.
+    if checked? {
+        return Err(Error::IncompatibleStore);
+    }
+    let (_, _, _, inherited) = validate(home, encoded, true)?;
+    let owned_home = home.to_owned();
+    let owned_encoded = encoded.to_owned();
+    let store = Store {
+        db: crate::backend::Backend::inherited_trial_checked_writer(
+            inherited,
+            MAX_TRIAL_FILE_BYTES,
+            move |_| validate(&owned_home, &owned_encoded, true).map(|_| ()),
+        )
+        .await?,
+    };
+    let transactions = ApplicationTransactions::new(store.clone());
+    let result = transactions
+        .mark_forward_catalog(&request.activation, marker, || {
+            validate(home, encoded, false).map(|_| ())
+        })
+        .await;
+    drop(transactions);
+    let closed = store.db.shutdown_for_handoff().await;
+    // Any error after writable open has uncertain delivery; only the owning
+    // parent may reconcile through its existing durable-state verifier.
+    result.map_err(|_| Error::UnknownCommit)?;
+    closed.map_err(|_| Error::UnknownCommit)
 }
 
 #[cfg(test)]

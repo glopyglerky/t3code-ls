@@ -148,6 +148,14 @@ jobs:
                 test --locked -j 2 -p t3-code-ls-storage --lib "$process_test" \
                 -- --ignored --exact --nocapture 2>&1 | tee "$proof/forward-process.log"
               grep -F "test $process_test ... ok" "$proof/forward-process.log"
+              if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-catalog-integrated-writer-process-installed-* ]]; then
+                packaged_test=application_bootstrap::upgrade::tests::service_forward_packaged_handoff
+                T3_TEST_PROMOTION_HELPER="$CARGO_TARGET_DIR/debug/t3-code-ls-db" \
+                  "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked -j 2 \
+                  -p t3-code-ls-storage --lib "$packaged_test" \
+                  -- --ignored --exact --nocapture 2>&1 | tee "$proof/forward-packaged.log"
+                grep -F "test $packaged_test ... ok" "$proof/forward-packaged.log"
+              fi
             fi
             sha256sum --check "$proof/prior-helper.sha256"
             timeout -k 5s 600s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \

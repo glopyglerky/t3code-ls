@@ -383,7 +383,26 @@ pub(crate) async fn record_fixture_forward_catalog_process(
     tokio::spawn(isolated::record_forward_catalog_owned(
         home,
         update_id,
-        Some(command),
+        Some(isolated::ForwardProcess::Fixture(command)),
+    ))
+    .await
+    .map_err(|_| Error::UnknownCommit)?
+}
+
+// The synthetic launcher selects the verified installed package internally.
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) async fn record_fixture_forward_catalog_packaged(
+    home: PathBuf,
+    update_id: String,
+    lose_output: bool,
+) -> Result<bool> {
+    if !home.is_absolute() || !valid_update_id(&update_id) {
+        return Err(Error::IncompatibleStore);
+    }
+    tokio::spawn(isolated::record_forward_catalog_owned(
+        home,
+        update_id,
+        Some(isolated::ForwardProcess::Packaged { lose_output }),
     ))
     .await
     .map_err(|_| Error::UnknownCommit)?

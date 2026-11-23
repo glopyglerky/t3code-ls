@@ -1446,6 +1446,8 @@ enum ForwardCommitCase {
     CatalogFences,
     ProcessHandoff,
     ProcessHandoffUnknown,
+    PackagedHandoff,
+    PackagedHandoffUnknown,
 }
 
 #[cfg(target_os = "linux")]
@@ -1492,6 +1494,19 @@ async fn service_forward_process_handoff() {
         ForwardCommitCase::ProcessHandoffUnknown,
     ))
     .await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "requires the exact-source packaged helper and executable sealed memfd policy"]
+async fn service_forward_packaged_handoff() {
+    assert!(std::env::var_os("T3_TEST_PROMOTION_HELPER").is_some());
+    for case in [
+        ForwardCommitCase::PackagedHandoff,
+        ForwardCommitCase::PackagedHandoffUnknown,
+    ] {
+        promotion_intent_fixture(PromotionFixture::ForwardCommit(case)).await;
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -1992,6 +2007,8 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
         ForwardCommitCase::CatalogFences
             | ForwardCommitCase::ProcessHandoff
             | ForwardCommitCase::ProcessHandoffUnknown
+            | ForwardCommitCase::PackagedHandoff
+            | ForwardCommitCase::PackagedHandoffUnknown
     );
     let generic_update = if catalog_case {
         "ba212c2b-63d4-4b28-97e4-1c1d6dc6d281"
@@ -2034,6 +2051,8 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
             | ForwardCommitCase::CatalogFences
             | ForwardCommitCase::ProcessHandoff
             | ForwardCommitCase::ProcessHandoffUnknown
+            | ForwardCommitCase::PackagedHandoff
+            | ForwardCommitCase::PackagedHandoffUnknown
     ) {
         let frame = run(
             &source_helper,
@@ -2072,7 +2091,9 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
         ForwardCommitCase::InterruptAfterDurable
         | ForwardCommitCase::CatalogFences
         | ForwardCommitCase::ProcessHandoff
-        | ForwardCommitCase::ProcessHandoffUnknown => "forward-commit-durable",
+        | ForwardCommitCase::ProcessHandoffUnknown
+        | ForwardCommitCase::PackagedHandoff
+        | ForwardCommitCase::PackagedHandoffUnknown => "forward-commit-durable",
     };
     let interrupt = |boundary: &str, action: Option<&str>| {
         let mut child = Command::new(std::env::current_exe().unwrap());
@@ -2256,13 +2277,27 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
             assert!(witness.exists());
             if matches!(
                 case,
-                ForwardCommitCase::ProcessHandoff | ForwardCommitCase::ProcessHandoffUnknown
+                ForwardCommitCase::ProcessHandoff
+                    | ForwardCommitCase::ProcessHandoffUnknown
+                    | ForwardCommitCase::PackagedHandoff
+                    | ForwardCommitCase::PackagedHandoffUnknown
             ) {
-                forward_writer_process_cases(
-                    home,
-                    matches!(case, ForwardCommitCase::ProcessHandoffUnknown),
-                )
-                .await;
+                if matches!(
+                    case,
+                    ForwardCommitCase::PackagedHandoff | ForwardCommitCase::PackagedHandoffUnknown
+                ) {
+                    forward_packaged_writer_case(
+                        home,
+                        matches!(case, ForwardCommitCase::PackagedHandoffUnknown),
+                    )
+                    .await;
+                } else {
+                    forward_writer_process_cases(
+                        home,
+                        matches!(case, ForwardCommitCase::ProcessHandoffUnknown),
+                    )
+                    .await;
+                }
                 assert_restore_refused();
                 assert_eq!(capture(&receipt), durable);
                 assert_eq!(capture(&original), source);
@@ -3061,7 +3096,7 @@ fn forward_packaged_child_cases(
     let original_offset = cursor.stream_position().unwrap();
     let database_hash =
         forward_fixture_sha256(&std::fs::read(home.join("userdata/statev2.omdb")).unwrap());
-    for case in [
+    for (case, commit) in [
         "valid",
         "mutable-image",
         "source-changed",
@@ -3077,6 +3112,7 @@ fn forward_packaged_child_cases(
     ]
     .into_iter()
     .filter(|case| coherent || *case == "valid")
+    .flat_map(|case| [(case, false), (case, true)])
     {
         // Change the original bytes only after staging. The sealed copy stays
         // exact, while readiness refuses the now-mismatching installed package.
@@ -3141,7 +3177,11 @@ fn forward_packaged_child_cases(
         };
         let mut child = Command::new(launch)
             .args([
-                "trial-verify-inherited-readiness",
+                if commit {
+                    "trial-commit-inherited-forward"
+                } else {
+                    "trial-verify-inherited-readiness"
+                },
                 home.to_str().unwrap(),
                 &request.to_string(),
             ])
@@ -3175,12 +3215,12 @@ fn forward_packaged_child_cases(
                 witness.activation.target_helper_sha256
             );
         }
-        let valid = coherent && matches!(case, "valid" | "parent-retry");
+        let valid = !commit && coherent && matches!(case, "valid" | "parent-retry");
         assert_eq!(
             status.code(),
             Some(if valid {
                 0
-            } else if coherent && case == "output-failure" {
+            } else if !commit && coherent && case == "output-failure" {
                 1
             } else {
                 78
@@ -3212,7 +3252,7 @@ fn forward_packaged_child_cases(
             database_hash
         );
         println!(
-            "T05 packaged readiness {case}: exit {}",
+            "T05 packaged observation {case}, commit refusal {commit}: exit {}",
             status.code().unwrap()
         );
     }
@@ -3397,4 +3437,44 @@ async fn forward_writer_process_cases(home: &std::path::Path, unknown: bool) {
             .unwrap()
     );
     assert_eq!(capture_forward_file(&live).unwrap(), marked);
+}
+
+#[cfg(target_os = "linux")]
+async fn forward_packaged_writer_case(home: &std::path::Path, lose_output: bool) {
+    use crate::application_storage::{
+        record_fixture_forward_catalog, record_fixture_forward_catalog_packaged,
+    };
+    let live = home.join("userdata/statev2.omdb");
+    let before = capture_forward_file(&live).unwrap();
+    let result = record_fixture_forward_catalog_packaged(
+        home.to_owned(),
+        ISOLATED_UPDATE.into(),
+        lose_output,
+    )
+    .await;
+    if lose_output {
+        assert!(matches!(result, Err(Error::UnknownCommit)), "{result:?}");
+    } else {
+        assert!(!result.unwrap());
+    }
+    // Reconcile only after the owned process was reaped. A failed completion
+    // must not replay a writer or switch to a generic restore path.
+    assert!(
+        record_fixture_forward_catalog(home.to_owned(), ISOLATED_UPDATE.into())
+            .await
+            .unwrap()
+    );
+    let marked = capture_forward_file(&live).unwrap();
+    assert_ne!(marked.3, before.3);
+    // The existing owner returns before launch when it observes this exact
+    // durable outcome. Even a request to lose output cannot invoke another child.
+    assert!(
+        record_fixture_forward_catalog_packaged(home.to_owned(), ISOLATED_UPDATE.into(), true)
+            .await
+            .unwrap()
+    );
+    assert_eq!(capture_forward_file(&live).unwrap(), marked);
+    println!(
+        "T05 installed sealed helper committed exact catalog; lost output {lose_output}, reconciled without replay"
+    );
 }

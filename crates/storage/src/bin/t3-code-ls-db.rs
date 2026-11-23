@@ -1658,6 +1658,20 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     #[cfg(target_os = "linux")]
     if let [mode, home, encoded] = args.as_slice() {
+        if mode == "trial-commit-inherited-forward" {
+            if t3_code_ls_storage::forward_child_readiness::commit(Path::new(home), encoded)
+                .await
+                .is_err()
+            {
+                std::process::exit(78);
+            }
+            // Output failure is unknown delivery to the supervisor. Never
+            // fall through to the ordinary database protocol after commit.
+            let mut output = io::stdout().lock();
+            writeln!(output, r#"{{"ok":true,"syntheticForwardCommit":1}}"#)?;
+            output.flush()?;
+            return Ok(());
+        }
         if mode == "trial-verify-inherited-readiness" {
             if t3_code_ls_storage::forward_child_readiness::verify(Path::new(home), encoded)
                 .await

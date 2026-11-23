@@ -885,12 +885,18 @@ pub(super) async fn record_forward_catalog(home: PathBuf, update_id: String) -> 
     record_forward_catalog_owned(home, update_id, None).await
 }
 
+#[cfg(test)]
+pub(super) enum ForwardProcess {
+    Fixture(std::process::Command),
+    Packaged { lose_output: bool },
+}
+
 // The existing owner retains every physical lease. Only engine ownership moves.
 #[cfg(test)]
 pub(super) async fn record_forward_catalog_owned(
     home: PathBuf,
     update_id: String,
-    process: Option<std::process::Command>,
+    process: Option<ForwardProcess>,
 ) -> Result<bool> {
     use super::tests::interrupt_trial_publication;
     use crate::{application::ForwardServiceActivation, backend::ExclusiveTrialFile};
@@ -991,7 +997,7 @@ pub(super) async fn record_forward_catalog_owned(
     lease.sync_publication()?;
     verify_witness()?;
     interrupt_trial_publication("forward-catalog-armed");
-    if let Some(mut command) = process {
+    if let Some(process) = process {
         // No engine survives preflight. Bind the inherited description to the
         // exact parent observation, never to a digest supplied by the child.
         let witness = super::FixtureForwardActivationWitness {
@@ -1005,6 +1011,53 @@ pub(super) async fn record_forward_catalog_owned(
         if trial_file_digest(&candidate.verified_file()?)? != digest {
             return Err(Error::IncompatibleStore);
         }
+        // Construct the command only inside the existing checked owner. The
+        // caller supplies neither a pathname nor an executable authority hash.
+        let image;
+        let mut command = match process {
+            ForwardProcess::Fixture(command) => command,
+            ForwardProcess::Packaged { lose_output } => {
+                use std::os::fd::AsRawFd;
+                let helper = lease
+                    .home
+                    .join("runtime/versions")
+                    .join(&activation.target_version)
+                    .join("native-bin/t3-code-ls-db");
+                image = crate::forward_child_readiness::stage_image(
+                    &helper,
+                    &activation.target_helper_sha256,
+                )?;
+                let mut command = std::process::Command::new(format!(
+                    "/proc/{}/fd/{}",
+                    std::process::id(),
+                    image.as_raw_fd(),
+                ));
+                let request = crate::forward_child_readiness::ReadinessRequest {
+                    activation: activation.clone(),
+                    database: saved.preparation.database.clone(),
+                    receipt_sha256: witness.receipt_sha256.clone(),
+                    selection_sha256: witness.selection_sha256.clone(),
+                    database_sha256: digest.clone(),
+                };
+                command
+                    .arg("trial-commit-inherited-forward")
+                    .arg(&lease.home)
+                    .arg(serde_json::to_string(&request).map_err(|_| Error::IncompatibleStore)?)
+                    .env_clear()
+                    .stderr(std::process::Stdio::null());
+                if lose_output {
+                    command.stdout(std::process::Stdio::from(
+                        std::fs::OpenOptions::new()
+                            .write(true)
+                            .open("/dev/full")
+                            .map_err(io_error)?,
+                    ));
+                } else {
+                    command.stdout(std::process::Stdio::null());
+                }
+                command
+            }
+        };
         command
             .env("T3_TEST_FORWARD_CHILD_HOME", &lease.home)
             .env(
