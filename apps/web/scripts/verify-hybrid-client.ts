@@ -875,31 +875,6 @@ async function exercise(implementation: Implementation): Promise<void> {
     proof.threadUrl = page.url();
     inspectPersistence("initial");
     completed("Received the completed replay turn on the original thread route");
-    if (expectsRustComposer && implementation === "native" && bundledClient) {
-      starting("negotiated Rust text appends");
-      const framesBefore = messageAppendFrames;
-      const requestsBefore = messageAppendRequests;
-      const appendThread = await submitReplay(page, "Text appends", "Replay: text appends");
-      const reply = "日本語 and a 🐟 complete the sequence. The bounded text fixture is complete.";
-      await page.getByText(reply, { exact: false }).last().waitFor({ state: "visible" });
-      const appended = await readThreadSnapshot(page, appendThread);
-      await assertCompleted(page, appendThread, replayTurnIdentity(appended, "text-appends"), reply);
-      const rustDecoder = await page.evaluate(
-        () => performance.getEntriesByName("t3-thread-rust-text-append").length === 1,
-      );
-      proof.messageAppends = {
-        requests: messageAppendRequests - requestsBefore,
-        frames: messageAppendFrames - framesBefore,
-        rustDecoder,
-        messageUpdates: wireMessages.get(appendThread) ?? [],
-      };
-      saveProof();
-      Assert.ok(proof.messageAppends.requests > 0, "The client must negotiate text appends");
-      Assert.ok(proof.messageAppends.frames > 0, "The thread subscription must receive an append");
-      Assert.ok(rustDecoder, "The Rust binding must apply a received append");
-      completed("Applied negotiated WebSocket text appends in the Rust browser reducer");
-    }
-
     starting("stop with a streamed reply and pending approval");
     proof.interrupted = await interruptShowcase(page);
     Assert.notEqual(proof.interrupted.threadId, threadId);
@@ -1000,6 +975,35 @@ async function exercise(implementation: Implementation): Promise<void> {
       proof.cancelledQuestion = await cancelCapturedQuestion(page);
       completed("Cancelled the recorded question in the composer and recovered its cancelled request");
     }
+    if (expectsRustComposer && implementation === "native" && bundledClient) {
+      starting("negotiated Rust text appends");
+      const framesBefore = messageAppendFrames;
+      const requestsBefore = messageAppendRequests;
+      const appendThread = await submitReplay(page, "Text appends", "Replay: text appends");
+      const approve = page.getByRole("button", { name: /^(Yes|Approve)$/u }).first();
+      await approve.waitFor({ state: "visible" });
+      Assert.ok(messageAppendRequests > requestsBefore, "Subscribe before releasing the fixture");
+      await approve.click();
+      const reply = "日本語 and a 🐟 complete the sequence. The bounded text fixture is complete.";
+      await page.getByText(reply, { exact: false }).last().waitFor({ state: "visible" });
+      const appended = await readThreadSnapshot(page, appendThread);
+      await assertCompleted(page, appendThread, replayTurnIdentity(appended, "text-appends"), reply);
+      const rustDecoder = await page.evaluate(
+        () => performance.getEntriesByName("t3-thread-rust-text-append").length === 1,
+      );
+      proof.messageAppends = {
+        requests: messageAppendRequests - requestsBefore,
+        frames: messageAppendFrames - framesBefore,
+        rustDecoder,
+        messageUpdates: wireMessages.get(appendThread) ?? [],
+      };
+      saveProof();
+      Assert.ok(proof.messageAppends.requests > 0, "The client must negotiate text appends");
+      Assert.ok(proof.messageAppends.frames > 0, "The thread subscription must receive an append");
+      Assert.ok(rustDecoder, "The Rust binding must apply a received append");
+      completed("Applied negotiated WebSocket text appends in the Rust browser reducer");
+    }
+
     if (implementation === "native") {
       Assert.equal(proof.persistence.length, 4);
       completed(
