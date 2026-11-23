@@ -49,14 +49,9 @@ struct DatabaseHandles {
     exclusive: bool,
     read_only: bool,
     identity: Option<same_file::Handle>,
-    reader: Option<Reader>,
+    reader: Option<ReadOnlyDatabase>,
     writer: Mutex<Option<Arc<Database>>>,
     opening: Mutex<()>,
-}
-
-enum Reader {
-    Pinned(ReadOnlyDatabase),
-    Current,
 }
 
 impl DatabaseHandles {
@@ -75,24 +70,11 @@ impl DatabaseHandles {
         if let Some(writer) = self.writer.lock().map_err(storage_error)?.clone() {
             return writer.begin_read().map_err(storage_error);
         }
-        match self.reader.as_ref().ok_or(Error::IncompatibleStore)? {
-            Reader::Pinned(reader) => reader.begin_read().map_err(storage_error),
-            Reader::Current => {
-                let file = open_regular_file(&self.path, OpenOptions::new().read(true))?;
-                if self.identity.as_ref() != Some(&file_identity(&file)?) {
-                    return Err(Error::IncompatibleStore);
-                }
-                let backend = redb::backends::FileBackend::new(file).map_err(storage_error)?;
-                let reader = builder()
-                    .open_read_only_with_backend(backend)
-                    .map_err(|error| match error {
-                        redb::DatabaseError::RepairAborted => Error::RecoveryRequired,
-                        other => storage_error(other),
-                    })?;
-                self.verify_identity()?;
-                reader.begin_read().map_err(storage_error)
-            }
-        }
+        self.reader
+            .as_ref()
+            .ok_or(Error::IncompatibleStore)?
+            .begin_read()
+            .map_err(storage_error)
     }
 
     fn try_writer(&self) -> Result<Arc<Database>> {
@@ -458,7 +440,7 @@ impl Backend {
                                 exclusive: false,
                                 read_only: false,
                                 identity: Some(identity),
-                                reader: Some(Reader::Pinned(reader)),
+                                reader: Some(reader),
                                 writer: Mutex::new(None),
                                 opening: Mutex::new(()),
                             }));
@@ -536,28 +518,47 @@ impl Backend {
     /// Inspect an existing store without a writable descriptor, integrity repair,
     /// schema initialization, or later promotion to a writer.
     pub(crate) async fn open_read_only(path: impl AsRef<Path>) -> Result<Self> {
-        Self::open_snapshot(path.as_ref().to_owned(), false, u64::MAX, false).await
+        Self::open_snapshot(path.as_ref().to_owned(), false, u64::MAX).await
     }
 
     pub(crate) async fn open_current_reader(path: impl AsRef<Path>) -> Result<Self> {
-        Self::open_snapshot(path.as_ref().to_owned(), false, u64::MAX, true).await
+        let path = path.as_ref().to_owned();
+        if !path.is_absolute() {
+            return Err(Error::Invalid("database path must be absolute".into()));
+        }
+        let handles = tokio::task::spawn_blocking(move || {
+            let identity = path_identity(&path)?;
+            // Use a live MultiWriter engine handle for fresh committed snapshots.
+            // The application handle keeps transaction writes and writer acquisition disabled.
+            let database = checked_open(&path, &identity)?;
+            validate_tables(&database.begin_read().map_err(storage_error)?)?;
+            let handles = DatabaseHandles {
+                path,
+                exclusive: false,
+                read_only: true,
+                identity: Some(identity),
+                reader: None,
+                writer: Mutex::new(Some(Arc::new(database))),
+                opening: Mutex::new(()),
+            };
+            handles.verify_identity()?;
+            Ok::<_, Error>(Arc::new(handles))
+        })
+        .await
+        .map_err(worker_error)??;
+        Ok(Self { handles })
     }
 
     pub(crate) async fn open_offline_snapshot(path: &Path) -> Result<Self> {
-        Self::open_snapshot(path.to_owned(), true, u64::MAX, false).await
+        Self::open_snapshot(path.to_owned(), true, u64::MAX).await
     }
 
     #[cfg(unix)]
     pub(crate) async fn open_bounded_offline_snapshot(path: &Path, max_bytes: u64) -> Result<Self> {
-        Self::open_snapshot(path.to_owned(), true, max_bytes, false).await
+        Self::open_snapshot(path.to_owned(), true, max_bytes).await
     }
 
-    async fn open_snapshot(
-        path: PathBuf,
-        exclusive: bool,
-        max_bytes: u64,
-        current: bool,
-    ) -> Result<Self> {
+    async fn open_snapshot(path: PathBuf, exclusive: bool, max_bytes: u64) -> Result<Self> {
         if !path.is_absolute() {
             return Err(Error::Invalid("database path must be absolute".into()));
         }
@@ -596,11 +597,7 @@ impl Backend {
                 exclusive,
                 read_only: true,
                 identity: Some(identity),
-                reader: Some(if current {
-                    Reader::Current
-                } else {
-                    Reader::Pinned(reader)
-                }),
+                reader: Some(reader),
                 writer: Mutex::new(None),
                 opening: Mutex::new(()),
             }))
@@ -995,7 +992,7 @@ impl Backend {
                         Err(writer) => drop(writer),
                     }
                 }
-                if let Some(Reader::Pinned(reader)) = handles.reader {
+                if let Some(reader) = handles.reader {
                     reader.close().map_err(storage_error)?;
                 }
                 Ok(())

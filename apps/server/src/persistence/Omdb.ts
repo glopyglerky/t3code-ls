@@ -291,6 +291,9 @@ export const make = Effect.fn("Omdb.make")(
       ]) {
         while (!(yield* prepare).prepared) yield* Effect.yieldNow;
       }
+      if (readDatabase !== undefined) {
+        yield* readDatabase.request({ operation: "application_schema" }, RedbClient.ApplicationSchema);
+      }
       if (activate !== undefined) yield* activate;
       return { database, client };
     });
