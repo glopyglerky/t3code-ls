@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - "candidate/t3code-ls-t03-text-revision-*"
+      - "candidate/t3code-ls-t03-layout-*"
       - "candidate/t3code-ls-t12-outbox-identity-*"
       - "candidate/t3code-ls-t12-outbox-native-*"
 
@@ -26,6 +27,7 @@ jobs:
         with:
           node-version: "26.12.1"
       - name: Install the locked client runtime dependencies
+        if: "!startsWith(github.ref_name, 'candidate/t3code-ls-t03-layout-')"
         run: |
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
@@ -40,6 +42,19 @@ jobs:
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-')
         working-directory: apps/mobile
         run: pnpm exec vp test run --project unit --maxWorkers 2 src/state/thread-outbox.test.ts
+      - name: Measure retained storage for the matched text event layouts
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t03-layout-')
+        run: |
+          node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/layout-toolchain"
+      - name: Verify exact replay and report physical event storage
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t03-layout-')
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/layout-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/layout-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-storage --lib \
+            assistant_text_layout_preserves_logical_replay_with_less_retained_storage -- --ignored --nocapture
       - name: Install the pinned compiler for the outbox checks
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
         run: |
