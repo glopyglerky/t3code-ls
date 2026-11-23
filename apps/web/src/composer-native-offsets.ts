@@ -34,6 +34,7 @@ const maps = new WeakMap<RichDocMap, NativeMap>();
 let offsetModule: OffsetModule | undefined;
 let recordedUse = false;
 let recordedTextAppend = false;
+let recordedTextSplice = false;
 
 export async function initializeComposerOffsets(): Promise<void> {
   if (import.meta.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS !== "rust") return;
@@ -60,8 +61,14 @@ export async function initializeComposerOffsets(): Promise<void> {
             }
             return text;
           },
-          splice: (baseSequence, sequence, start, end, text) =>
-            base.splice?.(baseSequence, sequence, start, end, text),
+          splice(baseSequence, sequence, start, end, inserted) {
+            const text = base.splice?.(baseSequence, sequence, start, end, inserted);
+            if (text !== undefined && !recordedTextSplice) {
+              performance.mark("t3-thread-rust-text-splice");
+              recordedTextSplice = true;
+            }
+            return text;
+          },
           free: () => base.free(),
         };
       },
