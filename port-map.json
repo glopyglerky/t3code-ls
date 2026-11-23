@@ -932,7 +932,7 @@
         "apps/server/scripts/verify-packaged-guest-authorization.ts": ".github/workflows/cli-archive-proof.yml"
       },
       "retired_paths": [],
-      "notes": "Guest-share transitions, invite and signed-session eligibility, and upload classification run through the existing Rust helper. The application verifies signatures, holds keys, applies live host policy, and owns filesystem observations, JavaScript Unicode case folding, IDs, upstream SQLite transactions, attachment copying and cleanup. Run 45191900038 at 6283476858c082d9e787ba5a645284bf299a2981 exercised the packaged Linux x64 server and native database with a synthetic managed relay. It verified one successful concurrent redemption, a valid session after restart, refusal to reuse the invite, and no writes on rejected authorization. Browser cookie handling and the live Connect edge remain open. Other hosts retain the original classifier.",
+      "notes": "Guest-share transitions, invite and signed-session eligibility, and upload classification run through the existing Rust helper. The application verifies signatures, holds keys, applies live host policy, and owns filesystem observations, JavaScript Unicode case folding, IDs, upstream SQLite transactions, attachment copying and cleanup. Run 45191900038 at 6283476858c082d9e787ba5a645284bf299a2981 exercised the packaged Linux x64 server and native database with a synthetic managed relay. It verified one successful concurrent redemption, a valid session after restart, refusal to reuse the invite, and no writes on rejected authorization. Run 45198628802 at ad528d82ef8d383dc74c0cd961c7f907da360fc2 also verified keyboard redemption, a secure scoped cookie, process reopen, and revocation through packaged Chromium and loopback TLS. The live Connect edge remains open. Other hosts retain the original classifier.",
       "rust_crates": ["crates/core"]
     },
     {
@@ -2189,7 +2189,7 @@
         "apps/server/scripts/check-claude-stdio-helper.mjs": ".github/workflows/claude-stdio.yml"
       },
       "retired_paths": [],
-      "notes": "T01/T08 Unix stream-JSON candidate for @anthropic-ai/claude-agent-sdk 0.3.321 initialize, user input, permission and interrupt frames. The scoped t3-code-ls-claude-stdio executable owns the deterministic child in the ClaudeAdapterV2 test and the isolated vendor initialization proof. Run 45115372585 validated the earlier Cargo test bridge. Live sessions select the SDK runner. Installed CLI, hook, account, full control and application parity require qualification.",
+      "notes": "T01/T08 Unix stream-JSON candidate for @anthropic-ai/claude-agent-sdk 0.3.321 initialize, user input, permission and interrupt frames. The scoped t3-code-ls-claude-stdio executable owns the deterministic child in the ClaudeAdapterV2 test and the isolated vendor initialization proof. Run 45201606959 at 2b3672d76f3ceadb254381784c77475cca1f1b04 verified the built Rust helper with the real Claude adapter and deterministic child, then initialized and reaped the pinned Linux CLI with no prompt in a loopback-only namespace. Live sessions select the SDK runner. Vendor turns, hooks, account behavior, and full control parity remain unqualified.",
       "rust_crates": ["crates/core"]
     },
     {
