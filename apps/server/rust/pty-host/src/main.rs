@@ -41,8 +41,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut input = io::stdin().lock();
     let mut output = io::stdout().lock();
     let mut owner: Option<PtyOwner> = None;
-    for _ in 0..4096 {
-        let mut frame = Vec::new();
+    let mut frame = Vec::new();
+    loop {
+        frame.clear();
         let count = input
             .by_ref()
             .take(128 * 1024 + 1)
@@ -112,7 +113,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         output.write_all(b"\n")?;
         output.flush()?;
     }
-    Err("PTY command budget exhausted".into())
 }
 
 fn main() {
