@@ -372,8 +372,12 @@ const mobileEndorsementRows = [
           <div class="open-pitch-footer">
             <div class="open-pitch-meta">
               <span>{messagesFor(locale).layout.mitLicensed}</span>
-              <span aria-hidden="true">·</span>
-              <span>{fillTemplate(t.stars, { stars: MARKETING_STATS.githubStars })}</span>
+              {MARKETING_STATS.githubStars !== null && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>{fillTemplate(t.stars, { stars: MARKETING_STATS.githubStars })}</span>
+                </>
+              )}
             </div>
 
             <div class="open-pitch-actions">

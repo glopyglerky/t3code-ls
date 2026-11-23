@@ -58,10 +58,14 @@ jobs:
             }]
           }
           JSON
-          T3_CODE_LS_MARKETING_RELEASE_CATALOG="$proof/catalog.json" pnpm --filter @t3tools/marketing build
+          build_site() {
+            sudo -n unshare --net -- runuser -u "$(id -un)" -- env PATH="$PATH" \
+              T3_CODE_LS_MARKETING_RELEASE_CATALOG="$1" "$(command -v pnpm)" --filter @t3tools/marketing build
+          }
+          build_site "$proof/catalog.json"
           node apps/marketing/scripts/verify-download-links.mjs apps/marketing/dist catalog > "$proof/html.sha256"
           printf '{}' | "$catalog" download-catalog > "$proof/unavailable.json"
-          T3_CODE_LS_MARKETING_RELEASE_CATALOG="$proof/unavailable.json" pnpm --filter @t3tools/marketing build
+          build_site "$proof/unavailable.json"
           node apps/marketing/scripts/verify-download-links.mjs apps/marketing/dist unavailable > "$proof/fallback-html.sha256"
       - name: Retain generated catalog and artifact identities
         if: always()

@@ -7,20 +7,19 @@ export const ANDROID_PLAY_STORE_URL =
   "https://play.google.com/store/apps/details?id=com.t3tools.t3code";
 
 // Runs at build time, so each deploy picks up the current count.
-async function fetchGithubStars(): Promise<string> {
+async function fetchGithubStars(): Promise<string | null> {
   const token = process.env.GITHUB_TOKEN;
   try {
     const response = await fetch("https://api.github.com/repos/pingdotgg/t3code", {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: AbortSignal.timeout(3_000),
     });
     if (!response.ok) throw new Error(`GitHub API responded ${response.status}`);
     const { stargazers_count: stars } = (await response.json()) as { stargazers_count: number };
+    if (!Number.isSafeInteger(stars) || stars < 0) return null;
     return stars < 1000 ? String(stars) : `${Math.floor(stars / 1000)}k+`;
-  } catch (error) {
-    // A deploy must not ship a made-up count; offline dev should still render.
-    if (import.meta.env.PROD) throw new Error("Could not fetch GitHub stars", { cause: error });
-    console.warn("Could not fetch GitHub stars", error);
-    return "?";
+  } catch {
+    return null;
   }
 }
 

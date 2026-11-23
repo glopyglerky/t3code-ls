@@ -24,6 +24,8 @@ function getAnchor(html, target) {
 for (const locale of LOCALES) {
   const path = join(dist, locale.path, "download", "index.html");
   const html = readFileSync(path, "utf8");
+  const repositoryLink = [...html.matchAll(/<a\s+[^>]*>/gu)].find(([tag]) => tag.includes('class="nav-stars"'));
+  assert.ok(repositoryLink?.[0].includes('aria-label="GitHub"'), path);
   const dmg = getAnchor(html, "arm64.dmg");
   const deb = getAnchor(html, "amd64.deb");
   const exe = getAnchor(html, "x64.exe");
