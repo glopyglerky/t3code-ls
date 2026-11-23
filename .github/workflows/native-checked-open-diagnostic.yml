@@ -18,6 +18,9 @@ jobs:
       PROBE_TREE: c38176b1d15a863f4b4c3829b90fcc98b5b032c0
       OMDB_COMMIT: b2ff031398b1f0a793a352db7a699575b5d4d3d4
       OMDB_TREE: 8297dd226d54782c5940f6b95cef3c8f59e92281
+      OMDB_PHASE_COMMIT: 410df55de0e17959bd75104c90431718382aded5
+      OMDB_PHASE_TREE: 2028c97c9301f4164a5bb812bdc404f9c3245e8d
+      ENGINE_PHASE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-phases-') }}
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
       WASM_BINDGEN_VERSION: "0.2.130"
       WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
@@ -60,7 +63,32 @@ jobs:
           mkdir -p "$scratch/probe/tools/src/bin"
           cp tools/diagnostics/t16-checked-open.rs "$scratch/probe/tools/src/bin/t16-checked-open.rs"
           sha256sum tools/diagnostics/t16-* > "$evidence/diagnostic-source.sha256"
-          test -x /usr/bin/strace || (sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends strace)
+          if [[ "$ENGINE_PHASE_PROOF" == true ]]; then
+            touch "$scratch/bin/engine-phases"
+            python3 - "$scratch/native" "$OMDB_COMMIT" "$OMDB_PHASE_COMMIT" <<'PY'
+          import pathlib
+          import sys
+          root, old, new = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+          for relative in ("Cargo.lock", "database.lock.json", "crates/storage/Cargo.toml",
+                           "apps/server/src/persistence/redb_transactions.rs"):
+              path = root / relative
+              text = path.read_text()
+              if old not in text or new in text:
+                  raise SystemExit(f"unexpected original source pin in {relative}")
+              text = text.replace(old, new)
+              if relative.endswith("Cargo.toml"):
+                  tail = f'rev = "{new}" }}'
+                  if text.count(tail) != 1:
+                      raise SystemExit("expected one matching backend dependency")
+                  text = text.replace(tail, f'rev = "{new}", features = ["checked_open_diagnostics"] }}')
+              path.write_text(text)
+          PY
+            git -C "$scratch/native" diff --check
+            git -C "$scratch/native" diff --binary > "$evidence/instrumentation.patch"
+            sha256sum "$evidence/instrumentation.patch" > "$evidence/instrumentation.sha256"
+          else
+            test -x /usr/bin/strace || (sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends strace)
+          fi
           npm install --global --prefix "$scratch/npm" --cache "$scratch/npm-cache" pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           echo "$scratch/npm/bin" >> "$GITHUB_PATH"
           (cd "$scratch/native" && node tools/install-toolchain.mjs --destination "$scratch/toolchain")
@@ -91,8 +119,15 @@ jobs:
             > "$evidence/packaged-artifacts.sha256"
           omdb=("$CARGO_HOME"/git/checkouts/omdb-*/*)
           test "${#omdb[@]}" -eq 1
-          test "$(git -C "${omdb[0]}" rev-parse HEAD)" = "$OMDB_COMMIT"
-          test "$(git -C "${omdb[0]}" rev-parse 'HEAD^{tree}')" = "$OMDB_TREE"
+          engine_commit="$OMDB_COMMIT"
+          engine_tree="$OMDB_TREE"
+          if [[ "$ENGINE_PHASE_PROOF" == true ]]; then
+            engine_commit="$OMDB_PHASE_COMMIT"
+            engine_tree="$OMDB_PHASE_TREE"
+          fi
+          test "$(git -C "${omdb[0]}" rev-parse HEAD)" = "$engine_commit"
+          test "$(git -C "${omdb[0]}" rev-parse 'HEAD^{tree}')" = "$engine_tree"
+          printf '%s %s\n' "$engine_commit" "$engine_tree" > "$evidence/engine-source.txt"
           ln -s "$PWD/apps/server/dist/native-bin/t3-code-ls-db" "$DIAGNOSTIC_WORK/bin/packaged-db"
           cd "$DIAGNOSTIC_WORK/probe"
           "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked -p t3code-ls-tools --bin t16-checked-open
@@ -103,6 +138,7 @@ jobs:
           jq '{release,compiler_revision,coordinator_revision,archive_sha256,checked_members}' \
             "$DIAGNOSTIC_WORK/toolchain/installation-proof.json" > "$evidence/toolchain.json"
       - name: Pair an untraced reopen with a helper-only trace
+        if: env.ENGINE_PHASE_PROOF != 'true'
         shell: bash
         run: |
           umask 077
@@ -164,6 +200,47 @@ jobs:
               map(.descriptor_micros) as [$plain,$traced] | [$round,$plain,$traced,$traced - $plain] | @tsv' \
               "$plain" "$trace" >> "$evidence/overhead.tsv"
           done
+      - name: Attribute checked-open reads inside the packaged database helper
+        if: env.ENGINE_PHASE_PROOF == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          scratch="$DIAGNOSTIC_WORK"
+          evidence="$RUNNER_TEMP/checked-open-evidence"
+          trial="$scratch/trials/engine-phases"
+          probe="$CARGO_TARGET_DIR/release/t3code-ls-tools"
+          bundle="$scratch/native/apps/server/dist/bin.mjs"
+          chrome="$(command -v google-chrome)"
+          driver="$(command -v chromedriver || printf '%s/chromedriver' "$CHROMEWEBDRIVER")"
+          test -x "$driver"
+          sudo -n unshare --net --pid --fork --mount-proc --kill-child -- bash -euc '
+            ip link set dev lo up
+            user="$1"; shift
+            exec runuser -u "$user" -- "$@"
+          ' _ "$(id -un)" env "T3_CODE_LS_DIAGNOSTIC_DB=$scratch/bin/t16-checked-open" \
+            "$probe" probe-reopen "$(command -v node)" "$bundle" "$trial" "$driver" "$chrome" native \
+            > "$evidence/engine-reopen.json"
+          jq -e '.journey == "J02" and .profile == "native" and .snapshot.valid and
+            .snapshot.threadCount == 32 and .snapshot.messageCount == 200 and .fixture.total_messages == 6400 and
+            .database_migration > 0 and .saved_thread_sequence > 0' "$evidence/engine-reopen.json"
+          awk '
+            BEGIN { print "phase\tbackend_reads\tbackend_read_errors\tbackend_bytes" }
+            /^redb_checked_open / {
+              if (NF != 5 || $2 !~ /^phase=(Preparation|VerifyCurrentRoots|VerifyAlternateRoots|RebuildDataAllocator|RebuildSystemAllocator|MarkPinnedPages|RepairCommit|RestoreSavepoints|RecordAllocator)$/ ||
+                  $3 !~ /^backend_reads=[0-9]+$/ || $4 !~ /^backend_read_errors=0$/ || $5 !~ /^backend_bytes=[0-9]+$/) exit 1
+              split($2, phase, "="); split($3, reads, "="); split($4, failures, "="); split($5, bytes, "=")
+              if (seen[phase[2]]++) exit 1
+              if (phase[2] == "VerifyCurrentRoots" || phase[2] == "RebuildDataAllocator") {
+                if (reads[2] + 0 == 0 || bytes[2] + 0 == 0) exit 1
+              }
+              print phase[2] "\t" reads[2] "\t" failures[2] "\t" bytes[2]
+            }
+            END {
+              if (!seen["VerifyCurrentRoots"] || !seen["RebuildDataAllocator"] || seen["VerifyAlternateRoots"] ||
+                  !seen["RebuildSystemAllocator"] || !seen["RepairCommit"] || !seen["RecordAllocator"]) exit 1
+            }
+          ' "$trial/checked-open-phases.log" > "$evidence/engine-phases.tsv"
       - name: Remove task-owned generated files and record available space
         if: always() && env.DIAGNOSTIC_WORK != ''
         shell: bash

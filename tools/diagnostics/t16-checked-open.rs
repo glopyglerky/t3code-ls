@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::fs;
+use std::os::unix::fs::OpenOptionsExt as _;
 use std::os::unix::process::CommandExt;
 use std::path::{Component, Path};
 use std::process::Command;
@@ -44,11 +45,25 @@ fn launch(mode: &OsString, database: &Path) -> Result<()> {
     if mode != "local" {
         return Err(Command::new(helper).arg(mode).arg(database).exec().into());
     }
-    let trace = database
+    let trial = database
         .ancestors()
         .nth(3)
-        .ok_or("missing trial directory")?
-        .join("checked-open-trace");
+        .ok_or("missing trial directory")?;
+    if tools.join("engine-phases").is_file() {
+        let diagnostics = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .mode(0o600)
+            .open(trial.join("checked-open-phases.log"))?;
+        return Err(Command::new(helper)
+            .arg(mode)
+            .arg(database)
+            .env("REDB_CHECKED_OPEN_DIAGNOSTICS", "1")
+            .stderr(diagnostics)
+            .exec()
+            .into());
+    }
+    let trace = trial.join("checked-open-trace");
     // A second local spawn means a reconnect or a route other than the one being tested.
     fs::create_dir(&trace)?;
     Err(Command::new("/usr/bin/strace")

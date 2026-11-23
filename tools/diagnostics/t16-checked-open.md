@@ -50,3 +50,18 @@ per-pair comparisons, and syscall totals.
 
 See the [strace manual](https://github.com/strace/strace/blob/v6.8/doc/strace.1.in)
 for the trace process, FD annotation, and timestamp behavior.
+
+## Phase counts inside the engine
+
+The `measure/t3code-ls-t16-checked-open-engine-phases-*` lane runs one copy
+of the same packaged workload with an instrumented omdb dependency. It records
+the scratch overlay, exact engine tree and packaged helper hash. The overlay
+changes only the dependency identity and diagnostic feature. The fixture
+enables the counters for the reopened writable helper and retains phase totals
+from that helper after checking the actual profile and selected thread.
+
+The engine test verifies current and alternate roots, refuses a torn backup
+slot, and exercises persistent savepoint restore. The workload receipts
+describe successful backend read requests and requested bytes, including
+possible page-cache hits. They do not establish physical disk reads or a
+startup speedup. [Engine qualification](https://github.com/glopyglerky/omdb/actions/runs/45197280102)
