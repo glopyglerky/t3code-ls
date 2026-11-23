@@ -198,6 +198,94 @@ const smokeNativeSessionOutput = Effect.fn("smokeNativeSessionOutput")(function*
   );
 });
 
+const smokePipedThread = Effect.fn("smokePipedThread")(function* (
+  executable: string,
+  home: string,
+  workspace: string,
+) {
+  const project = yield* runExecutable(
+    executable,
+    ["project", "add", workspace, "--base-dir", home],
+    workspace,
+  );
+  if (project.exitCode !== 0) {
+    return yield* new CliArchiveSmokeError({
+      step: "adding the replay project from the CLI archive",
+      detail: `exit ${String(project.exitCode)}\n${project.stderr}`,
+    });
+  }
+
+  const message = "Replay a recorded approval from stdin.\nSecond line: λ 🚀";
+  const started = yield* runExecutable(
+    executable,
+    [
+      "thread",
+      "start",
+      workspace,
+      "-",
+      "--base-dir",
+      home,
+      "--provider",
+      "devReplay",
+      "--model",
+      "approval",
+      "--wait",
+      "--json",
+    ],
+    workspace,
+    message,
+  );
+  const wait = Schema.decodeUnknownOption(
+    Schema.fromJsonString(
+      Schema.Struct({
+        threadId: Schema.NonEmptyString,
+        runId: Schema.NonEmptyString,
+        status: Schema.Literal("waiting"),
+        reply: Schema.Null,
+        error: Schema.Null,
+      }),
+    ),
+  )(started.stdout);
+  if (
+    started.exitCode !== 2 ||
+    Option.isNone(wait) ||
+    !started.stderr.includes("is waiting for an answer") ||
+    started.stderr.includes("\u001b")
+  ) {
+    return yield* new CliArchiveSmokeError({
+      step: "starting a recorded approval from stdin with --wait --json",
+      detail: `exit ${String(started.exitCode)}\n${started.stdout}${started.stderr}`,
+    });
+  }
+
+  const shown = yield* runExecutable(
+    executable,
+    ["thread", "show", wait.value.threadId, "--base-dir", home, "--json"],
+    workspace,
+  );
+  const history = Schema.decodeUnknownOption(
+    Schema.fromJsonString(
+      Schema.Struct({
+        thread: Schema.Struct({ pendingRequestCount: Schema.Int }),
+        messages: Schema.Array(Schema.Struct({ role: Schema.String, text: Schema.String })),
+      }),
+    ),
+  )(shown.stdout);
+  if (
+    shown.exitCode !== 0 ||
+    shown.stderr !== "" ||
+    Option.isNone(history) ||
+    history.value.thread.pendingRequestCount !== 1 ||
+    !history.value.messages.some((entry) => entry.role === "user" && entry.text === message)
+  ) {
+    return yield* new CliArchiveSmokeError({
+      step: "reading the exact piped prompt and pending approval from the running server",
+      detail: `exit ${String(shown.exitCode)}\n${shown.stdout}${shown.stderr}`,
+    });
+  }
+  yield* Effect.log("[cli-smoke] Piped Unicode prompt preserved, with JSON waiting status and exit 2.");
+});
+
 const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
   readonly archive: string;
   readonly expectVersion: string;
@@ -296,6 +384,27 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
   const net = yield* NetService.NetService;
   const port = yield* net.findAvailablePort(47700);
   const home = path.join(scratch, "home");
+  const workspace = path.join(scratch, "replay-workspace");
+  if (input.expectNative) {
+    const replay = yield* path.fromFileUrl(
+      new URL("../apps/server/scripts/dev-replay-agent.ts", import.meta.url),
+    );
+    const settings = path.join(home, "userdata");
+    yield* fs.makeDirectory(settings, { recursive: true });
+    yield* fs.makeDirectory(workspace);
+    yield* fs.writeFileString(
+      path.join(settings, "settings.json"),
+      JSON.stringify({
+        providerInstances: {
+          devReplay: {
+            displayName: "Replay (dev)",
+            driver: "acpRegistry",
+            config: { source: "local", commandPath: process.execPath, commandArgs: [replay] },
+          },
+        },
+      }),
+    );
+  }
   const server = yield* spawner.spawn(
     ChildProcess.make(
       executable,
@@ -337,6 +446,7 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
     Effect.timeout(Duration.seconds(30)),
     Effect.orElseSucceed(() => false),
   );
+  if (ready && input.expectNative) yield* smokePipedThread(executable, home, workspace);
   yield* server.kill({ killSignal: "SIGTERM" }).pipe(Effect.ignore);
   yield* server.exitCode.pipe(Effect.timeout(Duration.seconds(10)), Effect.ignore);
   const [stdout, stderr] = yield* Fiber.join(output).pipe(
