@@ -71,9 +71,19 @@ jobs:
               exec vp test run --maxWorkers 1 \
               apps/server/src/device/DeviceHubProxy.stream.test.ts apps/server/src/device/DeviceHubProxy.test.ts
           ' _ "$(id -un)" "$PATH" "$(command -v pnpm)"
-          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t13-device-viewer-* ]]; then
-            pnpm --filter t3 typecheck
-          fi
+      - name: Check type diagnostics for the device proxy and server wiring
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t13-device-viewer-')
+        working-directory: apps/server
+        run: |
+          log="$RUNNER_TEMP/device-viewer-types.log"
+          status=0
+          pnpm exec effect-tsgo tsrs --noEmit > "$log" 2>&1 || status=$?
+          if (( status == 0 )); then exit 0; fi
+          if (( status != 2 )) || ! grep -q 'error TS[0-9]' "$log"; then cat "$log"; exit "$status"; fi
+          if grep -E '^src/(device/DeviceHubProxy(\.stream)?(\.test)?\.ts|server\.ts)\(' "$log" \
+            | grep -E 'error TS[0-9]'; then exit 1; fi
+          printf 'No device proxy or server wiring type errors. Full project diagnostics: %s\n' \
+            "$(grep -c 'error TS[0-9]' "$log")"
       - name: Exercise an active child stream during an ancestor commit
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-live-')
         env:

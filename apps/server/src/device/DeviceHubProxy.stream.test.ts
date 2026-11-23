@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - Own loopback HTTP listeners with ephemeral ports.
 import { expect, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeWS from "@effect/platform-node/NodeWS";
@@ -53,6 +54,8 @@ const layerMediaPeer = (
           : Effect.fail(new EnvironmentAuth.ServerAuthMissingCredentialError({})),
     }),
     Layer.mock(SessionStore.SessionStore)({
+      cookieName: "fixture-session",
+      legacyCookieName: undefined,
       awaitInvalidation: (sessionId, proofKeyThumbprint) =>
         sessionId === session.sessionId && proofKeyThumbprint === session.proofKeyThumbprint
           ? Deferred.await(invalidated)
@@ -104,22 +107,23 @@ it.live("forwards a media chunk and releases the HTTP stream on session invalida
       ),
     );
     const origin = HttpServer.formatAddress(Context.get(services, HttpServer.HttpServer).address);
-    const abort = yield* Effect.acquireRelease(
-      Effect.sync(() => new AbortController()),
-      (controller) => Effect.sync(() => controller.abort()),
-    );
     const path = "/api/device-hub/vendor/serve-sim/helper/test/stream.avcc?wsTicket=fixture-media";
-    const response = yield* Effect.promise(() => fetch(`${origin}${path}`, { signal: abort.signal }));
-    expect(response.status).toBe(200);
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error("Missing media response body");
-    expect(yield* Effect.promise(() => reader.read())).toEqual({ done: false, value: frame });
+    const received = yield* Deferred.make<Uint8Array>();
+    const reading = yield* Effect.gen(function* () {
+      const client = HttpClient.withScope(yield* HttpClient.HttpClient);
+      const response = yield* client.get(`${origin}${path}`);
+      expect(response.status).toBe(200);
+      return yield* response.stream.pipe(
+        Stream.tap((bytes) => Deferred.succeed(received, bytes)),
+        Stream.runCollect,
+      );
+    }).pipe(Effect.scoped, Effect.provide(FetchHttpClient.layer), Effect.forkChild);
+    expect(yield* Deferred.await(received).pipe(Effect.timeout("5 seconds"))).toEqual(frame);
     expect(yield* Deferred.isDone(upstreamReleased)).toBe(false);
 
     yield* Deferred.succeed(invalidated, undefined);
 
-    const end = yield* Effect.promise(() => reader.read()).pipe(Effect.timeout("5 seconds"));
-    expect(end.done).toBe(true);
+    expect(yield* Fiber.join(reading).pipe(Effect.timeout("5 seconds"))).toEqual([frame]);
     yield* Deferred.await(upstreamReleased).pipe(Effect.timeout("5 seconds"));
   }),
 );
@@ -316,7 +320,11 @@ it.live("closes the WebRTC viewer while keeping the simulator and thread session
           Layer.mergeAll(
             Layer.succeed(HttpClient.HttpClient, http),
             Layer.succeed(DeviceService.DeviceService, devices),
-            Layer.mock(SessionStore.SessionStore)({ awaitInvalidation: () => Effect.never }),
+            Layer.mock(SessionStore.SessionStore)({
+              cookieName: "fixture-session",
+              legacyCookieName: undefined,
+              awaitInvalidation: () => Effect.never,
+            }),
             Layer.mock(EnvironmentAuth.EnvironmentAuth)({
               authenticateWebSocketUpgrade: (request, audience) =>
                 Effect.sync(() => {
