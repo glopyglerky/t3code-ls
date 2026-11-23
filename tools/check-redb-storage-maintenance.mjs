@@ -8,8 +8,10 @@ import * as Readline from "node:readline";
 import * as Sqlite from "node:sqlite";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Logger from "effect/Logger";
 import * as Schema from "effect/Schema";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -406,6 +408,57 @@ try {
       }),
     );
   }
+  const concurrentBackup = Path.join(fixture.root, "backup-during-write.omdb");
+  const existingKey = [{ type: "text", value: "row:160" }];
+  const unchangedKey = [{ type: "text", value: "row:191" }];
+  await withNative(executable, fixture, (client) =>
+    Effect.gen(function* () {
+      const staged = yield* Deferred.make();
+      const release = yield* Deferred.make();
+      const writer = yield* Effect.forkScoped(client.withTransaction(
+        Effect.gen(function* () {
+          Assert.equal(yield* client.delete("maintenance_fixture", existingKey), true);
+          Assert.equal(yield* client.get("maintenance_fixture", existingKey), null);
+          yield* Deferred.succeed(staged, undefined);
+          yield* Deferred.await(release);
+        }),
+      ));
+      yield* Effect.gen(function* () {
+        yield* Deferred.await(staged);
+        const reader = yield* NativeDatabase.make({
+          executable, databasePath: fixture.databasePath, mode: "current-read-local",
+        });
+        const backup = yield* reader.request(
+          { operation: "storage_backup", destination: concurrentBackup },
+          Schema.Struct({ rows: Schema.Number, bytes: Schema.Number, checksum: Schema.String }),
+        );
+        Assert.ok(backup.rows > 0);
+        Assert.match(backup.checksum, /^[a-f0-9]{64}$/u);
+      }).pipe(
+        Effect.timeout("10 seconds"),
+        Effect.ensuring(Deferred.succeed(release, undefined)),
+      );
+      yield* Fiber.join(writer);
+    }),
+  );
+  for (const [databasePath, expected] of [
+    [fixture.databasePath, null],
+    [concurrentBackup, liveRows[2]],
+  ]) {
+    await withNative(executable, { ...fixture, databasePath }, (client) =>
+      Effect.gen(function* () {
+        Assert.deepEqual(
+          normalized(yield* client.get("maintenance_fixture", existingKey)),
+          normalized(expected),
+        );
+        Assert.deepEqual(
+          normalized(yield* client.get("maintenance_fixture", unchangedKey)),
+          normalized(liveRows[3]),
+        );
+      }),
+    );
+  }
+  checks.push("A logical snapshot completes alongside a staged foreground deletion, reopens the prior committed rows, and preserves the later live commit");
   Assert.equal(hash(await FS.readFile(source)), sourceHash);
   Assert.equal(hash(await FS.readFile(legacy)), sourceHash);
   checks.push(
