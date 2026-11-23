@@ -359,7 +359,7 @@ const smokeThreadFailure = Effect.fn("smokeThreadFailure")(function* (
   if (
     started.exitCode !== 1 ||
     Option.isNone(result) ||
-    !result.value.error.includes("grok prompt error fixture") ||
+    result.value.error !== "Internal error" ||
     !started.stderr.includes(`Thread ${result.value.threadId} stopped with status failed`) ||
     started.stderr.includes("\u001b")
   ) {
