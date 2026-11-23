@@ -224,6 +224,16 @@ for (const mode of ["missing capability", "wrong digest", "wrong receipt", "chan
   });
 }
 
+test("ordinary launcher refuses isolated candidate preparation before any child starts", async (t) => {
+  const f = await fixture(t);
+  const launcher = f.launcher(initial, { T3_CODE_LS_SEALED_TRIAL_RECOVERY: "1" });
+  const before = await fs.readFile(f.statePath);
+  await assert.rejects(launcher.prepareIsolatedCandidate({}),
+    /requires a stopped native trial launcher/u);
+  assert.deepEqual(await fs.readFile(f.statePath), before);
+  await assert.rejects(fs.stat(f.starts), { code: "ENOENT" });
+});
+
 test("compiled Rust helper restores a sealed native trial before launcher startup", {
   skip: process.env.T3_TEST_SEALED_TRIAL_HELPER === undefined,
   timeout: 120_000,
@@ -330,6 +340,36 @@ test("compiled Rust helper restores a sealed native trial before launcher startu
     const stateBytes = await fs.readFile(f.statePath);
     const stateIdentity = await fs.stat(f.statePath, { bigint: true });
     const candidate = path.join(target, "t3");
+    const preparationLauncher = f.launcher(pending, { T3_CODE_LS_SEALED_TRIAL_RECOVERY: "1" });
+    let witness;
+    for (const attempt of ["mismatched-update", "corrupt-receipt", "first", "retry"]) {
+      const input = { request: attempt === "mismatched-update" ? {
+        ...request, activation: { ...activation, target_version: "1.2.0" },
+      } : request, preparation: attempt === "corrupt-receipt" ? {
+        ...prepared, file_sha256: "0".repeat(64),
+      } : prepared };
+      if (attempt === "mismatched-update" || attempt === "corrupt-receipt") {
+        await assert.rejects(preparationLauncher.prepareIsolatedCandidate(input),
+          attempt === "mismatched-update" ? /does not match the selected update/u : /Command failed/u);
+      } else {
+        const actual = await preparationLauncher.prepareIsolatedCandidate(input);
+        assert.deepEqual(actual, {
+          protocol: 1, status: "prepared-isolated", updateId: id, targetVersion,
+          entrySha256: activation.target_entry_sha256, helperSha256,
+          verificationSha256: digest(JSON.stringify(input)),
+        });
+        if (witness !== undefined) assert.deepEqual(actual, witness);
+        witness = actual;
+      }
+      assert.equal((await fs.stat(dbPath, { bigint: true })).ino, sourceIdentity.ino);
+      assert.equal((await fs.stat(trial, { bigint: true })).ino, stageIdentity.ino);
+      assert.equal((await fs.stat(f.statePath, { bigint: true })).ino, stateIdentity.ino);
+      assert.deepEqual(await fs.readFile(dbPath), sourceBytes);
+      assert.deepEqual(await fs.readFile(trial), stageBytes);
+      assert.deepEqual(await fs.readFile(f.statePath), stateBytes);
+      await assert.rejects(fs.stat(f.starts), { code: "ENOENT" });
+      await assert.rejects(fs.stat(path.join(f.userdata, "server-runtime.json")), { code: "ENOENT" });
+    }
     for (const valid of [false, true]) {
       const input = { request, preparation: valid ? prepared : {
         ...prepared, file_sha256: "0".repeat(64),
