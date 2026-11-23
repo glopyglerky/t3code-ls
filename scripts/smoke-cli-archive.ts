@@ -322,6 +322,55 @@ const smokeThreadTerminal = Effect.fn("smokeThreadTerminal")(function* (
   yield* Effect.log("[cli-smoke] PTY wait returned exit 0 on success and exit 2 on a question, with no ANSI escapes.");
 });
 
+const smokeThreadFailure = Effect.fn("smokeThreadFailure")(function* (
+  executable: string,
+  home: string,
+  workspace: string,
+) {
+  const started = yield* runExecutable(
+    executable,
+    [
+      "thread",
+      "start",
+      workspace,
+      "Replay a recorded failed turn",
+      "--base-dir",
+      home,
+      "--provider",
+      "devReplay",
+      "--model",
+      "failed-turn",
+      "--wait",
+      "--json",
+    ],
+    workspace,
+  );
+  const result = Schema.decodeUnknownOption(
+    Schema.fromJsonString(
+      Schema.Struct({
+        threadId: Schema.NonEmptyString,
+        runId: Schema.NonEmptyString,
+        status: Schema.Literal("failed"),
+        reply: Schema.Null,
+        error: Schema.NonEmptyString,
+      }),
+    ),
+  )(started.stdout);
+  if (
+    started.exitCode !== 1 ||
+    Option.isNone(result) ||
+    !result.value.error.includes("grok prompt error fixture") ||
+    !started.stderr.includes(`Thread ${result.value.threadId} stopped with status failed`) ||
+    started.stderr.includes("\u001b")
+  ) {
+    return yield* new CliArchiveSmokeError({
+      step: "waiting for the recorded provider failure with --wait --json",
+      detail: `exit ${String(started.exitCode)}\n${started.stdout}${started.stderr}`,
+    });
+  }
+  yield* Effect.log("[cli-smoke] Failed turn returned exit 1, JSON run identity and a stderr diagnostic.");
+});
+
 const smokeSshHelper = Effect.fn("smokeSshHelper")(function* (
   executable: string,
   home: string,
@@ -513,6 +562,7 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
   );
   if (ready && input.expectNative) {
     yield* smokePipedThread(executable, home, workspace);
+    yield* smokeThreadFailure(executable, home, workspace);
     if (platform === "linux") {
       yield* smokeThreadTerminal(executable, home, workspace);
       yield* smokeSshHelper(executable, home, port, Number(server.pid));
