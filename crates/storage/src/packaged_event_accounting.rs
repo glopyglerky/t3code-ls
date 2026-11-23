@@ -8,7 +8,11 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::{Error, Result, Store, application::row_prefix, store_key};
+use crate::{
+    Error, Result, Store,
+    application::{ApplicationTransactions, row_prefix},
+    store_key,
+};
 
 const MAX_FILE_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_KEYS: u64 = 100_000;
@@ -37,7 +41,11 @@ fn digest(path: &Path) -> Result<String> {
         }
         hash.update(&buffer[..n]);
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(hash
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 #[derive(Default, Serialize)]
@@ -99,7 +107,10 @@ pub async fn inspect(root: &Path, profile: &str, expected_sha256: &str) -> Resul
         return Err(invalid());
     }
     let store = Store::open_read_only(&path).await?;
-    let generation = store.generation_identity().await?.ok_or_else(invalid)?;
+    let generation = ApplicationTransactions::new(store.clone())
+        .generation_identity()
+        .await?
+        .ok_or_else(invalid)?;
     let layout = if profile == "full" {
         "t3-application-keyspace-v1"
     } else {
