@@ -635,9 +635,11 @@ async function verifyDraftStorageRecovery(page: Page) {
   const storageKey = "t3code:composer-drafts:v1";
   const original = "Draft stored before the quota fault";
   const revised = "Draft edited while storage is full 🐟";
-  const editor = page.getByTestId("composer-editor");
+  const editor = page.getByRole("textbox", { name: "Message New thread", exact: true });
   await page.getByRole("button", { name: "New thread in hybrid-fixture", exact: true }).click();
   await page.waitForURL((url) => url.pathname.startsWith("/draft/"));
+  // Route navigation can change the URL before React has replaced the old thread's editor.
+  await editor.waitFor({ state: "visible" });
   const draftId = decodeURIComponent(new URL(page.url()).pathname.split("/").at(-1)!);
   const saved = (prompt: string) => page.waitForFunction(
     ({ storageKey, draftId, prompt }) => {
@@ -648,6 +650,7 @@ async function verifyDraftStorageRecovery(page: Page) {
     { timeout: 10_000 },
   );
   await editor.fill(original);
+  Assert.equal(await editor.innerText(), original);
   await saved(original);
   await page.evaluate((key) => {
     const setItem = Storage.prototype.setItem;

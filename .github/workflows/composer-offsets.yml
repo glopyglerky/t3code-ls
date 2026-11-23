@@ -179,18 +179,14 @@ jobs:
           sha256sum apps/web/dist/client-text-wasm/composer_offsets.js \
             apps/web/dist/client-text-wasm/composer_offsets_bg.wasm apps/server/dist/bin.mjs \
             > "$proof/application.sha256"
+          if [[ "$INTEGRATED_NATIVE" == true ]]; then
+            for renderer in dioxus dioxus-fallback; do
+              mkdir "$proof/$renderer"
+              T3_CODE_LS_PAIRING_PROOF="$renderer" \
+                node apps/web/scripts/verify-hybrid-client.ts "$proof/$renderer" "$implementation"
+            done
+          fi
           node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
-      - name: Exercise Dioxus pairing and its fallback against the native bundle
-        if: env.INTEGRATED_NATIVE == 'true'
-        env:
-          T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
-        run: |
-          proof="$RUNNER_TEMP/built-composer-proof"
-          for renderer in dioxus dioxus-fallback; do
-            mkdir "$proof/$renderer"
-            T3_CODE_LS_PAIRING_PROOF="$renderer" \
-              node apps/web/scripts/verify-hybrid-client.ts "$proof/$renderer" native
-          done
       - name: Exercise PDF link handling in the browser
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-')
         working-directory: apps/web
