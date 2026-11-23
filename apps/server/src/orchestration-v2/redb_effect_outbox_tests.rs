@@ -94,6 +94,7 @@ async fn imported(store: &Store, rows: Vec<Map<String, Value>>) -> ApplicationCa
     let catalog = ApplicationCatalog {
         event_layout: None,
         prepared_service_activation_v1: None,
+        forward_service_activation_v1: None,
         schema: schema(),
         generation: "a".repeat(64),
     };
