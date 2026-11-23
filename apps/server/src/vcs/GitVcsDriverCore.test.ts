@@ -767,6 +767,10 @@ it.effect.skipIf(gixFixture === undefined)(
     yield* native.switchRef({ cwd: linked, refName: yield* git(linked, ["rev-parse", "HEAD"]) });
     const detached = yield* native.listRefs({ cwd: linked, refresh: true });
     assert.isFalse(detached.refs.some((ref) => ref.current));
+    const configured = yield* makeNative({ GIT_CONFIG_COUNT: "0" });
+    const configuredStart = calls.length;
+    assert.deepEqual((yield* configured.listRefs({ cwd: linked })).refs, detached.refs);
+    assert.isFalse(calls.slice(configuredStart).some((call) => call.command === gixFixture));
 
     const remote = "origin/team";
     const remoteRef = `refs/remotes/${remote}/release`;
@@ -800,12 +804,9 @@ it.effect.skipIf(gixFixture === undefined)(
     assert.isTrue(calls.slice(malformedStart).some((call) => call.args.includes("show-ref")));
     yield* fs.remove(malformedRef);
 
-    const configured = yield* makeNative({ GIT_CONFIG_COUNT: "0" });
-    const configuredExpected = yield* retained.listRefs({ cwd: linked, refresh: true });
-    const configuredStart = calls.length;
-    assert.deepEqual((yield* configured.listRefs({ cwd: linked })).refs, configuredExpected.refs);
+    const configuredRefStart = calls.length;
     assert.isFalse(yield* configured.remoteBranchExists({ cwd, remoteName: remote, refName: "release" }));
-    assert.isFalse(calls.slice(configuredStart).some((call) => call.command === gixFixture));
+    assert.isFalse(calls.slice(configuredRefStart).some((call) => call.command === gixFixture));
     const badConfigProbe = path.join(cwd, "bad-config-probe");
     yield* fs.makeDirectory(badConfigProbe);
     const configFile = path.join(cwd, ".git", "config");
