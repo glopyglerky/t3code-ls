@@ -1543,7 +1543,9 @@ try {
   const executablePath = process.env.T3_CODE_LS_CHROMIUM_EXECUTABLE;
   browser = await chromium.launch({
     ...(executablePath ? { executablePath } : {}),
-    ...(voiceDraftProof ? { args: ["--use-fake-device-for-media-stream"] } : {}),
+    ...(voiceDraftProof
+      ? { channel: "chromium", args: ["--use-fake-device-for-media-stream"] }
+      : {}),
   });
   console.log(`Original client acceptance: ${requested.join(", ")}; Chromium ${browser.version()}`);
   for (const implementation of requested) {

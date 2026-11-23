@@ -58,6 +58,9 @@ jobs:
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
           node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+      - name: Install the full Chromium binary for microphone capture
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-voice-')
+        run: node apps/web/node_modules/playwright/cli.js install --with-deps --no-shell chromium
       - name: Exercise the composer with the retained offset mapper
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-offsets-')
         working-directory: apps/web
