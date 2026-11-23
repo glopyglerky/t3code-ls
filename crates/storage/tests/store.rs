@@ -956,3 +956,63 @@ async fn concurrent_helpers_reopen_after_crash_without_reading_unrecovered_state
         }
     }
 }
+
+#[tokio::test]
+async fn ordinary_owner_startup_preflight_uses_existing_native_catalog() {
+    use t3_code_ls_storage::application_server_ownership::OwnerLock;
+    let fixture = test_support::TestFixture::start().await;
+    let state = fixture.path().parent().unwrap().join("userdata");
+    std::fs::create_dir(&state).unwrap();
+    let lock_path = state.join("server-owner.sqlite");
+    let owner = OwnerLock::acquire(&lock_path).unwrap();
+    // First-run initialization remains the ordinary bootstrap owner's job.
+    owner.check_server_startup().await.unwrap();
+    assert!(!state.join("statev2.omdb").exists());
+    let store = Store::initialize_local(state.join("statev2.omdb"))
+        .await
+        .unwrap();
+    store.bootstrap_application().await.unwrap();
+    store.shutdown().await.unwrap();
+    let before = std::fs::read(state.join("statev2.omdb")).unwrap();
+    owner.check_server_startup().await.unwrap();
+    assert_eq!(std::fs::read(state.join("statev2.omdb")).unwrap(), before);
+    #[cfg(unix)]
+    {
+        let held = state.join("held-owner");
+        std::fs::rename(&lock_path, &held).unwrap();
+        std::fs::write(&lock_path, b"foreign owner").unwrap();
+        assert!(matches!(
+            owner.check_server_startup().await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert_eq!(std::fs::read(state.join("statev2.omdb")).unwrap(), before);
+        std::fs::remove_file(&lock_path).unwrap();
+        std::fs::rename(held, &lock_path).unwrap();
+    }
+    drop(owner);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_t3-code-ls-db"))
+        .arg("owner-lock")
+        .arg(&lock_path)
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(
+        b"{\"operation\":\"owner_check_startup\"}\n{\"operation\":\"owner_acquire\"}\n{\"operation\":\"owner_check_startup\"}\n"
+    ).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let replies: Vec<Value> = std::str::from_utf8(&output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(replies.len(), 3);
+    assert_eq!(replies[0]["error"]["kind"], "invalid_request");
+    assert_eq!(replies[1]["ok"], true);
+    assert_eq!(replies[2]["result"]["checked"], true);
+    assert_eq!(std::fs::read(state.join("statev2.omdb")).unwrap(), before);
+}

@@ -129,6 +129,48 @@ impl OwnerLock {
         Ok(bytes.as_slice() == NATIVE_OWNER_MARKER)
     }
 
+    /// Production preflight while the ordinary server owner is held. This is
+    /// a refusal boundary, not authority to consume a prepared/forward catalog.
+    /// Keep the catalog's permanent fence and all trial receipts unchanged.
+    /// The caller must finish legacy PID/boot-service exclusion before invoking.
+    pub async fn check_server_startup(&self) -> Result<()> {
+        if self.path.file_name().and_then(|name| name.to_str()) != Some("server-owner.sqlite")
+            || self.replaced_during_acquire
+            || !self.owned()?
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        let database = self
+            .path
+            .parent()
+            .ok_or(Error::IncompatibleStore)?
+            .join("statev2.omdb");
+        match std::fs::symlink_metadata(&database) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err(Error::IncompatibleStore),
+            Ok(metadata) if !metadata.is_file() => return Err(Error::IncompatibleStore),
+            Ok(_) => {}
+        }
+        let store = match crate::Store::open_read_only(&database).await {
+            Ok(store) => store,
+            // Preserve ordinary crash recovery under this exclusive application
+            // owner. Only an explicit recovery-required result permits it. A
+            // busy, foreign or incompatible file never selects another route.
+            Err(Error::RecoveryRequired) => crate::Store::open_exclusive(&database).await?,
+            Err(error) => return Err(error),
+        };
+        let inspected = store.serving_startup_migrations().await;
+        // Close every engine before the server can construct its storage layers.
+        // Failed completion never grants startup, even after a valid inspection.
+        let closed = store.shutdown().await;
+        inspected?;
+        closed?;
+        if !self.owned()? {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    }
+
     pub fn activate_native(&self) -> Result<()> {
         if self.path.file_name().and_then(|name| name.to_str()) != Some("server-owner.sqlite")
             || !self.owned()?
@@ -168,6 +210,7 @@ impl OwnerLock {
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
     OwnerAcquire,
+    OwnerCheckStartup,
     OwnerCheck,
     OwnerActivate,
 }
@@ -182,7 +225,7 @@ fn reply(result: Result<Value>) -> Value {
 }
 
 /// Dedicated process: dropping stdin or killing the process releases the OS lock.
-pub fn run(path: &Path) -> io::Result<()> {
+pub async fn run(path: &Path) -> io::Result<()> {
     let mut input = io::stdin().lock();
     let mut output = io::stdout().lock();
     let mut owner: Option<OwnerLock> = None;
@@ -197,19 +240,33 @@ pub fn run(path: &Path) -> io::Result<()> {
         } else {
             let request = serde_json::from_slice::<Request>(&frame)
                 .map_err(|_| Error::Invalid("invalid ownership request".into()));
-            reply(request.and_then(|request| match request {
-                Request::OwnerAcquire=>{
-                    if owner.is_some() { return Err(Error::Invalid("ownership already acquired".into())); }
-                    let acquired=OwnerLock::acquire(path)?;
-                    let result=json!({"owned":acquired.owned()?,"replaced_during_acquire":acquired.replaced_during_acquire});
-                    owner=Some(acquired); Ok(result)
-                },
-                Request::OwnerCheck=>Ok(json!({"owned":owner.as_ref().ok_or_else(||Error::Invalid("ownership not acquired".into()))?.owned()?})),
-                Request::OwnerActivate=>{
-                    owner.as_ref().ok_or_else(||Error::Invalid("ownership not acquired".into()))?.activate_native()?;
-                    Ok(json!({"activated":true}))
-                },
-            }))
+            let result = async {
+                match request? {
+                    Request::OwnerAcquire => {
+                        if owner.is_some() {
+                            return Err(Error::Invalid("ownership already acquired".into()));
+                        }
+                        let acquired = OwnerLock::acquire(path)?;
+                        let result = json!({"owned": acquired.owned()?,
+                            "replaced_during_acquire": acquired.replaced_during_acquire});
+                        owner = Some(acquired);
+                        Ok(result)
+                    }
+                    Request::OwnerCheckStartup => {
+                        owner.as_ref().ok_or_else(|| Error::Invalid("ownership not acquired".into()))?
+                            .check_server_startup().await?;
+                        Ok(json!({"checked": true}))
+                    }
+                    Request::OwnerCheck => Ok(json!({"owned": owner.as_ref()
+                        .ok_or_else(|| Error::Invalid("ownership not acquired".into()))?.owned()?})),
+                    Request::OwnerActivate => {
+                        owner.as_ref().ok_or_else(|| Error::Invalid("ownership not acquired".into()))?
+                            .activate_native()?;
+                        Ok(json!({"activated": true}))
+                    }
+                }
+            }.await;
+            reply(result)
         };
         serde_json::to_writer(&mut output, &response)?;
         writeln!(output)?;

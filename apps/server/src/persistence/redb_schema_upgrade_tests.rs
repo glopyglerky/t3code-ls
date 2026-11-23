@@ -3474,7 +3474,62 @@ async fn forward_packaged_writer_case(home: &std::path::Path, lose_output: bool)
             .unwrap()
     );
     assert_eq!(capture_forward_file(&live).unwrap(), marked);
+    forward_server_startup_refused(home);
     println!(
         "T05 installed sealed helper committed exact catalog; lost output {lose_output}, reconciled without replay"
     );
+}
+
+// Exercise the actual native startup protocol selected by the server adapter.
+// This owns only a disposable home; it does not grant serving or clear a fence.
+#[cfg(target_os = "linux")]
+fn forward_server_startup_refused(home: &std::path::Path) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let state = home.join("userdata");
+    let paths = [
+        state.join("statev2.omdb"),
+        state.join("server-owner.sqlite"),
+        state.join(format!(".statev2-trial-{ISOLATED_UPDATE}.receipt-v1.json")),
+        state.join(format!(".statev2-forward-{ISOLATED_UPDATE}.json")),
+        home.join("runtime/service-state.json"),
+    ];
+    let before = paths.each_ref().map(|path| capture_forward_file(path));
+    let helper = home.join("runtime/versions/1.2.4/native-bin/t3-code-ls-db");
+    let mut child = Command::new(helper)
+        .arg("owner-lock")
+        .arg(state.join("server-owner.sqlite"))
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(
+        b"{\"operation\":\"owner_acquire\"}\n{\"operation\":\"owner_check_startup\"}\n{\"operation\":\"owner_check\"}\n"
+    ).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let replies: Vec<Value> = std::str::from_utf8(&output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(replies.len(), 3);
+    assert_eq!(replies[0]["ok"], true);
+    assert_eq!(replies[1]["ok"], false);
+    assert_eq!(replies[1]["error"]["kind"], "incompatible_store");
+    assert_eq!(replies[2]["result"]["owned"], true);
+    assert_eq!(
+        paths.each_ref().map(|path| capture_forward_file(path)),
+        before
+    );
+    // Reaped helper released the ordinary owner without changing trial authority.
+    let owner = crate::application_server_ownership::OwnerLock::acquire_existing_native(
+        &state.join("server-owner.sqlite"),
+    )
+    .unwrap();
+    owner.verify_native().unwrap();
+    println!("T05 native startup owner refused selected forward catalog; receipts unchanged");
 }

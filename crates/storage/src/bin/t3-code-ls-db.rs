@@ -1832,6 +1832,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     if let [mode, path] = args.as_slice() {
         if mode == "owner-lock" {
             return t3_code_ls_storage::application_server_ownership::run(Path::new(path))
+                .await
                 .map_err(Into::into);
         }
     }
