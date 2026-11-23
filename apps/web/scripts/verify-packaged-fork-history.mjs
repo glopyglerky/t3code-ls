@@ -142,7 +142,7 @@ function seedEvents() {
     ...userTurn(13), ...pendingQuestion(13)];
 }
 
-function assertNativeOwner(pid, executable, database) {
+function assertNativeOwner(pid, executable, database, mode = "local") {
   Assert.ok(pid);
   const tasks = `/proc/${pid}/task`;
   const matches = FS.readdirSync(tasks).some((task) => {
@@ -151,7 +151,7 @@ function assertNativeOwner(pid, executable, database) {
       return children.split(/\s+/u).filter(Boolean).some((id) => {
         try {
           const argv = FS.readFileSync(`/proc/${id}/cmdline`, "utf8").split("\0");
-          return argv[1] === "local" && argv[2] === database &&
+          return argv[1] === mode && argv[2] === database &&
             FS.readlinkSync(`/proc/${id}/exe`) === executable;
         } catch (error) {
           if (error.code !== "ENOENT") throw error;
@@ -248,7 +248,7 @@ try {
   phase("initializing-packaged-profile");
   application = await start("initialize");
   await application.ready;
-  assertNativeOwner(application.pid, executable, databasePath);
+  assertNativeOwner(application.pid, executable, databasePath, "initialize-local");
   const setup = await authenticatePackagedServer(application, abort.signal);
   await setup.createProject({ projectId, title: "Fork history fixture", workspaceRoot: workspace });
   await application.stop();
