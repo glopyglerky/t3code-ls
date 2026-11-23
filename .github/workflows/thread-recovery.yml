@@ -378,11 +378,11 @@ jobs:
           test "$RUNNER_ENVIRONMENT" = github-hosted
           test -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           test -x "$ANDROID_HOME/platform-tools/adb"
-          mkdir "$sdk" "$RUNNER_TEMP/outbox-runtime-sdk-user"
+          mkdir -p "$sdk/cmdline-tools/latest" "$RUNNER_TEMP/outbox-runtime-sdk-user"
           cp -R "$ANDROID_HOME/licenses" "$sdk/licenses"
-          ln -s "$ANDROID_HOME/cmdline-tools" "$sdk/cmdline-tools"
+          cp -a "$ANDROID_HOME/cmdline-tools/latest/." "$sdk/cmdline-tools/latest/"
           ln -s "$ANDROID_HOME/platform-tools" "$sdk/platform-tools"
-          ANDROID_USER_HOME="$RUNNER_TEMP/outbox-runtime-sdk-user" \
+          ANDROID_HOME="$sdk" ANDROID_SDK_ROOT="$sdk" ANDROID_USER_HOME="$RUNNER_TEMP/outbox-runtime-sdk-user" \
             "$sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk" --channel=0 --install \
               emulator 'system-images;android-36;google_apis;x86_64' </dev/null
           img="$sdk/system-images/android-36/google_apis/x86_64"
@@ -414,7 +414,7 @@ jobs:
           getent group kvm >/dev/null
           sudo -n unshare --net -- bash -euc '
             ip link set dev lo up
-            exec runuser -u "$1" -g "$6" -G kvm -- env GITHUB_ACTIONS=true RUNNER_TEMP="$3" ANDROID_HOME="$4" JAVA_HOME="$5" \
+            exec runuser -u "$1" -g "$6" -G kvm -- env GITHUB_ACTIONS=true RUNNER_TEMP="$3" ANDROID_HOME="$4" ANDROID_SDK_ROOT="$4" JAVA_HOME="$5" \
               "$2" scripts/verify-android-outbox-runtime.ts admit "$3/outbox-runtime-proof"
           ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$RUNNER_TEMP/outbox-runtime-sdk" "$JAVA_HOME" "$(id -gn)"
       - name: Build matching JNI and two embedded-JS proof packages
@@ -462,7 +462,7 @@ jobs:
           export JAVA_HOME="$JAVA_HOME_21_X64"
           sudo -n unshare --net -- bash -euc '
             ip link set dev lo up
-            exec runuser -u "$1" -g "$6" -G kvm -- env GITHUB_ACTIONS=true RUNNER_TEMP="$3" ANDROID_HOME="$4" JAVA_HOME="$5" \
+            exec runuser -u "$1" -g "$6" -G kvm -- env GITHUB_ACTIONS=true RUNNER_TEMP="$3" ANDROID_HOME="$4" ANDROID_SDK_ROOT="$4" JAVA_HOME="$5" \
               "$2" scripts/verify-android-outbox-runtime.ts run "$3/outbox-runtime-proof"
           ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$RUNNER_TEMP/outbox-runtime-sdk" "$JAVA_HOME" "$(id -gn)"
       - name: Retain Android execution or the first admission blocker
