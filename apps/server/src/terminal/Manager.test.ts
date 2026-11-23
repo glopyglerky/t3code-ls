@@ -884,7 +884,7 @@ it.layer(
         invoked.resolve();
       });
       const data = "café 🧪\r";
-      const writing = yield* manager.write({ threadId: "thread-1", terminalId: "default", data }).pipe(
+      const writing = yield* manager.write({ threadId: "thread-1", terminalId: DEFAULT_TERMINAL_ID, data }).pipe(
         Effect.forkChild({ startImmediately: true }),
       );
       yield* Effect.promise(() => invoked.promise);
@@ -906,7 +906,7 @@ it.layer(
       const data = "🧪\r";
       for (const acceptedBytes of [0, 1, data.length, 99, Number.NaN]) {
         process.writeReceipt = () => Promise.resolve({ acceptedBytes });
-        const error = yield* manager.write({ threadId: "thread-1", terminalId: "default", data }).pipe(Effect.flip);
+        const error = yield* manager.write({ threadId: "thread-1", terminalId: DEFAULT_TERMINAL_ID, data }).pipe(Effect.flip);
         expect(error).toMatchObject({
           _tag: "TerminalWriteError",
           terminalPid: process.pid,
@@ -914,7 +914,7 @@ it.layer(
         });
       }
       process.writeReceipt = () => Promise.reject(new Error("lost native write acknowledgement"));
-      const lost = yield* manager.write({ threadId: "thread-1", terminalId: "default", data }).pipe(Effect.flip);
+      const lost = yield* manager.write({ threadId: "thread-1", terminalId: DEFAULT_TERMINAL_ID, data }).pipe(Effect.flip);
       expect(lost).toMatchObject({ _tag: "TerminalWriteError", terminalPid: process.pid });
       expect(process.writes).toEqual(Array.from({ length: 6 }, () => data));
     }),
