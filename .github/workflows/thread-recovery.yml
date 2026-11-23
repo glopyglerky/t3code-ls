@@ -556,8 +556,10 @@ jobs:
           pnpm --dir apps/mobile exec expo prebuild --platform android --no-install
           apps/mobile/android/gradlew -p apps/mobile/android --no-daemon --max-workers=2 :app:assembleRelease
           apk=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
-          sdk="$RUNNER_TEMP/outbox-runtime-sdk"
-          test "$("$sdk/cmdline-tools/latest/bin/apkanalyzer" manifest application-id "$apk")" = com.t3tools.t3code.dev.preferencesproof
+          aapt="$ANDROID_HOME/build-tools/37.0.0/aapt2"
+          test -x "$aapt"
+          package_id="$("$aapt" dump badging "$apk" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
+          test "$package_id" = com.t3tools.t3code.dev.preferencesproof
           cp "$apk" "$RUNNER_TEMP/outbox-runtime-preferences.apk"
           proof="$RUNNER_TEMP/outbox-runtime-proof"
           git show -s --format='%H %T' > "$proof/preferences-source.txt"
