@@ -32,7 +32,19 @@ jobs:
       - name: Install the X11 test host
         timeout-minutes: 5
         run: |
-          apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
+          set -euo pipefail
+          source /etc/os-release
+          test "$ID/$VERSION_CODENAME" = ubuntu/noble
+          sources="$RUNNER_TEMP/gpui-ubuntu.list"
+          trap 'rm -f "$sources"' EXIT
+          cat > "$sources" <<'EOF'
+          deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://archive.ubuntu.com/ubuntu noble main universe
+          deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://archive.ubuntu.com/ubuntu noble-updates main universe
+          deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] https://security.ubuntu.com/ubuntu noble-security main universe
+          EOF
+          apt_options=(-o "Dir::Etc::sourcelist=$sources" -o Dir::Etc::sourceparts=-
+            -o APT::Update::Error-Mode=any -o APT::Get::List-Cleanup=0
+            -o Acquire::Retries=1 -o Acquire::https::Timeout=15)
           sudo apt-get "${apt_options[@]}" update
           sudo apt-get "${apt_options[@]}" install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev \
             libx11-xcb-dev libxrandr-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-render0-dev \
