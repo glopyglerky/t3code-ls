@@ -48,7 +48,10 @@ const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
 const spliceNegotiationProof = process.env.T3_CODE_LS_SPLICE_NEGOTIATION_PROOF === "true";
 const splitPtyProof = process.env.T3_CODE_LS_SPLIT_PTY_PROOF === "true";
 const pairingProof = process.env.T3_CODE_LS_PAIRING_PROOF;
-const nativePtyHost = process.env.T3_CODE_LS_PTY_PROOF_EXECUTABLE;
+const bundledPtyProof = process.env.T3_CODE_LS_BUNDLED_PTY_PROOF === "true";
+const nativePtyHost = bundledPtyProof
+  ? NodePath.join(repoRoot, "apps/server/dist/native-bin/t3-code-ls-pty-host")
+  : process.env.T3_CODE_LS_PTY_PROOF_EXECUTABLE;
 const multiTabDraftProof = process.env.T3_CODE_LS_MULTI_TAB_DRAFT_PROOF === "true";
 const draftStorageProof = process.env.T3_CODE_LS_DRAFT_STORAGE_PROOF === "true";
 const fileEditorProof = process.env.T3_CODE_LS_FILE_EDITOR_PROOF === "true";
@@ -197,8 +200,9 @@ async function startApplication(
     FORCE_COLOR: "0",
     NO_COLOR: "1",
   });
-  if (nativePtyHost !== undefined && implementation === "native") {
-    env.T3_CODE_LS_PTY_HOST_EXECUTABLE = nativePtyHost;
+  if (implementation === "native") {
+    if (bundledPtyProof) env.T3_CODE_LS_BUNDLED_PTY_HOST = "1";
+    else if (nativePtyHost !== undefined) env.T3_CODE_LS_PTY_HOST_EXECUTABLE = nativePtyHost;
   }
   if (bundledClient) Object.assign(env, { HOME: stateDirectory });
   NodeFS.writeFileSync(logPath, "");
@@ -1334,6 +1338,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     terminalFailure: null as string | null,
     terminalInitialOutput: false,
     nativePtyOwner: false,
+    bundledNativePtyOwner: false,
     fileEditor: null as Awaited<ReturnType<typeof verifyFileEditor>> | null,
     completedSnapshots: [] as Array<
       Awaited<ReturnType<typeof assertCompleted>> & { checkpoint: string }
@@ -1646,8 +1651,15 @@ async function exercise(implementation: Implementation): Promise<void> {
         });
         const shell = await terminalMarker(page, "fixture-pty");
         if (nativePtyHost !== undefined) {
+          if (bundledPtyProof) {
+            const manifest = JSON.parse(NodeFS.readFileSync(NodePath.join(NodePath.dirname(nativePtyHost), "manifest.json"), "utf8"));
+            Assert.equal(manifest.target, "linux-x64");
+            Assert.equal(manifest.files["t3-code-ls-pty-host"],
+              NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(nativePtyHost)).digest("hex"));
+          }
           assertNativePtyOwner(shell, nativePtyHost, application.pid);
           proof.nativePtyOwner = true;
+          proof.bundledNativePtyOwner = bundledPtyProof;
         }
         proof.terminalInitialOutput = true;
         saveProof();

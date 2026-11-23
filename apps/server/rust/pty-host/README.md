@@ -67,3 +67,11 @@ The source oracle is the retained `NodePtyAdapter.ts` at
 `c7a3f02e3851923ced8ebd000db79f641e11b038`, blob
 `cc7ae638f7df2c5605584eba1c0de3f4799acdfc`. Whole terminal rendering, reconnect,
 authorization and platform acceptance remain with T07's application owner.
+
+The native bundle can include this helper with `T3_CODE_LS_BUNDLE_PTY_HOST=1` at
+build time. The running server selects the packaged helper with
+`T3_CODE_LS_BUNDLED_PTY_HOST=1`, verifying its Linux x64 manifest entry and SHA-256
+before creating the adapter. An explicit helper override and packaged selection
+cannot be combined. Ordinary selection continues through the existing Node owner.
+The bundled browser qualification resolves the helper beside the server bundle
+and verifies that the terminal shell descends from that exact executable.
