@@ -73,13 +73,31 @@ impl Store {
     }
 
     pub async fn application_migrations(&self) -> Result<Vec<Migration>> {
+        Ok(self
+            .read_application_migrations(false)
+            .await?
+            .unwrap_or_default())
+    }
+
+    /// Inspect the serving catalog and its migration rows on the same snapshot.
+    pub async fn serving_startup_migrations(&self) -> Result<Option<Vec<Migration>>> {
+        self.read_application_migrations(true).await
+    }
+
+    async fn read_application_migrations(
+        &self,
+        require_serving: bool,
+    ) -> Result<Option<Vec<Migration>>> {
         let mut tx = self.db.begin_read_only().await?;
         let Some(bytes) = tx.get(&schema_key()).await? else {
             tx.rollback().await?;
-            return Ok(Vec::new());
+            return Ok(None);
         };
         let catalog = decode_catalog(&bytes)?;
         read_generation_identity(&mut tx, &catalog, &bytes).await?;
+        if require_serving {
+            catalog.ensure_serving()?;
+        }
         let prefix = row_prefix(&catalog.generation, "effect_sql_migrations")?;
         let mut end = prefix.clone();
         *end.last_mut().ok_or(Error::IncompatibleStore)? += 1;
@@ -111,7 +129,7 @@ impl Store {
         }
         result.sort_by_key(|entry| entry.id.parse::<i64>().unwrap_or(i64::MAX));
         tx.rollback().await?;
-        Ok(result)
+        Ok(Some(result))
     }
 
     /// New files are initialized atomically; an imported or existing file is

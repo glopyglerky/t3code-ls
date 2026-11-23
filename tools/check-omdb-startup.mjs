@@ -81,6 +81,23 @@ const hasCauseMessage = (error, expected) => {
   }
   return false;
 };
+const uncataloged = await createFixture();
+try {
+  NodeAssert.equal(nativeRequest(executable, uncataloged, "initialize", {
+    operation: "application_schema",
+  }), null);
+  const beforeInspection = hash(await NodeFSP.readFile(uncataloged.databasePath));
+  NodeAssert.equal(nativeRequest(executable, uncataloged, "inspect", {
+    operation: "application_startup_migrations",
+  }), null);
+  NodeAssert.deepEqual(nativeRequest(executable, uncataloged, "inspect", {
+    operation: "application_migrations",
+  }), []);
+  NodeAssert.equal(hash(await NodeFSP.readFile(uncataloged.databasePath)), beforeInspection);
+  checks.push("Read-only startup inspection distinguishes an uncataloged file without writing it");
+} finally {
+  await uncataloged.close();
+}
 try {
   await run(({ database }) =>
     Effect.gen(function* () {
@@ -171,6 +188,16 @@ try {
   );
   NodeAssert.deepEqual(readIdentity(fixture), initialIdentity);
   checks.push("reopen verifies schema and migration identity without reinitializing state");
+  const beforeInspection = hash(await NodeFSP.readFile(fixture.databasePath));
+  const inspected = nativeRequest(executable, fixture, "inspect", {
+    operation: "application_startup_migrations",
+  });
+  NodeAssert.deepEqual(inspected, nativeRequest(executable, fixture, "inspect", {
+    operation: "application_migrations",
+  }));
+  NodeAssert.equal(inspected.at(-1).id, "89");
+  NodeAssert.equal(hash(await NodeFSP.readFile(fixture.databasePath)), beforeInspection);
+  checks.push("Read-only startup inspection returns the committed migration list without writing the file");
 } finally {
   await fixture.close();
 }

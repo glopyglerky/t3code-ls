@@ -78,15 +78,11 @@ export const make = Effect.fn("Omdb.make")(
               ? { reconnect: false, requestTimeout: "60 minutes" as const }
               : {}),
           });
-          const schema = yield* inspection.request(
-            { operation: "application_schema" },
-            Schema.NullOr(RedbClient.ApplicationSchema),
-          );
-          if (schema === null) return false;
           const migrations = yield* inspection.request(
-            { operation: "application_migrations" },
-            Bootstrap.fields.migrations,
+            { operation: "application_startup_migrations" },
+            Schema.NullOr(Bootstrap.fields.migrations),
           );
+          if (migrations === null) return false;
           return (
             migrations.length !== currentSchema.migrations.length ||
             migrations.some(

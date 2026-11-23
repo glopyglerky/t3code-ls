@@ -67,6 +67,7 @@ enum Request {
         event_layout: Option<ApplicationEventLayout>,
     },
     ApplicationMigrations {},
+    ApplicationStartupMigrations {},
     ApplicationProjectionWindowQuery {
         transaction_id: String,
         query: ProjectionWindowQuery,
@@ -550,6 +551,7 @@ impl Request {
             | Self::ApplicationProjectionsShell { .. }
             | Self::ApplicationThreadSearchRead { .. }
             | Self::ApplicationMigrations { .. }
+            | Self::ApplicationStartupMigrations { .. }
             | Self::ApplicationProjectionWindowQuery { .. }
             | Self::StorageStatistics { .. }
             | Self::ApplicationLegacyV1Read { .. }
@@ -671,11 +673,14 @@ async fn evaluate(
                 .bootstrap_application_with_event_layout(event_layout)
                 .await?,
         ),
-        Request::ApplicationMigrations {} => {
-            if transactions.prepared_service_activation().await?.is_some() {
-                return Err(Error::IncompatibleStore);
-            }
-            serde_json::to_value(store.application_migrations().await?)
+        Request::ApplicationMigrations {} => serde_json::to_value(
+            store
+                .serving_startup_migrations()
+                .await?
+                .unwrap_or_default(),
+        ),
+        Request::ApplicationStartupMigrations {} => {
+            serde_json::to_value(store.serving_startup_migrations().await?)
         }
         Request::ApplicationProjectionWindowQuery {
             transaction_id,

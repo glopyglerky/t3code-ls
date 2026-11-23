@@ -368,6 +368,13 @@ jobs:
           node tools/install-server-tests.mjs
           node tools/check-acceptance.mjs --tests '["tools/check-omdb-startup.mjs"]' \
             --proof-directory "$RUNNER_TEMP/migration-proof"
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t16-migration-witness-startup-inspection-* ]]; then
+            "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              test --locked -j 2 -p t3-code-ls-storage --lib \
+              application_bootstrap::upgrade::tests::isolated_trial_upgrades_88_without_changing_the_stopped_source \
+              -- --exact --nocapture | tee "$RUNNER_TEMP/migration-proof/sealed-inspection.log"
+            grep -F 'test result: ok. 1 passed' "$RUNNER_TEMP/migration-proof/sealed-inspection.log"
+          fi
       - name: Retain native startup evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

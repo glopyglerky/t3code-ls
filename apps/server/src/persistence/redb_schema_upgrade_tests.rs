@@ -762,6 +762,10 @@ async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
             );
             assert_eq!(generation_bytes(&candidate, &catalog).await, original_rows);
             if bind_runtime {
+                assert!(matches!(
+                    candidate.serving_startup_migrations().await,
+                    Err(Error::IncompatibleStore)
+                ));
                 let mut application = ApplicationTransactions::new(candidate.clone());
                 assert_eq!(
                     application.prepared_service_activation().await.unwrap(),
