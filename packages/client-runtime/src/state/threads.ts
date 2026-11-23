@@ -441,14 +441,16 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     options?: {
       readonly resetHistory?: boolean;
       readonly history?: ThreadHistoryMeta;
+      readonly snapshotSequence?: number;
     },
   ) {
     const waiting = yield* Ref.get(awaitingCompletion);
-    const sequence = yield* SubscriptionRef.get(lastSequence);
+    const snapshotSequence = options?.snapshotSequence;
+    const sequence = snapshotSequence ?? (yield* SubscriptionRef.get(lastSequence));
     // Atomic with concurrent history meta updates: never get-then-set the whole
     // state when only the projection changes. Bounded installs pass history so
     // projection + cursor persist together in one enqueue.
-    const next = yield* SubscriptionRef.updateAndGet(state, (previous) => {
+    const publish = SubscriptionRef.updateAndGet(state, (previous) => {
       const history =
         options?.history !== undefined
           ? options.history
@@ -468,14 +470,19 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         sequence,
       };
     });
+    const next =
+      snapshotSequence === undefined
+        ? yield* publish
+        : yield* Effect.uninterruptible(
+            publish.pipe(Effect.tap(() => SubscriptionRef.set(lastSequence, snapshotSequence))),
+          );
     // Active projections can update many times per second and retain large tool
     // payloads. Persist once the run settles so cache encoding stays off the
     // streaming path. Progressive meta rides along when the window is incomplete.
     if (shouldPersistThread(thread, next.history)) {
-      const snapshotSequence = yield* SubscriptionRef.get(lastSequence);
       yield* queuePersist(
         snapshotToPersist(
-          snapshotSequence,
+          sequence,
           thread,
           next.history,
           yield* Ref.get(acceptsBoundedSocketSnapshots),
@@ -656,7 +663,6 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     }
 
     if (item.kind === "snapshot") {
-      yield* SubscriptionRef.set(lastSequence, item.snapshotSequence);
       const hasProgressiveHistory =
         item.historyCursor !== undefined ||
         item.hasMoreHistory !== undefined ||
@@ -673,8 +679,9 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
                 expanded: false,
                 latestLocalTurnOrdinal: item.latestLocalTurnOrdinal ?? null,
               },
+              snapshotSequence: item.snapshotSequence,
             }
-          : { resetHistory: true },
+          : { resetHistory: true, snapshotSequence: item.snapshotSequence },
       );
       return;
     }
@@ -1055,7 +1062,6 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
               // snapshots still go through applyItem (resetHistory).
               yield* applyLock.withPermits(1)(
                 Effect.gen(function* () {
-                  yield* SubscriptionRef.set(lastSequence, httpResult.snapshot.snapshotSequence);
                   const history: ThreadHistoryMeta =
                     httpResult.history !== undefined
                       ? {
@@ -1067,7 +1073,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
                           latestLocalTurnOrdinal: httpResult.history.latestLocalTurnOrdinal ?? null,
                         }
                       : EMPTY_THREAD_HISTORY_META;
-                  yield* setThread(httpResult.snapshot.projection, { history });
+                  yield* setThread(httpResult.snapshot.projection, {
+                    history,
+                    snapshotSequence: httpResult.snapshot.snapshotSequence,
+                  });
                   yield* remember;
                 }),
               );
