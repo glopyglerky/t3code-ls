@@ -6,6 +6,15 @@ export interface WelcomeMount extends DioxusMount {
   update(agentReady: boolean, isImporting: boolean, selectedCount: number, newCount: number): void;
 }
 
+export type ThreadFindAction = "query" | "next" | "previous" | "retry" | "close";
+
+export interface ThreadFindMount extends DioxusMount {
+  update(
+    query: string, count: string, status: string, busy: boolean, noResults: boolean,
+    navigationDisabled: boolean, focusRequestId: number,
+  ): void;
+}
+
 interface OnboardingBindings {
   default(): Promise<unknown>;
   mount_pairing_form(
@@ -23,6 +32,10 @@ interface OnboardingBindings {
     newCount: number,
     onStart: () => void,
   ): WelcomeMount;
+  mount_thread_find(
+    root: HTMLDivElement,
+    action: (action: ThreadFindAction, query?: string) => void,
+  ): ThreadFindMount;
 }
 
 async function initialize(): Promise<OnboardingBindings> {

@@ -16,6 +16,7 @@ interface ImportMetaEnv {
   readonly VITE_RELAY_OTLP_TRACES_TOKEN: string;
   readonly VITE_T3_CODE_LS_COMPOSER_OFFSETS?: "rust";
   readonly VITE_T3_CODE_LS_PAIRING_RENDERER?: "dioxus";
+  readonly VITE_T3_CODE_LS_THREAD_FIND_RENDERER?: "dioxus";
   readonly T3CODE_DESKTOP_UPDATE_REPOSITORY: string;
   readonly T3CODE_FEATURE_SECRETS: string;
   readonly APP_VERSION: string;

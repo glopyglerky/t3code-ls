@@ -30,6 +30,7 @@ jobs:
       INTEGRATED_NATIVE: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') }}
       NATIVE_PTY_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-') }}
       PAIRING_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t01-dioxus-pairing-') }}
+      DIOXUS_FIND_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-find-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -62,7 +63,7 @@ jobs:
             build_binding t3-code-ls-client-text-web t3_code_ls_client_text_web \
               composer_offsets apps/web/public/client-text-wasm
           fi
-          if [[ "$PAIRING_PROOF" == true || "$INTEGRATED_NATIVE" == true ]]; then
+          if [[ "$PAIRING_PROOF" == true || "$INTEGRATED_NATIVE" == true || "$DIOXUS_FIND_PROOF" == true ]]; then
             build_binding t3-code-ls-web-pairing t3_code_ls_web_pairing \
               local_pairing "$RUNNER_TEMP/pairing-wasm"
           fi
@@ -223,6 +224,10 @@ jobs:
             cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
             export VITE_T3_CODE_LS_PAIRING_RENDERER=dioxus
           fi
+          if [[ "$DIOXUS_FIND_PROOF" == true ]]; then
+            cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
+            export VITE_T3_CODE_LS_THREAD_FIND_RENDERER=dioxus
+          fi
           pnpm --dir apps/web run build
           implementation=upstream
           if [[ "$BUNDLED_NATIVE" == true ]]; then
@@ -255,7 +260,23 @@ jobs:
                 node apps/web/scripts/verify-hybrid-client.ts "$proof/$renderer" "$implementation"
             done
           fi
-          node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
+          if [[ "$DIOXUS_FIND_PROOF" == true ]]; then
+            sha256sum apps/web/dist/pairing-wasm/local_pairing{.js,_bg.wasm} > "$proof/find-wasm.sha256"
+            for renderer in dioxus fallback; do
+              mkdir "$proof/$renderer"
+              sudo -n unshare --net -- bash -euc '
+                ip link set dev lo up
+                exec runuser -u "$1" -- env T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 \
+                  VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust T3_CODE_LS_DIOXUS_FIND_PROOF="$4" \
+                  "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
+              ' _ "$(id -un)" "$(command -v node)" "$proof/$renderer" "$renderer"
+            done
+            jq -e '.historyFind.renderer == "dioxus-wasm" and .historyFind.draftPreserved' "$proof/dioxus/native/proof.json"
+            jq -e '.historyFind.renderer == "retained" and .historyFind.refusedWasmRequests > 0 and .historyFind.draftPreserved' \
+              "$proof/fallback/native/proof.json"
+          else
+            node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
+          fi
       - name: Exercise PDF link handling in the browser
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-')
         working-directory: apps/web
