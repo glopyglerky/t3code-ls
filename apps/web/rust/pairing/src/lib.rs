@@ -1,6 +1,7 @@
 #![cfg(target_arch = "wasm32")]
 
 mod approval_action;
+mod assistant_text;
 mod composer_submit;
 mod guest_name;
 mod thread_find;

@@ -17,9 +17,12 @@ import { useFileContextMenuHandler } from "../../fileContextMenu";
 import {
   readResponseSubagents,
   useAssistantMessageText,
+  useAssistantMessageSnapshot,
   useProject,
   useThreadShell,
 } from "../../state/entities";
+import { DioxusAssistantText } from "./DioxusAssistantText";
+import * as DateTime from "effect/DateTime";
 import { MessageCopyButton } from "./MessageCopyButton";
 import { AssistantCitationSource } from "./AssistantCitationSource";
 import { resolveAssistantMessageCopyState } from "./MessagesTimeline.logic";
@@ -38,7 +41,11 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
     row.message.streaming ? ctx.threadRef : null,
     row.projectedItem?.item.id,
   );
-  const text = liveText ?? row.message.text;
+  const nativeSnapshot = useAssistantMessageSnapshot(
+    import.meta.env.VITE_T3_CODE_LS_ASSISTANT_TEXT_RENDERER === "dioxus" ? ctx.threadRef : null,
+    row.projectedItem?.item.id,
+  );
+  const text = nativeSnapshot?.text ?? liveText ?? row.message.text;
   const messageText =
     text || (row.message.streaming || row.suppressEmptyResponse ? "" : "(empty response)");
 
@@ -54,19 +61,21 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
             request={ctx.citationRequest}
             listRef={ctx.listRef}
           >
-            <ChatMarkdown
-              text={messageText}
-              renderInsights
-              cwd={ctx.markdownCwd}
-              threadRef={ctx.threadRef ?? undefined}
-              isStreaming={Boolean(row.message.streaming)}
-              lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
-              skills={ctx.skills}
-              headingLevelOffset={MESSAGE_HEADING_LEVEL}
-              onUseArtifactTemplate={ctx.onUseArtifactTemplate}
-              onRunShellCommand={ctx.onRunShellCommand}
-              onImageExpand={ctx.onImageExpand}
-            />
+            <AssistantTextBoundary snapshot={nativeSnapshot}>
+              <ChatMarkdown
+                text={messageText}
+                renderInsights
+                cwd={ctx.markdownCwd}
+                threadRef={ctx.threadRef ?? undefined}
+                isStreaming={Boolean(row.message.streaming)}
+                lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
+                skills={ctx.skills}
+                headingLevelOffset={MESSAGE_HEADING_LEVEL}
+                onUseArtifactTemplate={ctx.onUseArtifactTemplate}
+                onRunShellCommand={ctx.onRunShellCommand}
+                onImageExpand={ctx.onImageExpand}
+              />
+            </AssistantTextBoundary>
           </AssistantCitationSource>
         </div>
         {ctx.onOpenTurnDiff ? (
@@ -94,6 +103,17 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
       </div>
     </>
   );
+}
+
+function AssistantTextBoundary({ snapshot, children }: {
+  snapshot: ReturnType<typeof useAssistantMessageSnapshot>;
+  children: import("react").ReactNode;
+}) {
+  if (!snapshot) return children;
+  return <DioxusAssistantText text={snapshot.text} sequence={String(snapshot.sequence)}
+    updatedAt={DateTime.formatIso(snapshot.updatedAt)} streaming={snapshot.streaming}>
+    {children}
+  </DioxusAssistantText>;
 }
 
 function AssistantForkButton({

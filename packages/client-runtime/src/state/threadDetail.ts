@@ -385,6 +385,21 @@ export function createEnvironmentThreadDetailAtoms<E>(
     );
   });
 
+  const assistantMessageSnapshotAtomFamily = Atom.family((key: string) => {
+    const separator = key.lastIndexOf("\u0000");
+    const thread = key.slice(0, separator);
+    const itemId = key.slice(separator + 1);
+    return Atom.make((get) => {
+      const item = get(visibleTurnItemsAtomFamily(thread)).find(
+        (visibleItem) => visibleItem.item.id === itemId,
+      )?.item;
+      const sequence = get(threadStateValueAtomFamily(thread)).sequence;
+      return item?.type === "assistant_message"
+        ? { text: item.text, updatedAt: item.updatedAt, streaming: item.streaming, sequence }
+        : null;
+    }).pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-assistant-message-snapshot:${key}`));
+  });
+
   const assistantMessageTextAtomFamily = Atom.family((key: string) => {
     const separator = key.lastIndexOf("\u0000");
     const thread = key.slice(0, separator);
@@ -624,6 +639,8 @@ export function createEnvironmentThreadDetailAtoms<E>(
       quietVisibleTurnItemsAtomFamily(threadKey(ref)),
     timelineVisibleTurnItemsAtom: (ref: ScopedThreadRef) =>
       timelineVisibleTurnItemsAtomFamily(threadKey(ref)),
+    assistantMessageSnapshotAtom: (ref: ScopedThreadRef, itemId: string) =>
+      assistantMessageSnapshotAtomFamily(`${threadKey(ref)}\u0000${itemId}`),
     assistantMessageTextAtom: (ref: ScopedThreadRef, itemId: string) =>
       assistantMessageTextAtomFamily(`${threadKey(ref)}\u0000${itemId}`),
     statusAtom: (ref: ScopedThreadRef) => statusAtomFamily(threadKey(ref)),

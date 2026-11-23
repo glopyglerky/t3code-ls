@@ -830,6 +830,23 @@ async function verifyComposerSubmitRefusal(
   return submit;
 }
 
+async function assertNativeAssistantText(page: Page, threadId: string, messageId: string) {
+  const snapshot = await readThreadSnapshot(page, threadId);
+  const item = snapshot.projection.turnItems.find((item) =>
+    item.type === "assistant_message" && item.messageId === messageId);
+  Assert.ok(item && item.type === "assistant_message");
+  const row = page.locator(`[data-assistant-citation-source=${JSON.stringify(messageId)}]`)
+    .locator('[data-assistant-text-renderer="dioxus-wasm"]');
+  await row.waitFor({ state: "visible" });
+  Assert.equal(await row.textContent(), item.text);
+  Assert.equal(await row.getAttribute("data-message-updated-at"), DateTime.formatIso(item.updatedAt));
+  Assert.equal(await row.getAttribute("data-streaming"), String(item.streaming));
+  const sequence = Number(await row.getAttribute("data-snapshot-sequence"));
+  Assert.ok(sequence >= snapshot.snapshotSequence, "Rendered text must reflect the observed committed snapshot");
+  return { messageId, text: item.text, updatedAt: DateTime.formatIso(item.updatedAt), sequence,
+    streaming: item.streaming };
+}
+
 async function verifyComposerStop(
   page: Page,
   threadId: string,
@@ -853,6 +870,19 @@ async function verifyComposerStop(
       message.text === capturedStop.partialText,
   );
   Assert.ok(partial, "The run must stream the captured text before Stop");
+
+  const timelineProof = process.env.T3_CODE_LS_ASSISTANT_TEXT_PROOF === "true";
+  let streamingRow: Awaited<ReturnType<typeof assertNativeAssistantText>> | undefined;
+  if (timelineProof && renderer === "dioxus") {
+    streamingRow = await assertNativeAssistantText(page, threadId, partial.id);
+    Assert.equal(streamingRow.streaming, true);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForURL(threadUrl);
+    const resumed = await assertNativeAssistantText(page, threadId, partial.id);
+    Assert.equal(resumed.text, streamingRow.text);
+    Assert.equal(resumed.updatedAt, streamingRow.updatedAt);
+    Assert.equal(resumed.streaming, true);
+  }
 
   if (renderer === "dioxus-fallback") {
     const fallback = footer.getByRole("button", { name: "Use standard Stop button", exact: true });
@@ -882,6 +912,7 @@ async function verifyComposerStop(
   await editor.press("End");
   await editor.press("a");
   await editor.press("Backspace");
+  Assert.ok(await editor.evaluate((element) => document.activeElement === element), "Typing beside the live row must retain composer focus");
   Assert.equal(await stop.count(), 1);
   Assert.equal(await send.count(), 1);
   Assert.ok(await stop.evaluate((button, original) => button === original, originalStop));
@@ -934,6 +965,12 @@ async function verifyComposerStop(
     draft,
   );
   Assert.equal(await assertInterrupted(), sentMessageId);
+  const reopenedRow = timelineProof && renderer === "dioxus" ? await assertNativeAssistantText(page, threadId, partial.id) : undefined;
+  if (timelineProof && renderer === "dioxus-fallback") {
+    Assert.equal(await page.locator('[data-assistant-text-renderer="dioxus-wasm"]:visible').count(), 0);
+    await page.getByText(capturedStop.partialText, { exact: true }).waitFor({ state: "visible" });
+  }
+  if (reopenedRow) Assert.equal(reopenedRow.streaming, false);
   Assert.equal(requests.length, 1, "Keyboard Stop must send exactly one interruption command");
   const [request] = requests;
   Assert.ok(request?.commandId);
@@ -946,6 +983,7 @@ async function verifyComposerStop(
     request,
     sentMessageId,
     capturedFixtureSha256: capturedStop.sha256,
+    timeline: timelineProof ? { streamingRow, reopenedRow, runningRouteResumed: renderer === "dioxus", retainedFallback: renderer === "dioxus-fallback" } : undefined,
     draftPreserved: true,
     interruptedReopened: true,
   };

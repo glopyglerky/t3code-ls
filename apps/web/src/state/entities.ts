@@ -246,6 +246,20 @@ export function useTimelineVisibleTurnItems(
   );
 }
 
+type AssistantMessageSnapshot = NonNullable<
+  ReturnType<typeof environmentThreadDetails.assistantMessageSnapshotAtom> extends Atom.Atom<infer A> ? A : never
+>;
+const EMPTY_ASSISTANT_MESSAGE_SNAPSHOT_ATOM = Atom.make<AssistantMessageSnapshot | null>(null);
+
+/** Text and applied sequence from the same selected-thread state read. */
+export function useAssistantMessageSnapshot(ref: ScopedThreadRef | null, itemId: string | undefined) {
+  return useAtomValue(
+    ref === null || itemId === undefined
+      ? EMPTY_ASSISTANT_MESSAGE_SNAPSHOT_ATOM
+      : environmentThreadDetails.assistantMessageSnapshotAtom(ref, itemId),
+  );
+}
+
 /** One assistant message's live text, or null when the thread does not hold the item. */
 export function useAssistantMessageText(
   ref: ScopedThreadRef | null,
