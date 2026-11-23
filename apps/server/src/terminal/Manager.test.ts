@@ -1389,6 +1389,47 @@ it.layer(
     }),
   );
 
+  it.effect("restores a live parser continuation at the attach snapshot boundary", () =>
+    Effect.gen(function* () {
+      const { manager, ptyAdapter } = yield* createManager();
+      const input = openInput();
+      yield* manager.open(input);
+      const pty = ptyAdapter.processes[0]!;
+      const first = "ready\n\u001b[3";
+      const suffix = "2mWorld 🦀\u001b[0m\n";
+      const firstSeen = yield* Deferred.make<void>();
+      const finishSeen = yield* Deferred.make<void>();
+      const unsubscribe = yield* manager.subscribe((event) =>
+        event.type === "output" && event.data === first
+          ? Deferred.succeed(firstSeen, undefined).pipe(Effect.asVoid)
+          : Effect.void,
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(unsubscribe));
+      pty.emitData(first);
+      yield* Deferred.await(firstSeen);
+      const events = yield* Ref.make<ReadonlyArray<TerminalAttachStreamEvent>>([]);
+      const detach = yield* manager.attachStream({ ...input, resume: true }, (event) =>
+        Ref.update(events, (values) => [...values, event]).pipe(
+          Effect.andThen(
+            event.type === "output" && event.data === suffix
+              ? Deferred.succeed(finishSeen, undefined).pipe(Effect.asVoid)
+              : Effect.void,
+          ),
+        ),
+      );
+      yield* Effect.addFinalizer(() => Effect.sync(detach));
+      expect(yield* Ref.get(events)).toMatchObject([{ type: "snapshot", snapshot: { history: first } }]);
+      pty.emitData(suffix);
+      yield* Deferred.await(finishSeen);
+      expect(yield* Ref.get(events)).toMatchObject([
+        { type: "snapshot", snapshot: { history: first } },
+        { type: "output", data: suffix },
+      ]);
+      expect((yield* manager.open(input)).history).toBe(first + suffix);
+      expect(ptyAdapter.spawnInputs).toHaveLength(1);
+    }),
+  );
+
   it.effect("strips replayable CSI and DCS traffic while preserving setters", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter } = yield* createManager();

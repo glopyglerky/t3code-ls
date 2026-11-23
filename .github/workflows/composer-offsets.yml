@@ -72,6 +72,10 @@ jobs:
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-')
         working-directory: apps/web
         run: pnpm exec vp test run --project unit --maxWorkers 2 src/composerDraftStore.test.ts
+      - name: Exercise terminal attachment and parser continuity
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-split-')
+        working-directory: apps/server
+        run: pnpm exec vp test run --maxWorkers 2 src/terminal/Manager.test.ts
       - name: Build and open the application with the Rust composer binding
         if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
         env:
