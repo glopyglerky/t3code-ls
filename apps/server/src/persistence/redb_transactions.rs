@@ -68,6 +68,55 @@ pub(crate) struct ApplicationCatalog {
     pub(crate) generation: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) event_layout: Option<ApplicationEventLayout>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) prepared_service_activation_v1: Option<PreparedServiceActivation>,
+}
+
+impl ApplicationCatalog {
+    pub(crate) fn ensure_serving(&self) -> Result<()> {
+        if self.prepared_service_activation_v1.is_some() {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    }
+}
+
+/// Installed-runtime identity sealed into a private trial's native catalog.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedServiceActivation {
+    pub update_id: String,
+    pub from_version: String,
+    pub target_version: String,
+    pub target_entry_sha256: String,
+    pub target_helper_sha256: String,
+    pub target_schema_sha256: String,
+}
+
+pub(crate) fn exact_service_version(value: &str) -> bool {
+    static GRAMMAR: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:(?:0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$",
+        )
+        .expect("service version grammar")
+    });
+    value.len() <= 256 && GRAMMAR.is_match(value)
+}
+
+impl PreparedServiceActivation {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if !crate::application_storage::valid_update_id(&self.update_id)
+            || !exact_service_version(&self.from_version)
+            || !exact_service_version(&self.target_version)
+            || self.from_version == self.target_version
+            || !digest(&self.target_entry_sha256)
+            || !digest(&self.target_helper_sha256)
+            || !digest(&self.target_schema_sha256)
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -149,7 +198,7 @@ async fn verify_generation_identity(
     expected: &ApplicationGenerationIdentity,
 ) -> Result<Option<ApplicationGenerationIdentity>> {
     let Some(bytes) = transaction.get(&generation_identity_key(catalog)).await? else {
-        if catalog.event_layout.is_some() {
+        if catalog.event_layout.is_some() || catalog.prepared_service_activation_v1.is_some() {
             return Err(Error::IncompatibleStore);
         }
         // Older generations have a validated catalog without an engine record.
@@ -287,6 +336,9 @@ fn validate_catalog(catalog: &ApplicationCatalog) -> Result<()> {
     }
     if catalog.event_layout.is_some() && catalog.generation != "native" {
         return Err(invalid("event layout requires a fresh native generation"));
+    }
+    if let Some(binding) = &catalog.prepared_service_activation_v1 {
+        binding.validate()?;
     }
     Ok(())
 }
@@ -433,10 +485,11 @@ impl ApplicationTransactions {
     }
 
     pub async fn schema(&self) -> Result<Option<ApplicationSchema>> {
-        Ok(self
-            .catalog_and_identity()
-            .await?
-            .map(|(catalog, _)| catalog.schema))
+        let Some((catalog, _)) = self.catalog_and_identity().await? else {
+            return Ok(None);
+        };
+        catalog.ensure_serving()?;
+        Ok(Some(catalog.schema))
     }
 
     pub async fn generation_identity(&self) -> Result<Option<ApplicationGenerationIdentity>> {
@@ -446,12 +499,43 @@ impl ApplicationTransactions {
             .and_then(|(_, identity)| identity))
     }
 
+    pub async fn prepared_service_activation(&self) -> Result<Option<PreparedServiceActivation>> {
+        Ok(self
+            .catalog_and_identity()
+            .await?
+            .and_then(|(catalog, _)| catalog.prepared_service_activation_v1))
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) async fn seal_service_trial(
+        &self,
+        binding: PreparedServiceActivation,
+    ) -> Result<()> {
+        self.store.db.require_exclusive()?;
+        let mut transaction = self.store.db.begin().await?;
+        let bytes = transaction
+            .get(&schema_key())
+            .await?
+            .ok_or(Error::IncompatibleStore)?;
+        let mut catalog = decode_catalog(&bytes)?;
+        read_generation_identity(&mut transaction, &catalog, &bytes).await?;
+        if catalog.prepared_service_activation_v1.is_some() {
+            return Err(Error::IncompatibleStore);
+        }
+        catalog.prepared_service_activation_v1 = Some(binding);
+        let bytes = encode_catalog(&catalog)?;
+        record_generation_identity(&mut transaction, &catalog, &bytes).await?;
+        transaction.put(schema_key(), bytes).await?;
+        transaction.commit().await
+    }
+
     pub async fn initialize(&mut self, schema: ApplicationSchema) -> Result<bool> {
         validate_schema(&schema)?;
         let mut transaction = self.store.db.begin().await?;
         if let Some(bytes) = transaction.get(&schema_key()).await? {
             let existing = decode_catalog(&bytes)?;
             read_generation_identity(&mut transaction, &existing, &bytes).await?;
+            existing.ensure_serving()?;
             if existing.schema != schema {
                 return Err(invalid(
                     "application schema is already initialized differently",
@@ -464,6 +548,7 @@ impl ApplicationTransactions {
             schema,
             generation: "native".into(),
             event_layout: None,
+            prepared_service_activation_v1: None,
         };
         let bytes = encode_catalog(&catalog)?;
         record_generation_identity(&mut transaction, &catalog, &bytes).await?;
@@ -531,6 +616,7 @@ impl ApplicationTransactions {
             Some(cached) if cached.bytes == bytes => cached,
             slot => {
                 let catalog = Arc::new(decode_catalog(&bytes)?);
+                catalog.ensure_serving()?;
                 let identity = generation_identity(&catalog, &bytes);
                 slot.insert(ValidatedCatalog {
                     bytes,

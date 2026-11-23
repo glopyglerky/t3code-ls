@@ -12,6 +12,7 @@ async fn fixture_80() -> (TestFixture, Store, ApplicationCatalog) {
     let previous: Definition = serde_json::from_str(include_str!("omdb-schema-80.json")).unwrap();
     let source = ApplicationCatalog {
         event_layout: None,
+        prepared_service_activation_v1: None,
         schema: previous.schema,
         generation: "native".into(),
     };
@@ -240,6 +241,7 @@ async fn interrupted_staging_retries_from_current_source_and_removes_stale_candi
     let current = definition().unwrap();
     let target = ApplicationCatalog {
         event_layout: None,
+        prepared_service_activation_v1: None,
         generation: request_digest(&json!([
             "native-schema-upgrade",
             source.generation,
@@ -579,15 +581,18 @@ async fn fixture_88() -> (TestFixture, Store, ApplicationCatalog) {
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
+    use crate::application::PreparedServiceActivation;
     use crate::application_bootstrap::bootstrap_schema_sha256;
     use crate::application_server_ownership::OwnerLock;
     use crate::application_storage::{
-        IsolatedTrialRequest, TrialSnapshot, backup_service_trial, prepare_isolated_service_trial,
+        IsolatedTrialRequest, TrialSnapshot, backup_service_trial,
+        inspect_isolated_service_trial_selection, prepare_isolated_service_trial,
     };
+    use sha2::{Digest, Sha256};
     use std::fs;
 
     const UPDATE: &str = "aa212c2b-63d4-4b28-97e4-1c1d6dc6d281";
-    for unsupported in [false, true] {
+    for (unsupported, bind_runtime) in [(false, false), (true, false), (false, true)] {
         let (fixture, store, catalog) = fixture_88().await;
         if unsupported {
             let mut tx = store.db.begin().await.unwrap();
@@ -629,22 +634,57 @@ async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
         let checkpoint = home.join(format!("runtime/native-db-backup/{UPDATE}.omdb"));
         let live_bytes = fs::read(&live).unwrap();
         let checkpoint_bytes = fs::read(&checkpoint).unwrap();
-        let result = prepare_isolated_service_trial(
-            home,
-            UPDATE.into(),
-            IsolatedTrialRequest {
+        let target_schema_sha256 = bootstrap_schema_sha256();
+        let helper = home.join("runtime/versions/1.2.4/native-bin/t3-code-ls-db");
+        let selection_file = home.join("runtime/service-state.json");
+        let write_selection = |protocol| {
+            let selection = json!({
+                "protocol": protocol, "activeVersion": "1.2.3", "update": {
+                    "id": UPDATE, "fromVersion": "1.2.3", "targetVersion": "1.2.4",
+                    "dbPath": live, "status": "pending"
+                }
+            });
+            fs::write(&selection_file, selection.to_string()).unwrap();
+        };
+        let activation = if bind_runtime {
+            let version_dir = home.join("runtime/versions/1.2.4");
+            fs::create_dir_all(helper.parent().unwrap()).unwrap();
+            fs::write(&helper, b"fixture helper").unwrap();
+            fs::write(version_dir.join("t3"), b"fixture runtime").unwrap();
+            fs::write(version_dir.join(".install-complete"), b"").unwrap();
+            write_selection(4);
+            Some(PreparedServiceActivation {
                 update_id: UPDATE.into(),
-                database: backup.database,
-                checkpoint: TrialSnapshot {
-                    catalog_sha256: identity.catalog_sha256,
-                    rows: backup.backup.rows,
-                    checksum: backup.backup.checksum,
-                },
-                target_schema_sha256: bootstrap_schema_sha256(),
+                from_version: "1.2.3".into(),
+                target_version: "1.2.4".into(),
+                target_entry_sha256: format!("{:x}", Sha256::digest(b"fixture runtime")),
+                target_helper_sha256: format!("{:x}", Sha256::digest(b"fixture helper")),
+                target_schema_sha256: target_schema_sha256.clone(),
+            })
+        } else {
+            None
+        };
+        let request = || IsolatedTrialRequest {
+            update_id: UPDATE.into(),
+            database: backup.database.clone(),
+            checkpoint: TrialSnapshot {
+                catalog_sha256: identity.catalog_sha256.clone(),
+                rows: backup.backup.rows,
+                checksum: backup.backup.checksum.clone(),
             },
-        )
-        .await;
+            target_schema_sha256: target_schema_sha256.clone(),
+            activation: activation.clone(),
+        };
         let trial = state.join(format!(".statev2-trial-{UPDATE}.omdb"));
+        if bind_runtime {
+            assert!(matches!(
+                prepare_isolated_service_trial(home.clone(), UPDATE.into(), request()).await,
+                Err(Error::IncompatibleStore)
+            ));
+            assert!(!trial.exists());
+            write_selection(5);
+        }
+        let result = prepare_isolated_service_trial(home.clone(), UPDATE.into(), request()).await;
         if unsupported {
             assert!(matches!(result, Err(Error::Invalid(_))), "{result:?}");
             assert!(!trial.exists());
@@ -654,12 +694,29 @@ async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
             let upgraded =
                 decode_catalog(&candidate.db.read(&schema_key()).await.unwrap().unwrap()).unwrap();
             let expected = definition().unwrap();
-            assert_eq!(upgraded, target_89(&catalog, &expected));
+            let mut expected_catalog = target_89(&catalog, &expected);
+            expected_catalog.prepared_service_activation_v1 = activation.clone();
+            assert_eq!(upgraded, expected_catalog);
             assert_eq!(
                 candidate.application_migrations().await.unwrap().len(),
                 expected.migrations.len()
             );
             assert_eq!(generation_bytes(&candidate, &catalog).await, original_rows);
+            if bind_runtime {
+                let mut application = ApplicationTransactions::new(candidate.clone());
+                assert_eq!(
+                    application.prepared_service_activation().await.unwrap(),
+                    activation
+                );
+                assert!(matches!(
+                    application.schema().await,
+                    Err(Error::IncompatibleStore)
+                ));
+                assert!(matches!(
+                    application.open_read_session().await,
+                    Err(Error::IncompatibleStore)
+                ));
+            }
             assert_eq!(
                 ApplicationTransactions::new(candidate.clone())
                     .generation_identity()
@@ -670,6 +727,34 @@ async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
                 prepared.snapshot.catalog_sha256
             );
             candidate.shutdown().await.unwrap();
+            if bind_runtime {
+                assert_eq!(
+                    prepare_isolated_service_trial(home.clone(), UPDATE.into(), request())
+                        .await
+                        .unwrap(),
+                    prepared
+                );
+                let inspect = || {
+                    inspect_isolated_service_trial_selection(
+                        home.clone(),
+                        UPDATE.into(),
+                        "1.2.3".into(),
+                        "1.2.4".into(),
+                    )
+                };
+                assert_eq!(
+                    inspect().await.unwrap().prepared_database,
+                    prepared.database
+                );
+                let trial_bytes = fs::read(&trial).unwrap();
+                fs::write(&helper, b"replacement helper").unwrap();
+                assert!(matches!(inspect().await, Err(Error::IncompatibleStore)));
+                assert!(matches!(
+                    prepare_isolated_service_trial(home.clone(), UPDATE.into(), request()).await,
+                    Err(Error::IncompatibleStore)
+                ));
+                assert_eq!(fs::read(&trial).unwrap(), trial_bytes);
+            }
         }
         assert_eq!(fs::read(&live).unwrap(), live_bytes);
         assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);

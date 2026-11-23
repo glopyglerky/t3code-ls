@@ -161,6 +161,7 @@ enum Request {
     },
     ApplicationSchema {},
     ApplicationGenerationIdentity {},
+    ApplicationPreparedServiceActivation {},
     ApplicationInit {
         schema: ApplicationSchema,
     },
@@ -541,6 +542,7 @@ impl Request {
             Self::Shutdown { .. }
             | Self::ApplicationSchema { .. }
             | Self::ApplicationGenerationIdentity { .. }
+            | Self::ApplicationPreparedServiceActivation { .. }
             | Self::ApplicationProjectionsContext { .. }
             | Self::ApplicationProjectionsRecovery { .. }
             | Self::ApplicationProjectionsShell { .. }
@@ -728,6 +730,9 @@ async fn evaluate(
         Request::ApplicationSchema {} => serde_json::to_value(transactions.schema().await?),
         Request::ApplicationGenerationIdentity {} => {
             serde_json::to_value(transactions.generation_identity().await?)
+        }
+        Request::ApplicationPreparedServiceActivation {} => {
+            serde_json::to_value(transactions.prepared_service_activation().await?)
         }
         Request::ApplicationInit { schema } => {
             Ok(json!({"initialized": transactions.initialize(schema).await?}))

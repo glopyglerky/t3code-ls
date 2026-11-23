@@ -131,6 +131,7 @@ impl Store {
         if let Some(bytes) = tx.get(&schema_key()).await? {
             let catalog = decode_catalog(&bytes)?;
             read_generation_identity(&mut tx, &catalog, &bytes).await?;
+            catalog.ensure_serving()?;
             tx.rollback().await?;
             if event_layout.is_some() && event_layout != catalog.event_layout {
                 return Err(Error::Invalid(
@@ -169,6 +170,7 @@ impl Store {
             schema: definition.schema,
             generation: "native".into(),
             event_layout,
+            prepared_service_activation_v1: None,
         };
         let bytes = encode_catalog(&catalog)?;
         record_generation_identity(&mut tx, &catalog, &bytes).await?;

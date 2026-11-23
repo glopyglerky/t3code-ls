@@ -5,6 +5,9 @@ use super::{
     trial_file_digest, trial_file_identity, validate_isolated_trial_preparation,
     validate_isolated_trial_request, verify_restore_snapshot, write_trial_receipt,
 };
+use crate::application::{
+    ApplicationTransactions, PreparedServiceActivation, exact_service_version,
+};
 use crate::application_bootstrap::bootstrap_schema_sha256;
 use crate::application_server_ownership::OwnerLock;
 use crate::backend::{Backend, path_identity};
@@ -110,15 +113,111 @@ impl TrialLease {
         self.checkpoint.verify()
     }
 
-    async fn verify_candidate(&self, preparation: &IsolatedTrialPreparation) -> Result<()> {
+    async fn verify_candidate(
+        &self,
+        request: &IsolatedTrialRequest,
+        preparation: &IsolatedTrialPreparation,
+    ) -> Result<()> {
         let candidate = TrialInput::open(self.trial.clone(), &preparation.snapshot).await?;
         if candidate.identity != preparation.database || candidate.sha256 != preparation.file_sha256
         {
             return Err(Error::IncompatibleStore);
         }
         candidate.store.verify_bootstrap_schema().await?;
+        if ApplicationTransactions::new(candidate.store.clone())
+            .prepared_service_activation()
+            .await?
+            != request.activation
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        self.verify_activation(request)?;
         self.verify_inputs()?;
         candidate.verify()
+    }
+
+    fn verify_activation(&self, request: &IsolatedTrialRequest) -> Result<()> {
+        if let Some(activation) = &request.activation {
+            self.verify_installed_target(activation)?;
+            self.pending_selection(
+                &request.update_id,
+                &activation.from_version,
+                &activation.target_version,
+                true,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn pending_selection(
+        &self,
+        update_id: &str,
+        from: &str,
+        target: &str,
+        bound: bool,
+    ) -> Result<ServiceSelection> {
+        let state_path =
+            TrialRestoreDirectories::pinned(&self.directories.runtime).join("service-state.json");
+        let selection =
+            read_trial_receipt::<ServiceSelection>(&state_path)?.ok_or(Error::IncompatibleStore)?;
+        let supported_protocol = if bound {
+            selection.protocol == 5
+        } else {
+            matches!(selection.protocol, 3 | 4)
+        };
+        if !supported_protocol
+            || selection.active_version != from
+            || selection.update.id != update_id
+            || selection.update.from_version != from
+            || selection.update.target_version != target
+            || selection.update.status != "pending"
+            || selection.update.db_path != self.home.join("userdata/statev2.omdb")
+            || !exact_service_version(from)
+            || !exact_service_version(target)
+            || compare_service_versions(target, from) != std::cmp::Ordering::Greater
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(selection)
+    }
+
+    fn verify_installed_target(&self, activation: &PreparedServiceActivation) -> Result<()> {
+        let version_dir = self
+            .home
+            .join("runtime/versions")
+            .join(&activation.target_version);
+        let versions_dir = version_dir.parent().ok_or(Error::IncompatibleStore)?;
+        if fs::canonicalize(versions_dir).map_err(io_error)? != versions_dir
+            || fs::canonicalize(&version_dir).map_err(io_error)? != version_dir
+            || !fs::symlink_metadata(version_dir.join(".install-complete"))
+                .map_err(io_error)?
+                .is_file()
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        let entry = fs::canonicalize(version_dir.join("t3")).map_err(io_error)?;
+        if !entry.starts_with(&version_dir) {
+            return Err(Error::IncompatibleStore);
+        }
+        let helper = entry
+            .parent()
+            .ok_or(Error::IncompatibleStore)?
+            .join("native-bin/t3-code-ls-db");
+        for (path, sha256) in [
+            (&entry, &activation.target_entry_sha256),
+            (&helper, &activation.target_helper_sha256),
+        ] {
+            if fs::canonicalize(path).map_err(io_error)? != *path {
+                return Err(Error::IncompatibleStore);
+            }
+            let mut options = fs::OpenOptions::new();
+            options.read(true);
+            let file = crate::backend::open_regular_file(path, &mut options)?;
+            if trial_file_digest(&file)? != *sha256 {
+                return Err(Error::IncompatibleStore);
+            }
+        }
+        self.directories.verify(&self.home)
     }
 
     fn sync_publication(&self) -> Result<()> {
@@ -135,17 +234,10 @@ pub(super) async fn verify(
     preparation: IsolatedTrialPreparation,
 ) -> Result<()> {
     let lease = TrialLease::open(home, &request).await?;
-    lease.verify_candidate(&preparation).await
+    lease.verify_candidate(&request, &preparation).await
 }
 
 // Ported from cloud/serviceProtocol.ts, retained stock 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f.
-// This observer compares expectations with the pending record and selects no runtime.
-fn exact_service_version(value: &str) -> bool {
-    regex::Regex::new(
-        r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:(?:0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$",
-    ).expect("service version grammar").is_match(value)
-}
-
 fn compare_service_versions(left: &str, right: &str) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     fn parts(version: &str) -> (&str, &str) {
@@ -259,22 +351,12 @@ pub(super) async fn inspect_selection(
     validate_isolated_trial_preparation(&saved.request, &saved.preparation)?;
     let lease = TrialLease::open(home.clone(), &saved.request).await?;
     directories.verify(&home)?;
-    let state_path =
-        TrialRestoreDirectories::pinned(&lease.directories.runtime).join("service-state.json");
-    let selection =
-        read_trial_receipt::<ServiceSelection>(&state_path)?.ok_or(Error::IncompatibleStore)?;
-    if !matches!(selection.protocol, 3 | 4)
-        || selection.active_version != from_version
-        || selection.update.id != update_id
-        || selection.update.from_version != from_version
-        || selection.update.target_version != target_version
-        || selection.update.status != "pending"
-        || selection.update.db_path != home.join("userdata/statev2.omdb")
-    {
-        return Err(Error::IncompatibleStore);
-    }
-    lease.verify_candidate(&saved.preparation).await?;
-    if read_trial_receipt::<ServiceSelection>(&state_path)?.as_ref() != Some(&selection) {
+    let bound = saved.request.activation.is_some();
+    let selection = lease.pending_selection(&update_id, &from_version, &target_version, bound)?;
+    lease
+        .verify_candidate(&saved.request, &saved.preparation)
+        .await?;
+    if lease.pending_selection(&update_id, &from_version, &target_version, bound)? != selection {
         return Err(Error::IncompatibleStore);
     }
     if read_trial_receipt::<IsolatedTrialVerification>(&receipt)?.as_ref() != Some(&saved) {
@@ -295,6 +377,7 @@ pub(super) async fn prepare(
     request: IsolatedTrialRequest,
 ) -> Result<IsolatedTrialPreparation> {
     let lease = TrialLease::open(home, &request).await?;
+    lease.verify_activation(&request)?;
     let trial = &lease.trial;
     let receipt = trial.with_extension("receipt-v1.json");
     if let Some(saved) = read_trial_receipt::<IsolatedTrialVerification>(&receipt)? {
@@ -302,7 +385,7 @@ pub(super) async fn prepare(
             return Err(Error::IncompatibleStore);
         }
         validate_isolated_trial_preparation(&request, &saved.preparation)?;
-        lease.verify_candidate(&saved.preparation).await?;
+        lease.verify_candidate(&request, &saved.preparation).await?;
         lease.sync_publication()?;
         return Ok(saved.preparation);
     }
@@ -334,6 +417,11 @@ pub(super) async fn prepare(
     if candidate.bootstrap_application().await?.initialized {
         return Err(Error::IncompatibleStore);
     }
+    if let Some(activation) = &request.activation {
+        ApplicationTransactions::new(candidate.clone())
+            .seal_service_trial(activation.clone())
+            .await?;
+    }
     candidate.shutdown().await?;
 
     let candidate = Store {
@@ -354,6 +442,7 @@ pub(super) async fn prepare(
     file.sync_all().map_err(io_error)?;
 
     lease.verify_inputs()?;
+    lease.verify_activation(&request)?;
     disposable_file_exists(trial)?;
     candidate.db.verify_identity()?;
     fs::rename(&working, trial).map_err(io_error)?;

@@ -56,6 +56,7 @@ fn target_89(source: &ApplicationCatalog, current: &Definition) -> ApplicationCa
         ])),
         schema: current.schema.clone(),
         event_layout: None,
+        prepared_service_activation_v1: source.prepared_service_activation_v1.clone(),
     }
 }
 
@@ -417,6 +418,7 @@ impl Store {
             ])),
             schema: current.schema.clone(),
             event_layout: None,
+            prepared_service_activation_v1: source.prepared_service_activation_v1.clone(),
         };
         for stage in [
             Stage::Clear,

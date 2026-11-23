@@ -1,6 +1,8 @@
 //! Native file accounting, snapshot backups and offline compaction.
 
-use crate::application::{ApplicationGenerationIdentity, ApplicationTransactions};
+use crate::application::{
+    ApplicationGenerationIdentity, ApplicationTransactions, PreparedServiceActivation,
+};
 use crate::application_server_ownership::OwnerLock;
 use crate::backend::{Backend, path_identity};
 use crate::{Error, Result, Store};
@@ -90,6 +92,9 @@ pub struct IsolatedTrialRequest {
     pub checkpoint: TrialSnapshot,
     /// SHA-256 of the expected candidate's bundled omdb-schema.json.
     pub target_schema_sha256: String,
+    /// Native protocol-5 trials additionally bind their installed target artifacts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activation: Option<PreparedServiceActivation>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -170,6 +175,14 @@ fn validate_isolated_trial_request(
         || !valid_digest(&request.target_schema_sha256)
     {
         return Err(Error::Invalid("invalid isolated trial identity".into()));
+    }
+    if let Some(activation) = &request.activation {
+        activation.validate()?;
+        if activation.update_id != update_id
+            || activation.target_schema_sha256 != request.target_schema_sha256
+        {
+            return Err(Error::IncompatibleStore);
+        }
     }
     Ok(())
 }
@@ -315,7 +328,7 @@ fn valid_digest(digest: &str) -> bool {
     digest.len() == 64 && digest.bytes().all(lower_hex)
 }
 
-fn valid_update_id(id: &str) -> bool {
+pub(crate) fn valid_update_id(id: &str) -> bool {
     id.len() == 36
         && id.bytes().enumerate().all(|(index, byte)| match index {
             8 | 13 | 18 | 23 => byte == b'-',
