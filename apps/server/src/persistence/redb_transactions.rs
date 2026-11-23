@@ -602,7 +602,27 @@ impl ApplicationTransactions {
         snapshot: redb_bench_compare::ordered::Snapshot,
     ) -> Result<()> {
         self.check_new_session(transaction_id)?;
-        let transaction = Transaction::comparison_read_only(self.store.db.clone(), snapshot);
+        let transaction = Transaction::comparison_read_only(snapshot);
+        let session = self.session_from_transaction(transaction).await?;
+        self.sessions.insert(transaction_id.into(), session);
+        Ok(())
+    }
+
+    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    pub(crate) async fn begin_comparison_write(
+        &mut self,
+        transaction_id: &str,
+        database: Arc<redb_bench_compare::ordered::Database>,
+        discard_commit_ack: bool,
+    ) -> Result<()> {
+        self.check_new_session(transaction_id)?;
+        let transaction = Transaction::comparison_reserved(
+            database,
+            Duration::from_millis(DEFAULT_LOCK_TIMEOUT_MS),
+            MAX_IDLE,
+            discard_commit_ack,
+        )
+        .await?;
         let session = self.session_from_transaction(transaction).await?;
         self.sessions.insert(transaction_id.into(), session);
         Ok(())

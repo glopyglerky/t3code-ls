@@ -21,6 +21,8 @@ use redb::{
     ReadableDatabase, ReadableTable, StorageBackend, TableDefinition, TableHandle,
     WriteTransaction,
 };
+#[cfg(all(test, feature = "ordered-engine-fixture"))]
+use redb_bench_compare::ordered as comparison;
 use sha2::{Digest, Sha256};
 use tokio::sync::oneshot;
 
@@ -915,19 +917,12 @@ impl Backend {
         let snapshot = tokio::task::spawn_blocking(move || handles.begin_read())
             .await
             .map_err(worker_error)??;
-        Ok(Transaction {
-            backend: self.clone(),
-            snapshot: TransactionSnapshot::Omdb(Arc::new(snapshot)),
-            reads: BTreeMap::new(),
-            mutation_reads: BTreeMap::new(),
-            writes: BTreeMap::new(),
-            staged_bytes: 0,
-            observed_bytes: 0,
-            observed_records: 0,
-            ranges: Vec::new(),
-            reserved: None,
-            read_only: self.handles.read_only,
-        })
+        Ok(Transaction::new(
+            Some(self.clone()),
+            TransactionSnapshot::Omdb(Arc::new(snapshot)),
+            None,
+            self.handles.read_only,
+        ))
     }
 
     pub(crate) async fn begin_read_only(&self) -> Result<Transaction> {
@@ -943,37 +938,18 @@ impl Backend {
         lock_timeout: Duration,
         idle_timeout: Duration,
     ) -> Result<Transaction> {
-        let (commands, receive) = mpsc::sync_channel(1);
-        let (ready, snapshot) = oneshot::channel();
-        let state = Arc::new(Mutex::new(ReservationState {
-            touched: Instant::now(),
-            closed: false,
-            idle_timeout,
-        }));
-        let worker_state = state.clone();
-        let handles = self.handles.clone();
-        let worker = tokio::task::spawn_blocking(move || {
-            reserved_worker(handles, worker_state, receive, ready, lock_timeout);
-        });
-        let reserved = ReservedWriter {
-            commands: Some(commands),
-            worker: Some(worker),
-            state,
-        };
-        let snapshot = snapshot.await.map_err(worker_error_from_channel)??;
-        Ok(Transaction {
-            backend: self.clone(),
-            snapshot: TransactionSnapshot::Omdb(snapshot),
-            reads: BTreeMap::new(),
-            mutation_reads: BTreeMap::new(),
-            writes: BTreeMap::new(),
-            staged_bytes: 0,
-            observed_bytes: 0,
-            observed_records: 0,
-            ranges: Vec::new(),
-            reserved: Some(reserved),
-            read_only: false,
-        })
+        let handles = Arc::clone(&self.handles);
+        let (snapshot, reserved) =
+            ReservedWriter::start(idle_timeout, move |state, commands, ready| {
+                reserved_worker(handles, state, commands, ready, lock_timeout);
+            })
+            .await?;
+        Ok(Transaction::new(
+            Some(self.clone()),
+            snapshot,
+            Some(reserved),
+            false,
+        ))
     }
 
     pub(crate) async fn read(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
@@ -1048,21 +1024,86 @@ struct ObservedRange {
 enum TransactionSnapshot {
     Omdb(Arc<ReadTransaction>),
     #[cfg(all(test, feature = "ordered-engine-fixture"))]
-    Comparison(Arc<redb_bench_compare::ordered::Snapshot>),
+    Comparison(Arc<comparison::Snapshot>),
 }
 
 impl TransactionSnapshot {
-    fn omdb(&self) -> Result<Arc<ReadTransaction>> {
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
         match self {
-            Self::Omdb(snapshot) => Ok(Arc::clone(snapshot)),
+            Self::Omdb(snapshot) => {
+                let table = snapshot.open_table(TABLE).map_err(storage_error)?;
+                let value = table.get(key).map_err(storage_error)?;
+                value.map(|value| bounded_copy(value.value())).transpose()
+            }
             #[cfg(all(test, feature = "ordered-engine-fixture"))]
-            Self::Comparison(_) => Err(Error::Invalid("comparison snapshot is read-only".into())),
+            Self::Comparison(snapshot) => snapshot.get(key).map_err(Error::from),
+        }
+    }
+
+    fn fingerprint(&self, key: &[u8]) -> Result<Option<(usize, [u8; 32])>> {
+        match self {
+            Self::Omdb(snapshot) => {
+                let table = snapshot.open_table(TABLE).map_err(storage_error)?;
+                let value = table.get(key).map_err(storage_error)?;
+                Ok(value.map(|value| fingerprint(value.value())))
+            }
+            #[cfg(all(test, feature = "ordered-engine-fixture"))]
+            Self::Comparison(snapshot) => Ok(snapshot.get(key)?.as_deref().map(fingerprint)),
+        }
+    }
+
+    fn scan(&self, start: &[u8], end: &[u8], limit: usize) -> Result<Vec<Pair>> {
+        match self {
+            Self::Omdb(snapshot) => {
+                let table = snapshot.open_table(TABLE).map_err(storage_error)?;
+                scan_table(&table, start, end, limit)
+            }
+            #[cfg(all(test, feature = "ordered-engine-fixture"))]
+            Self::Comparison(snapshot) => snapshot.scan(start, end, limit).map_err(Error::from),
+        }
+    }
+
+    fn read_many<T>(
+        &self,
+        keys: impl IntoIterator<Item = Vec<u8>>,
+        mut entry: impl FnMut(Vec<u8>, Option<Vec<u8>>) -> T,
+    ) -> Result<Vec<T>> {
+        let mut total = 0usize;
+        let mut account = |bytes| {
+            total = total.saturating_add(bytes);
+            if total > MAX_BATCH_BYTES {
+                return Err(Error::ResourceLimit(ResourceLimit::ReadBytes));
+            }
+            Ok(())
+        };
+        match self {
+            Self::Omdb(snapshot) => {
+                let table = snapshot.open_table(TABLE).map_err(storage_error)?;
+                keys.into_iter()
+                    .map(|key| {
+                        let value = table.get(key.as_slice()).map_err(storage_error)?;
+                        if let Some(value) = &value {
+                            account(value.value().len())?;
+                        }
+                        Ok(entry(key, value.map(|value| value.value().to_vec())))
+                    })
+                    .collect()
+            }
+            #[cfg(all(test, feature = "ordered-engine-fixture"))]
+            Self::Comparison(snapshot) => keys
+                .into_iter()
+                .map(|key| {
+                    let value = snapshot.get(&key)?;
+                    account(value.as_ref().map_or(0, Vec::len))?;
+                    Ok(entry(key, value))
+                })
+                .collect(),
         }
     }
 }
 
 pub(crate) struct Transaction {
-    backend: Backend,
+    backend: Option<Backend>,
     snapshot: TransactionSnapshot,
     reads: BTreeMap<Vec<u8>, Option<Vec<u8>>>,
     mutation_reads: BTreeMap<Vec<u8>, Option<(usize, [u8; 32])>>,
@@ -1089,16 +1130,15 @@ pub(crate) struct TransactionCheckpoint {
 }
 
 impl Transaction {
-    /// Comparison snapshots never acquire a source snapshot or a writer. The
-    /// backend handle is retained only to fit the existing transaction owner.
-    #[cfg(all(test, feature = "ordered-engine-fixture"))]
-    pub(crate) fn comparison_read_only(
-        backend: Backend,
-        snapshot: redb_bench_compare::ordered::Snapshot,
+    fn new(
+        backend: Option<Backend>,
+        snapshot: TransactionSnapshot,
+        reserved: Option<ReservedWriter>,
+        read_only: bool,
     ) -> Self {
         Self {
             backend,
-            snapshot: TransactionSnapshot::Comparison(Arc::new(snapshot)),
+            snapshot,
             reads: BTreeMap::new(),
             mutation_reads: BTreeMap::new(),
             writes: BTreeMap::new(),
@@ -1106,9 +1146,37 @@ impl Transaction {
             observed_bytes: 0,
             observed_records: 0,
             ranges: Vec::new(),
-            reserved: None,
-            read_only: true,
+            reserved,
+            read_only,
         }
+    }
+
+    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    pub(crate) fn comparison_read_only(snapshot: comparison::Snapshot) -> Self {
+        Self::new(
+            None,
+            TransactionSnapshot::Comparison(Arc::new(snapshot)),
+            None,
+            true,
+        )
+    }
+
+    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    pub(crate) async fn comparison_reserved(
+        database: Arc<comparison::Database>,
+        lock_timeout: Duration,
+        idle_timeout: Duration,
+        discard_commit_ack: bool,
+    ) -> Result<Self> {
+        let reservation = ReservedWriter::start(idle_timeout, move |state, commands, ready| {
+            comparison_reserved_worker(database, state, commands, ready, discard_commit_ack);
+        });
+        // A timed-out waiter drops readiness. The native lock wait can finish
+        // later, but the worker exits before admitting application work.
+        let (snapshot, reserved) = tokio::time::timeout(lock_timeout, reservation)
+            .await
+            .map_err(|_| Error::WriterBusy)??;
+        Ok(Self::new(None, snapshot, Some(reserved), false))
     }
 
     pub(crate) fn is_active(&self) -> bool {
@@ -1175,23 +1243,11 @@ impl Transaction {
         if let Some(value) = self.writes.get(key).or_else(|| self.reads.get(key)) {
             return Ok(value.clone());
         }
-        #[cfg(all(test, feature = "ordered-engine-fixture"))]
-        if let TransactionSnapshot::Comparison(snapshot) = &self.snapshot {
-            let snapshot = Arc::clone(snapshot);
-            let key = key.to_vec();
-            return tokio::task::spawn_blocking(move || snapshot.get(&key).map_err(Error::from))
-                .await
-                .map_err(worker_error)?;
-        }
+        let snapshot = self.snapshot.clone();
         let owned_key = key.to_vec();
-        let snapshot = self.snapshot.omdb()?;
-        let value = tokio::task::spawn_blocking(move || {
-            let table = snapshot.open_table(TABLE).map_err(storage_error)?;
-            let value = table.get(owned_key.as_slice()).map_err(storage_error)?;
-            value.map(|value| bounded_copy(value.value())).transpose()
-        })
-        .await
-        .map_err(worker_error)??;
+        let value = tokio::task::spawn_blocking(move || snapshot.get(&owned_key))
+            .await
+            .map_err(worker_error)??;
         // A read-only transaction owns one immutable engine snapshot and cannot
         // commit mutations. Retaining every read as conflict evidence only
         // duplicates that snapshot and makes bounded paged queries exhaust a
@@ -1266,15 +1322,11 @@ impl Transaction {
         if self.reads.contains_key(key) || self.mutation_reads.contains_key(key) {
             return Ok(());
         }
-        let snapshot = self.snapshot.omdb()?;
+        let snapshot = self.snapshot.clone();
         let owned_key = key.to_vec();
-        let observed = tokio::task::spawn_blocking(move || {
-            let table = snapshot.open_table(TABLE).map_err(storage_error)?;
-            let value = table.get(owned_key.as_slice()).map_err(storage_error)?;
-            Ok::<_, Error>(value.map(|value| fingerprint(value.value())))
-        })
-        .await
-        .map_err(worker_error)??;
+        let observed = tokio::task::spawn_blocking(move || snapshot.fingerprint(&owned_key))
+            .await
+            .map_err(worker_error)??;
         self.observe_size(
             key.len()
                 .saturating_add(observed.as_ref().map_or(0, |_| 40)),
@@ -1287,53 +1339,15 @@ impl Transaction {
     /// Fetch a previously size-checked set of values in one blocking operation.
     pub(crate) async fn get_many(&mut self, keys: &[Vec<u8>]) -> Result<Vec<Option<Vec<u8>>>> {
         self.ensure_active()?;
-        #[cfg(all(test, feature = "ordered-engine-fixture"))]
-        if let TransactionSnapshot::Comparison(snapshot) = &self.snapshot {
-            if keys.len() > MAX_BATCH_RECORDS {
-                return Err(Error::ResourceLimit(ResourceLimit::ReadBytes));
-            }
-            let snapshot = Arc::clone(snapshot);
-            let keys = keys.to_vec();
-            return tokio::task::spawn_blocking(move || {
-                let mut bytes = 0usize;
-                let mut values = Vec::with_capacity(keys.len());
-                for key in keys {
-                    let value = snapshot.get(&key).map_err(Error::from)?;
-                    bytes = bytes.saturating_add(value.as_ref().map_or(0, Vec::len));
-                    if bytes > MAX_BATCH_BYTES {
-                        return Err(Error::ResourceLimit(ResourceLimit::ReadBytes));
-                    }
-                    values.push(value);
-                }
-                Ok(values)
-            })
-            .await
-            .map_err(worker_error)?;
-        }
         if self.read_only {
             if keys.len() > MAX_BATCH_RECORDS {
                 return Err(Error::ResourceLimit(ResourceLimit::ReadBytes));
             }
-            let snapshot = self.snapshot.omdb()?;
+            let snapshot = self.snapshot.clone();
             let keys = keys.to_vec();
-            return tokio::task::spawn_blocking(move || {
-                let table = snapshot.open_table(TABLE).map_err(storage_error)?;
-                let mut total = 0usize;
-                let mut result = Vec::with_capacity(keys.len());
-                for key in keys {
-                    let value = table.get(key.as_slice()).map_err(storage_error)?;
-                    if let Some(value) = &value {
-                        total = total.saturating_add(value.value().len());
-                        if total > MAX_BATCH_BYTES {
-                            return Err(Error::ResourceLimit(ResourceLimit::ReadBytes));
-                        }
-                    }
-                    result.push(value.map(|value| value.value().to_vec()));
-                }
-                Ok(result)
-            })
-            .await
-            .map_err(worker_error)?;
+            return tokio::task::spawn_blocking(move || snapshot.read_many(keys, |_, value| value))
+                .await
+                .map_err(worker_error)?;
         }
         let missing: std::collections::BTreeSet<_> = keys
             .iter()
@@ -1341,22 +1355,9 @@ impl Transaction {
             .cloned()
             .collect();
         if !missing.is_empty() {
-            let snapshot = self.snapshot.omdb()?;
+            let snapshot = self.snapshot.clone();
             let loaded = tokio::task::spawn_blocking(move || {
-                let table = snapshot.open_table(TABLE).map_err(storage_error)?;
-                let mut total = 0usize;
-                let mut loaded = Vec::with_capacity(missing.len());
-                for key in missing {
-                    let value = table.get(key.as_slice()).map_err(storage_error)?;
-                    if let Some(value) = &value {
-                        total = total.saturating_add(value.value().len());
-                        if total > MAX_BATCH_BYTES {
-                            return Err(Error::ResourceLimit(ResourceLimit::ReadBytes));
-                        }
-                    }
-                    loaded.push((key, value.map(|value| value.value().to_vec())));
-                }
-                Ok(loaded)
+                snapshot.read_many(missing, |key, value| (key, value))
             })
             .await
             .map_err(worker_error)??;
@@ -1395,27 +1396,15 @@ impl Transaction {
         if start >= end || limit == 0 {
             return Err(Error::Invalid("invalid database scan".into()));
         }
-        #[cfg(all(test, feature = "ordered-engine-fixture"))]
-        if let TransactionSnapshot::Comparison(snapshot) = &self.snapshot {
-            let snapshot = Arc::clone(snapshot);
-            let start = start.to_vec();
-            let end = end.to_vec();
-            return tokio::task::spawn_blocking(move || {
-                snapshot.scan(&start, &end, limit).map_err(Error::from)
-            })
-            .await
-            .map_err(worker_error)?;
-        }
         let pending = self.writes.range(start.to_vec()..end.to_vec()).count();
         let fetch_limit = limit
             .checked_add(pending)
             .ok_or_else(|| Error::Invalid("database scan limit overflow".into()))?;
         let owned_start = start.to_vec();
         let owned_end = end.to_vec();
-        let snapshot = self.snapshot.omdb()?;
+        let snapshot = self.snapshot.clone();
         let rows = tokio::task::spawn_blocking(move || {
-            let table = snapshot.open_table(TABLE).map_err(storage_error)?;
-            scan_table(&table, &owned_start, &owned_end, fetch_limit)
+            snapshot.scan(&owned_start, &owned_end, fetch_limit)
         })
         .await
         .map_err(worker_error)??;
@@ -1479,6 +1468,7 @@ impl Transaction {
         // sessions use the writer acquired before their callback, on its owning worker.
         tokio::task::spawn_blocking(move || {
             drop(snapshot);
+            let backend = backend.ok_or(Error::IncompatibleStore)?;
             let database = backend.handles.wait_for_writer()?;
             let mut transaction = database.begin_write().map_err(storage_error)?;
             backend.handles.verify_identity()?;
@@ -1563,6 +1553,39 @@ impl CommitTable for redb::Table<'_, &'static [u8], &'static [u8]> {
     }
 }
 
+#[cfg(all(test, feature = "ordered-engine-fixture"))]
+impl From<comparison::Error> for Error {
+    fn from(error: comparison::Error) -> Self {
+        match error {
+            comparison::Error::UnknownCommit(_) => Error::UnknownCommit,
+            _ => Error::Database("ordered comparison operation failed".into()),
+        }
+    }
+}
+
+#[cfg(all(test, feature = "ordered-engine-fixture"))]
+impl CommitTable for comparison::WriteTransaction {
+    fn matches(&self, key: &[u8], expected: Option<&[u8]>) -> Result<bool> {
+        Ok(self.get(key)?.as_deref() == expected)
+    }
+
+    fn fingerprint(&self, key: &[u8]) -> Result<Option<(usize, [u8; 32])>> {
+        Ok(self.get(key)?.as_deref().map(fingerprint))
+    }
+
+    fn scan(&self, start: &[u8], end: &[u8], limit: usize) -> Result<Vec<Pair>> {
+        self.scan(start, end, limit).map_err(Error::from)
+    }
+
+    fn put(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
+        self.put(key, value).map_err(Error::from)
+    }
+
+    fn delete(&mut self, key: &[u8]) -> Result<()> {
+        self.delete(key).map_err(Error::from)
+    }
+}
+
 fn commit_staged(transaction: WriteTransaction, staged: StagedCommit) -> Result<()> {
     {
         let mut table = transaction.open_table(TABLE).map_err(storage_error)?;
@@ -1607,6 +1630,8 @@ enum ReservationCommand {
     Abort(oneshot::Sender<Result<()>>),
 }
 
+type ReservationReady = oneshot::Sender<Result<TransactionSnapshot>>;
+
 struct ReservedWriter {
     commands: Option<mpsc::SyncSender<ReservationCommand>>,
     worker: Option<tokio::task::JoinHandle<()>>,
@@ -1622,6 +1647,35 @@ fn worker_error_from_channel(_: oneshot::error::RecvError) -> Error {
 }
 
 impl ReservedWriter {
+    async fn start(
+        idle_timeout: Duration,
+        run: impl FnOnce(
+            Arc<Mutex<ReservationState>>,
+            mpsc::Receiver<ReservationCommand>,
+            ReservationReady,
+        ) + Send
+        + 'static,
+    ) -> Result<(TransactionSnapshot, Self)> {
+        let (commands, receive) = mpsc::sync_channel(1);
+        let (ready, snapshot) = oneshot::channel();
+        let state = Arc::new(Mutex::new(ReservationState {
+            touched: Instant::now(),
+            closed: false,
+            idle_timeout,
+        }));
+        let worker_state = Arc::clone(&state);
+        let worker = tokio::task::spawn_blocking(move || run(worker_state, receive, ready));
+        let reserved = Self {
+            commands: Some(commands),
+            worker: Some(worker),
+            state,
+        };
+        Ok((
+            snapshot.await.map_err(worker_error_from_channel)??,
+            reserved,
+        ))
+    }
+
     fn touch(&self) -> Result<()> {
         let mut state = self.state.lock().map_err(storage_error)?;
         if state.closed || state.touched.elapsed() >= state.idle_timeout {
@@ -1691,7 +1745,7 @@ fn reserved_worker(
     handles: Arc<DatabaseHandles>,
     state: Arc<Mutex<ReservationState>>,
     commands: mpsc::Receiver<ReservationCommand>,
-    ready: oneshot::Sender<Result<Arc<ReadTransaction>>>,
+    ready: ReservationReady,
     lock_timeout: Duration,
 ) {
     let started = Instant::now();
@@ -1739,60 +1793,117 @@ fn reserved_worker(
             return;
         }
     };
+    let snapshot = TransactionSnapshot::Omdb(snapshot);
+    match await_reservation_command(&state, &commands, ready, snapshot) {
+        Some(ReservationCommand::Commit(staged, reply)) => {
+            let result = if claim_reservation_commit(&state) {
+                handles
+                    .verify_identity()
+                    .and_then(|()| commit_staged(transaction, staged))
+            } else {
+                transaction
+                    .abort()
+                    .map_err(storage_error)
+                    .and(Err(expired_writer()))
+            };
+            let _ = reply.send(result);
+        }
+        Some(ReservationCommand::Abort(reply)) => {
+            close_reservation(&state);
+            let _ = reply.send(transaction.abort().map_err(storage_error));
+        }
+        None => {
+            let _ = transaction.abort();
+        }
+    }
+}
+
+fn await_reservation_command(
+    state: &Mutex<ReservationState>,
+    commands: &mpsc::Receiver<ReservationCommand>,
+    ready: ReservationReady,
+    snapshot: TransactionSnapshot,
+) -> Option<ReservationCommand> {
     if let Ok(mut state) = state.lock() {
         state.touched = Instant::now();
     }
-    if ready.send(Ok(snapshot)).is_err() {
+    if ready.send(Ok(snapshot)).is_ok() {
+        loop {
+            let remaining = match state.lock() {
+                Ok(state) if !state.closed => {
+                    state.idle_timeout.saturating_sub(state.touched.elapsed())
+                }
+                _ => Duration::ZERO,
+            };
+            if remaining.is_zero() {
+                break;
+            }
+            match commands.recv_timeout(remaining) {
+                Ok(command) => return Some(command),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            }
+        }
+    }
+    close_reservation(state);
+    None
+}
+
+fn claim_reservation_commit(state: &Mutex<ReservationState>) -> bool {
+    state.lock().is_ok_and(|mut state| {
+        let live = !state.closed && state.touched.elapsed() < state.idle_timeout;
+        state.closed = true;
+        live
+    })
+}
+
+#[cfg(all(test, feature = "ordered-engine-fixture"))]
+fn comparison_reserved_worker(
+    database: Arc<comparison::Database>,
+    state: Arc<Mutex<ReservationState>>,
+    commands: mpsc::Receiver<ReservationCommand>,
+    ready: ReservationReady,
+    discard_commit_ack: bool,
+) {
+    if ready.is_closed() {
         close_reservation(&state);
-        let _ = transaction.abort();
         return;
     }
-    loop {
-        let remaining = match state.lock() {
-            Ok(state) if !state.closed => {
-                state.idle_timeout.saturating_sub(state.touched.elapsed())
-            }
-            _ => Duration::ZERO,
-        };
-        if remaining.is_zero() {
-            close_reservation(&state);
-            let _ = transaction.abort();
-            return;
+    let mut ready = Some(ready);
+    let mut reply = None;
+    let result = database.write(|transaction| -> Result<()> {
+        let sender = ready.as_ref().expect("callback runs once");
+        if sender.is_closed() {
+            return Err(expired_writer());
         }
-        match commands.recv_timeout(remaining) {
-            Ok(ReservationCommand::Commit(staged, reply)) => {
-                let live = match state.lock() {
-                    Ok(mut state) => {
-                        let live = !state.closed && state.touched.elapsed() < state.idle_timeout;
-                        state.closed = true;
-                        live
-                    }
-                    Err(_) => false,
-                };
-                let result = if live {
-                    handles
-                        .verify_identity()
-                        .and_then(|()| commit_staged(transaction, staged))
-                } else {
-                    transaction
-                        .abort()
-                        .map_err(storage_error)
-                        .and(Err(expired_writer()))
-                };
-                let _ = reply.send(result);
-                return;
+        // The ordered API has acquired the engine's writer. Take an owned
+        // snapshot here so app reads need not borrow the callback's writer.
+        let snapshot = TransactionSnapshot::Comparison(Arc::new(database.snapshot()?));
+        let sender = ready.take().expect("callback runs once");
+        match await_reservation_command(&state, &commands, sender, snapshot) {
+            Some(ReservationCommand::Commit(staged, sender)) => {
+                reply = Some((sender, discard_commit_ack));
+                if !claim_reservation_commit(&state) {
+                    return Err(expired_writer());
+                }
+                apply_staged(transaction, staged)
             }
-            Ok(ReservationCommand::Abort(reply)) => {
+            Some(ReservationCommand::Abort(sender)) => {
                 close_reservation(&state);
-                let _ = reply.send(transaction.abort().map_err(storage_error));
-                return;
+                reply = Some((sender, false));
+                Ok(())
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                close_reservation(&state);
-                let _ = transaction.abort();
-                return;
-            }
+            None => Ok(()),
+        }
+    });
+    drop(database);
+    if let Some(sender) = ready {
+        close_reservation(&state);
+        let _ = sender.send(result.and(Err(expired_writer())));
+    } else if let Some((sender, discard_ack)) = reply {
+        // Inject loss only after the engine has acknowledged a successful commit.
+        if !discard_ack || result.is_err() {
+            let _ = sender.send(result);
         }
     }
 }

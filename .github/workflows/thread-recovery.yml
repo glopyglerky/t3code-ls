@@ -625,7 +625,8 @@ jobs:
           for name in \
             ordered_engines_preserve_a_fresh_application_generation \
             ordered_engines_apply_an_uncommitted_application_command \
-            ordered_engines_decode_application_reads_from_a_held_candidate_snapshot; do
+            ordered_engines_decode_application_reads_from_a_held_candidate_snapshot \
+            ordered_engines_commit_directly_from_an_application_writer_reservation; do
             grep -F "ordered_engine_fixture::$name ... ok" "$proof/ordered-application.log"
           done
           "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked --release \

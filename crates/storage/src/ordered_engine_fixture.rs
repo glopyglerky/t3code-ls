@@ -1,3 +1,6 @@
+use std::sync::Arc;
+use std::time::Duration;
+
 use redb_bench_compare::ordered::{Database, Engine, Error, Snapshot};
 use serde_json::json;
 
@@ -209,50 +212,6 @@ async fn ordered_engines_preserve_a_fresh_application_generation()
         assert_eq!(serde_json::from_slice::<u64>(&exclusive_end)?, 18);
     }
     Ok(())
-}
-
-fn comparison_error(error: Error) -> crate::Error {
-    match error {
-        Error::UnknownCommit(_) => crate::Error::UnknownCommit,
-        _ => crate::Error::Database("ordered comparison operation failed".into()),
-    }
-}
-
-impl From<Error> for crate::Error {
-    fn from(error: Error) -> Self {
-        comparison_error(error)
-    }
-}
-
-impl crate::backend::CommitTable for redb_bench_compare::ordered::WriteTransaction {
-    fn matches(&self, key: &[u8], expected: Option<&[u8]>) -> crate::Result<bool> {
-        Ok(self.get(key).map_err(comparison_error)?.as_deref() == expected)
-    }
-
-    fn fingerprint(&self, key: &[u8]) -> crate::Result<Option<(usize, [u8; 32])>> {
-        Ok(self
-            .get(key)
-            .map_err(comparison_error)?
-            .as_deref()
-            .map(crate::backend::fingerprint))
-    }
-
-    fn scan(
-        &self,
-        start: &[u8],
-        end: &[u8],
-        limit: usize,
-    ) -> crate::Result<Vec<(Vec<u8>, Vec<u8>)>> {
-        self.scan(start, end, limit).map_err(comparison_error)
-    }
-
-    fn put(&mut self, key: &[u8], value: &[u8]) -> crate::Result<()> {
-        self.put(key, value).map_err(comparison_error)
-    }
-
-    fn delete(&mut self, key: &[u8]) -> crate::Result<()> {
-        self.delete(key).map_err(comparison_error)
-    }
 }
 
 #[tokio::test]
@@ -552,6 +511,183 @@ async fn ordered_engines_decode_application_reads_from_a_held_candidate_snapshot
         ));
     }
     drop(app);
+    store.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn ordered_engines_commit_directly_from_an_application_writer_reservation()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    store.bootstrap_application().await?;
+    store.prepare_application_events().await?;
+    store.prepare_application_receipts().await?;
+    let (start, end) = prefix_range("");
+    let mut source = store.db.begin_read_only().await?;
+    let seed = source.scan(&start, &end, MAX_FIXTURE_ROWS + 1).await?;
+    assert!(seed.len() <= MAX_FIXTURE_ROWS);
+    assert!(
+        seed.iter()
+            .map(|(key, value)| key.len() + value.len())
+            .sum::<usize>()
+            < MAX_FIXTURE_BYTES
+    );
+    source.rollback().await?;
+    let catalog = decode_catalog(&seed.iter().find(|(key, _)| *key == schema_key()).unwrap().1)?;
+    let receipt_key = row_key(&catalog.generation, RECEIPTS, &[text_cell(COMMAND)])?;
+    let receipt = ReceiptRow {
+        command_id: COMMAND.into(),
+        aggregate_kind: "thread".into(),
+        aggregate_id: THREAD.into(),
+        command_type: "fixture.command".into(),
+        accepted_at: TIME.into(),
+        result_sequence: 1,
+        status: "accepted".into(),
+        error: None,
+    };
+    let history = || EventRead {
+        after_sequence: 0,
+        through_sequence: None,
+        thread_id: Some(THREAD.into()),
+        command_id: Some(COMMAND.into()),
+        event_type: None,
+        only_agent_events: None,
+        limit: 8,
+    };
+    let predecessor = store_key("comparison/writer-predecessor");
+    for (engine, name) in [
+        (Engine::Fjall, "reserved.fjall"),
+        (Engine::DirectRedb, "reserved.redb"),
+    ] {
+        let path = fixture.path().with_file_name(name);
+        let database = Arc::new(Database::open(engine, &path)?);
+        database.write(|tx| {
+            for (key, value) in &seed {
+                tx.put(key, value)?;
+            }
+            Ok::<_, Error>(())
+        })?;
+        let held = database.snapshot()?;
+        let mut first = ApplicationTransactions::new(store.clone());
+        first
+            .begin_comparison_write("rollback", Arc::clone(&database), false)
+            .await?;
+        assert!(first.receipts_insert("rollback", receipt.clone()).await?);
+        first.events_append("rollback", event(1), None).await?;
+        first.rollback("rollback").await?;
+        assert_eq!(
+            database
+                .snapshot()?
+                .scan(&start, &end, MAX_FIXTURE_ROWS + 1)?,
+            seed
+        );
+
+        first
+            .begin_comparison_write("drop", Arc::clone(&database), false)
+            .await?;
+        assert!(first.receipts_insert("drop", receipt.clone()).await?);
+        first.discard_all();
+        first
+            .begin_comparison_write("predecessor", Arc::clone(&database), false)
+            .await?;
+        assert!(first.has_active_writer());
+        assert_eq!(first.receipts_get("predecessor", COMMAND).await?, None);
+        let mut session = first.take("predecessor")?;
+        session
+            .transaction
+            .put(predecessor.clone(), b"committed".to_vec())
+            .await?;
+        first.finish("predecessor", session, Ok(())).await?;
+
+        let mut app = ApplicationTransactions::new(store.clone());
+        let mut waiting =
+            Box::pin(app.begin_comparison_write("command", Arc::clone(&database), true));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut waiting)
+                .await
+                .is_err()
+        );
+        first.commit("predecessor").await?;
+        assert!(!first.has_active_writer());
+        waiting.await?;
+        assert!(app.has_active_writer());
+        let mut session = app.take("command")?;
+        assert_eq!(
+            session.transaction.get(&predecessor).await?.as_deref(),
+            Some(b"committed".as_slice())
+        );
+        app.finish("command", session, Ok(())).await?;
+        assert_eq!(app.receipts_get("command", COMMAND).await?, None);
+        assert!(app.receipts_insert("command", receipt.clone()).await?);
+        assert_eq!(
+            app.events_append("command", event(1), None).await?.sequence,
+            1
+        );
+        app.savepoint("command", "outer").await?;
+        app.savepoint("command", "inner").await?;
+        let mut nested = receipt.clone();
+        nested.result_sequence = 2;
+        app.receipts_upsert("command", nested.clone()).await?;
+        assert_eq!(
+            app.events_append("command", event(2), None).await?.sequence,
+            2
+        );
+        assert_eq!(app.receipts_get("command", COMMAND).await?, Some(nested));
+        assert_eq!(app.events_read("command", history()).await?.len(), 2);
+        app.rollback_to("command", "inner").await?;
+        app.release("command", "inner").await?;
+        app.release("command", "outer").await?;
+        assert_eq!(
+            app.receipts_get("command", COMMAND).await?,
+            Some(receipt.clone())
+        );
+        let mut session = app.take("command")?;
+        let values = session
+            .transaction
+            .get_many(&[
+                receipt_key.clone(),
+                predecessor.clone(),
+                receipt_key.clone(),
+            ])
+            .await?;
+        assert!(values[0].is_some());
+        assert_eq!(values[0], values[2]);
+        assert_eq!(values[1].as_deref(), Some(b"committed".as_slice()));
+        app.finish("command", session, Ok(())).await?;
+        assert_eq!(app.events_read("command", history()).await?.len(), 1);
+        assert_eq!(database.snapshot()?.get(&receipt_key)?, None);
+
+        assert!(matches!(
+            app.commit("command").await,
+            Err(crate::Error::UnknownCommit)
+        ));
+        assert!(matches!(
+            app.commit("command").await,
+            Err(crate::Error::Invalid(_))
+        ));
+        assert_eq!(held.scan(&start, &end, MAX_FIXTURE_ROWS + 1)?, seed);
+        drop(held);
+        drop(database);
+
+        let reopened = Arc::new(Database::open(engine, &path)?);
+        app.begin_comparison_write("reconcile", Arc::clone(&reopened), false)
+            .await?;
+        assert_eq!(
+            app.receipts_get("reconcile", COMMAND).await?,
+            Some(receipt.clone())
+        );
+        assert!(!app.receipts_insert("reconcile", receipt.clone()).await?);
+        let rows = app.events_read("reconcile", history()).await?;
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].sequence, 1);
+        assert_eq!(rows[0].payload_json, event(1).payload_json);
+        app.rollback("reconcile").await?;
+        assert_eq!(reopened.snapshot()?.get(&history_key(2))?, None);
+    }
+    let mut source = store.db.begin_read_only().await?;
+    assert_eq!(source.scan(&start, &end, MAX_FIXTURE_ROWS + 1).await?, seed);
+    source.rollback().await?;
     store.shutdown().await?;
     Ok(())
 }
