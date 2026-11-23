@@ -1380,6 +1380,7 @@ enum ForwardCommitCase {
     RefuseTargetWithoutFence,
     InterruptBeforeWrite,
     InterruptAfterDurable,
+    CatalogFences,
 }
 
 #[cfg(target_os = "linux")]
@@ -1399,6 +1400,18 @@ async fn service_forward_commit_refuses_rollback_without_unsealing() {
     println!(
         "T05 forward decision interruption and rollback refusal verified with installed helpers"
     );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "requires the exact-base and compatible pinned Rust helpers"]
+async fn service_forward_catalog_fences_generic_restore() {
+    assert!(std::env::var_os("T3_TEST_PROMOTION_HELPER").is_some());
+    assert!(std::env::var_os("T3_TEST_PRIOR_PROMOTION_HELPER").is_some());
+    promotion_intent_fixture(PromotionFixture::ForwardCommit(
+        ForwardCommitCase::CatalogFences,
+    ))
+    .await;
 }
 
 #[cfg(target_os = "linux")]
@@ -1471,13 +1484,24 @@ async fn promotion_intent_fixture(case: PromotionFixture) {
         "#!/bin/sh\n[ \"$1\" = trial-capabilities ] || exit 99\nprintf '%s\\n' '{}'\n",
         json!({"ok": true, "result": predecessor_capabilities})
     );
-    let source_bytes_for_helper = if matches!(
-        case,
-        PromotionFixture::ForwardCommit(ForwardCommitCase::RefuseSourceWithoutFence)
-    ) {
-        predecessor.as_bytes()
-    } else {
-        &helper_bytes
+    let prior_helper_bytes;
+    let source_bytes_for_helper = match case {
+        PromotionFixture::ForwardCommit(ForwardCommitCase::RefuseSourceWithoutFence) => {
+            predecessor.as_bytes()
+        }
+        PromotionFixture::ForwardCommit(ForwardCommitCase::CatalogFences) => {
+            let path = std::path::PathBuf::from(
+                std::env::var_os("T3_TEST_PRIOR_PROMOTION_HELPER").unwrap(),
+            );
+            assert!(path.is_absolute());
+            assert!(fs::metadata(&path).unwrap().len() <= 128 * 1024 * 1024);
+            prior_helper_bytes = fs::read(path).unwrap();
+            assert_ne!(hash(&prior_helper_bytes), hash(&helper_bytes));
+            println!("T05 prior helper SHA-256 {}", hash(&prior_helper_bytes));
+            println!("T05 compatible helper SHA-256 {}", hash(&helper_bytes));
+            &prior_helper_bytes
+        }
+        _ => &helper_bytes,
     };
     let target_bytes_for_helper = if matches!(
         case,
@@ -1861,16 +1885,13 @@ async fn promotion_intent_fixture(case: PromotionFixture) {
 #[cfg(target_os = "linux")]
 async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase) {
     use crate::application_storage::{
-        IsolatedTrialVerification, TrialRestorePhase, TrialRestoreRequest,
+        IsolatedTrialVerification, TrialRestorePhase, TrialRestoreRequest, backup_service_trial,
         publish_intended_isolated_service_trial, record_fixture_forward_commit,
         record_fixture_forward_selection,
     };
-    use sha2::{Digest, Sha256};
     use std::fs;
-    use std::io::Write;
-    use std::os::unix::fs::MetadataExt;
     use std::path::Path;
-    use std::process::{Command, Stdio};
+    use std::process::Command;
 
     let state = home.join("userdata");
     let receipt = state.join(format!(".statev2-trial-{ISOLATED_UPDATE}.receipt-v1.json"));
@@ -1886,53 +1907,46 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
     };
     let source_helper = helper_path("1.2.3");
     let target_helper = helper_path("1.2.4");
-    let run = |helper: &Path, mode: &str, input: Option<Value>| -> Value {
-        let mut child = Command::new(helper)
-            .arg(mode)
-            .arg(home)
-            .arg(ISOLATED_UPDATE)
-            .env_clear()
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap();
-        if let Some(input) = input {
-            child
-                .stdin
-                .take()
-                .unwrap()
-                .write_all(&serde_json::to_vec(&input).unwrap())
-                .unwrap();
-        }
-        let output = child.wait_with_output().unwrap();
-        assert!(output.status.success(), "{mode}: {:?}", output.status);
-        assert!(output.stderr.is_empty(), "{mode}: {:?}", output.stderr);
-        serde_json::from_slice(&output.stdout).unwrap()
+    let catalog_case = matches!(case, ForwardCommitCase::CatalogFences);
+    let generic_update = if catalog_case {
+        "ba212c2b-63d4-4b28-97e4-1c1d6dc6d281"
+    } else {
+        ISOLATED_UPDATE
     };
-    let capture = |path: &Path| {
-        let metadata = fs::metadata(path).unwrap();
-        (
-            metadata.dev(),
-            metadata.ino(),
-            metadata.nlink(),
-            fs::read(path).unwrap(),
-        )
+    let run = |helper: &Path, mode: &str, input: Option<Value>| {
+        let update = match mode {
+            "trial-prepare-restore" | "trial-publish-restore-offline" => generic_update,
+            _ => ISOLATED_UPDATE,
+        };
+        run_forward_helper(helper, home, update, mode, input.as_ref())
     };
+    let capture = |path: &Path| capture_forward_file(path).unwrap();
     let source = capture(&live);
     let checkpoint_before = capture(&checkpoint);
     let selection_before = capture(&selection);
     let pending: IsolatedTrialVerification =
         serde_json::from_slice(&fs::read(&receipt).unwrap()).unwrap();
+    if catalog_case {
+        backup_service_trial(
+            home.to_owned(),
+            generic_update.into(),
+            pending.request.checkpoint.catalog_sha256.clone(),
+        )
+        .await
+        .unwrap();
+    }
     let mut legacy_request = TrialRestoreRequest {
-        update_id: ISOLATED_UPDATE.into(),
+        update_id: generic_update.into(),
         phase: TrialRestorePhase::FailedBeforeActivation,
         database: pending.request.database,
         target: pending.request.checkpoint.clone(),
         checkpoint: pending.request.checkpoint,
     };
-    let stage = state.join(format!(".statev2-restore-{ISOLATED_UPDATE}.omdb"));
-    let legacy_preparation = if matches!(case, ForwardCommitCase::InterruptAfterDurable) {
+    let stage = state.join(format!(".statev2-restore-{generic_update}.omdb"));
+    let legacy_preparation = if matches!(
+        case,
+        ForwardCommitCase::InterruptAfterDurable | ForwardCommitCase::CatalogFences
+    ) {
         let frame = run(
             &source_helper,
             "trial-prepare-restore",
@@ -1966,7 +1980,9 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
             return;
         }
         ForwardCommitCase::InterruptBeforeWrite => "forward-commit-prewrite",
-        ForwardCommitCase::InterruptAfterDurable => "forward-commit-durable",
+        ForwardCommitCase::InterruptAfterDurable | ForwardCommitCase::CatalogFences => {
+            "forward-commit-durable"
+        }
     };
     let interrupt = |boundary: &str, action: Option<&str>| {
         let mut child = Command::new(std::env::current_exe().unwrap());
@@ -2062,11 +2078,7 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
         let mut expected: Value = serde_json::from_slice(&selection_before.3).unwrap();
         expected["activeVersion"] = json!("1.2.4");
         expected["phase"] = json!("forward-selected");
-        let receipt_digest: String = Sha256::digest(&durable.3)
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect();
-        expected["forwardReceiptSha256"] = json!(receipt_digest);
+        expected["forwardReceiptSha256"] = json!(forward_fixture_sha256(&durable.3));
         assert_eq!(
             serde_json::from_slice::<Value>(&selected.3).unwrap(),
             expected
@@ -2112,6 +2124,318 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
                 .exists()
         );
         println!("T05 forward selection recovered without unsealing or allowing restore");
+        if catalog_case {
+            forward_catalog_fixture(
+                home,
+                &selected.3,
+                &legacy_request,
+                &generic_publication["preparation"],
+                [&source_helper, &target_helper],
+            )
+            .await;
+            assert_eq!(capture(&receipt), durable);
+            assert_eq!(capture(&original), source);
+            assert_eq!(capture(&selection), selected);
+            assert!(!failed.exists());
+        }
     }
     assert_eq!(capture(&checkpoint), checkpoint_before);
+}
+
+#[cfg(target_os = "linux")]
+fn run_forward_helper(
+    helper: &std::path::Path,
+    home: &std::path::Path,
+    update: &str,
+    mode: &str,
+    input: Option<&Value>,
+) -> Value {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(helper)
+        .arg(mode)
+        .arg(home)
+        .arg(update)
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    if let Some(input) = input {
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(input).unwrap())
+            .unwrap();
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{mode}: {:?}", output.status);
+    assert!(output.stderr.is_empty(), "{mode}: {:?}", output.stderr);
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[cfg(target_os = "linux")]
+fn forward_fixture_sha256(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn capture_forward_file(path: &std::path::Path) -> Option<(u64, u64, u64, Vec<u8>)> {
+    use std::{fs, io::ErrorKind, os::unix::fs::MetadataExt};
+
+    match fs::metadata(path) {
+        Ok(metadata) => Some((
+            metadata.dev(),
+            metadata.ino(),
+            metadata.nlink(),
+            fs::read(path).unwrap(),
+        )),
+        Err(error) if error.kind() == ErrorKind::NotFound => None,
+        Err(error) => panic!("cannot capture {}: {error}", path.display()),
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn forward_catalog_fixture(
+    home: &std::path::Path,
+    selection: &[u8],
+    request: &crate::application_storage::TrialRestoreRequest,
+    preparation: &Value,
+    helpers: [&std::path::Path; 2],
+) {
+    use crate::application_rows::text_cell;
+    use crate::application_server_ownership::OwnerLock;
+    use crate::application_storage::{TrialRestorePreparation, TrialSnapshot};
+    use std::fs;
+
+    let state = home.join("userdata");
+    let live = state.join("statev2.omdb");
+    let update = &request.update_id;
+    let checkpoint = home.join(format!("runtime/native-db-backup/{update}.omdb"));
+    let stage = state.join(format!(".statev2-restore-{update}.omdb"));
+    let draft = stage.with_extension("staging");
+    let parked = stage.with_extension("saved");
+    let preserved = state.join(format!(".statev2-failed-{update}.omdb"));
+    let paths = [&live, &stage, &draft, &parked, &preserved, &checkpoint];
+    let capture = || paths.map(|path| capture_forward_file(path));
+    let sha256 = forward_fixture_sha256(selection);
+
+    // Only this disposable fixture changes the catalog. The actual transition
+    // needs a writable handoff from the locked offline snapshot.
+    let owner = OwnerLock::acquire_existing_native(&state.join("server-owner.sqlite")).unwrap();
+    let store = Store::open_exclusive(&live).await.unwrap();
+    let mut tx = store.db.begin().await.unwrap();
+    let bytes = tx.get(&schema_key()).await.unwrap().unwrap();
+    let sealed = decode_catalog(&bytes).unwrap();
+    assert_eq!(
+        sealed
+            .prepared_service_activation_v1
+            .as_ref()
+            .unwrap()
+            .update_id,
+        ISOLATED_UPDATE
+    );
+    let mut marked = serde_json::to_value(&sealed).unwrap();
+    marked
+        .as_object_mut()
+        .unwrap()
+        .remove("prepared_service_activation_v1");
+    marked["forward_service_activation_v1"] = json!({
+        "update_id": ISOLATED_UPDATE,
+        "forward_selection_sha256": sha256,
+    });
+    let bytes = serde_json::to_vec(&marked).unwrap();
+    record_generation_identity(&mut tx, &sealed, &bytes)
+        .await
+        .unwrap();
+    tx.put(schema_key(), bytes.clone()).await.unwrap();
+    tx.commit().await.unwrap();
+    assert!(matches!(
+        store.bootstrap_application().await,
+        Err(Error::IncompatibleStore)
+    ));
+    let mut transactions = ApplicationTransactions::new(store.clone());
+    assert!(matches!(
+        transactions.begin("serving").await,
+        Err(Error::IncompatibleStore)
+    ));
+    drop(transactions);
+
+    let table = "pull_request_review_guides";
+    let guide = [
+        text_cell("fixture.invalid"),
+        text_cell("fixture/review"),
+        int_cell(1),
+    ];
+    let key = row_key(&sealed.generation, table, &guide).unwrap();
+    let mut later = store.db.begin().await.unwrap();
+    write_row(
+        &mut later,
+        &sealed,
+        table,
+        Map::from_iter([
+            ("host".into(), guide[0].clone()),
+            ("repository".into(), guide[1].clone()),
+            ("number".into(), guide[2].clone()),
+            ("guide_json".into(), text_cell("{\"fixture\":\"later\"}")),
+        ]),
+    )
+    .await
+    .unwrap();
+    later.commit().await.unwrap();
+    owner.verify_native().unwrap();
+    store.shutdown().await.unwrap();
+    drop(owner);
+
+    let read = Store::open_read_only(&live).await.unwrap();
+    let (catalog, identity) = ApplicationTransactions::new(read.clone())
+        .catalog_and_identity()
+        .await
+        .expect("the compatible reader must reopen the forward catalog")
+        .unwrap();
+    assert_eq!(serde_json::to_value(&catalog).unwrap(), marked);
+    assert_eq!(
+        serde_json::to_value(target_89(&catalog, &definition().unwrap())).unwrap()["forward_service_activation_v1"],
+        marked["forward_service_activation_v1"]
+    );
+    let identity = identity.unwrap();
+    assert_eq!(identity.catalog_sha256, forward_fixture_sha256(&bytes));
+    assert!(catalog.ensure_serving().is_err());
+    let later_guide = read.db.read(&key).await.unwrap().unwrap();
+    let fingerprint = read.db.bounded_storage_fingerprint().await.unwrap();
+    read.shutdown().await.unwrap();
+    let marked_snapshot = TrialSnapshot {
+        catalog_sha256: identity.catalog_sha256,
+        rows: fingerprint.rows,
+        checksum: fingerprint.checksum,
+    };
+    let marked_file = capture_forward_file(&live).unwrap();
+    let marked_sha256 = forward_fixture_sha256(&marked_file.3);
+    let mut marked_target = request.clone();
+    marked_target.target = marked_snapshot.clone();
+    let marked_target_publication = json!({
+        "restore": marked_target,
+        "preparation": preparation,
+        "witness": { "kind": "offline-pre-activation", "target_file_sha256": marked_sha256 },
+    });
+    let assert_refused = |commands: &[(&str, &str, &str, Option<&Value>)]| {
+        let before = capture();
+        for helper in helpers {
+            for &(mode, update, error, input) in commands {
+                let frame = run_forward_helper(helper, home, update, mode, input);
+                assert_eq!(frame["ok"], false, "{helper:?} {mode}: {frame}");
+                assert_eq!(frame["error"]["kind"], error, "{helper:?} {mode}: {frame}");
+                assert_eq!(capture(), before, "{helper:?} {mode} changed fixture files");
+            }
+        }
+    };
+    let prepare = json!(marked_target);
+    assert_refused(&[
+        (
+            "trial-rollback-sealed",
+            ISOLATED_UPDATE,
+            "incompatible_store",
+            None,
+        ),
+        (
+            "trial-prepare-restore",
+            update,
+            "incompatible_store",
+            Some(&prepare),
+        ),
+        (
+            "trial-publish-restore-offline",
+            update,
+            "incompatible_store",
+            Some(&marked_target_publication),
+        ),
+    ]);
+    fs::rename(&stage, &parked).unwrap();
+    assert_refused(&[(
+        "trial-prepare-restore",
+        update,
+        "incompatible_store",
+        Some(&prepare),
+    )]);
+    fs::rename(&parked, &stage).unwrap();
+
+    // The first interrupted layout still has a stage and two links to the target.
+    fs::hard_link(&live, &preserved).unwrap();
+    assert_refused(&[(
+        "trial-publish-restore-offline",
+        update,
+        "incompatible_store",
+        Some(&marked_target_publication),
+    )]);
+    fs::remove_file(&live).unwrap();
+    fs::rename(&stage, &live).unwrap();
+    // After rename the marked failed target is read under its preserved name.
+    assert_refused(&[(
+        "trial-publish-restore-offline",
+        update,
+        "unknown_commit",
+        Some(&marked_target_publication),
+    )]);
+    fs::rename(&live, &stage).unwrap();
+    fs::rename(&preserved, &live).unwrap();
+
+    // In the alternate retry layout the preserved target is plain. The canonical
+    // prepared file and the independent checkpoint have the same marked snapshot.
+    let plain_preparation: TrialRestorePreparation =
+        serde_json::from_value(preparation.clone()).unwrap();
+    let plain_checkpoint = capture_forward_file(&checkpoint).unwrap();
+    fs::write(&checkpoint, &marked_file.3).unwrap();
+    let marked_prepared_publication = json!({
+        "restore": {
+            "update_id": update,
+            "phase": "failed-before-activation",
+            "database": plain_preparation.staged_database,
+            "checkpoint": marked_snapshot,
+            "target": request.checkpoint,
+        },
+        "preparation": {
+            "staged_database": request.database,
+            "staged_file_sha256": marked_sha256,
+            "reused": false,
+        },
+        "witness": {
+            "kind": "offline-pre-activation",
+            "target_file_sha256": plain_preparation.staged_file_sha256,
+        }
+    });
+    fs::rename(&stage, &preserved).unwrap();
+    assert_refused(&[(
+        "trial-publish-restore-offline",
+        update,
+        "unknown_commit",
+        Some(&marked_prepared_publication),
+    )]);
+    fs::rename(&live, &stage).unwrap();
+    fs::rename(&preserved, &live).unwrap();
+    assert_refused(&[(
+        "trial-publish-restore-offline",
+        update,
+        "incompatible_store",
+        Some(&marked_prepared_publication),
+    )]);
+
+    // Restore the synthetic layout and confirm the later application row by key.
+    fs::rename(&live, &parked).unwrap();
+    fs::rename(&stage, &live).unwrap();
+    fs::rename(&parked, &stage).unwrap();
+    fs::write(&checkpoint, &plain_checkpoint.3).unwrap();
+    assert_eq!(capture_forward_file(&checkpoint).unwrap(), plain_checkpoint);
+    assert_eq!(capture_forward_file(&live).unwrap(), marked_file);
+    let read = Store::open_read_only(&live).await.unwrap();
+    assert_eq!(read.db.read(&key).await.unwrap().unwrap(), later_guide);
+    read.shutdown().await.unwrap();
+    println!("T05 forward catalog fenced both installed helpers across generic restore retries");
 }
