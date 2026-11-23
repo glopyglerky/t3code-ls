@@ -6,6 +6,7 @@ import runpy
 import signal
 import subprocess
 import sys
+import traceback
 
 import pyatspi
 
@@ -113,6 +114,11 @@ def main():
                     assert not find("Load older", application).getState().contains(pyatspi.STATE_ENABLED)
             request_window_close(window)
             assert application.wait(timeout=10) == 0
+        except Exception as error:
+            frames = traceback.extract_tb(error.__traceback__)
+            line = next(frame.lineno for frame in reversed(frames) if frame.filename == __file__)
+            print(f"T14 history check: {scenario} line {line}", file=sys.stderr, flush=True)
+            raise
         finally:
             if application.poll() is None:
                 application.terminate()

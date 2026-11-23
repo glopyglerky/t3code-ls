@@ -190,7 +190,12 @@ try {
       clearTimeout(timer);
       if (forcedStop) clearTimeout(forcedStop);
       if (code === 0 && !oversized && stopRequested && output.includes("T14 GPUI history X11 AT-SPI passed") && !output.includes(token)) resolve();
-      else reject(new Error(`GPUI history X11/AT-SPI check failed (exit ${code})`));
+      else {
+        // Only forward the fixed stage and source line, never subprocess output.
+        const failure = /^T14 history check: (initial-refusal|complete|page-refusal) line ([1-9][0-9]{0,3})$/mu.exec(output);
+        const checkpoint = failure ? ` at ${failure[1]} line ${failure[2]}` : "";
+        reject(new Error(`GPUI history X11/AT-SPI check failed${checkpoint} (exit ${code})`));
+      }
     });
     view.stdin.on("error", () => {});
     view.stdin.write(JSON.stringify({ connection: { port, token, environmentId: descriptor.environmentId, threadId },
