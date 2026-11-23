@@ -104,5 +104,11 @@ The repair keeps navigation title checks but uses the production stream tab ID,
 current address and active-tab close control for lifecycle actions. The synthetic
 page now reports its actual DOM label and path along with its counter. The expected
 `1, 2, 1` states and all original socket, frame, navigation and ownership assertions
-remain required. No production title or preview policy changed. Local validation
-of this repair remains static; hosted execution of the follow-up is pending.
+remain required.
+
+The next run reached the docked panel toggle. Closing the docked panel starts
+the floating preview, and the run retained a visible canvas and the floating
+close control. The fixture now checks that the same tab streams into the floating
+viewer, dismisses it through the keyboard-accessible close control, and then
+requires all sockets to detach before reopening the docked panel.
+[Docked-to-floating checkpoint](https://github.com/glopyglerky/t3code-ls/actions/runs/45176698760)

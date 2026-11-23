@@ -302,7 +302,7 @@ jobs:
               VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
               "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
           ' _ "$(id -un)" "$(command -v node)" "$proof" "$RUNNER_TEMP/preview-browser-home"
-          jq -e '.status == "passed" and .previewLifetime.runtime == "server" and .previewLifetime.navigationOwned and .previewLifetime.pointerRoundTrip and .previewLifetime.hiddenViewerDetached and .previewLifetime.sameTabReconnected and .previewLifetime.closedViewerDetached and .previewLifetime.reopenedFresh and .previewLifetime.frames > 0' \
+          jq -e '.status == "passed" and .previewLifetime.runtime == "server" and .previewLifetime.navigationOwned and .previewLifetime.pointerRoundTrip and .previewLifetime.floatingViewerRetained and .previewLifetime.hiddenViewerDetached and .previewLifetime.sameTabReconnected and .previewLifetime.closedViewerDetached and .previewLifetime.reopenedFresh and .previewLifetime.frames > 0' \
             "$proof/native/proof.json"
       - name: Check preview stream and surface lifecycle owners
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-preview-')

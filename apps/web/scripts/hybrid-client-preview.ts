@@ -156,14 +156,23 @@ export async function verifyPreviewLifetime(page: Page, threadId: string, screen
     await canvas.screenshot({ path: Path.join(Path.dirname(screenshot), "preview-first-click.png") });
     const beforeHide = streams.length;
     await toggle.click();
+    const floating = page.getByRole("region", { name: "Floating browser preview", exact: true });
+    await floating.locator("[data-server-browser-surface] canvas").waitFor({ state: "visible" });
+    await waitFor(() => streams.slice(beforeHide).some((stream) =>
+      !stream.closed && stream.tabId === first.tabId && stream.frames > 0),
+    "The docked browser must transfer the same live tab to the floating preview");
+    const closeFloating = floating.getByRole("button", { name: "Close floating preview", exact: true });
+    await closeFloating.focus();
+    await closeFloating.press("Enter");
     await canvas.waitFor({ state: "hidden" });
     await waitFor(() => streams.every((s) => s.closed), "A hidden panel must release its viewer sockets");
     const stoppedFrames = streams.reduce((n, s) => n + s.frames, 0);
     await page.waitForTimeout(250);
     Assert.equal(streams.reduce((n, s) => n + s.frames, 0), stoppedFrames);
+    const beforeResume = streams.length;
     await toggle.click();
     await canvas.waitFor({ state: "visible" });
-    await waitFor(() => streams.length > beforeHide && streams.some((s) => !s.closed && s.frames > 0), "Showing the panel must reconnect its stream");
+    await waitFor(() => streams.slice(beforeResume).some((s) => !s.closed && s.frames > 0), "Showing the panel must reconnect its stream");
     Assert.equal(streams.findLast((s) => !s.closed)!.tabId, first.tabId);
     await clickPage(80, 50);
     await waitFor(() => events.includes("count:2"), "The retained page must remain interactive after reconnect");
@@ -187,7 +196,8 @@ export async function verifyPreviewLifetime(page: Page, threadId: string, screen
       { count: 1, label: "Count: 1", page: "first" },
     ], "The observed DOM must retain state on reconnect and reset for a fresh tab");
     return { runtime: "server", loopbackOnly: true, navigationOwned: true, pointerRoundTrip: true,
-      hiddenViewerDetached: true, sameTabReconnected: true, closedViewerDetached: true, reopenedFresh: true,
+      floatingViewerRetained: true, hiddenViewerDetached: true, sameTabReconnected: true,
+      closedViewerDetached: true, reopenedFresh: true,
       pageEvents: events, pageStates, frames: streams.reduce((n, s) => n + s.frames, 0), streamConnections: streams.length,
       sandbox: process.env.T3CODE_SERVER_BROWSER_SANDBOX === "0" ? "disabled-for-isolated-fixture" : "enabled" };
   } finally {
