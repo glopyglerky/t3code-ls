@@ -43,14 +43,25 @@ fn plain_paragraph(text: &str) -> bool {
 // The full rendered text must still pass the old plain-paragraph guard, so
 // splitting a URL/list marker across spans cannot bypass retained behavior.
 #[derive(Clone, Copy)]
-enum InlineKind { Text, Strong, Emphasis }
+enum InlineKind {
+    Text,
+    Strong,
+    Emphasis,
+}
 
 fn inline_paragraph(text: &str) -> Option<Vec<(InlineKind, &str)>> {
-    if text.len() > 4096 { return None; }
-    if plain_paragraph(text) { return Some(vec![(InlineKind::Text, text)]); }
+    if text.len() > 4096 {
+        return None;
+    }
+    if plain_paragraph(text) {
+        return Some(vec![(InlineKind::Text, text)]);
+    }
     // The retained direction algorithm handles mixed scripts. Qualify those
     // separately rather than substituting browser dir=auto for its majority rule.
-    if !text.chars().all(|c| c.is_ascii() || ('\u{4e00}'..='\u{9fff}').contains(&c)) {
+    if !text
+        .chars()
+        .all(|c| c.is_ascii() || ('\u{4e00}'..='\u{9fff}').contains(&c))
+    {
         return None;
     }
     let mut parts = Vec::new();
@@ -59,7 +70,9 @@ fn inline_paragraph(text: &str) -> Option<Vec<(InlineKind, &str)>> {
     let mut spans = 0;
     while let Some(at) = rest.find('*') {
         let before = &rest[..at];
-        if at > 0 && !before.ends_with(' ') { return None; }
+        if at > 0 && !before.ends_with(' ') {
+            return None;
+        }
         if !before.is_empty() {
             flattened.push_str(before);
             parts.push((InlineKind::Text, before));
@@ -67,22 +80,38 @@ fn inline_paragraph(text: &str) -> Option<Vec<(InlineKind, &str)>> {
         let opening = &rest[at..];
         let (delimiter, kind) = if opening.starts_with("**") {
             ("**", InlineKind::Strong)
-        } else { ("*", InlineKind::Emphasis) };
+        } else {
+            ("*", InlineKind::Emphasis)
+        };
         let body = &opening[delimiter.len()..];
         let close = body.find('*')?;
         let value = &body[..close];
         let ending = &body[close..];
-        if !ending.starts_with(delimiter) || !plain_paragraph(value) { return None; }
+        if !ending.starts_with(delimiter) || !plain_paragraph(value) {
+            return None;
+        }
         rest = &ending[delimiter.len()..];
-        if rest.chars().next().is_some_and(|c| !matches!(c, ' ' | '.' | ',' | '!' | '?')) { return None; }
+        if rest
+            .chars()
+            .next()
+            .is_some_and(|c| !matches!(c, ' ' | '.' | ',' | '!' | '?'))
+        {
+            return None;
+        }
         spans += 1;
-        if spans > 32 { return None; }
+        if spans > 32 {
+            return None;
+        }
         flattened.push_str(value);
         parts.push((kind, value));
     }
     flattened.push_str(rest);
-    if !plain_paragraph(&flattened) { return None; }
-    if !rest.is_empty() { parts.push((InlineKind::Text, rest)); }
+    if !plain_paragraph(&flattened) {
+        return None;
+    }
+    if !rest.is_empty() {
+        parts.push((InlineKind::Text, rest));
+    }
     Some(parts)
 }
 
