@@ -12,7 +12,10 @@ import {
   recordedMigrations,
 } from "../apps/server/src/persistence/databaseMigrationHead.ts";
 import { migrationManifest } from "../apps/server/src/persistence/Migrations.ts";
-import { runServicePreflight } from "../apps/server/src/cloud/servicePreflight.ts";
+import {
+  decodeServicePreflightResult,
+  runServicePreflight,
+} from "../apps/server/src/cloud/servicePreflight.ts";
 import { SERVICE_LAUNCHER_PROTOCOL } from "../apps/server/src/cloud/serviceProtocol.ts";
 import { createFixture } from "./database-fixture.mjs";
 import {
@@ -165,7 +168,13 @@ try {
     "recovery_required",
   );
   Assert.equal(recordedMigrations(crashed), null);
-  Assert.equal(preflight(crashed).status, "blocked");
+  const blockedCrash = preflight(crashed);
+  Assert.equal(blockedCrash.status, "blocked");
+  Assert.equal(blockedCrash.code, "recovery_required");
+  Assert.deepEqual(
+    decodeServicePreflightResult(JSON.parse(JSON.stringify(blockedCrash)), SERVICE_LAUNCHER_PROTOCOL),
+    blockedCrash,
+  );
   Assert.equal(hash(await FS.readFile(crashed)), crashedHash);
   checks.push(
     "a deliberately killed writer remains recovery-required; read-only preflight fails closed without repairing or changing the file",
