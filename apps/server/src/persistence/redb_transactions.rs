@@ -475,6 +475,8 @@ pub struct ApplicationTransactions {
     store: Store,
     sessions: BTreeMap<String, Session>,
     validated_catalog: Option<ValidatedCatalog>,
+    #[cfg(feature = "ordered-engine-fixture")]
+    ordered_fixture: Option<Arc<redb_bench_compare::ordered::Database>>,
 }
 
 impl ApplicationTransactions {
@@ -483,7 +485,120 @@ impl ApplicationTransactions {
             store,
             sessions: BTreeMap::new(),
             validated_catalog: None,
+            #[cfg(feature = "ordered-engine-fixture")]
+            ordered_fixture: None,
         }
+    }
+
+    /// Isolated helper fixture only. This copies a bounded empty application
+    /// schema, never an existing user's rows and never an engine migration.
+    #[cfg(feature = "ordered-engine-fixture")]
+    pub async fn select_ordered_fixture(
+        &mut self,
+        profile: &str,
+        directory: &std::path::Path,
+        initialize: bool,
+    ) -> Result<()> {
+        use redb_bench_compare::ordered::{Database, Engine};
+        // Validate before touching either the candidate path or session state.
+        if !directory.is_absolute() || !self.sessions.is_empty() || self.ordered_fixture.is_some() {
+            return Err(invalid("ordered fixture selection rejected"));
+        }
+        let (engine, name, marker): (Engine, &str, &[u8]) = match profile {
+            "t04-direct-redb-efaf649-v1" => (
+                Engine::DirectRedb,
+                "state.redb",
+                b"t3-t04-isolated/1/direct-redb/efaf649fb270ce70257e53862295cc10e4bddab0/t3-application-keyspace-v1",
+            ),
+            "t04-fjall-efaf649-v1" => (
+                Engine::Fjall,
+                "state.fjall",
+                b"t3-t04-isolated/1/fjall/efaf649fb270ce70257e53862295cc10e4bddab0/t3-application-keyspace-v1",
+            ),
+            _ => return Err(invalid("ordered fixture selection rejected")),
+        };
+        let path = directory.join(name);
+        let profile_file = directory.join("profile");
+        let marker_key = store_key("ordered-fixture/identity");
+        let database = if initialize {
+            let mut source = self.store.db.begin_read_only().await?;
+            let catalog_bytes = source
+                .get(&schema_key())
+                .await?
+                .ok_or(Error::IncompatibleStore)?;
+            let catalog = decode_catalog(&catalog_bytes)?;
+            catalog.ensure_serving()?;
+            if catalog.generation != "native" || catalog.prepared_service_activation_v1.is_some() {
+                return Err(Error::IncompatibleStore);
+            }
+            read_generation_identity(&mut source, &catalog, &catalog_bytes)
+                .await?
+                .ok_or(Error::IncompatibleStore)?;
+            for table in &catalog.schema.tables {
+                if table.name == "effect_sql_migrations" {
+                    continue;
+                }
+                let prefix = row_prefix(&catalog.generation, &table.name)?;
+                let mut end = prefix.clone();
+                *end.last_mut().ok_or(Error::IncompatibleStore)? += 1;
+                if !source.scan(&prefix, &end, 1).await?.is_empty() {
+                    return Err(invalid("ordered fixture requires an empty application"));
+                }
+            }
+            let (start, end) = crate::prefix_range("");
+            let rows = source.scan(&start, &end, 4097).await?;
+            if rows.len() > 4096
+                || rows.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() > MAX_BATCH_BYTES / 2
+            {
+                return Err(invalid("ordered fixture seed budget exceeded"));
+            }
+            source.rollback().await?;
+            // Exclusive directory creation protects existing files/profiles.
+            std::fs::create_dir(directory)
+                .map_err(|_| invalid("ordered fixture directory must be new"))?;
+            let database = Database::open(engine, &path)?;
+            database.write(|tx| {
+                for (key, value) in &rows {
+                    tx.put(key, value)?;
+                }
+                tx.put(&marker_key, marker)?;
+                Ok::<_, redb_bench_compare::ordered::Error>(())
+            })?;
+            // An interrupted initialization stays unselectable; no automatic retry.
+            std::fs::write(&profile_file, marker)
+                .map_err(|_| invalid("ordered fixture marker write failed"))?;
+            database
+        } else {
+            let metadata = std::fs::symlink_metadata(directory)
+                .map_err(|_| invalid("ordered fixture directory missing"))?;
+            if !metadata.is_dir()
+                || !std::fs::symlink_metadata(&profile_file)
+                    .is_ok_and(|metadata| metadata.is_file())
+                || std::fs::read(&profile_file).ok().as_deref() != Some(marker)
+                || !std::fs::symlink_metadata(&path).is_ok_and(|metadata| match engine {
+                    Engine::DirectRedb => metadata.is_file(),
+                    _ => metadata.is_dir(),
+                })
+            {
+                return Err(Error::IncompatibleStore);
+            }
+            Database::open(engine, &path)?
+        };
+        if database.snapshot()?.get(&marker_key)?.as_deref() != Some(marker) {
+            return Err(Error::IncompatibleStore);
+        }
+        // Validate the copied catalog and generation before admitting sessions.
+        let transaction = Transaction::comparison_read_only(database.snapshot()?);
+        let session = self.session_from_transaction(transaction).await?;
+        drop(session);
+        self.ordered_fixture = Some(Arc::new(database));
+        self.validated_catalog = None;
+        Ok(())
+    }
+
+    #[cfg(feature = "ordered-engine-fixture")]
+    pub fn has_ordered_fixture(&self) -> bool {
+        self.ordered_fixture.is_some()
     }
 
     pub fn discard_all(&mut self) {
@@ -695,6 +810,14 @@ impl ApplicationTransactions {
                 "writer acquisition timeout must be between 1 and 30000 milliseconds",
             ));
         }
+        self.check_new_session(transaction_id)?;
+        let session = self.open_session(mode, lock_timeout_ms).await?;
+        self.sessions.insert(transaction_id.into(), session);
+        Ok(())
+    }
+
+    fn check_new_session(&mut self, transaction_id: &str) -> Result<()> {
+        validate_transaction_id(transaction_id)?;
         self.expire();
         if self.sessions.contains_key(transaction_id) {
             return Err(invalid("application transaction already exists"));
@@ -702,7 +825,40 @@ impl ApplicationTransactions {
         if self.sessions.len() >= MAX_SESSIONS {
             return Err(invalid("too many application transactions"));
         }
-        let session = self.open_session(mode, lock_timeout_ms).await?;
+        Ok(())
+    }
+
+    /// Decode comparison bytes with the real application read APIs. This does
+    /// not validate or activate the candidate as a production storage engine.
+    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    pub(crate) async fn begin_comparison_read(
+        &mut self,
+        transaction_id: &str,
+        snapshot: redb_bench_compare::ordered::Snapshot,
+    ) -> Result<()> {
+        self.check_new_session(transaction_id)?;
+        let transaction = Transaction::comparison_read_only(snapshot);
+        let session = self.session_from_transaction(transaction).await?;
+        self.sessions.insert(transaction_id.into(), session);
+        Ok(())
+    }
+
+    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    pub(crate) async fn begin_comparison_write(
+        &mut self,
+        transaction_id: &str,
+        database: Arc<redb_bench_compare::ordered::Database>,
+        discard_commit_ack: bool,
+    ) -> Result<()> {
+        self.check_new_session(transaction_id)?;
+        let transaction = Transaction::comparison_reserved(
+            database,
+            Duration::from_millis(DEFAULT_LOCK_TIMEOUT_MS),
+            MAX_IDLE,
+            discard_commit_ack,
+        )
+        .await?;
+        let session = self.session_from_transaction(transaction).await?;
         self.sessions.insert(transaction_id.into(), session);
         Ok(())
     }
@@ -717,7 +873,25 @@ impl ApplicationTransactions {
         mode: ApplicationTransactionMode,
         lock_timeout_ms: u64,
     ) -> Result<Session> {
-        let mut transaction = match mode {
+        #[cfg(feature = "ordered-engine-fixture")]
+        if let Some(database) = &self.ordered_fixture {
+            let transaction = match mode {
+                ApplicationTransactionMode::Read => {
+                    Transaction::comparison_read_only(database.snapshot()?)
+                }
+                ApplicationTransactionMode::Write => {
+                    Transaction::comparison_reserved(
+                        Arc::clone(database),
+                        Duration::from_millis(lock_timeout_ms),
+                        MAX_IDLE,
+                        false,
+                    )
+                    .await?
+                }
+            };
+            return self.session_from_transaction(transaction).await;
+        }
+        let transaction = match mode {
             ApplicationTransactionMode::Read => self.store.db.begin_read_only().await?,
             ApplicationTransactionMode::Write => {
                 self.store
@@ -726,6 +900,10 @@ impl ApplicationTransactions {
                     .await?
             }
         };
+        self.session_from_transaction(transaction).await
+    }
+
+    async fn session_from_transaction(&mut self, mut transaction: Transaction) -> Result<Session> {
         let bytes = transaction
             .get(&schema_key())
             .await?
@@ -974,6 +1152,24 @@ impl ApplicationTransactions {
         }
         .await;
         self.finish(transaction_id, session, result).await
+    }
+
+    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    pub(crate) async fn stage_for_comparison(
+        &mut self,
+        transaction_id: &str,
+    ) -> Result<crate::backend::StagedCommit> {
+        let session = self.take(transaction_id)?;
+        if !session.savepoints.is_empty() {
+            return self
+                .finish(
+                    transaction_id,
+                    session,
+                    Err(invalid("unreleased savepoints")),
+                )
+                .await;
+        }
+        session.transaction.stage_for_comparison().await
     }
 
     pub async fn commit(&mut self, transaction_id: &str) -> Result<()> {

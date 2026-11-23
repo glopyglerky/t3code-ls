@@ -175,7 +175,8 @@ export const make = Effect.fn("NativeDatabase.make")(function* (config: {
     | "read-only-local"
     | "current-read-local"
     | "exclusive-local"
-    | "owner-lock";
+    | "owner-lock"
+    | "ordered-fixture-local";
   /** Ownership handles must never silently reacquire a lost lifetime lock. */
   readonly reconnect?: boolean;
   readonly requestTimeout?: Duration.Input;
@@ -190,6 +191,7 @@ export const make = Effect.fn("NativeDatabase.make")(function* (config: {
       "current-read-local",
       "exclusive-local",
       "owner-lock",
+      "ordered-fixture-local",
     ].includes(mode)
   ) {
     return yield* new NativeDatabaseInputError({ stage: "configuration" });
