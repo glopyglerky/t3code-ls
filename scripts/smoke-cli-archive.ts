@@ -2,6 +2,8 @@
 // @effect-diagnostics nodeBuiltinImport:off - The signal fixture records the exact POSIX child exit.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeReadline from "node:readline";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
 import { ORCHESTRATION_PROTOCOL_VERSION } from "@t3tools/contracts";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -338,6 +340,119 @@ const smokeInstalledLifecycle = Effect.fn("smokeInstalledLifecycle")(function* (
     `exit ${String(inspected.exitCode)}. Expected a readable, byte-identical native application database.`,
   );
   yield* Effect.log("[cli-smoke] Installed launcher ran, foreign launcher was refused, and uninstall preserved reopenable native state and unrelated files.");
+});
+
+const smokeWindowsInstalledLifecycle = Effect.fn("smokeWindowsInstalledLifecycle")(function* (
+  contentDir: string,
+  home: string,
+  expectedVersion: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const runtime = path.join(home, "runtime");
+  const versionDir = path.join(runtime, "versions", expectedVersion);
+  const executable = path.join(versionDir, "t3.exe");
+  const launcher = path.join(home, "fixture-bin", "t3.cmd");
+  const unrelated = path.join(home, "fixture-bin", "keep.txt");
+  const retained = path.join(home, "userdata", "lifecycle.keep");
+  const archiveExecutable = path.join(contentDir, "t3.exe");
+  const systemRoot = process.env.SystemRoot ?? process.env.windir ?? "C:\\Windows";
+  const comspec = path.join(systemRoot, "System32", "cmd.exe");
+  // Only child-process lookup changes: OS utilities support the stock detached
+  // remover; system Node and installed user commands remain out of this PATH.
+  const environment = {
+    T3CODE_HOME: home, T3CODE_INSTALL_BIN_DIR: path.dirname(launcher),
+    APPDATA: path.join(home, "AppData", "Roaming"),
+    LOCALAPPDATA: path.join(home, "AppData", "Local"),
+    PATH: path.join(systemRoot, "System32"), ComSpec: comspec,
+  };
+  const require = (condition: boolean, step: string) => condition ? Effect.void :
+    new CliArchiveSmokeError({ step, detail: "The disposable Windows managed lifecycle invariant failed." });
+  const snapshot = (root: string): string => {
+    const files: Array<[string, string]> = [];
+    const walk = (directory: string, prefix: string) => {
+      for (const entry of NodeFS.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+        const relative = prefix + entry.name;
+        const target = NodePath.join(directory, entry.name);
+        if (entry.isDirectory()) { files.push([relative + "/", "directory"]); walk(target, relative + "/"); }
+        else if (entry.isFile()) files.push([relative, nativeHash(target)]);
+        else throw new Error("The owned lifecycle fixture contains an unexpected entry.");
+      }
+    };
+    walk(root, "");
+    return JSON.stringify(files);
+  };
+  const run = (args: ReadonlyArray<string>) => runExecutable(executable, args, home, undefined, environment);
+  // A .cmd file must run through cmd.exe. Quote only controlled literal arguments
+  // and disable delayed expansion; no shell is used for ordinary archive checks.
+  const runShim = (args: ReadonlyArray<string>) => Effect.try({
+    try: () => {
+      if ([launcher, ...args].some((value) => /[%"\r\n\u0080-\uffff]/u.test(value))) throw new Error("Unsupported controlled shim argument.");
+      const command = `""${launcher}" ${args.map((arg) => `"${arg}"`).join(" ")}"`;
+      const result = NodeChildProcess.spawnSync(comspec, ["/d", "/v:off", "/s", "/c", command], {
+        cwd: home, env: { ...executableEnvironment(home), ...environment },
+        windowsVerbatimArguments: true, windowsHide: true,
+        encoding: "utf8", timeout: 60_000, maxBuffer: 1024 * 1024,
+      });
+      if (result.error) throw result.error;
+      return { stdout: result.stdout, stderr: result.stderr, exitCode: result.status };
+    },
+    catch: () => new CliArchiveSmokeError({ step: "running the owned Windows cmd launcher", detail: "The bounded cmd invocation failed." }),
+  });
+
+  yield* fs.makeDirectory(path.dirname(versionDir), { recursive: true });
+  yield* fs.copy(contentDir, versionDir);
+  yield* fs.writeFileString(path.join(versionDir, ".install-complete"), `${expectedVersion}\n`);
+  yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
+  yield* fs.makeDirectory(environment.APPDATA, { recursive: true });
+  yield* fs.makeDirectory(environment.LOCALAPPDATA, { recursive: true });
+  yield* smokeSessionOutput(executable, versionDir, home, false);
+  yield* fs.writeFileString(retained, "Synthetic retained managed Windows state.\n");
+  yield* fs.writeFileString(unrelated, "Synthetic unrelated binary-directory entry.\n");
+  const foreign = '@echo off\r\n"foreign-runtime.exe" %*';
+  yield* fs.writeFileString(launcher, foreign);
+  const sessionsBefore = yield* run(["auth", "session", "list", "--base-dir", home, "--json"]);
+  yield* require(sessionsBefore.exitCode === 0 && sessionsBefore.stderr === "", "reading the original managed Windows sessions");
+  const stateBefore = yield* Effect.sync(() => snapshot(path.join(home, "userdata")));
+  const appDataBefore = yield* Effect.sync(() => snapshot(path.join(home, "AppData")));
+
+  const refused = yield* run(["install"]);
+  yield* require(refused.exitCode === 1 && refused.stdout === "" && refused.stderr.includes("Another t3 is already at") &&
+    (yield* fs.readFileString(launcher)) === foreign && !(yield* fs.exists(path.join(runtime, "launchers"))) &&
+    (yield* Effect.sync(() => snapshot(path.join(home, "userdata")))) === stateBefore &&
+    (yield* fs.readFileString(unrelated)) === "Synthetic unrelated binary-directory entry.\n",
+    "refusing a foreign Windows shim without an ownership receipt");
+  yield* fs.remove(launcher);
+  const installed = yield* run(["install"]);
+  const generated = `@echo off\r\n"${executable}" %*`;
+  const recorded = yield* fs.readFileString(path.join(runtime, "launchers"));
+  const receipts = recorded.split(/\r?\n/u).filter(Boolean);
+  yield* require(installed.exitCode === 0 && installed.stderr === "" && installed.stdout.includes(`Installed t3 ${expectedVersion} at ${launcher}.`) &&
+    (yield* fs.readFileString(launcher)) === generated && receipts.length === 1 && path.resolve(receipts[0]!).toLowerCase() === launcher.toLowerCase(),
+    "installing the exact managed t3.cmd and its ownership receipt");
+  const version = yield* runShim(["--version"]);
+  yield* require(version.exitCode === 0 && version.stderr === "" && version.stdout.includes(expectedVersion), "running the managed Windows shim");
+  const uninstalled = yield* runShim(["uninstall", "--base-dir", home, "--yes"]);
+  const runtimePresentAtExit = yield* fs.exists(runtime);
+  yield* require(uninstalled.exitCode === 0 && uninstalled.stderr === "" &&
+    uninstalled.stdout.includes(`Removed ${launcher}.`) && uninstalled.stdout.includes(`${runtime} will be removed once t3 exits.`) &&
+    !(yield* fs.exists(launcher)), "scheduling owned Windows runtime removal after shim uninstall");
+  yield* fs.exists(runtime).pipe(
+    Effect.flatMap((exists) => exists ? Effect.fail(new CliArchiveSmokeError({ step: "observing detached Windows runtime removal", detail: "The runtime still exists after the uninstall command exited." })) : Effect.void),
+    Effect.retry({ times: 200, schedule: Schedule.spaced("100 millis") }),
+  );
+  yield* require((yield* fs.readFileString(unrelated)) === "Synthetic unrelated binary-directory entry.\n" &&
+    (yield* Effect.sync(() => snapshot(path.join(home, "userdata")))) === stateBefore &&
+    (yield* Effect.sync(() => snapshot(path.join(home, "AppData")))) === appDataBefore,
+    "preserving original Windows state and unrelated files through detached cleanup");
+  const reopened = yield* runExecutable(archiveExecutable, ["auth", "session", "list", "--base-dir", home, "--json"], home, undefined, environment);
+  yield* require(reopened.exitCode === 0 && reopened.stderr === "" && reopened.stdout === sessionsBefore.stdout,
+    "reopening retained sessions after Windows managed uninstall");
+  const proof = { version: expectedVersion, installedShim: true, foreignShimRefused: true,
+    ownershipReceipt: true, shimVersionRan: true, shimUninstallRan: true, detachedRemovalObserved: true,
+    runtimePresentAtExit, originalStatePreserved: true, sessionsReopened: true, unrelatedFilePreserved: true,
+    appDataUnchanged: true, serviceInstallRequested: false, pathOrRegistryCommandRequested: false };
+  yield* Effect.sync(() => { process.stdout.write(`WINDOWS_MANAGED_LIFECYCLE ${JSON.stringify(proof)}\n`); });
 });
 
 const smokePipedThread = Effect.fn("smokePipedThread")(function* (
@@ -843,6 +958,9 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
   }
   if (input.expectNative && platform === "linux") {
     yield* smokeInstalledLifecycle(contentDir, path.join(scratch, "lifecycle-home"), input.expectVersion);
+  }
+  if (input.expectUpstream && platform === "win32") {
+    yield* smokeWindowsInstalledLifecycle(contentDir, path.join(scratch, "managed lifecycle home"), input.expectVersion);
   }
   if (input.expectUpstream) {
     yield* Effect.log(`[cli-smoke] Retained executable SHA-256 ${nativeHash(executable)}. Archive SHA-256 ${nativeHash(input.archive)}.`);

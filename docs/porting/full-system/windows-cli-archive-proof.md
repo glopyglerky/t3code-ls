@@ -36,9 +36,10 @@ valid JSON on stdout and actionable plain stderr respectively.
 Running `install` directly from an extracted archive is outside the managed
 `runtime/versions/<version>` layout. The runner checks that existing refusal
 is exit 1, empty stdout and an actionable stderr message. It does not label
-that refusal a Windows installer defect. Managed `.cmd` installation,
-update/rollback, uninstall, service integration, PTY and Windows signal
-semantics, signing and desktop/mobile packaging remain unqualified.
+that refusal a Windows installer defect. The following managed lifecycle extension
+is implemented but awaits its own hosted qualification. Update/rollback, service
+integration, PTY and Windows signal semantics, signing and desktop/mobile packaging
+remain unqualified.
 
 Windows ARM64 appears in the existing SEA target map, native target identities
 and archive naming code. That source coverage does not establish available
@@ -62,3 +63,68 @@ Existing MIT provenance is preserved.
 and [Node SEA documentation](https://nodejs.org/api/single-executable-applications.html)
 provide host and packaging context. The pinned repository's builders, selectors
 and executed artifact remain the qualification authority.
+
+## Managed Windows launcher lifecycle
+
+The retained Windows smoke now additionally copies the real extracted package into
+an owned `runtime/versions/<version>` under a fresh home containing spaces. It uses
+only `install`, `--version`, `uninstall --base-dir ... --yes` and auth session
+commands. No boot service is installed or registered, no update command runs, and
+no persistent PATH, registry or system configuration command is executed.
+
+Source ownership follows `cli/install.ts`, `cli/uninstall.ts` and
+`cloud/pinnedRuntime.ts`. Install refuses an occupied foreign launcher, writes a
+specific generated `t3.cmd`, and records the canonical target in `runtime/launchers`.
+Uninstall rechecks that ownership. Since Windows cannot unlink the running
+executable, its existing detached `cmd.exe` remover waits before removing the
+runtime directory. These owners are exercised as shipped; this slice adds no
+installation implementation or alternative state authority.
+
+The fixture requires all of the following:
+
+- A foreign shim stays byte-identical after exit-1 refusal, with no launcher receipt
+  and no state or unrelated-file change.
+- Installation writes the exact generated shim and exactly one matching ownership
+  receipt. Running that `.cmd` through absolute `cmd.exe` reports the expected
+  archive version, with successful exit and empty stderr.
+- The same `.cmd` runs uninstall. The launcher disappears and the command reports
+  deferred runtime removal. The test then observes the runtime directory vanish
+  through up to 200 bounded checks, spaced by 100 milliseconds. The harness does
+  not delete it to satisfy that observation.
+- The entire seeded synthetic `userdata` tree remains byte-identical. A real
+  retained SQLite session listing reopens from the untouched extracted package and
+  matches the original listing. An unrelated bin-directory file and the synthetic
+  AppData tree remain unchanged.
+
+The child environment redirects HOME, USERPROFILE, APPDATA, LOCALAPPDATA and all
+T3 paths to the disposable fixture. Only the managed lifecycle child PATH contains
+Windows System32 so the stock remover can resolve its OS utilities. This is not a
+persistent PATH change and does not expose host Node. All existing archive checks
+still use their original empty-PATH isolation. Commands through the `.cmd` have a
+60-second timeout and bounded captured output. Auth tokens, session JSON and state
+contents are not printed.
+
+After all assertions, `WINDOWS_MANAGED_LIFECYCLE` emits one machine-readable receipt
+without paths or credentials. The Windows archive job requires its version,
+ownership, shim execution, observed detached removal, state reopening and file
+preservation fields, then retains `managed-lifecycle.json` with the archive hashes.
+The small receipt also records whether runtime removal had already finished at
+command exit. It does not claim a separately observed detached process exit or
+universal host-state audit.
+
+The scoped hosted invocation remains:
+
+```sh
+node scripts/smoke-cli-archive.ts --archive "$ARCHIVE" \
+  --expect-version "$VERSION" --expect-upstream
+```
+
+The managed extension selects only when the executing platform is Windows and
+`--expect-upstream` is set. Linux native lifecycle and the previous retained Windows
+archive assertions remain unchanged. Local validation is static syntax, workflow
+structure and patch checks; no local product build, Windows command or test ran.
+Runtime qualification of this extension is pending on the exact candidate.
+The existing scratch finalizer removes the owned fixture after observation, while
+the hosted job cleans its package/dependency staging. Only bounded proof artifacts
+remain. Actual installer distribution, signing, service registration and Windows
+ARM64 still require their own qualification.
