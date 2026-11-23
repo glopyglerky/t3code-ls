@@ -3485,16 +3485,26 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
       });
     }
     session.inputCount += 1;
-    yield* Effect.try({
-      try: () => process.write(input.data),
-      catch: (cause) =>
-        new TerminalWriteError({
-          threadId: input.threadId,
-          terminalId,
-          terminalPid: process.pid,
-          cause,
-        }),
+    const writeError = (cause: unknown) => new TerminalWriteError({
+      threadId: input.threadId,
+      terminalId,
+      terminalPid: process.pid,
+      cause,
     });
+    const pending = yield* Effect.try({
+      try: () => process.write(input.data),
+      catch: writeError,
+    });
+    if (pending === undefined) return;
+    const receipt = yield* Effect.tryPromise({ try: () => pending, catch: writeError });
+    const expectedBytes = Buffer.byteLength(input.data, "utf8");
+    if (receipt.acceptedBytes !== expectedBytes) {
+      return yield* writeError({
+        reason: "incomplete-input-write",
+        acceptedBytes: receipt.acceptedBytes,
+        expectedBytes,
+      });
+    }
   });
 
   const resizeLocked = Effect.fn("terminal.resize")(function* (
