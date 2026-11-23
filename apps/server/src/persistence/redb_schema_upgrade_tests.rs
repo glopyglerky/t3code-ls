@@ -584,6 +584,9 @@ const ISOLATED_UPDATE: &str = "aa212c2b-63d4-4b28-97e4-1c1d6dc6d281";
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn isolated_trial_publish_interrupt_fixture() {
+    use crate::application_storage::{
+        publish_isolated_service_trial, rollback_isolated_service_trial,
+    };
     let Some(home) = std::env::var_os("T3_TEST_ISOLATED_TRIAL_HOME").map(std::path::PathBuf::from)
     else {
         return;
@@ -592,9 +595,16 @@ async fn isolated_trial_publish_interrupt_fixture() {
         home.file_name()
             .is_some_and(|name| name.to_string_lossy().starts_with("t3-redb-test-"))
     );
-    crate::application_storage::publish_isolated_service_trial(home, ISOLATED_UPDATE.into())
-        .await
-        .unwrap();
+    let boundary = std::env::var("T3_TEST_INTERRUPT_TRIAL_PUBLICATION").unwrap();
+    if boundary.starts_with("isolated-rollback-") {
+        rollback_isolated_service_trial(home, ISOLATED_UPDATE.into())
+            .await
+            .unwrap();
+    } else {
+        publish_isolated_service_trial(home, ISOLATED_UPDATE.into())
+            .await
+            .unwrap();
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -606,7 +616,7 @@ async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
     use crate::application_storage::{
         IsolatedTrialRequest, TrialSnapshot, backup_service_trial,
         inspect_isolated_service_trial_selection, prepare_isolated_service_trial,
-        publish_isolated_service_trial,
+        publish_isolated_service_trial, rollback_isolated_service_trial,
     };
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -781,6 +791,10 @@ async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
                 ));
                 assert_eq!(fs::read(&trial).unwrap(), trial_bytes);
                 assert!(matches!(
+                    rollback_isolated_service_trial(home.clone(), UPDATE.into()).await,
+                    Err(Error::IncompatibleStore)
+                ));
+                assert!(matches!(
                     publish_isolated_service_trial(home.clone(), UPDATE.into()).await,
                     Err(Error::IncompatibleStore)
                 ));
@@ -850,11 +864,28 @@ async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
                     assert_eq!(receipt["error"]["kind"], "incompatible_store", "{receipt}");
                     assert_eq!(fs::read(&live).unwrap(), trial_bytes);
                 }
+                let failed = state.join(format!(".statev2-failed-sealed-{UPDATE}.omdb"));
+                fs::remove_file(&helper).unwrap();
+                interrupt("isolated-rollback-preserved");
+                assert_eq!(fs::read(&live).unwrap(), trial_bytes);
+                assert_eq!(fs::read(&failed).unwrap(), trial_bytes);
+                assert_eq!(fs::read(&preserved).unwrap(), live_bytes);
+                interrupt("isolated-rollback-renamed");
+                assert!(!preserved.exists());
+                let rollback = rollback_isolated_service_trial(home.clone(), UPDATE.into())
+                    .await
+                    .unwrap();
+                assert!(rollback.reused);
+                assert_eq!(rollback.database, backup.database);
+                assert_eq!(rollback.preserved_database, prepared.database);
+                assert_eq!(fs::read(&failed).unwrap(), trial_bytes);
+                let reopened = Store::open_read_only(&live).await.unwrap();
+                let source = ApplicationTransactions::new(reopened);
+                assert_eq!(source.schema().await.unwrap(), Some(catalog.schema.clone()));
+                assert_eq!(source.prepared_service_activation().await.unwrap(), None);
             }
         }
-        if !bind_runtime {
-            assert_eq!(fs::read(&live).unwrap(), live_bytes);
-        }
+        assert_eq!(fs::read(&live).unwrap(), live_bytes);
         assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);
     }
 }

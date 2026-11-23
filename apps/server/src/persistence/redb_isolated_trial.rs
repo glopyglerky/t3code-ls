@@ -80,6 +80,12 @@ fn preserved_path(state: &Path, update_id: &str) -> PathBuf {
     state.join(format!(".statev2-source-{update_id}.omdb"))
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum SealedMove {
+    Publish,
+    Rollback,
+}
+
 struct TrialLease {
     home: PathBuf,
     live: TrialInput,
@@ -93,15 +99,17 @@ struct TrialLease {
 
 impl TrialLease {
     async fn open(home: PathBuf, request: &IsolatedTrialRequest) -> Result<Self> {
-        Self::open_for(home, request, false).await
+        Self::open_for(home, request, None).await
     }
 
     async fn open_for(
         home: PathBuf,
         request: &IsolatedTrialRequest,
-        publication: bool,
+        movement: Option<SealedMove>,
     ) -> Result<Self> {
-        if request.target_schema_sha256 != bootstrap_schema_sha256() {
+        if !matches!(movement, Some(SealedMove::Rollback))
+            && request.target_schema_sha256 != bootstrap_schema_sha256()
+        {
             return Err(Error::IncompatibleStore);
         }
         let directories = TrialRestoreDirectories::open(&home)?;
@@ -123,19 +131,12 @@ impl TrialLease {
         }
         let trial = state.join(format!(".statev2-trial-{}.omdb", request.update_id));
         let preserved = preserved_path(&state, &request.update_id);
-        let already_published = publication && !disposable_file_exists(&trial)?;
-        let source = if already_published {
-            preserved
-        } else {
-            state.join("statev2.omdb")
-        };
-        let source_links = if publication
-            && !already_published
-            && super::trial_entry_exists(&preserved_path(&state, &request.update_id))?
-        {
-            2
-        } else {
-            1
+        let canonical = state.join("statev2.omdb");
+        let (source, source_links) = match movement {
+            Some(SealedMove::Publish) if !disposable_file_exists(&trial)? => (preserved, 1),
+            Some(SealedMove::Publish) if super::trial_entry_exists(&preserved)? => (canonical, 2),
+            Some(SealedMove::Rollback) if super::trial_entry_exists(&preserved)? => (preserved, 1),
+            _ => (canonical, 1),
         };
         let live = TrialInput::open_with_links(source, &request.checkpoint, source_links).await?;
         if live.identity != request.database {
@@ -180,7 +181,7 @@ impl TrialLease {
         preparation: &IsolatedTrialPreparation,
     ) -> Result<()> {
         let candidate = self
-            .open_candidate(self.trial.clone(), request, preparation)
+            .open_candidate(self.trial.clone(), request, preparation, 1, true)
             .await?;
         self.verify_activation(request)?;
         self.verify_inputs()?;
@@ -192,13 +193,17 @@ impl TrialLease {
         path: PathBuf,
         request: &IsolatedTrialRequest,
         preparation: &IsolatedTrialPreparation,
+        links: u64,
+        verify_bootstrap: bool,
     ) -> Result<TrialInput> {
-        let candidate = TrialInput::open(path, &preparation.snapshot).await?;
+        let candidate = TrialInput::open_with_links(path, &preparation.snapshot, links).await?;
         if candidate.identity != preparation.database || candidate.sha256 != preparation.file_sha256
         {
             return Err(Error::IncompatibleStore);
         }
-        candidate.store.verify_bootstrap_schema().await?;
+        if verify_bootstrap {
+            candidate.store.verify_bootstrap_schema().await?;
+        }
         if ApplicationTransactions::new(candidate.store.clone())
             .prepared_service_activation()
             .await?
@@ -465,7 +470,11 @@ pub(super) async fn verify(
     lease.verify_candidate(&request, &preparation).await
 }
 
-pub(super) async fn publish(home: PathBuf, update_id: String) -> Result<IsolatedTrialPublication> {
+pub(super) async fn move_sealed(
+    home: PathBuf,
+    update_id: String,
+    movement: SealedMove,
+) -> Result<IsolatedTrialPublication> {
     let directories = TrialRestoreDirectories::open(&home)?;
     let receipt = TrialRestoreDirectories::pinned(&directories.state)
         .join(format!(".statev2-trial-{update_id}.receipt-v1.json"));
@@ -478,23 +487,66 @@ pub(super) async fn publish(home: PathBuf, update_id: String) -> Result<Isolated
         .ok_or(Error::IncompatibleStore)?;
     validate_isolated_trial_request(&home, &update_id, &saved.request)?;
     validate_isolated_trial_preparation(&saved.request, &saved.preparation)?;
-    let lease = TrialLease::open_for(home.clone(), &saved.request, true).await?;
+    let lease = TrialLease::open_for(home.clone(), &saved.request, Some(movement)).await?;
     directories.verify(&home)?;
     let state = TrialRestoreDirectories::pinned(&lease.directories.state);
     let canonical = state.join("statev2.omdb");
-    let preserved = preserved_path(&state, &update_id);
-    let reused = !disposable_file_exists(&lease.trial)?;
-    let candidate_path = if reused {
-        canonical.clone()
-    } else {
-        lease.trial.clone()
+    let original = preserved_path(&state, &update_id);
+    let (incoming_path, retained_path, _after_preserve, _after_rename) = match movement {
+        SealedMove::Publish => (
+            lease.trial.clone(),
+            original,
+            "isolated-preserved",
+            "isolated-renamed",
+        ),
+        SealedMove::Rollback => {
+            if super::trial_entry_exists(&lease.trial)? {
+                return Err(Error::IncompatibleStore);
+            }
+            let failed = state.join(format!(".statev2-failed-sealed-{update_id}.omdb"));
+            (
+                original,
+                failed,
+                "isolated-rollback-preserved",
+                "isolated-rollback-renamed",
+            )
+        }
+    };
+    let reused = !disposable_file_exists(&incoming_path)?;
+    let retained_exists = super::trial_entry_exists(&retained_path)?;
+    let outgoing_links = if !reused && retained_exists { 2 } else { 1 };
+    let (candidate_path, candidate_links) = match movement {
+        SealedMove::Publish if reused => (canonical.clone(), 1),
+        SealedMove::Publish => (incoming_path.clone(), 1),
+        SealedMove::Rollback if reused => (retained_path.clone(), 1),
+        SealedMove::Rollback => (canonical.clone(), outgoing_links),
     };
     let candidate = lease
-        .open_candidate(candidate_path, &saved.request, &saved.preparation)
+        .open_candidate(
+            candidate_path,
+            &saved.request,
+            &saved.preparation,
+            candidate_links,
+            matches!(movement, SealedMove::Publish),
+        )
         .await?;
+    let (outgoing, incoming) = match movement {
+        SealedMove::Publish => (&lease.live, &candidate),
+        SealedMove::Rollback => (&candidate, &lease.live),
+    };
     let verify_binding = || {
         lease.verify_ownership()?;
-        lease.verify_activation(&saved.request)?;
+        match movement {
+            SealedMove::Publish => lease.verify_activation(&saved.request)?,
+            SealedMove::Rollback => {
+                lease.pending_selection(
+                    &update_id,
+                    &activation.from_version,
+                    &activation.target_version,
+                    true,
+                )?;
+            }
+        }
         lease.checkpoint.verify()?;
         if read_trial_receipt::<IsolatedTrialVerification>(&receipt)?.as_ref() != Some(&saved) {
             return Err(Error::IncompatibleStore);
@@ -503,50 +555,47 @@ pub(super) async fn publish(home: PathBuf, update_id: String) -> Result<Isolated
     };
     verify_binding()?;
     if !reused {
-        let source = lease.live.verify_at(&canonical, lease.source_links)?;
-        let staged = candidate.verify_at(&lease.trial, 1)?;
+        let source = outgoing.verify_at(&canonical, outgoing_links)?;
+        let staged = incoming.verify_at(&incoming_path, 1)?;
         staged.sync_all().map_err(io_error)?;
-        if lease.source_links == 1 {
-            fs::hard_link(&canonical, &preserved).map_err(io_error)?;
+        if !retained_exists {
+            fs::hard_link(&canonical, &retained_path).map_err(io_error)?;
         }
         source.sync_all().map_err(|_| Error::UnknownCommit)?;
         lease.sync_publication()?;
         #[cfg(test)]
-        super::tests::interrupt_trial_publication("isolated-preserved");
+        super::tests::interrupt_trial_publication(_after_preserve);
 
         verify_binding().map_err(|_| Error::UnknownCommit)?;
-        lease
-            .live
+        outgoing
             .verify_at(&canonical, 2)
             .map_err(|_| Error::UnknownCommit)?;
-        lease
-            .live
-            .verify_at(&preserved, 2)
+        outgoing
+            .verify_at(&retained_path, 2)
             .map_err(|_| Error::UnknownCommit)?;
-        candidate
-            .verify_at(&lease.trial, 1)
+        incoming
+            .verify_at(&incoming_path, 1)
             .map_err(|_| Error::UnknownCommit)?;
-        // The catalog carries the candidate and runtime identity through this rename.
-        fs::rename(&lease.trial, &canonical).map_err(|_| Error::UnknownCommit)?;
+        // The canonical name carries the selected database and its catalog together.
+        fs::rename(&incoming_path, &canonical).map_err(|_| Error::UnknownCommit)?;
         #[cfg(test)]
-        super::tests::interrupt_trial_publication("isolated-renamed");
+        super::tests::interrupt_trial_publication(_after_rename);
     }
     lease.sync_publication()?;
     verify_binding().map_err(|_| Error::UnknownCommit)?;
-    lease
-        .live
-        .verify_at(&preserved, 1)
+    outgoing
+        .verify_at(&retained_path, 1)
         .map_err(|_| Error::UnknownCommit)?;
-    candidate
+    incoming
         .verify_at(&canonical, 1)
         .map_err(|_| Error::UnknownCommit)?;
-    if disposable_file_exists(&lease.trial).map_err(|_| Error::UnknownCommit)? {
+    if disposable_file_exists(&incoming_path).map_err(|_| Error::UnknownCommit)? {
         return Err(Error::UnknownCommit);
     }
     Ok(IsolatedTrialPublication {
         activation: activation.clone(),
-        database: saved.preparation.database,
-        preserved_database: saved.request.database,
+        database: incoming.identity.clone(),
+        preserved_database: outgoing.identity.clone(),
         reused,
     })
 }

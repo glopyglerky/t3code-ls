@@ -141,12 +141,38 @@ pub async fn publish_isolated_service_trial(
         return Err(Error::Invalid("invalid isolated trial selection".into()));
     }
     #[cfg(target_os = "linux")]
-    return tokio::spawn(isolated::publish(home, update_id))
-        .await
-        .map_err(|_| Error::UnknownCommit)?;
+    return tokio::spawn(isolated::move_sealed(
+        home,
+        update_id,
+        isolated::SealedMove::Publish,
+    ))
+    .await
+    .map_err(|_| Error::UnknownCommit)?;
     #[cfg(not(target_os = "linux"))]
     Err(Error::Invalid(
         "isolated service trial publication is unsupported on this platform".into(),
+    ))
+}
+
+/// Restore the original inode while the canonical store still matches the sealed trial.
+pub async fn rollback_isolated_service_trial(
+    home: PathBuf,
+    update_id: String,
+) -> Result<IsolatedTrialPublication> {
+    if !home.is_absolute() || !valid_update_id(&update_id) {
+        return Err(Error::Invalid("invalid isolated trial selection".into()));
+    }
+    #[cfg(target_os = "linux")]
+    return tokio::spawn(isolated::move_sealed(
+        home,
+        update_id,
+        isolated::SealedMove::Rollback,
+    ))
+    .await
+    .map_err(|_| Error::UnknownCommit)?;
+    #[cfg(not(target_os = "linux"))]
+    Err(Error::Invalid(
+        "isolated service trial rollback is unsupported on this platform".into(),
     ))
 }
 
