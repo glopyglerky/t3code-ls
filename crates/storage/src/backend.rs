@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::fs::OpenOptions;
+use std::fs::{File, OpenOptions};
 use std::io;
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
@@ -9,6 +9,12 @@ use std::time::{Duration, Instant};
 
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
+#[cfg(windows)]
+use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+#[cfg(windows)]
+use windows_sys::Win32::Storage::FileSystem::{
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
+};
 
 use redb::{
     BackendError, ConcurrencyMode, Database, Durability, ReadOnlyDatabase, ReadTransaction,
@@ -50,7 +56,7 @@ struct DatabaseHandles {
 impl DatabaseHandles {
     fn verify_identity(&self) -> Result<()> {
         if let Some(expected) = &self.identity {
-            let actual = same_file::Handle::from_path(&self.path).map_err(storage_error)?;
+            let actual = path_identity(&self.path)?;
             if actual != *expected {
                 return Err(Error::IncompatibleStore);
             }
@@ -268,16 +274,44 @@ impl StorageBackend for NonblockingOpen {
     }
 }
 
-fn file_identity(file: &std::fs::File) -> Result<same_file::Handle> {
+fn open_regular_file(path: &Path, options: &mut OpenOptions) -> Result<File> {
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    #[cfg(windows)]
+    options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    #[cfg(not(any(unix, windows)))]
+    if path.symlink_metadata().is_ok_and(|metadata| !metadata.is_file()) {
+        return Err(Error::IncompatibleStore);
+    }
+    let file = options.open(path).map_err(|error| {
+        #[cfg(unix)]
+        if error.raw_os_error() == Some(libc::ELOOP) {
+            return Error::IncompatibleStore;
+        }
+        storage_error(error)
+    })?;
+    let metadata = file.metadata().map_err(storage_error)?;
+    if !metadata.is_file() {
+        return Err(Error::IncompatibleStore);
+    }
+    #[cfg(windows)]
+    if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(Error::IncompatibleStore);
+    }
+    Ok(file)
+}
+
+fn path_identity(path: &Path) -> Result<same_file::Handle> {
+    let file = open_regular_file(path, OpenOptions::new().read(true))?;
+    same_file::Handle::from_file(file).map_err(storage_error)
+}
+
+fn file_identity(file: &File) -> Result<same_file::Handle> {
     same_file::Handle::from_file(file.try_clone().map_err(storage_error)?).map_err(storage_error)
 }
 
 fn checked_open(path: &Path, identity: &same_file::Handle) -> Result<Database> {
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(path)
-        .map_err(storage_error)?;
+    let file = open_regular_file(path, OpenOptions::new().read(true).write(true))?;
     if file_identity(&file)? != *identity {
         return Err(Error::IncompatibleStore);
     }
@@ -320,12 +354,12 @@ impl Backend {
                 options.read(true).write(true).create(true).truncate(false);
                 #[cfg(unix)]
                 options.mode(0o600);
-                let file = options.open(&path).map_err(storage_error)?;
+                let file = open_regular_file(&path, &mut options)?;
                 identity = file_identity(&file)?;
                 let file = redb::backends::FileBackend::new(file).map_err(storage_error)?;
                 builder().create_with_backend(file).map_err(storage_error)?
             } else {
-                identity = same_file::Handle::from_path(&path).map_err(storage_error)?;
+                identity = path_identity(&path)?;
                 let started = Instant::now();
                 loop {
                     match checked_open(&path, &identity) {
@@ -334,10 +368,7 @@ impl Backend {
                             // A live writer prevents a checked writable open. Readers
                             // still observe the last committed snapshot. A later writer
                             // promotion must finish the integrity check before begin.
-                            let file = OpenOptions::new()
-                                .read(true)
-                                .open(&path)
-                                .map_err(storage_error)?;
+                            let file = open_regular_file(&path, OpenOptions::new().read(true))?;
                             if file_identity(&file)? != identity {
                                 return Err(Error::IncompatibleStore);
                             }
@@ -447,16 +478,16 @@ impl Backend {
             return Err(Error::Invalid("database path must be absolute".into()));
         }
         let handles = tokio::task::spawn_blocking(move || {
-            let file = OpenOptions::new()
-                .read(true)
-                .open(&path)
-                .map_err(storage_error)?;
+            let file = open_regular_file(&path, OpenOptions::new().read(true))?;
             let identity = file_identity(&file)?;
             let file = redb::backends::FileBackend::new(file).map_err(storage_error)?;
             let reader = builder()
                 .open_read_only_with_backend(file)
-                .map_err(storage_error)?;
-            if same_file::Handle::from_path(&path).map_err(storage_error)? != identity {
+                .map_err(|error| match error {
+                    redb::DatabaseError::RepairAborted => Error::RecoveryRequired,
+                    other => storage_error(other),
+                })?;
+            if path_identity(&path)? != identity {
                 return Err(Error::IncompatibleStore);
             }
             validate_tables(&reader.begin_read().map_err(storage_error)?)?;
@@ -482,11 +513,7 @@ impl Backend {
             return Err(Error::Invalid("database path must be absolute".into()));
         }
         let handles = tokio::task::spawn_blocking(move || {
-            let file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&path)
-                .map_err(storage_error)?;
+            let file = open_regular_file(&path, OpenOptions::new().read(true).write(true))?;
             if file.metadata().map_err(storage_error)?.len() == 0 {
                 return Err(Error::IncompatibleStore);
             }
@@ -500,7 +527,7 @@ impl Backend {
                     redb::DatabaseError::DatabaseAlreadyOpen => Error::WriterBusy,
                     other => storage_error(other),
                 })?;
-            if same_file::Handle::from_path(&path).map_err(storage_error)? != identity {
+            if path_identity(&path)? != identity {
                 return Err(Error::IncompatibleStore);
             }
             validate_tables(&database.begin_read().map_err(storage_error)?)?;
@@ -581,7 +608,7 @@ impl Backend {
             options.read(true).write(true).create_new(true);
             #[cfg(unix)]
             options.mode(0o600);
-            let file = options.open(&destination).map_err(storage_error)?;
+            let file = open_regular_file(&destination, &mut options)?;
             let backup_identity = file_identity(&file)?;
             let file = redb::backends::FileBackend::new(file).map_err(storage_error)?;
             let mut builder = redb::Database::builder();
@@ -612,11 +639,8 @@ impl Backend {
             }
             write.commit().map_err(commit_error)?;
             drop(backup);
-            let verified_file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&destination)
-                .map_err(storage_error)?;
+            let verified_file =
+                open_regular_file(&destination, OpenOptions::new().read(true).write(true))?;
             if file_identity(&verified_file)? != backup_identity {
                 return Err(Error::IncompatibleStore);
             }
@@ -1752,6 +1776,40 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn store_modes_refuse_a_symlink_and_preserve_its_target() {
+        let fixture = TestFixture::start().await;
+        fixture.initialize().await.shutdown().await.unwrap();
+        let original = std::fs::read(fixture.path()).unwrap();
+        let link = fixture.path().with_file_name("linked.redb");
+        std::os::unix::fs::symlink(fixture.path(), &link).unwrap();
+
+        assert!(matches!(
+            Store::open_read_only(&link).await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert!(matches!(Store::open_local(&link).await, Err(Error::IncompatibleStore)));
+        assert!(matches!(
+            Store::open_exclusive(&link).await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert!(matches!(
+            Store::initialize_local(&link).await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert_eq!(std::fs::read(fixture.path()).unwrap(), original);
+
+        let dangling = fixture.path().with_file_name("dangling.redb");
+        let absent = fixture.path().with_file_name("absent.redb");
+        std::os::unix::fs::symlink(&absent, &dangling).unwrap();
+        assert!(matches!(
+            Store::initialize_local(&dangling).await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert!(!absent.exists());
     }
 
     #[tokio::test]

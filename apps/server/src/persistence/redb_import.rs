@@ -9,8 +9,9 @@ use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 
 use crate::application::{
-    ApplicationCatalog, ApplicationRow, ApplicationSchema, ApplicationTable, encode_catalog,
-    encode_row, row_key, schema_key, validate_row, validate_schema,
+    ApplicationCatalog, ApplicationRow, ApplicationSchema, ApplicationTable, decode_catalog,
+    encode_catalog, encode_row, read_generation_identity, record_generation_identity, row_key,
+    schema_key, validate_row, validate_schema,
 };
 use crate::sqlite_import::{ChunkRef, ExportSummary, ImportLimits, validate_reader};
 use crate::{Error, MAX_BATCH_BYTES, Result, Store, request_digest, store_key};
@@ -203,13 +204,12 @@ impl Store {
             };
             let mut receipt: ApplicationImportReceipt =
                 serde_json::from_slice(&bytes).map_err(|_| Error::IncompatibleStore)?;
-            let catalog: ApplicationCatalog = serde_json::from_slice(
-                &tx.get(&schema_key())
-                    .await?
-                    .ok_or(Error::IncompatibleStore)?,
-            )
-            .map_err(|_| Error::IncompatibleStore)?;
-            validate_schema(&catalog.schema).map_err(|_| Error::IncompatibleStore)?;
+            let bytes = tx
+                .get(&schema_key())
+                .await?
+                .ok_or(Error::IncompatibleStore)?;
+            let catalog = decode_catalog(&bytes)?;
+            read_generation_identity(&mut tx, &catalog, &bytes).await?;
             if receipt.generation != receipt.summary.export_sha256 || receipt.replayed {
                 return Err(Error::IncompatibleStore);
             }
@@ -440,7 +440,9 @@ impl Store {
                 _ => Err(invalid("application tables are already initialized")),
             };
         }
-        tx.insert(schema_key(), encode_catalog(&catalog)?).await?;
+        let bytes = encode_catalog(&catalog)?;
+        record_generation_identity(&mut tx, &catalog, &bytes).await?;
+        tx.insert(schema_key(), bytes).await?;
         tx.insert(receipt_key(), encode(&receipt)?).await?;
         tx.commit().await?;
         Ok(receipt)

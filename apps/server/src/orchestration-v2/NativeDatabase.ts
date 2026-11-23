@@ -45,6 +45,7 @@ export class NativeDatabaseUnavailable extends Schema.TaggedError<NativeDatabase
 const RejectionKind = Schema.Literals([
   "invalid_request",
   "incompatible_store",
+  "recovery_required",
   "stale_revision",
   "command_conflict",
   "duplicate_record",
