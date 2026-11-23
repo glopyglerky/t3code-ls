@@ -598,4 +598,183 @@ mod running_image_tests {
             assert!(verify_owned_image(&mut child, pid, &image, &digest).is_err());
         }
     }
+    // Opt-in real SEA composition. Expectations come from this build's retained
+    // raw bundle/package metadata, never from the observed child's JSON.
+    async fn sea_exchange(
+        child: &mut Child,
+        image: &File,
+        digest: &str,
+        expected: &serde_json::Value,
+        finish: Option<&[u8]>,
+    ) -> Result<std::process::ExitStatus> {
+        let pid = child.id().ok_or(Error::IncompatibleStore)?;
+        let result = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut stdout = child.stdout.take().ok_or(Error::IncompatibleStore)?;
+            let mut stderr = child.stderr.take().ok_or(Error::IncompatibleStore)?;
+            let mut frame = Vec::new();
+            loop {
+                if frame.len() >= 4096 {
+                    return Err(Error::IncompatibleStore);
+                }
+                let byte = stdout
+                    .read_u8()
+                    .await
+                    .map_err(|_| Error::IncompatibleStore)?;
+                frame.push(byte);
+                if byte == b'\n' {
+                    break;
+                }
+            }
+            // Compare every frame field against build evidence and the owned
+            // PID. The strict decoder also refuses extra or duplicate fields.
+            let mut expected = expected.clone();
+            expected["pid"] = pid.into();
+            let observed: serde_json::Value =
+                serde_json::from_slice(&frame).map_err(|_| Error::IncompatibleStore)?;
+            if observed != expected {
+                return Err(Error::IncompatibleStore);
+            }
+            // Strict fields also reject duplicates and unknown fields.
+            let strict: SeaFrame =
+                serde_json::from_slice(&frame).map_err(|_| Error::IncompatibleStore)?;
+            let mut encoded = serde_json::to_vec(&strict).map_err(|_| Error::IncompatibleStore)?;
+            encoded.push(10);
+            if encoded != frame {
+                return Err(Error::IncompatibleStore);
+            }
+            verify_owned_image(child, pid, image, digest)?;
+            let mut stdin = child.stdin.take().ok_or(Error::IncompatibleStore)?;
+            if let Some(finish) = finish {
+                stdin
+                    .write_all(finish)
+                    .await
+                    .map_err(|_| Error::IncompatibleStore)?;
+                // Finish alone cannot complete; verify the same live image
+                // while EOF is still withheld. Child's own timer bounds this.
+                if finish == FINISH {
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                    verify_owned_image(child, pid, image, digest)?;
+                }
+            }
+            drop(stdin);
+            let mut extra = [0; 1];
+            let (out, err, status) = tokio::try_join!(
+                async {
+                    stdout
+                        .read(&mut extra)
+                        .await
+                        .map_err(|_| Error::IncompatibleStore)
+                },
+                async {
+                    let mut byte = [0; 1];
+                    stderr
+                        .read(&mut byte)
+                        .await
+                        .map_err(|_| Error::IncompatibleStore)
+                },
+                async { child.wait().await.map_err(|_| Error::IncompatibleStore) },
+            )?;
+            if out != 0 || err != 0 {
+                return Err(Error::IncompatibleStore);
+            }
+            Ok(status)
+        })
+        .await
+        .unwrap_or(Err(Error::IncompatibleStore));
+        if result.is_err() {
+            // Await reap even if the child independently exited before kill.
+            let _ = child.start_kill();
+            child.wait().await.map_err(|_| Error::IncompatibleStore)?;
+        }
+        result
+    }
+
+    #[derive(Deserialize, Serialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct SeaFrame {
+        protocol: String,
+        package_name: String,
+        package_version: String,
+        pid: u32,
+        platform: String,
+        arch: String,
+        node_version: String,
+        sea: bool,
+        asset_name: String,
+        asset_bytes: u64,
+        asset_sha256: String,
+        serving: bool,
+    }
+
+    #[tokio::test]
+    #[ignore = "requires this build's isolated SEA and independently retained build artifacts"]
+    async fn packaged_sea_is_owned_sealed_and_reaped() {
+        let entry = std::path::PathBuf::from(std::env::var_os("T3_TEST_SEA_ENTRY").unwrap());
+        let expected_path =
+            std::path::PathBuf::from(std::env::var_os("T3_TEST_SEA_EXPECTED").unwrap());
+        let proof: serde_json::Value =
+            serde_json::from_slice(&bounded(&expected_path, 16384).unwrap()).unwrap();
+        let digest = proof["entrySha256"].as_str().unwrap();
+        let expected = &proof["frame"];
+        assert!(stage_image(&entry, &"0".repeat(64)).is_err());
+        let image = stage_image(&entry, digest).unwrap();
+        let other = stage_image(&entry, digest).unwrap();
+        let pinned = std::path::PathBuf::from(format!(
+            "/proc/{}/fd/{}",
+            std::process::id(),
+            image.as_raw_fd()
+        ));
+        for case in [
+            "valid",
+            "frame-mismatch",
+            "inode-mismatch",
+            "digest-mismatch",
+            "missing-finish",
+            "wrong-finish",
+        ] {
+            // Always launch the verified sealed descriptor. No disk fallback.
+            let mut child = Command::new(&pinned)
+                .arg("__sea-identity-observe")
+                .env_clear()
+                .current_dir(entry.parent().unwrap())
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
+                .unwrap();
+            let pid = child.id().unwrap();
+            let mut wanted = expected.clone();
+            if case == "frame-mismatch" {
+                wanted["assetSha256"] = "0".repeat(64).into();
+            }
+            let observed_image = if case == "inode-mismatch" {
+                &other
+            } else {
+                &image
+            };
+            let bad_digest = "0".repeat(64);
+            let observed_digest = if case == "digest-mismatch" {
+                &bad_digest
+            } else {
+                digest
+            };
+            let finish = match case {
+                "missing-finish" => None,
+                "wrong-finish" => Some(b"wrong\n".as_slice()),
+                _ => Some(FINISH),
+            };
+            let result =
+                sea_exchange(&mut child, observed_image, observed_digest, &wanted, finish).await;
+            assert_eq!(child.id(), None, "{case}: returned before reap");
+            assert!(child.try_wait().unwrap().is_some());
+            assert!(verify_owned_image(&mut child, pid, &image, digest).is_err());
+            match case {
+                "valid" => assert_eq!(result.unwrap().code(), Some(0)),
+                "missing-finish" | "wrong-finish" => assert_eq!(result.unwrap().code(), Some(78)),
+                _ => assert!(result.is_err(), "{case}: accepted mismatch"),
+            }
+            eprintln!("T05 SEA composition {case}: reaped");
+        }
+    }
 }

@@ -101,6 +101,9 @@ jobs:
           fi
           pnpm --dir apps/web run build
           pnpm exec node apps/server/scripts/cli.ts build --verbose
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-packaged-sea-identity-compose-* ]]; then
+            export T3_TEST_SEA_BUILD_ASSET="$RUNNER_TEMP/sea-build-binMain.mjs"
+          fi
           pnpm exec node apps/server/scripts/cli.ts build-exe --verbose
           mkdir -p apps/server/dist/resource-monitor
           install -m 0755 "$CARGO_TARGET_DIR/release/t3-resource-monitor" apps/server/dist/resource-monitor/
@@ -167,6 +170,60 @@ jobs:
           ' "$isolated/observed.json" > /dev/null
           install -m 0644 "$isolated/observed.json" "$proof/sea-identity.json"
           install -m 0644 "$isolated/hold.json" "$proof/sea-identity-handshake.json"
+      - name: Compose the sealed owned child with the actual packaged SEA
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-packaged-sea-identity-compose-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          isolated=$(mktemp -d "$RUNNER_TEMP/sea-compose.XXXXXX")
+          trap 'rm -rf -- "$isolated"; rm -f -- "$RUNNER_TEMP/sea-build-binMain.mjs"' EXIT
+          version=$(node -p 'require("./apps/server/package.json").version')
+          stem="t3-$version-linux-x64"
+          archive="$RUNNER_TEMP/cli-archive/$stem.tar.gz"
+          tar -xzOf "$archive" "$stem/t3" > "$isolated/t3"
+          chmod 0755 "$isolated/t3"
+          export T3_TEST_SEA_ENTRY="$isolated/t3"
+          export T3_TEST_SEA_EXPECTED="$RUNNER_TEMP/cli-proof/sea-build-expected.json"
+          node --input-type=module - "$archive" "$T3_TEST_SEA_ENTRY" "$RUNNER_TEMP/sea-build-binMain.mjs" "$T3_TEST_SEA_EXPECTED" <<'NODE'
+          import fs from 'node:fs';
+          import { createHash } from 'node:crypto';
+          const [archive, entry, asset, out] = process.argv.slice(2);
+          const pkg = JSON.parse(fs.readFileSync('apps/server/package.json'));
+          const bytes = fs.readFileSync(asset);
+          const hash = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+          if (!bytes.length || bytes.length > 134217728) throw Error('asset budget');
+          fs.writeFileSync(out, JSON.stringify({
+            archiveSha256: hash(archive), entrySha256: hash(entry),
+            frame: { protocol: 't3-sea-identity-observe-v1', packageName: pkg.name,
+              packageVersion: pkg.version, pid: 0, platform: 'linux', arch: 'x64',
+              nodeVersion: process.versions.node, sea: true, assetName: 'binMain.mjs',
+              assetBytes: bytes.length, assetSha256: hash(asset), serving: false }
+          }) + '\n');
+          NODE
+          sha256sum --check "$RUNNER_TEMP/cli-proof/archive.sha256"
+          export CARGO_HOME="$RUNNER_TEMP/cli-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/cli-target"
+          test_name=forward_child_readiness::running_image_tests::packaged_sea_is_owned_sealed_and_reaped
+          timeout -k 5s 180s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            test --locked -j 2 -p t3-code-ls-storage --lib --no-run --message-format=json \
+            > "$isolated/test-build.jsonl"
+          test_executable="$(jq -ser '
+            [.[] | select(.reason == "compiler-artifact" and .profile.test and
+                .target.name == "t3_code_ls_storage" and .executable != null) | .executable]
+            | if length == 1 then .[0] else error("expected one storage test executable") end
+          ' "$isolated/test-build.jsonl")"
+          rm -- "$isolated/test-build.jsonl"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- env T3_TEST_SEA_ENTRY="$2" T3_TEST_SEA_EXPECTED="$3" \
+              timeout -k 5s 60s "$4" "$5" --exact --ignored --nocapture
+          ' _ "$(id -un)" "$T3_TEST_SEA_ENTRY" "$T3_TEST_SEA_EXPECTED" "$test_executable" "$test_name" \
+            2>&1 | tee "$RUNNER_TEMP/cli-proof/sea-composition.log"
+          grep -F "test $test_name ... ok" "$RUNNER_TEMP/cli-proof/sea-composition.log"
+          for case in valid frame-mismatch inode-mismatch digest-mismatch missing-finish wrong-finish; do
+            grep -F "T05 SEA composition $case: reaped" "$RUNNER_TEMP/cli-proof/sea-composition.log"
+          done
+          test "$(find "$isolated" -mindepth 1 -maxdepth 1 | wc -l)" -eq 1
       - name: Verify the isolated candidate through the packaged executable
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-packaged-preparation-') || startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
         env:

@@ -167,6 +167,11 @@ const buildExeCmd = Command.make(
       yield* pack("bundle");
       const cliMainPath = path.join(cliAssetDir, "binMain.mjs");
       yield* pack(linuxArm64 ? "bootstrap" : "1");
+      // Opt-in hosted proof retains the exact raw bytes embedded above.
+      // The child never supplies this independent expected asset.
+      if (process.env.T3_TEST_SEA_BUILD_ASSET) {
+        yield* fs.copyFile(cliMainPath, process.env.T3_TEST_SEA_BUILD_ASSET);
+      }
 
       // Executables reject non-builtin imports even when bundling succeeds; inspect the emitted graph.
       const bootstrapPath = path.join(serverDir, "dist-exe/bin.mjs");
