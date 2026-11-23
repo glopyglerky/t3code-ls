@@ -67,12 +67,16 @@ jobs:
             packages/client-runtime/src/state/threads-sync.test.ts \
             packages/contracts/src/orchestrationV2.test.ts \
             apps/server/src/orchestration-v2/WireProjection.test.ts
+      - name: Install the pinned compiler for inherited history
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-')
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/history-toolchain"
       - name: Check anchored inherited windows across an ancestor commit
+        id: anchored-history
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-')
         shell: bash
         run: |
           set -euo pipefail
-          node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/history-toolchain"
+          test -x "$T3_CODE_LS_TOOLCHAIN/bin/lustr"
           export T3_CODE_LS_TEST_RUNTIME="$RUNNER_TEMP/history-runtime"
           export CARGO_HOME="$RUNNER_TEMP/history-cargo-home"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/history-target"
@@ -84,7 +88,7 @@ jobs:
             --tests '["tools/check-redb-projection-windows.mjs"]' \
             --proof-directory "$RUNNER_TEMP/history-proof"
       - name: Retain inherited window evidence
-        if: always() && startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-')
+        if: always() && startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-') && steps.anchored-history.outcome != 'skipped'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: inherited-history-proof
