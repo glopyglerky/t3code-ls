@@ -322,7 +322,10 @@ pub(crate) fn open_regular_file(path: &Path, options: &mut OpenOptions) -> Resul
     #[cfg(windows)]
     options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
     #[cfg(not(any(unix, windows)))]
-    if path.symlink_metadata().is_ok_and(|metadata| !metadata.is_file()) {
+    if path
+        .symlink_metadata()
+        .is_ok_and(|metadata| !metadata.is_file())
+    {
         return Err(Error::IncompatibleStore);
     }
     let file = options.open(path).map_err(|error| {
@@ -664,12 +667,21 @@ impl Backend {
         tokio::task::spawn_blocking(move || {
             let source = handles.begin_read()?;
             validate_tables(&source)?;
-            let mut options = OpenOptions::new();
-            options.read(true).write(true).create_new(true);
+            let directory = destination.parent().ok_or(Error::IncompatibleStore)?;
+            match destination.symlink_metadata() {
+                Ok(_) => return Err(Error::Database("backup destination already exists".into())),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(storage_error(error)),
+            }
             #[cfg(unix)]
-            options.mode(0o600);
-            let file = open_regular_file(&destination, &mut options)?;
-            let backup_identity = file_identity(&file)?;
+            let directory_handle = std::fs::File::open(directory).map_err(storage_error)?;
+            let staged = tempfile::Builder::new()
+                .prefix(".t3-backup-")
+                .suffix(".partial")
+                .tempfile_in(directory)
+                .map_err(storage_error)?;
+            let backup_identity = file_identity(staged.as_file())?;
+            let file = staged.reopen().map_err(storage_error)?;
             let file = redb::backends::FileBackend::new(file).map_err(storage_error)?;
             let mut builder = redb::Database::builder();
             builder
@@ -687,9 +699,9 @@ impl Backend {
                     Ok(())
                 })?
             };
-            write.commit().map_err(commit_error)?;
+            write.commit().map_err(storage_error)?;
             backup.close().map_err(storage_error)?;
-            let verified_file = open_regular_file(&destination, OpenOptions::new().read(true))?;
+            let verified_file = open_regular_file(staged.path(), OpenOptions::new().read(true))?;
             if file_identity(&verified_file)? != backup_identity {
                 return Err(Error::IncompatibleStore);
             }
@@ -706,42 +718,33 @@ impl Backend {
             }
             drop(verify);
             backup.close().map_err(storage_error)?;
+            staged.as_file().sync_all().map_err(storage_error)?;
+            let bytes = staged.as_file().metadata().map_err(storage_error)?.len();
             handles.verify_identity()?;
-            if path_identity(&destination)? != backup_identity {
+            if path_identity(staged.path())? != backup_identity {
                 return Err(Error::IncompatibleStore);
             }
+            staged
+                .persist_noclobber(&destination)
+                .map_err(storage_error)?;
             #[cfg(unix)]
-            {
-                std::fs::File::open(destination.parent().ok_or(Error::IncompatibleStore)?)
-                    .and_then(|directory| directory.sync_all())
-                    .map_err(storage_error)?;
+            directory_handle
+                .sync_all()
+                .map_err(|_| Error::UnknownCommit)?;
+            handles
+                .verify_identity()
+                .map_err(|_| Error::UnknownCommit)?;
+            if path_identity(&destination).map_err(|_| Error::UnknownCommit)? != backup_identity {
+                return Err(Error::UnknownCommit);
             }
-            let receipt = StorageBackup {
-                rows,
-                bytes: std::fs::metadata(&destination)
-                    .map_err(storage_error)?
-                    .len(),
-                checksum,
-            };
-            Ok((receipt, backup_identity))
-        })
-        .await
-        .map_err(worker_error)?
-    }
-
-    pub(crate) async fn storage_fingerprint(&self) -> Result<StorageBackup> {
-        let handles = self.handles.clone();
-        tokio::task::spawn_blocking(move || {
-            let (rows, checksum) = snapshot_digest(&handles.begin_read()?, |_, _| Ok(()))?;
-            let bytes = std::fs::metadata(&handles.path)
-                .map_err(storage_error)?
-                .len();
-            handles.verify_identity()?;
-            Ok(StorageBackup {
-                rows,
-                bytes,
-                checksum,
-            })
+            Ok((
+                StorageBackup {
+                    rows,
+                    bytes,
+                    checksum,
+                },
+                backup_identity,
+            ))
         })
         .await
         .map_err(worker_error)?
@@ -783,7 +786,9 @@ impl Backend {
 
     pub(crate) fn require_exclusive(&self) -> Result<()> {
         if !self.handles.exclusive || self.handles.read_only {
-            return Err(Error::Invalid("native schema upgrade requires an exclusive offline handle".into()));
+            return Err(Error::Invalid(
+                "native schema upgrade requires an exclusive offline handle".into(),
+            ));
         }
         self.handles.verify_identity()
     }
@@ -1874,7 +1879,10 @@ mod tests {
             Store::open_read_only(&link).await,
             Err(Error::IncompatibleStore)
         ));
-        assert!(matches!(Store::open_local(&link).await, Err(Error::IncompatibleStore)));
+        assert!(matches!(
+            Store::open_local(&link).await,
+            Err(Error::IncompatibleStore)
+        ));
         assert!(matches!(
             Store::open_exclusive(&link).await,
             Err(Error::IncompatibleStore)
