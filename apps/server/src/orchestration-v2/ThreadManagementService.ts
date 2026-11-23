@@ -504,6 +504,7 @@ export interface ThreadManagementServiceShape {
   readonly cancelDelegatedTask: Orchestrator.OrchestratorV2["Service"]["cancelDelegatedTask"];
   readonly delegatedTaskResultPending: Orchestrator.OrchestratorV2["Service"]["delegatedTaskResultPending"];
   readonly streamStoredEvents: Orchestrator.OrchestratorV2["Service"]["streamStoredEvents"];
+  readonly watchForkHistory: Orchestrator.OrchestratorV2["Service"]["watchForkHistory"];
   readonly streamStoredEventsFrom: Orchestrator.OrchestratorV2["Service"]["streamStoredEventsFrom"];
   readonly streamDomainEvents: Orchestrator.OrchestratorV2["Service"]["streamDomainEvents"];
 }
@@ -1715,6 +1716,7 @@ const make = Effect.gen(function* () {
     delegatedTaskResultPending: orchestrator.delegatedTaskResultPending,
     streamStoredEvents: orchestrator.streamStoredEvents,
     streamStoredEventsFrom: orchestrator.streamStoredEventsFrom,
+    watchForkHistory: orchestrator.watchForkHistory,
     streamDomainEvents: orchestrator.streamDomainEvents,
   });
 });

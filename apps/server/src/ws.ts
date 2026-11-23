@@ -66,6 +66,7 @@ import {
   type OrchestrationV2ShellSnapshot,
   type OrchestrationV2ShellStreamItem,
   type OrchestrationV2ThreadStreamItem,
+  type OrchestrationV2SubscribeThreadInput,
   type ApplicationStoredEvent,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
@@ -893,32 +894,8 @@ const enrichProjectShells = Effect.fn("ws.orchestrationV2.enrichProjectShells")(
 );
 
 export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subscribeThread")(
-  function* (input: {
-    readonly threadId: ThreadId;
-    readonly afterSequence?: number;
-    readonly requestCompletionMarker?: boolean;
-    readonly acceptBoundedSnapshot?: boolean;
-    readonly acceptDeferredWork?: boolean;
-    readonly acceptCompactTurnItems?: boolean;
-    readonly acceptDedupedBodies?: boolean;
-    readonly acceptCompactIds?: boolean;
-    readonly messageTextAppends?: number;
-  }) {
+  function* (input: OrchestrationV2SubscribeThreadInput) {
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
-    const dedupeBodies = input.acceptDedupedBodies === true;
-    // Replay, snapshot, and live tail share one deduper: it must see every delivered record.
-    const withLiveDedupe = <E, R>(stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>) =>
-      dedupeBodies ? Stream.suspend(() => Stream.map(stream, makeLiveBodyDeduper())) : stream;
-    const withMessageTextAppends = <E, R>(
-      stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>,
-    ) =>
-      input.messageTextAppends === 1 || input.messageTextAppends === 2
-        ? Stream.suspend(() =>
-            Stream.map(stream, makeMessageTextAppendEncoder(input.messageTextAppends === 2)),
-          )
-        : stream;
-    const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
-
     yield* Effect.annotateCurrentSpan({
       "orchestration_v2.thread_id": input.threadId,
     });
@@ -933,24 +910,74 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
       ),
     );
 
-    const eventStreamFrom = (afterSequence: number) =>
-      threadManagement
+    if (!shouldUseBoundedThreadSnapshot(input) || input.acceptHistoryInvalidation !== true) {
+      return yield* openThreadSubscription(input, threadManagement, null);
+    }
+    // Register before the opening snapshot or replay. A commit during either
+    // read remains pending until the stream enters its live tail.
+    return Stream.unwrap(
+      threadManagement.watchForkHistory(input.threadId).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationV2GetThreadProjectionError({
+              threadId: input.threadId,
+              message: `Failed to observe history for orchestration V2 thread ${input.threadId}`,
+              cause,
+            }),
+        ),
+        Effect.flatMap((invalidations) =>
+          openThreadSubscription(input, threadManagement, invalidations),
+        ),
+      ),
+    );
+  },
+);
+
+const openThreadSubscription = Effect.fnUntraced(
+  function* (
+    input: OrchestrationV2SubscribeThreadInput,
+    threadManagement: ThreadManagementService.ThreadManagementService["Service"],
+    invalidations: Effect.Success<ReturnType<typeof threadManagement.watchForkHistory>>,
+  ) {
+    const dedupeBodies = input.acceptDedupedBodies === true;
+    // An out-of-band bounded refresh can evict a live dedupe base. Keep the
+    // self-contained snapshot codec, and send complete repeated bodies on watched streams.
+    const withLiveDedupe = <E, R>(stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>) =>
+      dedupeBodies && invalidations === null
+        ? Stream.suspend(() => Stream.map(stream, makeLiveBodyDeduper()))
+        : stream;
+    const withMessageTextAppends = <E, R>(
+      stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>,
+    ) =>
+      input.messageTextAppends === 1 || input.messageTextAppends === 2
+        ? Stream.suspend(() =>
+            Stream.map(stream, makeMessageTextAppendEncoder(input.messageTextAppends === 2)),
+          )
+        : stream;
+    const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
+
+    const eventStreamFrom = (afterSequence: number) => {
+      const events = threadManagement
         .streamStoredEventsFrom({
           threadId: input.threadId,
           afterSequence,
         })
-        .pipe(
-          Stream.map(threadStreamEventItem),
-          coalesceThreadLiveStream,
-          Stream.mapError(
-            (cause) =>
-              new OrchestrationV2GetThreadProjectionError({
-                threadId: input.threadId,
-                message: `Failed while streaming orchestration V2 thread ${input.threadId}`,
-                cause,
-              }),
-          ),
-        );
+        .pipe(Stream.map(threadStreamEventItem), coalesceThreadLiveStream);
+      return (
+        invalidations === null
+          ? events
+          : Stream.merge(events, invalidations, { haltStrategy: "left" })
+      ).pipe(
+        Stream.mapError(
+          (cause) =>
+            new OrchestrationV2GetThreadProjectionError({
+              threadId: input.threadId,
+              message: `Failed while streaming orchestration V2 thread ${input.threadId}`,
+              cause,
+            }),
+        ),
+      );
+    };
 
     const loadReplayThrough = (afterSequence: number, throughSequence: number) =>
       applicationEvents
@@ -1889,6 +1916,7 @@ export const layerWsRpc = (
           shellOlderSettled: true,
           threadResumeCompletionMarker: true,
           threadSnapshotPagination: true,
+          threadHistoryInvalidation: true,
           threadMessageTextAppends: 1 as const,
           threadMessageTextSplices: 1 as const,
           threadFind: true,

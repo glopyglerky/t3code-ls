@@ -1566,7 +1566,7 @@ function visibleTurnItemsThroughRun(input: {
 }
 
 // Side chats show only their own rows; the fork transfer carries the parent's context to the model.
-function inheritedRunFork(thread: Pick<OrchestrationV2AppThread, "forkedFrom" | "lineage">) {
+export function inheritedRunFork(thread: Pick<OrchestrationV2AppThread, "forkedFrom" | "lineage">) {
   return thread.forkedFrom?.type === "run" && thread.lineage.sideChat !== true
     ? thread.forkedFrom
     : null;
