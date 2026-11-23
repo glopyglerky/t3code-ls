@@ -188,3 +188,33 @@ SHA-256 is `5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
 [server WebSocket authentication](../../server/src/auth/EnvironmentAuth.ts)
 and [Tungstenite's pinned source](https://github.com/snapview/tungstenite-rs/tree/v0.29.0)
 are the source boundaries used for this adapter.
+
+## Selected-thread streaming candidate
+
+The opt-in `--thread-compose` route subscribes to the selected authenticated thread
+before its single dispatch. It requests bounded snapshots and full message updates,
+without negotiating compact IDs or text deltas. One assistant message for the exact
+submitted run passes through `t3-code-ls-client-text::text_revision::TextRevision`
+and a four-slot queue into the existing read-only editor. Final confirmation still
+comes from the authenticated bounded projection. No provider action is retried.
+Closing the window drops the receiver and cancels the session. The transport keeps
+its 1 MiB frame/message limit, 4 MiB cumulative stream budget, 128-frame budget and
+eight-second socket deadline. This is a bounded controlled-replay increment.
+
+The existing hosted `gpui-showcase.yml` lane runs the focused Rust fixture, then the
+X11/AT-SPI check through `verify-gpui-thread-submit.ts`. The ordinary submit check
+now requires original recorded partial text while the run is still active, the
+same message ID at final and a read-only reopen, and preservation of a later unsent
+draft. The follow-up and Allow once checks remain separate assertions.
+
+Focused command, using the pinned compiler installed by that workflow:
+
+```sh
+"$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+  --manifest-path apps/desktop/rust/Cargo.toml \
+  server_submit::tests::streams_original_partial_then_final_for_one_dispatch_and_same_message
+```
+
+Source and fixture changes do not establish hosted execution. Normal Electron
+selection, toolkit-only fixture proofs, other desktop platforms, general stream
+recovery, live providers and durable desktop drafts remain separately qualified.

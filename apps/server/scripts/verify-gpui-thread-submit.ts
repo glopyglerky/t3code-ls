@@ -199,7 +199,8 @@ try {
     runCount: approval ? 1 : 2, userMessageCount: approval ? 1 : 2, refusalWindows: approval ? 0 : 4,
     normalCommandAndProjectionRoute: true, followUpInSameThread: !approval,
     ...(approval ? { approvalDecision: "accept", resolvedRequestCount: 1 } : {}),
-    unqualified: ["live providers", "streaming", "durable client identity allocation"],
+    ...(approval ? {} : { streaming: "original ACP partial before completed run; same message identity final/reopen; later unsent draft retained" }),
+    unqualified: ["live providers", "general stream recovery and delta negotiation", "durable client identity allocation"],
   }));
 } finally {
   if (server && server.exitCode === null) server.kill("SIGTERM");

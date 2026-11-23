@@ -7,6 +7,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
+use t3_code_ls_client_text::text_revision::{TextChange, TextEdit, TextRevision};
 use tungstenite::{Message, client::IntoClientRequest, protocol::WebSocketConfig};
 
 pub const FAILED: &str =
@@ -92,6 +93,24 @@ impl Session {
     }
 
     pub fn submit(&self, text: &str, cancelled: &AtomicBool) -> Result<Progress, &'static str> {
+        self.submit_inner(text, cancelled, None)
+    }
+
+    pub fn submit_streaming(
+        &self,
+        text: &str,
+        cancelled: &AtomicBool,
+        deliver: &mut dyn FnMut(Snapshot) -> Result<(), &'static str>,
+    ) -> Result<Progress, &'static str> {
+        self.submit_inner(text, cancelled, Some(deliver))
+    }
+
+    fn submit_inner(
+        &self,
+        text: &str,
+        cancelled: &AtomicBool,
+        deliver: Option<&mut dyn FnMut(Snapshot) -> Result<(), &'static str>>,
+    ) -> Result<Progress, &'static str> {
         if text.trim().is_empty() || text.len() > MAX_DRAFT {
             return Err(FAILED);
         }
@@ -110,6 +129,17 @@ impl Session {
             return Err(FAILED);
         }
         self.check_cancelled(cancelled)?;
+        let mut stream = deliver
+            .map(|deliver| {
+                self.subscribe(cancelled).map(|socket| Delivery {
+                    socket,
+                    deliver,
+                    bytes: 0,
+                    frames: 0,
+                    text: None,
+                })
+            })
+            .transpose()?;
         let command = json!({
             "type":"message.dispatch", "commandId":self.command_id,
             "threadId":self.connection.thread_id(), "messageId":self.message_id,
@@ -118,7 +148,7 @@ impl Session {
         });
         // Even an RPC error can follow a committed dispatch. Reconcile only by reading this identity.
         let _receipt = self.dispatch(command, cancelled);
-        self.observe(cancelled, |snapshot| {
+        self.observe(cancelled, text, stream.as_mut(), |snapshot| {
             let run = self.selected_run(snapshot, text)?;
             if run["status"].as_str() == Some("completed") {
                 return self.completed(snapshot).ok().map(Progress::Completed);
@@ -134,6 +164,26 @@ impl Session {
         text: &str,
         cancelled: &AtomicBool,
     ) -> Result<Snapshot, &'static str> {
+        self.allow_once_inner(approval, text, cancelled, None)
+    }
+
+    pub fn allow_once_streaming(
+        &self,
+        approval: &Approval,
+        text: &str,
+        cancelled: &AtomicBool,
+        deliver: &mut dyn FnMut(Snapshot) -> Result<(), &'static str>,
+    ) -> Result<Snapshot, &'static str> {
+        self.allow_once_inner(approval, text, cancelled, Some(deliver))
+    }
+
+    fn allow_once_inner(
+        &self,
+        approval: &Approval,
+        text: &str,
+        cancelled: &AtomicBool,
+        deliver: Option<&mut dyn FnMut(Snapshot) -> Result<(), &'static str>>,
+    ) -> Result<Snapshot, &'static str> {
         let command_id = self.approval_command_id.as_ref().ok_or(FAILED)?;
         if self.approval_attempted.swap(true, Ordering::AcqRel) {
             return Err(FAILED);
@@ -144,6 +194,17 @@ impl Session {
         if self.pending_approval(&before, run).as_ref() != Some(approval) {
             return Err(FAILED);
         }
+        let mut stream = deliver
+            .map(|deliver| {
+                self.subscribe(cancelled).map(|socket| Delivery {
+                    socket,
+                    deliver,
+                    bytes: 0,
+                    frames: 0,
+                    text: None,
+                })
+            })
+            .transpose()?;
         // The server still validates that this request is pending when it commits the command.
         let _receipt = self.dispatch(
             json!({
@@ -153,7 +214,7 @@ impl Session {
             }),
             cancelled,
         );
-        self.observe(cancelled, |snapshot| {
+        self.observe(cancelled, text, stream.as_mut(), |snapshot| {
             let run = self.selected_run(snapshot, text)?;
             let request = approval.request(snapshot)?;
             if run["status"].as_str() != Some("completed")
@@ -170,18 +231,38 @@ impl Session {
     fn observe<T>(
         &self,
         cancelled: &AtomicBool,
+        submitted: &str,
+        mut stream: Option<&mut Delivery<'_>>,
         observed: impl Fn(&Value) -> Option<T>,
     ) -> Result<T, &'static str> {
         let started = Instant::now();
         while started.elapsed() < RPC_DEADLINE {
             self.check_cancelled(cancelled)?;
-            if let Ok(snapshot) = self.bound_projection()
-                && let Some(result) = observed(&snapshot)
-            {
-                self.check_cancelled(cancelled)?;
-                return Ok(result);
+            if let Ok(snapshot) = self.bound_projection() {
+                if let Some(delivery) = stream.as_mut() {
+                    self.check_cancelled(cancelled)?;
+                    delivery.receive(self, submitted, &snapshot, cancelled)?;
+                }
+                if let Some(result) = observed(&snapshot) {
+                    self.check_cancelled(cancelled)?;
+                    if let Some(delivery) = stream.as_mut() {
+                        // Reconcile the authoritative final body through the same text owner,
+                        // even when completion overtakes buffered WebSocket updates.
+                        let sequence = snapshot["snapshotSequence"].as_u64().ok_or(FAILED)?;
+                        for message in snapshot["projection"]["messages"]
+                            .as_array()
+                            .ok_or(FAILED)?
+                        {
+                            delivery
+                                .apply(self, submitted, &snapshot, message, sequence, cancelled)?;
+                        }
+                    }
+                    return Ok(result);
+                }
             }
-            std::thread::sleep(Duration::from_millis(100));
+            if stream.is_none() {
+                std::thread::sleep(Duration::from_millis(100));
+            }
         }
         Err(FAILED)
     }
@@ -311,8 +392,22 @@ impl Session {
         })
     }
 
-    fn dispatch(&self, command: Value, cancelled: &AtomicBool) -> Result<(), &'static str> {
+    fn subscribe(
+        &self,
+        cancelled: &AtomicBool,
+    ) -> Result<tungstenite::WebSocket<DeadlineStream>, &'static str> {
         self.check_cancelled(cancelled)?;
+        let mut socket = self.open_socket()?;
+        self.check_cancelled(cancelled)?;
+        socket.send(Message::Text(json!({
+            "_tag":"Request", "id":"stream", "tag":"orchestration.subscribeThread",
+            "payload":{"threadId":self.connection.thread_id(), "acceptBoundedSnapshot":true},
+            "headers":[],
+        }).to_string().into())).map_err(|_| FAILED)?;
+        Ok(socket)
+    }
+
+    fn open_socket(&self) -> Result<tungstenite::WebSocket<DeadlineStream>, &'static str> {
         let deadline = Instant::now() + RPC_DEADLINE;
         let address = SocketAddr::from((Ipv4Addr::LOCALHOST, self.connection.port()));
         let stream =
@@ -344,6 +439,13 @@ impl Session {
             tungstenite::client::client_with_config(request, stream, Some(config))
                 .map_err(|_| FAILED)?;
         socket.get_mut().read_slice = Duration::from_millis(250);
+        Ok(socket)
+    }
+
+    fn dispatch(&self, command: Value, cancelled: &AtomicBool) -> Result<(), &'static str> {
+        self.check_cancelled(cancelled)?;
+        let mut socket = self.open_socket()?;
+        let deadline = socket.get_ref().deadline;
         self.check_cancelled(cancelled)?;
         socket.send(Message::Text(serde_json::to_string(&json!({
             "_tag":"Request", "id":"1", "tag":"orchestration.dispatchCommand", "payload":command, "headers":[],
@@ -408,6 +510,185 @@ impl Session {
             }
         }
         Err(FAILED)
+    }
+}
+
+// Full message updates only. Delta/compact encodings are deliberately not negotiated.
+// One selected assistant item and a bounded UI queue avoid an unbounded renderer backlog.
+struct Delivery<'a> {
+    socket: tungstenite::WebSocket<DeadlineStream>,
+    deliver: &'a mut dyn FnMut(Snapshot) -> Result<(), &'static str>,
+    bytes: usize,
+    frames: usize,
+    text: Option<(String, TextRevision)>,
+}
+
+impl Delivery<'_> {
+    fn receive(
+        &mut self,
+        session: &Session,
+        submitted: &str,
+        snapshot: &Value,
+        cancelled: &AtomicBool,
+    ) -> Result<(), &'static str> {
+        session.check_cancelled(cancelled)?;
+        if self.frames >= 128 || Instant::now() >= self.socket.get_ref().deadline {
+            return Err(FAILED);
+        }
+        let message = match self.socket.read() {
+            Ok(message) => message,
+            Err(tungstenite::Error::Io(error))
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) =>
+            {
+                return Ok(());
+            }
+            Err(_) => return Err(FAILED),
+        };
+        self.frames += 1;
+        match message {
+            Message::Text(text) => {
+                self.bytes += text.len();
+                if self.bytes > 4 * MAX_REPLY {
+                    return Err(FAILED);
+                }
+                let value: Value = serde_json::from_str(&text).map_err(|_| FAILED)?;
+                let batch = match &value {
+                    Value::Array(batch) => batch.as_slice(),
+                    value => std::slice::from_ref(value),
+                };
+                if batch.len() > 64 {
+                    return Err(FAILED);
+                }
+                for frame in batch {
+                    match frame["_tag"].as_str() {
+                        Some("Ping") => self
+                            .socket
+                            .send(Message::Text("{\"_tag\":\"Pong\"}".into()))
+                            .map_err(|_| FAILED)?,
+                        Some("Pong") => {}
+                        Some("Chunk") if frame["requestId"].as_str() == Some("stream") => {
+                            let values = frame["values"]
+                                .as_array()
+                                .filter(|values| values.len() <= 64)
+                                .ok_or(FAILED)?;
+                            for item in values {
+                                if item["kind"].as_str() == Some("event")
+                                    && item["event"]["type"].as_str() == Some("message.updated")
+                                {
+                                    if item["event"]["threadId"].as_str()
+                                        != Some(session.connection.thread_id())
+                                    {
+                                        return Err(FAILED);
+                                    }
+                                    self.apply(
+                                        session,
+                                        submitted,
+                                        snapshot,
+                                        &item["event"]["payload"],
+                                        item["sequence"].as_u64().ok_or(FAILED)?,
+                                        cancelled,
+                                    )?;
+                                } else if item["kind"].as_str() == Some("snapshot") {
+                                    if item["projection"]["thread"]["id"].as_str()
+                                        != Some(session.connection.thread_id())
+                                        || item["projection"]["thread"]["projectId"].as_str()
+                                            != Some(session.project_id.as_str())
+                                    {
+                                        return Err(FAILED);
+                                    }
+                                    for message in item["projection"]["messages"]
+                                        .as_array()
+                                        .filter(|items| items.len() <= 200)
+                                        .ok_or(FAILED)?
+                                    {
+                                        self.apply(
+                                            session,
+                                            submitted,
+                                            snapshot,
+                                            message,
+                                            item["snapshotSequence"].as_u64().ok_or(FAILED)?,
+                                            cancelled,
+                                        )?;
+                                    }
+                                }
+                            }
+                            self.socket
+                                .send(Message::Text(
+                                    json!({"_tag":"Ack","requestId":"stream"})
+                                        .to_string()
+                                        .into(),
+                                ))
+                                .map_err(|_| FAILED)?;
+                        }
+                        _ => return Err(FAILED),
+                    }
+                }
+            }
+            Message::Ping(_) | Message::Pong(_) => self.socket.flush().map_err(|_| FAILED)?,
+            _ => return Err(FAILED),
+        }
+        Ok(())
+    }
+
+    fn apply(
+        &mut self,
+        session: &Session,
+        submitted: &str,
+        snapshot: &Value,
+        message: &Value,
+        sequence: u64,
+        cancelled: &AtomicBool,
+    ) -> Result<(), &'static str> {
+        let Some(run) = session.selected_run(snapshot, submitted) else {
+            return Ok(());
+        };
+        if message["role"].as_str() != Some("assistant") || message["runId"] != run["id"] {
+            return Ok(());
+        }
+        if message["threadId"].as_str() != Some(session.connection.thread_id()) {
+            return Err(FAILED);
+        }
+        let id = checked_identity(&message["id"]).ok_or(FAILED)?;
+        let body = message["text"].as_str().ok_or(FAILED)?;
+        let (selected, state) = self.text.get_or_insert_with(|| {
+            (
+                id.to_owned(),
+                TextRevision::from_snapshot(0, 0, String::new(), MAX_REPLY).expect("empty text"),
+            )
+        });
+        if selected != id {
+            return Ok(());
+        }
+        if sequence == state.sequence() {
+            return if state.text() == body {
+                Ok(())
+            } else {
+                Err(FAILED)
+            };
+        }
+        if sequence < state.sequence() {
+            return Ok(());
+        }
+        state
+            .apply(TextChange {
+                base_revision: state.revision(),
+                revision: state.revision() + 1,
+                sequence,
+                edit: TextEdit::Replace(body),
+            })
+            .map_err(|_| FAILED)?;
+        session.check_cancelled(cancelled)?;
+        (self.deliver)(Snapshot {
+            text: format!(
+                "Thread {}\nMessage {}\nassistant\n{}\n",
+                session.connection.thread_id(),
+                id,
+                state.text()
+            ),
+        })
     }
 }
 
@@ -603,6 +884,70 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn streams_original_partial_then_final_for_one_dispatch_and_same_message() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let peer = thread::spawn(move || {
+            read_projection(&listener, false);
+            let mut stream = command_socket(&listener);
+            let subscription: Value =
+                serde_json::from_str(stream.read().unwrap().to_text().unwrap()).unwrap();
+            assert_eq!(subscription["tag"], "orchestration.subscribeThread");
+            assert_eq!(
+                subscription["payload"],
+                json!({"threadId": THREAD, "acceptBoundedSnapshot": true})
+            );
+            let mut dispatch = command_socket(&listener);
+            let command: Value =
+                serde_json::from_str(dispatch.read().unwrap().to_text().unwrap()).unwrap();
+            assert_eq!(command["payload"]["type"], "message.dispatch");
+            assert_eq!(command["payload"]["messageId"], "fixture-message-1");
+            dispatch.send(Message::Text(json!({"_tag":"Exit","requestId":"1","exit":{"_tag":"Success","value":{"sequence":1}}}).to_string().into())).unwrap();
+            let mut partial = projection(true);
+            partial["projection"]["runs"][0]["status"] = json!("running");
+            partial["projection"]["messages"][1]["text"] = json!("I'll track the three steps");
+            read_projection_value(&listener, partial.clone());
+            stream.send(Message::Text(json!({"_tag":"Chunk","requestId":"stream","values":[{
+                "kind":"event","sequence":5,"event":{"type":"message.updated","threadId":THREAD,
+                "payload":partial["projection"]["messages"][1]}
+            }]}).to_string().into())).unwrap();
+            let ack: Value =
+                serde_json::from_str(stream.read().unwrap().to_text().unwrap()).unwrap();
+            assert_eq!(ack, json!({"_tag":"Ack","requestId":"stream"}));
+            read_projection(&listener, true);
+            stream.send(Message::Text(json!({"_tag":"Chunk","requestId":"stream","values":[{
+                "kind":"event","sequence":7,"event":{"type":"message.updated","threadId":THREAD,
+                "payload":projection(true)["projection"]["messages"][1]}
+            }]}).to_string().into())).unwrap();
+            let _ = stream.read().unwrap();
+        });
+        let session = Session::read(input(port).as_slice()).unwrap();
+        let mut updates = Vec::new();
+        let result = session
+            .submit_streaming(PROMPT, &AtomicBool::new(false), &mut |snapshot| {
+                updates.push(snapshot.text);
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(updates.len(), 2);
+        assert!(updates[0].contains("I'll track the three steps"));
+        assert!(!updates[0].contains("Recorded reply"));
+        assert!(
+            updates
+                .iter()
+                .all(|text| text.contains("Message fixture-reply\n"))
+        );
+        let Progress::Completed(snapshot) = result else {
+            panic!("expected completed turn")
+        };
+        assert!(snapshot.text.contains("Message fixture-reply\n"));
+        assert!(snapshot.text.contains("Recorded reply"));
+        assert!(session.submit(PROMPT, &AtomicBool::new(false)).is_err());
+        peer.join().unwrap();
     }
 
     #[test]

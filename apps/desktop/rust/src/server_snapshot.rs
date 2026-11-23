@@ -246,6 +246,15 @@ fn parse_snapshot(value: &Value, thread: &str) -> Result<Snapshot, &'static str>
         if text.len() + role.len() + body.len() + 3 > MAX_REPLY {
             return Err(FAILED);
         }
+        if let Some(id) = message["id"].as_str() {
+            if id.len() > 1024 || id.chars().any(char::is_control) {
+                return Err(FAILED);
+            }
+            text.push_str(&format!("\nMessage {id}\n"));
+        }
+        if text.len() + role.len() + body.len() + 3 > MAX_REPLY {
+            return Err(FAILED);
+        }
         text.push_str(&format!("\n{role}\n{body}\n"));
     }
     Ok(Snapshot { text })
