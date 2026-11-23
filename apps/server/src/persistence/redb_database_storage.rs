@@ -356,6 +356,20 @@ pub(crate) async fn record_fixture_forward_selection(
     isolated::record_forward_selection(home, update_id).await
 }
 
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) async fn record_fixture_forward_catalog(
+    home: PathBuf,
+    update_id: String,
+) -> Result<bool> {
+    if !home.is_absolute() || !valid_update_id(&update_id) {
+        return Err(Error::IncompatibleStore);
+    }
+    // Keep the trial leases on the worker if the caller drops its future.
+    tokio::spawn(isolated::record_forward_catalog(home, update_id))
+        .await
+        .map_err(|_| Error::UnknownCommit)?
+}
+
 fn validate_isolated_trial_request(
     home: &Path,
     update_id: &str,

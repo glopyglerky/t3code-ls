@@ -439,13 +439,19 @@ impl TrialLease {
     }
 
     #[cfg(test)]
-    fn verify_published_candidate(&self, update_id: &str, candidate: &TrialInput) -> Result<()> {
+    fn verify_published_layout(&self, update_id: &str) -> Result<()> {
         let state = TrialRestoreDirectories::pinned(&self.directories.state);
         let failed = state.join(format!(".statev2-failed-sealed-{update_id}.omdb"));
         if super::trial_entry_exists(&self.trial)? || super::trial_entry_exists(&failed)? {
             return Err(Error::IncompatibleStore);
         }
         self.live.verify_at(&preserved_path(&state, update_id), 1)?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn verify_published_candidate(&self, update_id: &str, candidate: &TrialInput) -> Result<()> {
+        self.verify_published_layout(update_id)?;
         candidate.verify()
     }
 
@@ -783,8 +789,6 @@ pub(super) async fn record_forward_commit(home: PathBuf, update_id: String) -> R
 
 #[cfg(test)]
 pub(super) async fn record_forward_selection(home: PathBuf, update_id: String) -> Result<bool> {
-    use super::MAX_TRIAL_RECEIPT_BYTES;
-
     let directories = TrialRestoreDirectories::open(&home)?;
     let receipt = TrialRestoreDirectories::pinned(&directories.state)
         .join(format!(".statev2-trial-{update_id}.receipt-v1.json"));
@@ -827,25 +831,7 @@ pub(super) async fn record_forward_selection(home: PathBuf, update_id: String) -
     let runtime = &lease.directories.runtime;
     let selection = TrialRestoreDirectories::pinned(runtime).join("service-state.json");
     let current = read_trial_file(&selection)?.ok_or(Error::IncompatibleStore)?;
-    // Older installers honor the pending status even though their launchers
-    // reject the forward-only shape.
-    let proposed = serde_json::to_vec(&serde_json::json!({
-        "protocol": 5,
-        "phase": "forward-selected",
-        "activeVersion": activation.target_version,
-        "forwardReceiptSha256": trial_document_sha256(&receipt_bytes),
-        "update": {
-            "id": update_id,
-            "fromVersion": activation.from_version,
-            "targetVersion": activation.target_version,
-            "dbPath": home.join("userdata/statev2.omdb"),
-            "status": "pending",
-        }
-    }))
-    .map_err(|_| Error::IncompatibleStore)?;
-    if proposed.len() > MAX_TRIAL_RECEIPT_BYTES {
-        return Err(Error::IncompatibleStore);
-    }
+    let proposed = forward_selection_bytes(&home, activation, &receipt_bytes)?;
     if current != proposed {
         let pending: ServiceSelection =
             serde_json::from_slice(&current).map_err(|_| Error::IncompatibleStore)?;
@@ -871,6 +857,183 @@ pub(super) async fn record_forward_selection(home: PathBuf, update_id: String) -
         }
         Ok(())
     })
+}
+
+#[cfg(test)]
+fn forward_selection_bytes(
+    home: &Path,
+    activation: &PreparedServiceActivation,
+    receipt: &[u8],
+) -> Result<Vec<u8>> {
+    // Older installers honor the pending status even though their launchers
+    // reject the forward-only shape.
+    let bytes = serde_json::to_vec(&serde_json::json!({
+        "protocol": 5,
+        "phase": "forward-selected",
+        "activeVersion": activation.target_version,
+        "forwardReceiptSha256": trial_document_sha256(receipt),
+        "update": {
+            "id": activation.update_id,
+            "fromVersion": activation.from_version,
+            "targetVersion": activation.target_version,
+            "dbPath": home.join("userdata/statev2.omdb"),
+            "status": "pending",
+        }
+    }))
+    .map_err(|_| Error::IncompatibleStore)?;
+    if bytes.len() > super::MAX_TRIAL_RECEIPT_BYTES {
+        return Err(Error::IncompatibleStore);
+    }
+    Ok(bytes)
+}
+
+#[cfg(test)]
+pub(super) async fn record_forward_catalog(home: PathBuf, update_id: String) -> Result<bool> {
+    use super::tests::interrupt_trial_publication;
+    use crate::{application::ForwardServiceActivation, backend::ExclusiveTrialFile};
+
+    let directories = TrialRestoreDirectories::open(&home)?;
+    let receipt = TrialRestoreDirectories::pinned(&directories.state)
+        .join(format!(".statev2-trial-{update_id}.receipt-v1.json"));
+    let receipt_bytes = read_trial_file(&receipt)?.ok_or(Error::IncompatibleStore)?;
+    let saved: IsolatedTrialVerification =
+        serde_json::from_slice(&receipt_bytes).map_err(|_| Error::IncompatibleStore)?;
+    validate_observation(&saved)?;
+    validate_isolated_trial_request(&home, &update_id, &saved.request)?;
+    validate_isolated_trial_preparation(&saved.request, &saved.preparation)?;
+    if saved.sealed_publication.as_ref().map(|record| record.phase)
+        != Some(SealedPromotionPhase::ForwardCommitted)
+        || serde_json::to_vec(&saved).map_err(|_| Error::IncompatibleStore)? != receipt_bytes
+    {
+        return Err(Error::IncompatibleStore);
+    }
+
+    let lease =
+        TrialLease::open_for(home, &saved.request, Some(SealedMove::PublishIntended)).await?;
+    directories.verify(&lease.home)?;
+    let state = TrialRestoreDirectories::pinned(&lease.directories.state);
+    let candidate = ExclusiveTrialFile::acquire(state.join("statev2.omdb"), MAX_TRIAL_FILE_BYTES)?;
+    let activation = lease
+        .verify_promotion_runtimes(&saved)
+        .await?
+        .ok_or(Error::IncompatibleStore)?;
+    let runtime = &lease.directories.runtime;
+    let selection = TrialRestoreDirectories::pinned(runtime).join("service-state.json");
+    let selected = forward_selection_bytes(&lease.home, activation, &receipt_bytes)?;
+    let marker = ForwardServiceActivation {
+        update_id: update_id.clone(),
+        forward_selection_sha256: trial_document_sha256(&selected),
+    };
+    let verify = || {
+        lease.verify_ownership()?;
+        lease.checkpoint.verify()?;
+        lease.verify_published_layout(&update_id)?;
+        if trial_file_identity(&candidate.verified_file()?)?
+            != (saved.preparation.database.clone(), 1)
+            || read_trial_file(&receipt)?.as_deref() != Some(receipt_bytes.as_slice())
+            || read_trial_file(&selection)?.as_deref() != Some(selected.as_slice())
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    };
+    verify()?;
+    lease.sync_publication()?;
+    runtime.sync_all().map_err(|_| Error::UnknownCommit)?;
+
+    // A writable open can change the raw bytes even without an application
+    // commit. Record that the exact prepared image passed before that open.
+    let witness = state.join(format!(".statev2-forward-{update_id}.json"));
+    let witness_bytes = serde_json::to_vec(&marker).map_err(|_| Error::IncompatibleStore)?;
+    let armed = match read_trial_file(&witness)? {
+        None => false,
+        Some(bytes) if bytes == witness_bytes => true,
+        Some(_) => return Err(Error::IncompatibleStore),
+    };
+    let verify_witness = || {
+        verify()?;
+        if read_trial_file(&witness)?.as_deref() != Some(witness_bytes.as_slice()) {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    };
+    let digest = trial_file_digest(&candidate.verified_file()?)?;
+    if !armed && digest != saved.preparation.file_sha256 {
+        return Err(Error::IncompatibleStore);
+    }
+    let (db, recovery) = match candidate.snapshot().await {
+        Ok(db) => (db, false),
+        Err(Error::RecoveryRequired) if armed => {
+            (candidate.recover_copy(state.clone()).await?, true)
+        }
+        Err(error) => return Err(error),
+    };
+    let snapshot = Store { db };
+    snapshot.verify_bootstrap_schema().await?;
+    let reused = ApplicationTransactions::new(snapshot.clone())
+        .verify_forward_catalog(activation, &marker, &saved.preparation.snapshot)
+        .await?;
+    snapshot.shutdown().await?;
+    verify()?;
+    if trial_file_digest(&candidate.verified_file()?)? != digest || (reused && !armed) {
+        return Err(Error::IncompatibleStore);
+    }
+    if reused && !recovery {
+        verify_witness()?;
+        return Ok(true);
+    }
+    if !armed {
+        write_trial_receipt(&witness, &state, &marker)?;
+    }
+    lease.sync_publication()?;
+    verify_witness()?;
+    interrupt_trial_publication("forward-catalog-armed");
+    let store = Store {
+        db: candidate
+            .open_checked_writer(move |file| {
+                if trial_file_digest(file)? != digest {
+                    return Err(Error::IncompatibleStore);
+                }
+                Ok(())
+            })
+            .await?,
+    };
+    interrupt_trial_publication("forward-catalog-opened");
+    let transactions = ApplicationTransactions::new(store.clone());
+    if transactions
+        .verify_forward_catalog(activation, &marker, &saved.preparation.snapshot)
+        .await?
+        != reused
+    {
+        return Err(Error::IncompatibleStore);
+    }
+    if !reused {
+        transactions
+            .mark_forward_catalog(activation, marker.clone(), verify_witness)
+            .await?;
+        interrupt_trial_publication("forward-catalog-committed");
+    }
+    drop(transactions);
+    store.shutdown().await.map_err(|_| Error::UnknownCommit)?;
+    let snapshot = Store {
+        db: candidate
+            .snapshot()
+            .await
+            .map_err(|_| Error::UnknownCommit)?,
+    };
+    let confirmed = ApplicationTransactions::new(snapshot.clone())
+        .verify_forward_catalog(activation, &marker, &saved.preparation.snapshot)
+        .await
+        .map_err(|_| Error::UnknownCommit)?;
+    snapshot
+        .shutdown()
+        .await
+        .map_err(|_| Error::UnknownCommit)?;
+    verify_witness().map_err(|_| Error::UnknownCommit)?;
+    if !confirmed {
+        return Err(Error::UnknownCommit);
+    }
+    Ok(reused)
 }
 
 #[cfg(test)]

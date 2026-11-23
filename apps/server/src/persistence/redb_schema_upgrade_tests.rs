@@ -612,6 +612,10 @@ async fn isolated_trial_publish_interrupt_fixture() {
                 .await
                 .unwrap();
         }
+    } else if boundary.starts_with("forward-catalog-") {
+        crate::application_storage::record_fixture_forward_catalog(home, ISOLATED_UPDATE.into())
+            .await
+            .unwrap();
     } else if boundary.starts_with("forward-selection-") {
         crate::application_storage::record_fixture_forward_selection(home, ISOLATED_UPDATE.into())
             .await
@@ -1933,8 +1937,8 @@ async fn promotion_intent_fixture(case: PromotionFixture) {
 async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase) {
     use crate::application_storage::{
         IsolatedTrialVerification, TrialRestorePhase, TrialRestoreRequest, backup_service_trial,
-        publish_intended_isolated_service_trial, record_fixture_forward_commit,
-        record_fixture_forward_selection,
+        publish_intended_isolated_service_trial, record_fixture_forward_catalog,
+        record_fixture_forward_commit, record_fixture_forward_selection,
     };
     use std::fs;
     use std::path::Path;
@@ -2013,6 +2017,7 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
     let published = capture(&receipt);
     let decide = || record_fixture_forward_commit(home.to_owned(), ISOLATED_UPDATE.into());
     let select = || record_fixture_forward_selection(home.to_owned(), ISOLATED_UPDATE.into());
+    let mark = || record_fixture_forward_catalog(home.to_owned(), ISOLATED_UPDATE.into());
     assert!(matches!(select().await, Err(Error::IncompatibleStore)));
     let boundary = match case {
         ForwardCommitCase::RefuseSourceWithoutFence
@@ -2172,6 +2177,61 @@ async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase)
         );
         println!("T05 forward selection recovered without unsealing or allowing restore");
         if catalog_case {
+            let witness = state.join(format!(".statev2-forward-{ISOLATED_UPDATE}.json"));
+            for path in [&receipt, &selection] {
+                let bytes = fs::read(path).unwrap();
+                let mut changed = bytes.clone();
+                changed.push(b'\n');
+                fs::write(path, changed).unwrap();
+                assert!(matches!(mark().await, Err(Error::IncompatibleStore)));
+                fs::write(path, bytes).unwrap();
+            }
+            let held = Store::open_read_only(&live).await.unwrap();
+            assert!(matches!(mark().await, Err(Error::WriterBusy)));
+            held.shutdown().await.unwrap();
+            let moved_source = state.join("fixture-held-source.omdb");
+            fs::rename(&original, &moved_source).unwrap();
+            fs::write(&original, &source.3).unwrap();
+            assert!(matches!(mark().await, Err(Error::IncompatibleStore)));
+            fs::rename(moved_source, &original).unwrap();
+            let moved_candidate = state.join("fixture-held-canonical.omdb");
+            fs::rename(&live, &moved_candidate).unwrap();
+            fs::write(&live, &sealed.3).unwrap();
+            let replacement = capture(&live);
+            assert!(matches!(mark().await, Err(Error::IncompatibleStore)));
+            assert_eq!(capture(&live), replacement);
+            fs::rename(moved_candidate, &live).unwrap();
+            assert_eq!(capture(&live), sealed);
+            assert!(!witness.exists());
+
+            interrupt("forward-catalog-armed", None);
+            assert_eq!(capture(&live), sealed);
+            assert!(witness.exists());
+            interrupt("forward-catalog-opened", None);
+            let dirty_old = capture(&live);
+            assert_ne!(dirty_old.3, sealed.3);
+            let witness_bytes = fs::read(&witness).unwrap();
+            fs::write(&witness, b"foreign witness").unwrap();
+            assert!(matches!(mark().await, Err(Error::IncompatibleStore)));
+            assert_eq!(capture(&live), dirty_old);
+            fs::write(&witness, witness_bytes).unwrap();
+            interrupt("forward-catalog-committed", None);
+            let dirty_new = capture(&live);
+            assert_ne!(dirty_new.3, dirty_old.3);
+            fs::write(&selection, &selection_before.3).unwrap();
+            assert!(matches!(mark().await, Err(Error::IncompatibleStore)));
+            assert_eq!(capture(&live), dirty_new);
+            fs::write(&selection, &selected.3).unwrap();
+            assert!(
+                mark().await.unwrap(),
+                "recovered the already committed marker"
+            );
+            let marked = capture(&live);
+            assert!(mark().await.unwrap(), "verified the clean marked candidate");
+            assert_eq!(capture(&live), marked);
+            println!(
+                "T05 native forward catalog recovered the interrupted sealed and marked states"
+            );
             forward_catalog_fixture(
                 home,
                 &selected.3,
@@ -2275,36 +2335,19 @@ async fn forward_catalog_fixture(
     let capture = || paths.map(|path| capture_forward_file(path));
     let sha256 = forward_fixture_sha256(selection);
 
-    // Only this disposable fixture changes the catalog. The actual transition
-    // needs a writable handoff from the locked offline snapshot.
     let owner = OwnerLock::acquire_existing_native(&state.join("server-owner.sqlite")).unwrap();
     let store = Store::open_exclusive(&live).await.unwrap();
-    let mut tx = store.db.begin().await.unwrap();
-    let bytes = tx.get(&schema_key()).await.unwrap().unwrap();
-    let sealed = decode_catalog(&bytes).unwrap();
+    let bytes = store.db.read(&schema_key()).await.unwrap().unwrap();
+    let catalog = decode_catalog(&bytes).unwrap();
+    assert!(catalog.prepared_service_activation_v1.is_none());
+    let marked = serde_json::to_value(&catalog).unwrap();
     assert_eq!(
-        sealed
-            .prepared_service_activation_v1
-            .as_ref()
-            .unwrap()
-            .update_id,
-        ISOLATED_UPDATE
+        marked["forward_service_activation_v1"],
+        json!({
+            "update_id": ISOLATED_UPDATE,
+            "forward_selection_sha256": sha256,
+        })
     );
-    let mut marked = serde_json::to_value(&sealed).unwrap();
-    marked
-        .as_object_mut()
-        .unwrap()
-        .remove("prepared_service_activation_v1");
-    marked["forward_service_activation_v1"] = json!({
-        "update_id": ISOLATED_UPDATE,
-        "forward_selection_sha256": sha256,
-    });
-    let bytes = serde_json::to_vec(&marked).unwrap();
-    record_generation_identity(&mut tx, &sealed, &bytes)
-        .await
-        .unwrap();
-    tx.put(schema_key(), bytes.clone()).await.unwrap();
-    tx.commit().await.unwrap();
     assert!(matches!(
         store.bootstrap_application().await,
         Err(Error::IncompatibleStore)
@@ -2322,11 +2365,11 @@ async fn forward_catalog_fixture(
         text_cell("fixture/review"),
         int_cell(1),
     ];
-    let key = row_key(&sealed.generation, table, &guide).unwrap();
+    let key = row_key(&catalog.generation, table, &guide).unwrap();
     let mut later = store.db.begin().await.unwrap();
     write_row(
         &mut later,
-        &sealed,
+        &catalog,
         table,
         Map::from_iter([
             ("host".into(), guide[0].clone()),

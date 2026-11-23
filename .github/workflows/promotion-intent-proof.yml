@@ -141,6 +141,7 @@ jobs:
             proof="$RUNNER_TEMP/promotion-proof"
             lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
             for test_name in \
+              backend::tests::exclusive_trial_keeps_peer_locks_across_engine_handles \
               application::tests::forward_catalog_marker_is_strict_and_keeps_the_serving_fence \
               application_bootstrap::upgrade::tests::direct_88_import_and_80_88_89_chain_retain_the_original_receipt_and_exact_lineage; do
               log="$proof/${test_name##*::}.log"
@@ -155,6 +156,8 @@ jobs:
               application_bootstrap::upgrade::tests::service_forward_catalog_fences_generic_restore \
               -- --ignored --exact --nocapture 2>&1 | tee "$proof/forward-catalog.log"
             grep -F 'T05 forward catalog fenced both installed helpers across generic restore retries' \
+              "$proof/forward-catalog.log"
+            grep -F 'T05 native forward catalog recovered the interrupted sealed and marked states' \
               "$proof/forward-catalog.log"
           fi
           cp "$RUNNER_TEMP/promotion-toolchain/installation-proof.json" "$RUNNER_TEMP/promotion-proof/"
