@@ -1,5 +1,5 @@
 // Explicit CI-only entry selected by withAndroidOutboxProof; normal App is not loaded.
-import { CommandId, EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
+import { CommandId, EnvironmentId, MessageId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { registerRootComponent, requireNativeModule } from "expo";
 import { createElement, useEffect, useState } from "react";
 import { Text, View } from "react-native";
@@ -9,7 +9,7 @@ import {
   type QueuedThreadMessage,
 } from "./src/state/thread-outbox-model";
 
-type Phase = "seed" | "reopen-remove" | "reopen-empty";
+type Phase = "seed" | "seed-creation" | "reopen-remove" | "reopen-empty";
 
 interface NativeProof {
   getOutboxRuntimeProofPhase: () => string | null;
@@ -76,7 +76,7 @@ async function runProof(native: NativeProof, phase: Phase): Promise<string> {
     const messageId = MessageId.make("t12-offline-message");
     const threadKey = scopedThreadKey(environmentId, threadId);
 
-    if (phase === "seed") {
+    if (phase === "seed" || phase === "seed-creation") {
       report.checkpoint = "enqueue-draft";
       if (Object.keys(readQueues()).length !== 0) throw new Error("Expected a fresh fixture outbox");
       const { createPastedTextComposerAttachment } = await import("./src/lib/composerImages");
@@ -90,10 +90,19 @@ async function runProof(native: NativeProof, phase: Phase): Promise<string> {
         threadId,
         messageId,
         commandId: CommandId.make("t12-offline-command"),
-        text: "T12 offline draft",
+        text: phase === "seed-creation" ? "T12 offline pending task" : "T12 offline draft",
         attachments: [attachment],
         dispatchMode: "queue",
         createdAt: "2026-01-01T00:00:00.000Z",
+        ...(phase === "seed-creation" ? {
+          creation: {
+            projectId: ProjectId.make("t12-offline-project"),
+            projectTitle: "Fixture project",
+            workspaceMode: "local" as const,
+            branch: null,
+            worktreePath: null,
+          },
+        } : {}),
       };
       await enqueueThreadOutboxMessage(message);
       await flushThreadOutbox();
@@ -143,13 +152,13 @@ async function runProof(native: NativeProof, phase: Phase): Promise<string> {
         report.checkpoint = "reconcile-loaded-draft";
         report.reconcileAction = resolve({
           isCreation: message.creation !== undefined,
-          threadExists: false,
+          threadExists: message.creation !== undefined,
           shellStatus: "live",
           environmentConnected: false,
           familyRead: "settled",
         });
         if (report.reconcileAction !== "remove") {
-          throw new Error("Settled absence must remove the draft");
+          throw new Error("A settled outbox entry must be removed");
         }
         const removed = await threadOutboxManager.remove(message);
         if (removed !== message) throw new Error("The loaded draft was not removed");
@@ -179,7 +188,10 @@ function InstalledOutboxProof() {
   useEffect(() => {
     const native = requireNativeModule<NativeProof>("T3NativeControls");
     const phase = native.getOutboxRuntimeProofPhase();
-    if (phase !== "seed" && phase !== "reopen-remove" && phase !== "reopen-empty") {
+    if (
+      phase !== "seed" && phase !== "seed-creation" &&
+      phase !== "reopen-remove" && phase !== "reopen-empty"
+    ) {
       setStatus("invalid fixture phase");
       return;
     }
