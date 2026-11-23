@@ -83,15 +83,21 @@ export async function verifySavedHistory(page: Page, seed: Awaited<ReturnType<ty
     seed.beforeRestart.newest, "Reopen must retain exact saved message identities, text and completion");
   const newest = projection.messages.find((message) => message.text === text(count - 1));
   Assert.ok(newest);
+  const newestRow = scroll.locator(`[data-message-id=${JSON.stringify(newest.id)}]`);
+  await newestRow.waitFor({ state: "visible" });
   Assert.ok(!projection.messages.some((message) => message.text === text(1)), "Old match must be outside the initial window");
   Assert.equal(await scroll.getByText(text(1).split("\n")[0]!, { exact: false }).count(), 0);
   const draft = "Saved history search preserves this unsent 雪 draft.";
   const editor = page.getByTestId("composer-editor");
   await editor.fill(draft);
-  await scroll.evaluate((element) => { element.scrollTop = 0; });
-  const olderResponse = observedPage(false);
-  await page.getByRole("button", { name: "Load earlier turns", exact: true }).click();
-  const older = await olderResponse;
+  // Start paging only after the normal subscription has rendered the saved thread.
+  // A keyboard history gesture releases the follow-latest scroll behavior.
+  await scroll.focus();
+  await scroll.press("Home");
+  await page.waitForFunction(() => document.querySelector(".messages-timeline-scroll")?.scrollTop === 0);
+  const loadEarlier = page.getByRole("button", { name: "Load earlier turns", exact: true });
+  await loadEarlier.waitFor({ state: "visible" });
+  const [older] = await Promise.all([observedPage(false), loadEarlier.click()]);
   Assert.ok(older.ok());
   const history = decodePage(await older.json());
   Assert.ok(history.items.length > 0);
@@ -119,16 +125,23 @@ export async function verifySavedHistory(page: Page, seed: Awaited<ReturnType<ty
   const jumps: Array<{ index: number; text: string; messageId: string | undefined }> = [];
   for (const index of [1, count - 1, 1]) {
     const query = text(index).split("\n")[0]!;
-    const soughtPage = jumps.length === 0 ? observedPage(true) : undefined;
-    await input.fill(query);
-    await bar.getByText("1/1", { exact: true }).waitFor({ state: "visible" });
-    await page.waitForFunction((query) => Array.from(CSS.highlights.get("t3-thread-find-active") ?? []).some((range) => {
-      if (!(range instanceof Range)) return false;
-      const element = range.startContainer.parentElement?.closest<HTMLElement>("[data-message-id]");
-      const bounds = range.getBoundingClientRect();
-      return range.toString() === query && element?.dataset.messageId && bounds.height > 0 &&
-        bounds.top >= 0 && bounds.bottom <= innerHeight;
-    }), query);
+    const revealMatch = async () => {
+      await input.fill(query);
+      await bar.getByText("1/1", { exact: true }).waitFor({ state: "visible" });
+      await page.waitForFunction((query) => Array.from(CSS.highlights.get("t3-thread-find-active") ?? []).some((range) => {
+        if (!(range instanceof Range)) return false;
+        const element = range.startContainer.parentElement?.closest<HTMLElement>("[data-message-id]");
+        const bounds = range.getBoundingClientRect();
+        return range.toString() === query && element?.dataset.messageId && bounds.height > 0 &&
+          bounds.top >= 0 && bounds.bottom <= innerHeight;
+      }), query);
+    };
+    let soughtResponse;
+    if (jumps.length === 0) {
+      [soughtResponse] = await Promise.all([observedPage(true), revealMatch()]);
+    } else {
+      await revealMatch();
+    }
     const active = await page.evaluate(() => {
       const ranges = Array.from(CSS.highlights.get("t3-thread-find-active") ?? []);
       const range = ranges[0]!;
@@ -137,8 +150,7 @@ export async function verifySavedHistory(page: Page, seed: Awaited<ReturnType<ty
     });
     Assert.equal(active.text, query);
     Assert.ok(active.messageId);
-    if (soughtPage) {
-      const soughtResponse = await soughtPage;
+    if (soughtResponse) {
       Assert.ok(soughtResponse.ok());
       const sought = decodePage(await soughtResponse.json());
       const row = sought.items.find((row) => row.item.type === "assistant_message" &&

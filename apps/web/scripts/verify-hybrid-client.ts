@@ -3115,6 +3115,7 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       } else Assert.ok(refusedComposerWasmRequests > 0);
       proof.composerStop = await verifyComposerStop(page, stoppedId, composerSubmit.renderer, stopRequests);
       Assert.equal(proof.composerStop.sentMessageId, stopSend.messageId);
+      completed("Streamed and interrupted the same submitted conversation");
       const stoppedUrl = page.url();
       proof.composerSubmit = { renderer: composerSubmit.renderer, requests: [stopSend], wasmSha256,
         refusedWasmRequests: refusedComposerWasmRequests, localRefusalPreservedDraft: true };
@@ -3136,6 +3137,8 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       // Synthetic provider import through authenticated production RPC. No live DB edits.
       const savedHistorySeed = await importSavedHistory(page, stateDirectory,
         NodePath.join(runRoot, fixtureName, "saved-history-fixture"));
+      proof.savedHistory = { seed: savedHistorySeed };
+      completed("Completed one approved run and imported a saved transcript through the same application");
       // Reopen the same omdb profile through the ordinary packaged entry.
       await application.stop();
       application = await startApplication(implementation, stateDirectory, serverPort, webPort,
@@ -3166,6 +3169,8 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       proof.historyFind = { query, count: "1/1", draftPreserved: true,
         renderer: compositionProof === "dioxus" ? "dioxus-wasm" : "retained",
         refusedWasmRequests: refusedComposerWasmRequests };
+      completed("Restarted the application and found the completed approved reply");
+      starting("reopen and page the saved transcript, then search exact old and new messages");
       proof.savedHistory = { seed: savedHistorySeed,
         reopened: await verifySavedHistory(page, savedHistorySeed) };
       completed("Reopened paged saved history and jumped to exact old/new messages through Find");
