@@ -203,6 +203,9 @@ const decodeGixRepositoryPaths = Schema.decodeUnknownOption(Schema.fromJsonStrin
 const decodeGixRefPresence = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.NullOr(Schema.Boolean)),
 );
+const decodeGixBranchHead = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.NullOr(Schema.String)),
+);
 const decodeGixBranchNames = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.NullOr(Schema.Array(Schema.String))),
 );
@@ -2114,48 +2117,52 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   });
 
   const readStatusDetailsRemote = Effect.fn("readStatusDetailsRemote")(function* (cwd: string) {
-    const branchResult = yield* executeGitWithStableDiagnostics(
-      "GitVcsDriver.statusDetailsRemote.branch",
-      cwd,
-      ["rev-parse", "--symbolic-full-name", "HEAD"],
-      { allowNonZeroExit: true },
-    ).pipe(
-      Effect.catchTags({
-        GitCommandError: (error) =>
-          isMissingGitCwdError(error) ? Effect.succeed(null) : Effect.fail(error),
-      }),
-    );
+    const native = yield* runGix(cwd, ["branch-head", cwd]);
+    let branch = native === null ? null : Option.getOrNull(decodeGixBranchHead(native));
+    if (branch !== null) branch = branchNameFromHeadRef(branch);
+    if (branch === null) {
+      const branchResult = yield* executeGitWithStableDiagnostics(
+        "GitVcsDriver.statusDetailsRemote.branch",
+        cwd,
+        ["rev-parse", "--symbolic-full-name", "HEAD"],
+        { allowNonZeroExit: true },
+      ).pipe(
+        Effect.catchTags({
+          GitCommandError: (error) =>
+            isMissingGitCwdError(error) ? Effect.succeed(null) : Effect.fail(error),
+        }),
+      );
 
-    if (branchResult === null) {
-      return NON_REPOSITORY_REMOTE_STATUS_DETAILS;
-    }
-    let branch: string | null;
-    if (branchResult.exitCode !== 0) {
-      if (isNonRepositoryGitStderr(branchResult.stderr)) {
+      if (branchResult === null) {
         return NON_REPOSITORY_REMOTE_STATUS_DETAILS;
       }
-      if (!isUnbornHeadStderr(branchResult.stderr)) {
-        return yield* new GitCommandError({
-          ...gitCommandContext({
-            operation: "GitVcsDriver.statusDetailsRemote.branch",
-            cwd,
-            args: ["rev-parse", "--symbolic-full-name", "HEAD"],
-          }),
-          detail: "Git branch lookup failed.",
-          exitCode: branchResult.exitCode,
-          stdoutLength: branchResult.stdout.length,
-          stderrLength: branchResult.stderr.length,
-        });
-      }
+      if (branchResult.exitCode !== 0) {
+        if (isNonRepositoryGitStderr(branchResult.stderr)) {
+          return NON_REPOSITORY_REMOTE_STATUS_DETAILS;
+        }
+        if (!isUnbornHeadStderr(branchResult.stderr)) {
+          return yield* new GitCommandError({
+            ...gitCommandContext({
+              operation: "GitVcsDriver.statusDetailsRemote.branch",
+              cwd,
+              args: ["rev-parse", "--symbolic-full-name", "HEAD"],
+            }),
+            detail: "Git branch lookup failed.",
+            exitCode: branchResult.exitCode,
+            stdoutLength: branchResult.stdout.length,
+            stderrLength: branchResult.stderr.length,
+          });
+        }
 
-      const branchValue = yield* runGitStdout(
-        "GitVcsDriver.statusDetailsRemote.unbornBranch",
-        cwd,
-        ["symbolic-ref", "--quiet", "HEAD"],
-      );
-      branch = branchNameFromHeadRef(branchValue);
-    } else {
-      branch = branchNameFromHeadRef(branchResult.stdout);
+        const branchValue = yield* runGitStdout(
+          "GitVcsDriver.statusDetailsRemote.unbornBranch",
+          cwd,
+          ["symbolic-ref", "--quiet", "HEAD"],
+        );
+        branch = branchNameFromHeadRef(branchValue);
+      } else {
+        branch = branchNameFromHeadRef(branchResult.stdout);
+      }
     }
     const currentUpstreamRef = yield* readCurrentUpstreamRef(cwd);
     let upstreamRef = currentUpstreamRef;
