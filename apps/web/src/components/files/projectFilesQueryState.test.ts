@@ -23,6 +23,7 @@ import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { projectEnvironment } from "~/state/projects";
 import { FileSaveCoordinator } from "./fileSaveCoordinator";
 import {
+  advanceProjectFileRevision,
   clearProjectFileQueryData,
   confirmProjectFileQueryData,
   getOptimisticProjectFileQueryData,
@@ -176,5 +177,28 @@ describe("project files queries", () => {
     expect(
       confirmProjectFileQueryData(environmentId, "/repo", "convex.json", '{"nodeVersion":"22"}'),
     ).toBe(true);
+  });
+
+  it("keeps a draft on its original base until the previous write is acknowledged", () => {
+    vi.stubGlobal("window", {});
+    const base = "a".repeat(64);
+    const accepted = "b".repeat(64);
+    appAtomRegistry.set(optimisticFile, {
+      confirmedAgainst: undefined,
+      data: {
+        relativePath: "convex.json",
+        contents: "old",
+        byteLength: 3,
+        truncated: false,
+        revision: base,
+      },
+    });
+    setProjectFileQueryData(environmentId, "/repo", "convex.json", "newer draft");
+    const unsaved = () => getUnsavedProjectFileQueryData(environmentId, "/repo", "convex.json");
+    expect(unsaved()?.revision).toBe(base);
+    advanceProjectFileRevision(environmentId, "/repo", "convex.json", "c".repeat(64), accepted);
+    expect(unsaved()?.revision).toBe(base);
+    advanceProjectFileRevision(environmentId, "/repo", "convex.json", base, accepted);
+    expect(unsaved()).toMatchObject({ contents: "newer draft", revision: accepted });
   });
 });
