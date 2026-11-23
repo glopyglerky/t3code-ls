@@ -19,6 +19,7 @@ import {
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -42,6 +43,7 @@ const recording = NodeFS.readFileSync(new URL(
 const agentId: string = recording.find((row) => row.label === "agent.opened").frame.agentId;
 const run: { id: string; result: string } = recording.find((row) => row.label === "run.completed:1").frame.result;
 const prompt: string = recording.find((row) => row.label === "run.start:1").frame.message;
+const wirePrompt = `${prompt}\n\n${buildRuntimeInstructions({ harness: "Cursor", model: "composer-2.5" })}`;
 const deltas: string[] = recording.filter((row) => row.label === "text-delta").map((row) => row.frame.update.text);
 
 function envelope(value: unknown, flags = 0): Buffer {
@@ -76,7 +78,7 @@ async function peer(truncated: boolean) {
       } else if (operation === "Send") {
         NodeAssert.equal(body[0], 0);
         NodeAssert.equal(body.readUInt32BE(1), body.length - 5);
-        NodeAssert.deepEqual(message, { agentId, message: { text: prompt }, options: { enableDeltas: true } });
+        NodeAssert.deepEqual(message, { agentId, message: { text: wirePrompt }, options: { enableDeltas: true } });
         response.setHeader("content-type", "application/connect+json");
         for (const text of deltas) {
           const frame = envelope({ interactionUpdate: { type: "text-delta", update: { type: "text-delta", text } } });
@@ -152,7 +154,7 @@ function cursorAgentSdkSession(
     close: Effect.sync(() => { child.stdin.end(); }),
     send: (input) => Effect.sync(() => {
       NodeAssert.equal(input.summarize, false);
-      NodeAssert.equal(input.message, prompt);
+      NodeAssert.equal(input.message, wirePrompt);
       child.stdin.end(`${JSON.stringify({ operation: "send", text: input.message })}\n`);
       return {
         agentId,
