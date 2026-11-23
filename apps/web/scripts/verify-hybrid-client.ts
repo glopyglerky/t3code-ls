@@ -516,7 +516,9 @@ async function acceptCapturedApproval(page: Page) {
   const sha256 = NodeCrypto.createHash("sha256").update(contents).digest("hex");
   Assert.equal(sha256, capturedApproval.sha256, "The recorded ACP approval fixture changed");
   const threadId = await submitReplay(page, capturedApproval.modelLabel, capturedApproval.prompt);
-  const button = page.getByRole("button", { name: "Allow once", exact: true });
+  const button = page
+    .getByRole("group", { name: "Command approval", exact: true })
+    .getByRole("button", { name: "Approve", exact: true });
   await button.waitFor({ state: "visible" });
   const pending = await readThreadSnapshot(page, threadId);
   const identity = replayTurnIdentity(pending, capturedApproval.model);
