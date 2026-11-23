@@ -17,6 +17,43 @@ const status = {
   gpuDevices: [],
 };
 
+function observeCaptureFailure() {
+  const report = (stage: string, cause: unknown) =>
+    console.error(`Synthetic voice capture ${stage}: ${cause instanceof Error ? cause.name : typeof cause}`);
+  const microphone = navigator.mediaDevices;
+  if (microphone) {
+    const getUserMedia = microphone.getUserMedia.bind(microphone);
+    microphone.getUserMedia = async (constraints) => {
+      try {
+        return await getUserMedia(constraints);
+      } catch (cause) {
+        report("getUserMedia", cause);
+        throw cause;
+      }
+    };
+  }
+  if (typeof Worklet !== "undefined") {
+    const addModule = Worklet.prototype.addModule;
+    Worklet.prototype.addModule = async function (...args) {
+      try {
+        return await addModule.apply(this, args);
+      } catch (cause) {
+        report("addModule", cause);
+        throw cause;
+      }
+    };
+  }
+  const resume = AudioContext.prototype.resume;
+  AudioContext.prototype.resume = async function () {
+    try {
+      return await resume.call(this);
+    } catch (cause) {
+      report("resume", cause);
+      throw cause;
+    }
+  };
+}
+
 export async function verifyBundledVoiceDraft(page: Page) {
   const origin = new URL(page.url()).origin;
   const descriptor = await page.evaluate(async () => {
@@ -81,6 +118,7 @@ export async function verifyBundledVoiceDraft(page: Page) {
     await page.goBack({ waitUntil: "domcontentloaded" });
     await page.waitForURL(draftRoute);
 
+    await page.evaluate(observeCaptureFailure);
     const editor = page.getByTestId("composer-editor");
     await editor.fill("🚀 draft");
     await editor.press("End");
@@ -94,7 +132,7 @@ export async function verifyBundledVoiceDraft(page: Page) {
     const encoded = request.postDataBuffer();
     Assert.ok(encoded, "The selected environment should receive binary PCM");
     const { pcm } = decodeSpeechPcmRequest(encoded);
-    Assert.ok(pcm.length > 0 && pcm.length % 2 === 0, "Expected complete 16-bit PCM samples");
+    Assert.ok(pcm.length > 0 && pcm.length % 4 === 0, "Expected complete float32 PCM samples");
     await page.getByRole("status", { name: "Transcribing…", exact: true }).waitFor({ state: "visible" });
     const edited = "Updated 🚀 draft";
     await editor.fill(edited);
