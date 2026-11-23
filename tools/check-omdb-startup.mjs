@@ -18,6 +18,24 @@ const [executable, proofPath] = process.argv.slice(2);
 NodeAssert.ok(executable && NodePath.isAbsolute(executable));
 const checks = [];
 const fixture = await createFixture();
+const generationIdentity = {
+  engine: "omdb",
+  engine_version: "4.5.0",
+  engine_revision: "b2ff031398b1f0a793a352db7a699575b5d4d3d4",
+  layout: "t3-application-keyspace-v1",
+  schema_version: 1,
+};
+const readIdentity = (profile) => {
+  const { catalog_sha256, generation, ...identity } = nativeRequest(
+    executable,
+    profile,
+    "connect",
+    { operation: "application_generation_identity" },
+  );
+  NodeAssert.deepEqual(identity, generationIdentity);
+  NodeAssert.match(catalog_sha256, /^[a-f0-9]{64}$/);
+  return { catalog_sha256, generation };
+};
 const isolated = (fixture, effect) =>
   effect.pipe(
     Effect.provideService(HostProcess.HomeDirectory, fixture.root),
@@ -80,11 +98,14 @@ try {
   checks.push(
     "fresh native schema initializes without an application SQLite file, activates the old-server fence and releases its bootstrap lease while the database remains open",
   );
+  const initialIdentity = readIdentity(fixture);
+  NodeAssert.equal(initialIdentity.generation, "native");
   await run(({ database }) =>
     database
       .request({ operation: "application_bootstrap" }, Omdb.Bootstrap)
       .pipe(Effect.tap((value) => Effect.sync(() => NodeAssert.equal(value.initialized, false)))),
   );
+  NodeAssert.deepEqual(readIdentity(fixture), initialIdentity);
   checks.push("reopen verifies schema and migration identity without reinitializing state");
 } finally {
   await fixture.close();
@@ -106,6 +127,10 @@ try {
     }).pipe((effect) => isolated(migrated, effect)),
   );
   NodeAssert.equal(hash(await NodeFSP.readFile(source)), before);
+  const imported = nativeRequest(executable, migrated, "connect", {
+    operation: "application_import",
+  });
+  NodeAssert.equal(readIdentity(migrated).generation, imported.generation);
   NodeAssert.equal(
     (await NodeFSP.readdir(migrated.root)).filter((path) => path.startsWith(".omdb-import-"))
       .length,

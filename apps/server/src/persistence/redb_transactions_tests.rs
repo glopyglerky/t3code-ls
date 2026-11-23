@@ -77,6 +77,68 @@ async fn application_schema_is_explicit_idempotent_and_immutable() {
 }
 
 #[tokio::test]
+async fn application_generation_checks_engine_layout_and_exact_catalog() {
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    let mut transactions = initialized(&store).await;
+    let bytes = store.db.read(&schema_key()).await.unwrap().unwrap();
+    let catalog = decode_catalog(&bytes).unwrap();
+    let key = generation_identity_key(&catalog);
+    let identity = transactions.generation_identity().await.unwrap().unwrap();
+    assert_eq!(
+        identity.catalog_sha256,
+        format!("{:x}", Sha256::digest(bytes))
+    );
+    let expected_pin = format!(
+        "name = \"redb\"\nversion = \"{}\"\nsource = \"git+https://github.com/glopyglerky/omdb?rev={}#{}\"",
+        identity.engine_version, identity.engine_revision, identity.engine_revision
+    );
+    assert!(include_str!("../../../../Cargo.lock").contains(&expected_pin));
+
+    for mismatched in [
+        ApplicationGenerationIdentity {
+            engine: "fjall".into(),
+            ..identity.clone()
+        },
+        ApplicationGenerationIdentity {
+            layout: "other-layout".into(),
+            ..identity.clone()
+        },
+        ApplicationGenerationIdentity {
+            catalog_sha256: "0".repeat(64),
+            ..identity.clone()
+        },
+    ] {
+        let mut writer = store.db.begin().await.unwrap();
+        writer
+            .put(key.clone(), bounded_encode(&mismatched).unwrap())
+            .await
+            .unwrap();
+        writer.commit().await.unwrap();
+        assert!(matches!(
+            transactions.schema().await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert!(matches!(
+            transactions.begin("writer").await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert!(matches!(
+            store.bootstrap_application().await,
+            Err(Error::IncompatibleStore)
+        ));
+    }
+
+    let mut writer = store.db.begin().await.unwrap();
+    writer.delete(key).await.unwrap();
+    writer.commit().await.unwrap();
+    assert_eq!(transactions.schema().await.unwrap(), Some(schema()));
+    assert!(transactions.generation_identity().await.unwrap().is_none());
+    assert!(!transactions.initialize(schema()).await.unwrap());
+    assert!(transactions.generation_identity().await.unwrap().is_none());
+}
+
+#[tokio::test]
 async fn rows_commit_atomically_with_snapshot_isolation_and_restart() {
     let fixture = TestFixture::start().await;
     let store = fixture.initialize().await;
