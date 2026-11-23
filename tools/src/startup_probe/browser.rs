@@ -118,12 +118,16 @@ impl Browser {
         if authenticated != true {
             return Err("first workspace could not read an authenticated session".into());
         }
+        let loaded_rust_composer = self.script(
+            "return performance.getEntriesByType('resource').some(entry => new URL(entry.name).pathname.endsWith('/client-text-wasm/composer_offsets_bg.wasm'));",
+        )?;
         Ok(json!({
             "welcome_micros": welcome_micros,
             "navigation_to_welcome_micros": navigation_to_welcome_micros,
             "setup_micros": setup_micros,
             "workspace_micros": workspace_micros,
             "authenticated": true,
+            "loaded_rust_composer": loaded_rust_composer == true,
         }))
     }
 

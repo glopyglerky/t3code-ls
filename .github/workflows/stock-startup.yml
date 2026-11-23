@@ -2,7 +2,7 @@ name: Stock startup measurement
 
 on:
   push:
-    branches: ["measure/t3code-ls-t00-stock-*"]
+    branches: ["measure/t3code-ls-t00-stock-*", "measure/t3code-ls-t01-startup-*"]
   workflow_dispatch:
 
 permissions:
@@ -15,9 +15,15 @@ jobs:
     env:
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
       STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
+      COMPOSER_COMMIT: e706302d4c57862ad3cc4e7abd30e52a4073f7a4
+      COMPOSER_TREE: 9892dd1ca5204a07747dd653daf3e13a80bc96a0
+      COMPARE_COMPOSER: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t01-startup-') }}
+      WASM_BINDGEN_VERSION: "0.2.130"
+      WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
       VP_REMOTE_CACHE: "off"
       VP_REMOTE_CACHE_URL: ""
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      NODE_OPTIONS: --max-old-space-size=6144
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
       GIT_TERMINAL_PROMPT: "0"
@@ -49,6 +55,37 @@ jobs:
       - name: Verify the pinned compiler package for the measurement tool
         working-directory: measurement
         run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/stock-probe-toolchain"
+      - name: Build the Rust composer candidate with the retained database
+        if: env.COMPARE_COMPOSER == 'true'
+        env:
+          VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
+        run: |
+          git init composer
+          git -C composer fetch --no-tags --depth=1 https://github.com/glopyglerky/t3code-ls.git "$COMPOSER_COMMIT"
+          git -C composer checkout --detach --no-recurse-submodules FETCH_HEAD
+          cd composer
+          test "$(git rev-parse HEAD)" = "$COMPOSER_COMMIT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$COMPOSER_TREE"
+          export CARGO_HOME="$RUNNER_TEMP/composer-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/composer-target"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
+            --release --locked --target wasm32-unknown-unknown -p t3-code-ls-client-text-web
+          archive="wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive.tar.gz" \
+            "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$WASM_BINDGEN_VERSION/$archive.tar.gz"
+          printf '%s  %s\n' "$WASM_BINDGEN_SHA256" "$RUNNER_TEMP/$archive.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$archive.tar.gz" -O "$archive/wasm-bindgen" > "$RUNNER_TEMP/wasm-bindgen"
+          chmod u+x "$RUNNER_TEMP/wasm-bindgen"
+          "$RUNNER_TEMP/wasm-bindgen" --target web --out-name composer_offsets \
+            --out-dir apps/web/public/client-text-wasm \
+            "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/t3_code_ls_client_text_web.wasm"
+          printf '%s  %s\n' \
+            8149273722ebc7bbf9f9ffa7edfc62072def9c94b810689e88d3906fd098e035 \
+            apps/web/public/client-text-wasm/composer_offsets_bg.wasm | sha256sum --check
+          pnpm install --frozen-lockfile
+          pnpm --dir apps/web run build
+          env -u T3_CODE_LS_TOOLCHAIN -u T3_CODE_LS_SYSROOT T3_CODE_LS_IMPLEMENTATION=upstream \
+            pnpm --dir apps/server run build:bundle
       - name: Sample built server startup and first authenticated workspace
         working-directory: measurement
         run: |
@@ -64,6 +101,16 @@ jobs:
             sha256sum pnpm-lock.yaml
             find apps/web/dist apps/server/dist -type f -print0 | sort -z | xargs -0 -r sha256sum
           ) > "$evidence/build.sha256"
+          if [[ "$COMPARE_COMPOSER" == true ]]; then
+            (
+              cd ../composer
+              sha256sum pnpm-lock.yaml
+              find apps/web/dist apps/server/dist -type f -print0 | sort -z | xargs -0 -r sha256sum
+            ) > "$evidence/composer-build.sha256"
+            jq -n --arg commit "$COMPOSER_COMMIT" --arg tree "$COMPOSER_TREE" \
+              '{commit:$commit,tree:$tree,client:"Rust composer offsets",server:"retained SQLite WAL/NORMAL"}' \
+              > "$evidence/composer-inputs.json"
+          fi
           jq -n --arg commit "$STOCK_COMMIT" --arg tree "$STOCK_TREE" \
             --arg probe_commit "$(git rev-parse HEAD)" --arg node "$(node --version)" \
             --arg chrome "$("$chrome" --version)" --arg driver "$("$driver" --version)" \
@@ -77,7 +124,7 @@ jobs:
           node_path="$(command -v node)"
           probe="$CARGO_TARGET_DIR/release/t3code-ls-tools"
           sha256sum "$probe" > "$evidence/probe.sha256"
-          printf 'batch\tpair\torder\tlabel\tworkspace_micros\n' > "$evidence/trials.tsv"
+          printf 'batch\tpair\torder\tlabel\tworkspace_micros\timplementation\n' > "$evidence/trials.tsv"
           for batch in 1 2; do
             for pair in 1 2 3 4 5 6 7; do
               if (( (batch + pair) % 2 == 0 )); then
@@ -89,13 +136,24 @@ jobs:
                 label="${labels[$position]}"
                 trial="$batch-$pair-$label"
                 result="$evidence/sample-$trial.json"
-                "$probe" probe-startup "$node_path" ../stock/apps/server/dist/bin.mjs \
-                  "$RUNNER_TEMP/stock-trial-$trial" "$driver" "$chrome" > "$result"
-                micros="$(jq -er 'select(.descriptor_micros > 0 and
+                bundle=../stock/apps/server/dist/bin.mjs
+                implementation=stock
+                mode=()
+                expected_rust=false
+                if [[ "$label" == b && "$COMPARE_COMPOSER" == true ]]; then
+                  bundle=../composer/apps/server/dist/bin.mjs
+                  implementation=composer
+                  mode=(fork-sqlite)
+                  expected_rust=true
+                fi
+                "$probe" probe-startup "$node_path" "$bundle" \
+                  "$RUNNER_TEMP/stock-trial-$trial" "$driver" "$chrome" "${mode[@]}" > "$result"
+                micros="$(jq -er --argjson expected_rust "$expected_rust" 'select(.descriptor_micros > 0 and
                   .html_micros >= .descriptor_micros and .browser.authenticated and
+                  .browser.loaded_rust_composer == $expected_rust and
                   .browser.welcome_micros >= .html_micros and
                   .browser.workspace_micros >= .browser.welcome_micros) | .browser.workspace_micros' "$result")"
-                printf '%s\t%s\t%s\t%s\t%s\n' "$batch" "$pair" "$((position + 1))" "$label" "$micros" >> "$evidence/trials.tsv"
+                printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$batch" "$pair" "$((position + 1))" "$label" "$micros" "$implementation" >> "$evidence/trials.tsv"
               done
             done
           done
