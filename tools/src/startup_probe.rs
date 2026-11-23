@@ -27,7 +27,8 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
         [node, bundle, trial, driver, chrome, mode] if !conversation && mode == "fork-sqlite" => {
             (node, bundle, trial, Some((driver, chrome)), Some("upstream"), None, None)
         }
-        [node, bundle, trial, driver, chrome, replay, mode, trace @ ..] if conversation && trace.len() <= 1 => (
+        [node, bundle, trial, driver, chrome, replay, mode, trace @ ..]
+            if conversation && (trace.len() <= 1 || (trace.len() == 2 && trace[1] == "server-spans")) => (
             node, bundle, trial, Some((driver, chrome)),
             match mode.to_str() {
                 Some("stock") => None,
@@ -36,9 +37,11 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
                 _ => return Err("conversation implementation must be stock, native or fork-sqlite".into()),
             },
             Some(fs::canonicalize(replay)?),
-            trace.first().map(fs::canonicalize).transpose()?,
+            trace.first().map(|wrapper| {
+                Ok::<_, std::io::Error>((fs::canonicalize(wrapper)?, trace.len() == 2))
+            }).transpose()?,
         ),
-        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|native|fork-sqlite [TRACE_WRAPPER]".into()),
+        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|native|fork-sqlite [TRACE_WRAPPER [server-spans]]".into()),
         _ => return Err("usage: t3code-ls-tools probe-startup NODE BUNDLE NEW_TRIAL_DIRECTORY [CHROMEDRIVER CHROME [fork-sqlite]]".into()),
     };
     let node = fs::canonicalize(node)?;
@@ -50,6 +53,8 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
     let state = base.join("userdata");
     let workspace = trial.join("conversation-fixture");
     let trace_log = trial.join("provider-trace.ndjson");
+    let server_trace = trial.join("server-trace.ndjson");
+    let record_server_spans = trace.as_ref().is_some_and(|(_, spans)| *spans);
     if let Some(replay) = &replay {
         fs::create_dir_all(&state)?;
         fs::create_dir(&workspace)?;
@@ -69,7 +74,7 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
                             "source": "local",
                             "commandPath": node,
                             "commandArgs": match &trace {
-                                Some(trace) => vec![trace, replay, &trace_log],
+                                Some((wrapper, _)) => vec![wrapper, replay, &trace_log],
                                 None => vec![replay],
                             },
                         }
@@ -102,6 +107,12 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
         .stderr(Stdio::null());
     if let Some(implementation) = implementation {
         command.env("T3_CODE_LS_IMPLEMENTATION", implementation);
+    }
+    if record_server_spans {
+        command
+            .env("T3CODE_TRACE_MIN_LEVEL", "Trace")
+            .env("T3CODE_TRACE_BATCH_WINDOW_MS", "100")
+            .env("T3CODE_TRACE_FILE", &server_trace);
     }
 
     let start = Instant::now();
@@ -137,6 +148,20 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
         let result = result?;
         closed?;
         Some(result)
+    } else {
+        None
+    };
+    let server_spans = if record_server_spans {
+        let start = browser
+            .as_ref()
+            .and_then(|proof| proof["conversation"]["timing"]["submitEpochMillis"].as_f64())
+            .ok_or("missing browser submit timestamp")?;
+        let end = provider_trace
+            .as_ref()
+            .and_then(|entries| entries.iter().find(|entry| entry["phase"] == "prompt"))
+            .and_then(|entry| entry["millis"].as_f64())
+            .ok_or("missing provider prompt timestamp")?;
+        Some(read_server_spans(&server_trace, start, end)?)
     } else {
         None
     };
@@ -177,9 +202,48 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
             "database_migration": database_migration,
             "browser": browser,
             "provider_trace": provider_trace,
+            "server_spans": server_spans,
         })
     );
     Ok(())
+}
+
+fn read_server_spans(path: &Path, submit: f64, prompt: f64) -> Result<Vec<Value>> {
+    let trace = fs::File::open(path)?;
+    if trace.metadata()?.len() > 10 * 1024 * 1024 || prompt <= submit {
+        return Err("invalid server trace size or phase boundaries".into());
+    }
+    let mut spans = Vec::new();
+    for line in BufReader::new(trace).lines() {
+        let line = line?;
+        let Ok(record) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let start = record["startTimeUnixNano"]
+            .as_str()
+            .and_then(|s| s.parse::<f64>().ok());
+        let end = record["endTimeUnixNano"]
+            .as_str()
+            .and_then(|s| s.parse::<f64>().ok());
+        let (Some(start), Some(end), Some(name)) = (start, end, record["name"].as_str()) else {
+            continue;
+        };
+        let start = start / 1_000_000.0;
+        let end = end / 1_000_000.0;
+        if start < submit
+            || end > prompt
+            || !name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+        {
+            continue;
+        }
+        spans.push(json!({ "name": name, "start_ms": start - submit, "duration_ms": end - start }));
+    }
+    if spans.is_empty() {
+        return Err("no closed server spans between submit and prompt".into());
+    }
+    Ok(spans)
 }
 
 struct OwnedChild(Child);

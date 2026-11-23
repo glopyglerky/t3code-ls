@@ -26,6 +26,7 @@ jobs:
       CARGO_INCREMENTAL: "0"
       GIT_TERMINAL_PROMPT: "0"
       TRACE_CONVERSATION: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-diagnose-') }}
+      TRACE_SERVER_SPANS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-diagnose-server-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -112,6 +113,10 @@ jobs:
             trace=("$PWD/measurement/tools/src/startup_probe/browser/conversation-provider-trace.mjs")
             sha256sum "${trace[0]}" >> "$evidence/fixture.sha256"
             pairs=6
+            if [[ "$TRACE_SERVER_SPANS" == true ]]; then
+              trace+=(server-spans)
+              pairs=3
+            fi
           fi
           for profile in stock candidate; do
             (
