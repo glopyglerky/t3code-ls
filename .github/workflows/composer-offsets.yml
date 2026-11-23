@@ -182,7 +182,12 @@ jobs:
         run: pnpm --dir apps/server exec vp test run --maxWorkers 2 src/terminal/NativePtyAdapter.integration.test.ts
       - name: Type-check the selected terminal adapter through the server
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-')
-        run: node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/omdb-production-tsconfig.json
+        run: |
+          status=0
+          node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit \
+            -p tools/omdb-production-tsconfig.json > "$RUNNER_TEMP/pty-typecheck.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/pty-typecheck.log"
+          exit "$status"
       - name: Build and open the application with the Rust composer binding
         if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
         env:
