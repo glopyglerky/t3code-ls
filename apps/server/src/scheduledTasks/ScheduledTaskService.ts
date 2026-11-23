@@ -816,15 +816,15 @@ export const layerWithRows = Layer.effect(
       );
 
     // A thread deleted before the binding landed already ran its task cleanup.
-    const cleanUpDeletedThreadBinding = (threadId: ThreadId) =>
-      Effect.gen(function* () {
+    const cleanUpDeletedThreadBinding = Effect.fn("ScheduledTaskService.cleanUpDeletedThreadBinding")(
+      function* (threadId: ThreadId) {
         const shell = yield* threadManagement.getThreadShell(threadId);
         if (shell === null || shell.deletedAt != null) yield* deleteForThread(threadId);
-      }).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Could not check the scheduled task's first thread.", cause),
-        ),
-      );
+      },
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Could not check the scheduled task's first thread.", cause),
+      ),
+    );
 
     // The run already started the thread, so a failed write only costs the binding.
     const bindThread = Effect.fn("ScheduledTaskService.bindThread")(
