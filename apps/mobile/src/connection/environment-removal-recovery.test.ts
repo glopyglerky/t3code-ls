@@ -73,8 +73,8 @@ describe("mobile durable environment removal", () => {
         return refuse ? Effect.fail(failedCleanup()) : Effect.sync(() => { data.delete(environmentId); });
       });
       const first = yield* openStorage(memory, clear);
-      yield* first.registrations.register(registration(removed));
-      yield* first.registrations.register(registration(kept));
+      yield* first.registrations.register(registration(removed), []);
+      yield* first.registrations.register(registration(kept), []);
       yield* first.registrations.remove(removed);
       expect((yield* first.targets.list).map((target) => target.environmentId)).toEqual([kept]);
       expect(Exit.isFailure(yield* Effect.exit(first.cleanup.clear(removed)))).toBe(true);
@@ -82,14 +82,14 @@ describe("mobile durable environment removal", () => {
       expect(pending.environmentRemovals.pending).toEqual([{ environmentId: removed, sequence: 1 }]);
 
       const blocked = yield* openStorage(memory, clear);
-      expect(Exit.isFailure(yield* Effect.exit(blocked.registrations.register(registration(removed))))).toBe(true);
+      expect(Exit.isFailure(yield* Effect.exit(blocked.registrations.register(registration(removed), [])))).toBe(true);
       expect(data.get(removed)).toEqual(["old queued message", "old draft"]);
       refuse = false;
       const reopened = yield* openStorage(memory, clear);
       expect(data.has(removed)).toBe(false);
       expect(data.get(kept)).toEqual(["kept queued message", "kept draft"]);
       expect(JSON.parse(memory.values.get(Catalog.CONNECTION_CATALOG_KEY)!).environmentRemovals.pending).toEqual([]);
-      yield* reopened.registrations.register(registration(removed));
+      yield* reopened.registrations.register(registration(removed), []);
       data.set(removed, ["new linked draft"]);
       const completedAttempts = attempts;
       yield* reopened.cleanup.clear(removed);
@@ -110,7 +110,7 @@ describe("mobile durable environment removal", () => {
           httpBaseUrl: "https://fixture.invalid", wsBaseUrl: "wss://fixture.invalid",
         }),
         credential: new BearerConnectionCredential({ token: "synthetic-fixture-only" }),
-      }));
+      }), []);
       const before = memory.values.get(Catalog.CONNECTION_CATALOG_KEY);
       memory.failWrites(true);
       expect(Exit.isFailure(yield* Effect.exit(store.registrations.remove(removed)))).toBe(true);
@@ -137,11 +137,11 @@ describe("mobile durable environment removal", () => {
         yield* Deferred.await(release);
         data.delete(environmentId);
       }));
-      yield* store.registrations.register(registration(removed));
+      yield* store.registrations.register(registration(removed), []);
       yield* store.registrations.remove(removed);
       const cleanup = yield* Effect.forkChild(store.cleanup.clear(removed));
       yield* Deferred.await(started);
-      const relink = yield* Effect.forkChild(store.registrations.register(registration(removed)).pipe(
+      const relink = yield* Effect.forkChild(store.registrations.register(registration(removed), []).pipe(
         Effect.andThen(Effect.sync(() => { data.set(removed, "new linked message"); })),
       ));
       yield* Deferred.succeed(release, undefined);

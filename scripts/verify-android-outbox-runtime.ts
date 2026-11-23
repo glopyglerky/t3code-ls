@@ -8,11 +8,13 @@ import * as OS from "node:os";
 import * as Path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-const [phase, proofArgument, variant] = process.argv.slice(2);
+const [phase, proofArgument, variant, reconnectArgument] = process.argv.slice(2);
 Assert.ok(phase === "admit" || phase === "run");
 const normalApp = variant === "--normal-app";
 Assert.ok(variant === undefined || (phase === "run" && normalApp), "Invalid proof variant");
-Assert.equal(process.argv.length, normalApp ? 5 : 4);
+const pairReconnect = reconnectArgument === "--pair-reconnect";
+Assert.ok(reconnectArgument === undefined || (normalApp && pairReconnect));
+Assert.equal(process.argv.length, pairReconnect ? 6 : normalApp ? 5 : 4);
 Assert.equal(process.env.GITHUB_ACTIONS, "true", "Only the admitted hosted lane may operate this fixture");
 Assert.equal(process.platform, "linux");
 Assert.equal(process.arch, "x64");
@@ -64,7 +66,7 @@ let ownsScratch = false;
 let ownsAdb = false;
 let failure: unknown;
 
-type FixturePhase = "seed" | "seed-creation" | "reopen-remove" | "reopen-empty";
+type FixturePhase = "dispatch-reopen" | "pair-reconnect" | "seed" | "seed-creation" | "reopen-remove" | "reopen-empty";
 const pendingTaskTitle = "T12 offline pending task";
 
 const launchedPids = new Set<string>();
@@ -90,7 +92,7 @@ async function launchFixture(label: string, fixturePhase: FixturePhase) {
   launchedPids.add(pid);
   report[`${label}Process`] = { pid, stopped: false };
   checkpoint(`${label}:await-receipt`);
-  const deadline = Date.now() + 60_000;
+  const deadline = Date.now() + ((fixturePhase === "pair-reconnect" || fixturePhase === "dispatch-reopen") ? 240_000 : 60_000);
   while (true) {
     abort.signal.throwIfAborted();
     const read = device([
@@ -103,11 +105,11 @@ async function launchFixture(label: string, fixturePhase: FixturePhase) {
       const receipt = JSON.parse(frame) as Record<string, unknown>;
       report[label] = receipt;
       save();
-      FS.writeFileSync(
+      if ((fixturePhase !== "pair-reconnect" && fixturePhase !== "dispatch-reopen")) FS.writeFileSync(
         Path.join(proof, `${label}-logcat.txt`),
         device(["logcat", "-d", "-t", "300"]).stdout,
       );
-      Assert.equal(receipt.schema, 2);
+      Assert.equal(receipt.schema, (fixturePhase === "pair-reconnect" || fixturePhase === "dispatch-reopen") ? 3 : 2);
       Assert.equal(receipt.phase, fixturePhase);
       return { pid, receipt };
     }
@@ -211,29 +213,43 @@ async function verifyNormalApp(positiveApk: string) {
   checkpoint("normal-app:await-pending-task");
   const hierarchyFile = "/data/local/tmp/t3-normal-outbox.xml";
   const deadline = Date.now() + 60_000;
-  while (true) {
-    Assert.equal(fixturePid(), pid, "The normal app exited before showing the pending task");
-    device(["shell", "rm", "-f", hierarchyFile]);
-    const dump = device(["shell", "uiautomator", "dump", "--compressed", hierarchyFile], true);
-    if (dump.status === 0) {
-      const xml = device(["shell", "cat", hierarchyFile], true);
-      const nodes = [...xml.stdout.matchAll(/<node\b[^>]*>/gu)].filter(([node]) =>
-        node.includes(` package="${packageName}"`) &&
-        node.includes(' clickable="true"') &&
-        node.includes(' enabled="true"') &&
-        (node.includes(` content-desc="${pendingTaskTitle}"`) ||
-          node.includes(` text="${pendingTaskTitle}"`)),
-      );
-      if (nodes.length > 0) {
-        Assert.equal(nodes.length, 1, "Expected one accessible pending task in the normal app");
-        report.normalAppPendingTask = { pid, title: pendingTaskTitle, package: packageName };
-        break;
+  const observations = { attemptedDumps: 0, validDumps: 0, displayedPackage: false,
+    displayedLabel: false, actionableLabel: false, idleRefusals: 0 };
+  report.normalAppObservations = observations;
+  try {
+    while (true) {
+      Assert.equal(fixturePid(), pid, "The normal app exited before showing the pending task");
+      device(["shell", "rm", "-f", hierarchyFile]);
+      observations.attemptedDumps += 1;
+      const dump = device(["shell", "uiautomator", "dump", "--compressed", hierarchyFile], true);
+      if (dump.stdout.includes("could not get idle state") || dump.stderr.includes("could not get idle state")) {
+        observations.idleRefusals += 1;
       }
+      if (dump.status === 0) {
+        const xml = device(["shell", "cat", hierarchyFile], true);
+        if (xml.status === 0 && xml.stdout.includes("<hierarchy")) observations.validDumps += 1;
+        const appNodes = [...xml.stdout.matchAll(/<node\b[^>]*>/gu)]
+          .filter(([node]) => node.includes(` package="${packageName}"`));
+        const labels = appNodes.filter(([node]) =>
+          node.includes(` content-desc="${pendingTaskTitle}"`) ||
+          node.includes(` text="${pendingTaskTitle}"`),
+        );
+        const nodes = labels.filter(([node]) => node.includes(' clickable="true"') && node.includes(' enabled="true"'));
+        observations.displayedPackage ||= appNodes.length > 0;
+        observations.displayedLabel ||= labels.length > 0;
+        observations.actionableLabel ||= nodes.length > 0;
+        if (nodes.length > 0) {
+          Assert.equal(nodes.length, 1, "Expected one accessible pending task in the normal app");
+          report.normalAppPendingTask = { pid, title: pendingTaskTitle, package: packageName };
+          break;
+        }
+      }
+      Assert.ok(Date.now() < deadline, "The normal app did not render the saved pending task");
+      await delay(500, undefined, { signal: abort.signal });
     }
-    Assert.ok(Date.now() < deadline, "The normal app did not render the saved pending task");
-    await delay(500, undefined, { signal: abort.signal });
+  } finally {
+    device(["shell", "rm", "-f", hierarchyFile], true);
   }
-  device(["shell", "rm", "-f", hierarchyFile]);
   const fixtureLog = device(["logcat", "-d", "-v", "raw", `--pid=${pid}`, "-s", "T3OutboxRuntimeProof:I", "*:S"]);
   Assert.ok(!fixtureLog.stdout.split("\n").some((line) => line.startsWith("{")));
   await stopFixture("normal-app", pid);
@@ -334,6 +350,13 @@ try {
     Assert.equal(admission.emulatorVersion, report.emulatorVersion);
     Assert.equal(admission.adbVersion, report.adbVersion);
     report.source = run("git", ["-C", root, "rev-parse", "HEAD", "HEAD^{tree}"]).stdout.trim().split("\n");
+    if (pairReconnect) {
+      checkpoint("pair-reconnect:server-preflight");
+      const { withAndroidPairingFixture } = await import("./android-pairing-fixture.ts");
+      await withAndroidPairingFixture({ temporary, signal: abort.signal,
+        record: (receipt) => { report.pairingServerPreflight = receipt; save(); },
+      });
+    }
     for (const variant of ["missing-library", "positive"] as const) {
       checkpoint(`${variant}:package`);
       const apk = Path.join(temporary, `outbox-runtime-${variant}.apk`);
@@ -395,6 +418,54 @@ try {
       Assert.equal(empty.receipt.attachmentFileCount, 0);
       await stopFixture("reopen-empty", empty.pid);
       if (normalApp) await verifyNormalApp(apk);
+      if (pairReconnect) {
+        checkpoint("pair-reconnect:prepare-server");
+        const { withAndroidPairingFixture } = await import("./android-pairing-fixture.ts");
+        await withAndroidPairingFixture({ temporary, signal: abort.signal,
+          record: (receipt) => { report.pairingServer = receipt; save(); },
+        }, {
+          device: (args) => { device(args); },
+          cleanupDevice: (args) => {
+            const result = ChildProcess.spawnSync(adb, ["-s", serial, ...args], {
+              env: commandEnvironment, timeout: 5_000, stdio: "ignore",
+            });
+            Assert.equal(result.status, 0, "Could not remove owned reverse mapping");
+          },
+          execute: async () => {
+            const result = await launchFixture("pair-reconnect", "pair-reconnect");
+            assertCompleted(result.receipt);
+            Assert.equal(typeof result.receipt.environmentId, "string");
+            const observations = result.receipt.observations as Array<{ phase: string; generation: number; authenticated: boolean | null }>;
+            Assert.deepEqual(observations.map((item) => item.phase),
+              ["connected", "disconnected", "connected", "disconnected", "connected"]);
+            Assert.deepEqual(observations.map((item) => item.authenticated), [true, null, true, null, true]);
+            Assert.ok(observations[2]!.generation > observations[0]!.generation);
+            Assert.ok(observations[4]!.generation > observations[2]!.generation);
+            const dispatch = result.receipt.dispatch as Record<string, unknown>;
+            Assert.equal(dispatch.commandId, "t12-dispatch-command");
+            Assert.equal(dispatch.messageId, "t12-dispatch-message");
+            Assert.equal(dispatch.cleanupFailures, 1);
+            Assert.equal(dispatch.durableQueueCount, 0);
+            Assert.equal(dispatch.runCount, 1);
+            Assert.equal(dispatch.reopened, false);
+            await stopFixture("pair-reconnect", result.pid);
+            return result.receipt.environmentId;
+          },
+          reopen: async () => {
+            const result = await launchFixture("dispatch-reopen", "dispatch-reopen");
+            assertCompleted(result.receipt);
+            const dispatch = result.receipt.dispatch as Record<string, unknown>;
+            const first = (report["pair-reconnect"] as Record<string, unknown>).dispatch as Record<string, unknown>;
+            for (const key of ["environmentId", "threadId", "messageId", "commandId", "text", "runId", "userMessageCount", "runCount", "durableQueueCount"]) {
+              Assert.deepEqual(dispatch[key], first[key]);
+            }
+            Assert.equal(dispatch.reopened, true);
+            Assert.equal(dispatch.cleanupFailures, 0);
+            await stopFixture("dispatch-reopen", result.pid);
+            return result.receipt.environmentId;
+          },
+        });
+      }
     }
   }
   report.status = "passed";
@@ -403,7 +474,7 @@ try {
   report.status = "failed";
   report.failure = error instanceof Error ? error.message : String(error);
   failure = error;
-  if (child !== undefined) {
+  if (child !== undefined && !String(report.checkpoint).startsWith("pair-reconnect") && !String(report.checkpoint).startsWith("dispatch-reopen")) {
     const diagnostic = ChildProcess.spawnSync(adb, ["-s", serial, "logcat", "-d", "-t", "300"], {
       env: commandEnvironment, timeout: 5_000, encoding: "utf8", maxBuffer: 1_048_576,
     });

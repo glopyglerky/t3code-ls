@@ -8,7 +8,7 @@ import * as Exit from "effect/Exit";
 export class MobileEnvironmentDataCleanup extends Context.Service<
   MobileEnvironmentDataCleanup,
   { readonly clear: (environmentId: EnvironmentId) => Effect.Effect<void, Persistence.ConnectionPersistenceError> }
->()("mobile/connection/MobileEnvironmentDataCleanup") {}
+>()("@t3tools/mobile/connection/environment-owned-data-cleanup/MobileEnvironmentDataCleanup") {}
 
 export const clearEnvironmentOwnedData = Effect.fn("mobile.clearEnvironmentOwnedData")(
   function* (
@@ -23,7 +23,7 @@ export const clearEnvironmentOwnedData = Effect.fn("mobile.clearEnvironmentOwned
       operation: "clear-environment",
       message: `The environment was removed, but its ${data} could not be cleared from this device.`,
     });
-    const results = yield* Effect.all(
+    const results = yield* Effect.forEach(
       [
         Effect.tryPromise({
           try: () => cleanup.clearOutbox(environmentId),
@@ -37,7 +37,8 @@ export const clearEnvironmentOwnedData = Effect.fn("mobile.clearEnvironmentOwned
           try: () => cleanup.clearErrors(environmentId),
           catch: () => failed("composer errors"),
         }),
-      ].map((clear) => Effect.exit(clear)),
+      ],
+      Effect.exit,
       { concurrency: "unbounded" },
     );
     for (const result of results) {
