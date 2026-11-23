@@ -35,8 +35,11 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import * as HttpApi from "effect/http-api/HttpApi";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { Etag, HttpRouter } from "effect/http";
@@ -47,6 +50,8 @@ import * as PersistenceTransactions from "../persistence/PersistenceTransactions
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
 import { subscribeOrchestrationV2Thread } from "../ws.ts";
+import * as EventSink from "./EventSink.ts";
+import * as EventStore from "./EventStore.ts";
 import * as OrchestrationHttp from "./http.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProjectStore from "./ProjectStore.ts";
@@ -68,6 +73,7 @@ const modelSelection = { instanceId: provider, model: "gpt-5.4" };
 const projectId = ProjectId.make("project:compact-transport");
 const PARENT = ThreadId.make("thread:compact-transport:parent");
 const FORK = ThreadId.make("thread:compact-transport:fork");
+const GRANDCHILD = ThreadId.make("thread:compact-transport:grandchild");
 const LONG = ThreadId.make("thread:compact-transport:long");
 const BODIES = ThreadId.make("thread:compact-transport:bodies");
 const parentRun = RunId.make("run:compact-transport:parent");
@@ -78,9 +84,14 @@ const store = Layer.mergeAll(
   ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
   SqlitePersistence.layerMemory,
 );
+const events = EventSink.layer.pipe(
+  Layer.provide(EventStore.layerFromOrchestrationEventStore),
+  Layer.provideMerge(OrchestrationEventStore.layer),
+);
 const management = Layer.unwrap(
   Effect.gen(function* () {
     const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const eventSink = yield* EventSink.EventSinkV2;
     return Layer.mock(ThreadManagementService.ThreadManagementService)({
       ensureLegacyTranscript: () => Effect.void,
       getThreadSnapshot: (id) => projections.getThreadSnapshot(id).pipe(Effect.orDie),
@@ -91,7 +102,9 @@ const management = Layer.unwrap(
           .getThreadHistoryPage(id, cursor, throughEntryId, conversationOnly)
           .pipe(Effect.orDie),
       streamStoredEventsFrom: (input) =>
-        input?.threadId === BODIES ? Stream.fromIterable(bodiesLiveTail()) : Stream.empty,
+        input?.threadId === BODIES
+          ? Stream.fromIterable(bodiesLiveTail())
+          : eventSink.stream({ ...input, bounded: true }).pipe(Stream.orDie),
     });
   }),
 );
@@ -110,7 +123,12 @@ const auth = Layer.succeed(EnvironmentAuthenticatedAuth, (effect) =>
   ),
 );
 
-function threadCreated(id: ThreadId, at: DateTime.Utc, forkOf?: RunId): OrchestrationV2DomainEvent {
+function threadCreated(
+  id: ThreadId,
+  at: DateTime.Utc,
+  forkOf?: RunId,
+  sourceThreadId = PARENT,
+): OrchestrationV2DomainEvent {
   return {
     id: EventId.make(`event:${id}:created`),
     type: "thread.created",
@@ -132,8 +150,9 @@ function threadCreated(id: ThreadId, at: DateTime.Utc, forkOf?: RunId): Orchestr
       lineage:
         forkOf === undefined
           ? { parentThreadId: null, relationshipToParent: null, rootThreadId: id }
-          : { parentThreadId: PARENT, relationshipToParent: "fork", rootThreadId: PARENT },
-      forkedFrom: forkOf === undefined ? null : { type: "run", threadId: PARENT, runId: forkOf },
+          : { parentThreadId: sourceThreadId, relationshipToParent: "fork", rootThreadId: PARENT },
+      forkedFrom:
+        forkOf === undefined ? null : { type: "run", threadId: sourceThreadId, runId: forkOf },
       createdAt: at,
       updatedAt: at,
       archivedAt: null,
@@ -149,6 +168,7 @@ function runCreated(
   threadId: ThreadId,
   runId: RunId,
   at: DateTime.Utc,
+  ordinal = 1,
 ): OrchestrationV2DomainEvent {
   const rootNodeId = NodeId.make(`node:${runId}`);
   return {
@@ -162,7 +182,7 @@ function runCreated(
     payload: {
       id: runId,
       threadId,
-      ordinal: 1,
+      ordinal,
       providerInstanceId: provider,
       modelSelection,
       providerThreadId: null,
@@ -188,7 +208,8 @@ function itemUpdated(
   type:
     | "command_execution"
     | "run_interrupt_request"
-    | "run_interrupt_result" = "command_execution",
+    | "run_interrupt_result"
+    | "system_notice" = "command_execution",
 ): OrchestrationV2DomainEvent {
   const base = {
     id: TurnItemId.make(`turn-item:${threadId}:${key}`),
@@ -399,10 +420,9 @@ const TestLayer = Layer.mergeAll(
     getEnvironmentId: Effect.succeed(EnvironmentId.make("compact-transport")),
   }),
   Layer.effectDiscard(seed),
-  Layer.mock(OrchestrationEventStore.OrchestrationEventStore)({}),
   Layer.mock(ProjectStore.ProjectStoreV2)({}),
   Layer.mock(ProjectEnrichmentService.ProjectEnrichmentService)({}),
-).pipe(Layer.provideMerge(store));
+).pipe(Layer.provideMerge(events), Layer.provideMerge(store));
 
 const withHttp = <A>(use: (get: (path: string) => Promise<Response>) => Promise<A>) =>
   Effect.gen(function* () {
@@ -449,6 +469,104 @@ function itemIds(projection: OrchestrationV2ThreadProjection): string[] {
 }
 
 it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
+  it.effect("WS: an open run-fork grandchild refreshes inherited text at its child watermark", () =>
+    Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const at = yield* DateTime.now;
+      const forkRun = RunId.make("run:compact-transport:fork");
+      const laterRun = RunId.make("run:compact-transport:after-fork");
+      const original = itemUpdated(PARENT, parentRun, "inherited-notice", 4, at, "system_notice");
+      if (original.type !== "turn-item.updated" || original.payload.type !== "system_notice") {
+        throw new Error("Expected an inherited notice fixture");
+      }
+      const seeded = yield* eventSink.write({
+        events: [
+          original,
+          runCreated(FORK, forkRun, at),
+          threadCreated(GRANDCHILD, at, forkRun, FORK),
+          itemUpdated(GRANDCHILD, null, "initial-child-output", 1, at),
+        ],
+      });
+      const childSequence = seeded.at(-1)!.sequence;
+      const amended = {
+        ...original,
+        id: EventId.make("event:compact-transport:ancestor-edit"),
+        payload: { ...original.payload, message: "Amended inherited notice" },
+      };
+      const inheritedText = (projection: OrchestrationV2ThreadProjection) => {
+        const row = projection.visibleTurnItems.find(
+          (item) =>
+            item.visibility === "inherited" &&
+            item.sourceThreadId === PARENT &&
+            item.sourceItemId === original.payload.id,
+        );
+        return row?.item.type === "system_notice" ? row.item.message : undefined;
+      };
+
+      const received = yield* Queue.unbounded<OrchestrationV2ThreadStreamItem>();
+      const stream = yield* subscribeOrchestrationV2Thread({
+        threadId: GRANDCHILD,
+        acceptBoundedSnapshot: true,
+        acceptCompactTurnItems: true,
+        acceptCompactIds: true,
+        requestCompletionMarker: true,
+      });
+      yield* stream.pipe(
+        Stream.map((item) => decodeStreamItem(JSON.parse(JSON.stringify(encodeStreamItem(item))))),
+        Stream.runForEach((item) => Queue.offer(received, item)),
+        Effect.forkScoped,
+      );
+      const opening = yield* Queue.take(received);
+      if (opening.kind !== "snapshot") throw new Error("Expected the opening snapshot");
+      assert.equal(opening.snapshotSequence, childSequence);
+      assert.isTrue(opening.turnItemsOmitLocalVisible);
+      assert.equal(inheritedText(boundedSnapshotProjection(opening)), original.payload.message);
+      assert.deepStrictEqual(yield* Queue.take(received), { kind: "synchronized" });
+
+      yield* eventSink.write({
+        events: [
+          amended,
+          runCreated(PARENT, laterRun, at, 2),
+          itemUpdated(PARENT, laterRun, "outside-fork-history", 5, at),
+        ],
+      });
+      const current = yield* projections.getThreadSnapshotWindow(GRANDCHILD, { rowLimit: 20 });
+      assert.equal(inheritedText(current.projection), amended.payload.message);
+      assert.equal(current.snapshotSequence, childSequence);
+      assert.notInclude(JSON.stringify(current.projection), "outside-fork-history");
+
+      yield* TestClock.adjust("1 second");
+      const refresh = Option.getOrUndefined(yield* Queue.poll(received));
+
+      const [childEvent] = yield* eventSink.write({
+        events: [itemUpdated(GRANDCHILD, null, "child-live-output", 2, at)],
+      });
+      yield* TestClock.adjust("1 second");
+      const next = Option.getOrUndefined(yield* Queue.poll(received));
+      assert.equal(next?.kind, "event", "The original subscription still receives child events");
+      if (next?.kind === "event") {
+        assert.equal(next.sequence, childEvent!.sequence);
+        assert.equal(next.event.threadId, GRANDCHILD);
+        if (
+          next.event.type !== "turn-item.updated" ||
+          next.event.payload.type !== "command_execution"
+        ) {
+          throw new Error("Expected the child command update");
+        }
+        assert.isUndefined(next.event.payload.output);
+        assert.isTrue(next.event.payload.outputOmitted);
+      }
+      assert.equal(refresh?.kind, "snapshot", "The open stream missed the ancestor-only edit");
+      if (refresh?.kind !== "snapshot") throw new Error("Expected a bounded refresh");
+      assert.equal(refresh.snapshotSequence, childSequence);
+      assert.isTrue(refresh.turnItemsOmitLocalVisible);
+      assert.equal(inheritedText(boundedSnapshotProjection(refresh)), amended.payload.message);
+      assert.notInclude(JSON.stringify(refresh), "outside-fork-history");
+      assert.isTrue(Option.isNone(yield* Queue.poll(received)));
+    }).pipe(Effect.scoped),
+  );
+
   describe.each([
     ["fork", FORK],
     ["long run with a retained interrupt request", LONG],
