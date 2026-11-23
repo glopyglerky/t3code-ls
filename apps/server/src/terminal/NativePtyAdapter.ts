@@ -96,6 +96,8 @@ class PtyHostConnection {
 }
 
 class NativePtyProcess implements PtyAdapter.PtyProcess {
+  readonly pid: number;
+  private readonly host: PtyHostConnection;
   private readonly dataListeners = new Set<(data: string) => void>();
   private readonly exitListeners = new Set<(event: PtyAdapter.PtyExitEvent) => void>();
   private readonly decoder = new TextDecoder("utf8", { ignoreBOM: true });
@@ -109,7 +111,9 @@ class NativePtyProcess implements PtyAdapter.PtyProcess {
   private exitEvent: PtyAdapter.PtyExitEvent | undefined;
   private terminalExitCode: number | undefined;
 
-  constructor(readonly pid: number, private readonly host: PtyHostConnection) {
+  constructor(pid: number, host: PtyHostConnection) {
+    this.pid = pid;
+    this.host = host;
     host.child.once("close", () => {
       this.closing = true;
       clearTimeout(this.timer);
