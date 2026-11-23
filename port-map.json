@@ -1886,7 +1886,7 @@
         "crates/core/tests/claude_stdio_host.rs"
       ],
       "retired_paths": [],
-      "notes": "T01 standalone Unix stream-JSON session candidate for @anthropic-ai/claude-agent-sdk 0.3.321 initialize, user input, permission and interrupt frames. Reuses the Rust provider process owner. The spawned fixture exercises wire transport and the checked-in SDK callback capture supplies background result semantics. The application still selects its SDK runner. Installed CLI, hook, account, full control and application parity require qualification.",
+      "notes": "T01 standalone Unix stream-JSON session candidate for @anthropic-ai/claude-agent-sdk 0.3.321 initialize, user input, permission and interrupt frames. Reuses the Rust provider process owner. The spawned fixtures exercise wire transport and the actual ClaudeAdapterV2 open seam with a controlled child. See docs/porting/full-system/claude-stdio-adapter-fixture.md for the explicit test route and evidence. The application selects its SDK runner. Installed CLI, hook, account, full control and application parity require qualification.",
       "rust_crates": ["crates/core"]
     },
     {

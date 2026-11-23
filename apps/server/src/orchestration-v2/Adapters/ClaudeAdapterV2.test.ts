@@ -109,6 +109,7 @@ import * as ClaudeAdapterV2 from "./ClaudeAdapterV2.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderInstallationGate from "../../provider/ProviderInstallationGate.ts";
 import { ClaudeOrchestratorReplayHarness } from "./ClaudeAdapterV2.testkit.ts";
+import { makeClaudeStdioFixture } from "./ClaudeStdioHost.testkit.ts";
 import { provideDeterministicTestRuntime } from "../testkit/DeterministicRuntime.ts";
 import { runOrchestratorV2Scenario } from "../testkit/OrchestratorScenario.ts";
 import { layerProviderReplay } from "../testkit/ProviderReplayHarness.ts";
@@ -120,10 +121,10 @@ import {
   projectionFor,
 } from "../testkit/fixtures/shared.ts";
 
-vi.mock("@anthropic-ai/claude-agent-sdk", async (importOriginal) => ({
-  ...(await importOriginal<typeof ClaudeSdk>()),
-  resolveSettings: vi.fn(),
-}));
+vi.mock("@anthropic-ai/claude-agent-sdk", async (importOriginal) => {
+  const original = await importOriginal<typeof ClaudeSdk>();
+  return { ...original, query: vi.fn(original.query), resolveSettings: vi.fn() };
+});
 
 beforeEach(() => {
   vi.mocked(ClaudeSdk.resolveSettings).mockReset().mockResolvedValue({
@@ -266,6 +267,157 @@ function makeClaudeTestTurnInput(input: {
     runtimePolicy: input.runtimePolicy ?? CLAUDE_TEST_RUNTIME_POLICY,
   };
 }
+
+const claudeStdioFixtureExecutable = process.env.T3_CLAUDE_STDIO_FIXTURE;
+
+it.skipIf(claudeStdioFixtureExecutable === undefined)(
+  "runs ClaudeAdapterV2 against the Rust stdio host",
+  async () => {
+    const sdkQuery = vi.mocked(ClaudeSdk.query).mockClear();
+    await sdkQuery.withImplementation(
+      () => {
+        throw new Error("The controlled fixture must never start an SDK query.");
+      },
+      () =>
+        Effect.runPromise(
+          Effect.gen(function* () {
+            const fileSystem = yield* FileSystem.FileSystem;
+            const path = yield* Path.Path;
+            const idAllocator = yield* IdAllocator.IdAllocatorV2;
+            const directory = yield* fileSystem.makeTempDirectoryScoped({
+              prefix: "t3-claude-stdio-",
+            });
+            const fixture = makeClaudeStdioFixture(claudeStdioFixtureExecutable!, directory);
+            yield* Effect.addFinalizer(() => Effect.promise(fixture.close));
+            const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
+              instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+              settings: DEFAULT_CLAUDE_SETTINGS,
+              environment: { HOME: directory, CLAUDE_CONFIG_DIR: directory },
+              attachmentsDir: directory,
+              fileSystem,
+              path,
+              random: yield* SecureRandom.SecureRandom,
+              idAllocator,
+              queryRunner: fixture.runner,
+            });
+            const threadId = ThreadId.make("thread-native-claude-fixture");
+            const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+              runtimeMode: "approval-required",
+              interactionMode: "default",
+              cwd: directory,
+            });
+            const modelSelection = { ...CLAUDE_TEST_MODEL_SELECTION, options: [] };
+            const runtime = yield* adapter.openSession({
+              threadId,
+              providerSessionId: ProviderSessionId.make("provider-session-native-claude-fixture"),
+              modelSelection,
+              runtimePolicy,
+              promptSuggestions: Effect.succeed(false),
+            });
+            const providerThread = yield* runtime.ensureThread({
+              threadId,
+              modelSelection,
+              runtimePolicy,
+            });
+            const events: ProviderAdapter.ProviderAdapterV2Event[] = [];
+            const requests =
+              yield* Queue.unbounded<
+                Extract<
+                  ProviderAdapter.ProviderAdapterV2Event,
+                  { type: "runtime_request.updated" }
+                >["runtimeRequest"]
+              >();
+            yield* runtime.events.pipe(
+              Stream.runForEach((event) =>
+                Effect.sync(() => events.push(event)).pipe(
+                  Effect.andThen(
+                    event.type === "runtime_request.updated"
+                      ? Queue.offer(requests, event.runtimeRequest)
+                      : Effect.void,
+                  ),
+                  Effect.asVoid,
+                ),
+              ),
+              Effect.forkScoped,
+            );
+            const attemptId = RunAttemptId.make("attempt-native-claude-fixture");
+            const input = makeClaudeTestTurnInput({
+              threadId,
+              providerThread,
+              attemptId,
+              text: "First 🌱\n  keep spacing",
+              attachments: [],
+              now: yield* DateTime.now,
+              modelSelection,
+              runtimePolicy,
+            });
+            yield* runtime.startTurn(input);
+            const first = yield* Queue.take(requests);
+            assert.equal(first.status, "pending");
+            const providerTurnId = idAllocator.derive.providerTurn({
+              driver: ClaudeAdapterV2.CLAUDE_PROVIDER,
+              nativeTurnId: `turn:${attemptId}`,
+            });
+            const steerId = MessageId.make("steer-native-claude-fixture");
+            yield* runtime.steerTurn({
+              threadId,
+              runId: input.runId,
+              providerThread,
+              providerTurnId,
+              message: { ...input.message, messageId: steerId, text: "Steer 🛠️\n  now" },
+            });
+            // The bridge may start the new callback before the cancelled callback publishes its update.
+            const updates = [yield* Queue.take(requests), yield* Queue.take(requests)];
+            assert.equal(updates.find((request) => request.id === first.id)?.status, "cancelled");
+            const reissued = updates.find((request) => request.id !== first.id);
+            assert.equal(reissued?.status, "pending");
+            yield* runtime.respondToRuntimeRequest({
+              requestId: reissued!.id,
+              decision: "decline",
+            });
+            yield* Effect.promise(() => fixture.backgroundHandled);
+            assert.deepEqual(yield* Effect.promise(() => Promise.all(fixture.decisions)), [
+              false,
+              true,
+            ]);
+            assert.deepEqual(
+              events.filter((event) => event.type === "turn.terminal"),
+              [],
+            );
+
+            yield* runtime.interruptTurn({ providerThread, providerTurnId });
+            yield* Effect.promise(fixture.close);
+            yield* Effect.yieldNow;
+            const terminals = events.filter((event) => event.type === "turn.terminal");
+            assert.lengthOf(terminals, 1);
+            assert.equal(terminals[0]?.providerTurnId, providerTurnId);
+            assert.equal(terminals[0]?.status, "interrupted");
+            assert.deepEqual(
+              events
+                .filter((event) => event.type === "steer.updated" && event.messageId === steerId)
+                .map((event) => event.type === "steer.updated" && event.status),
+              ["pending", "completed"],
+            );
+            assert.include(JSON.stringify(events), "foreground only");
+            assert.notInclude(JSON.stringify(events), "background only");
+          }).pipe(
+            Effect.scoped,
+            Effect.timeout("12 seconds"),
+            Effect.provide(
+              Layer.mergeAll(
+                IdAllocator.layer,
+                McpProviderSessions.layer,
+                NodeServices.layer,
+                NodeCrypto.layer,
+              ),
+            ),
+          ),
+        ),
+    );
+    assert.equal(sdkQuery.mock.calls.length, 0);
+  },
+  15_000,
+);
 
 describe("ClaudeAdapterV2 runtime query policy", () => {
   it.each([
