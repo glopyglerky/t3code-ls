@@ -67,8 +67,10 @@ jobs:
           jq -n --arg commit "$STOCK_COMMIT" --arg tree "$STOCK_TREE" \
             --arg probe_commit "$(git rev-parse HEAD)" --arg node "$(node --version)" \
             --arg chrome "$("$chrome" --version)" --arg driver "$("$driver" --version)" \
+            --arg image "${ImageOS:-unknown}/${ImageVersion:-unknown}" --arg kernel "$(uname -r)" \
+            --arg cpu "$(LC_ALL=C lscpu | sed -n 's/^Model name:[[:space:]]*//p')" \
             --arg platform "$(uname -sm)" --arg load "$(uptime)" --argjson cores "$(nproc)" \
-            '{commit:$commit,tree:$tree,probe_commit:$probe_commit,node:$node,chrome:$chrome,driver:$driver,platform:$platform,initial_load:$load,cores:$cores,cache_profile:"fresh server and profile, headless browser launched before server, unmanaged filesystem cache",durability:"SQLite WAL/NORMAL"}' \
+            '{commit:$commit,tree:$tree,probe_commit:$probe_commit,node:$node,chrome:$chrome,driver:$driver,platform:$platform,image:$image,kernel:$kernel,cpu:$cpu,initial_load:$load,cores:$cores,cache_profile:"fresh server and profile, headless browser launched before server, unmanaged filesystem cache",durability:"SQLite WAL/NORMAL"}' \
             > "$evidence/inputs.json"
           for sample in 1 2 3 4 5 6 7; do
             "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" run \
