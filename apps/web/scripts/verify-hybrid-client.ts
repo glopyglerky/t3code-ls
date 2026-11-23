@@ -679,6 +679,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     interrupted: null as InterruptedShowcase | null,
     capturedApproval: null as Awaited<ReturnType<typeof acceptCapturedApproval>> | null,
     cancelledQuestion: null as Awaited<ReturnType<typeof cancelCapturedQuestion>> | null,
+    historyFind: null as { query: string; count: string; draftPreserved: boolean } | null,
     completedSnapshots: [] as Array<
       Awaited<ReturnType<typeof assertCompleted>> & { checkpoint: string }
     >,
@@ -719,6 +720,7 @@ async function exercise(implementation: Implementation): Promise<void> {
   };
   let context = await browser!.newContext(contextOptions);
   let page = await context.newPage();
+  let threadFindRequests = 0;
   function observePage(current: Page): void {
     current.setDefaultTimeout(timeoutMs);
     current.setDefaultNavigationTimeout(timeoutMs);
@@ -728,6 +730,13 @@ async function exercise(implementation: Implementation): Promise<void> {
     current.on("console", (message) => {
       if (message.type() === "error") proof.browserErrors.push(redact(message.text()));
     });
+    current.on("websocket", (socket) =>
+      socket.on("framesent", ({ payload }) => {
+        if (payload.toString().includes('"orchestration.searchThreadStream"')) {
+          threadFindRequests += 1;
+        }
+      }),
+    );
   }
   observePage(page);
 
@@ -840,6 +849,31 @@ async function exercise(implementation: Implementation): Promise<void> {
       "Recovered the same durable thread after server restart in a fresh client with the existing session",
     );
     await capture(page, directory, "completed");
+    if (bundledClient && implementation === "native") {
+      starting("find in reopened conversation");
+      const draft = "Draft retained while finding a previous reply";
+      const editor = page.getByTestId("composer-editor");
+      await editor.fill(draft);
+      const requestsBeforeFind = threadFindRequests;
+      await page.keyboard.press("Control+f");
+      const bar = page.getByRole("search", { name: "Find in thread" });
+      const search = bar.getByRole("searchbox", { name: "Find in thread" });
+      const query = "single math module";
+      await search.fill(query);
+      await bar.getByText("1/1", { exact: true }).waitFor({ state: "visible" });
+      Assert.ok(threadFindRequests > requestsBeforeFind, "Find must query the restarted server");
+      await page.waitForFunction(
+        (expected) => Array.from(CSS.highlights.get("t3-thread-find-active") ?? []).some(
+          (range) => range.toString() === expected,
+        ),
+        query,
+      );
+      await page.keyboard.press("Escape");
+      await bar.waitFor({ state: "hidden" });
+      Assert.equal(await editor.innerText(), draft);
+      proof.historyFind = { query, count: "1/1", draftPreserved: true };
+      completed("Found and highlighted the previous reply after restart while retaining the draft");
+    }
     await page.goto(proof.interrupted.threadUrl, { waitUntil: "domcontentloaded" });
     await verifyInterruptedShowcase(page, proof.interrupted);
     completed("Recovered the interrupted turn and partial reply in the new browser session");
