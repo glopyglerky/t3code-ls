@@ -169,6 +169,21 @@ const config :Workerd.Config = (
   Assert.deepEqual(failedAfterReopen.state, retried.state);
   Assert.equal((await request("/hold", body("third", -120_000))).accepted, true);
   checkpoint("rollback-and-retry-after-restart");
+  const rerouted = await request("/wake-during-send", {});
+  const wakeAt = Date.UTC(2035, 0, 1);
+  Assert.equal(rerouted.nextAt, wakeAt);
+  Assert.equal(rerouted.afterWake.alarm, wakeAt);
+  Assert.deepEqual(rerouted.sent, [{ baseUrl: "https://third.invalid/", id: "first" }]);
+  Assert.equal(rerouted.afterWake.target[0].base_url, "https://reopened.invalid/");
+  Assert.equal(rerouted.afterWake.target[0].failures, 0);
+  Assert.deepEqual(rerouted.afterWake.held.map(({ id }) => id), ["first", "second", "third"]);
+  Assert.deepEqual(rerouted.retried, ["first", "second", "third"].map((id) => ({
+    baseUrl: "https://reopened.invalid/", id, rawToken: "synthetic%2Ftoken", body: [0, 255, 10],
+  })));
+  Assert.equal(rerouted.afterRetry, null);
+  Assert.deepEqual(rerouted.state.held, []);
+  checkpoint("wake-reroutes-held-bytes-after-an-old-route-failure");
+
   cancellation.signal.throwIfAborted();
   state.status = "passed";
 } catch (error) {

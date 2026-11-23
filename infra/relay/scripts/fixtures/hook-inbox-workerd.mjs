@@ -2,7 +2,7 @@ import * as SqliteClient from "@effect/sql-sqlite-do/SqliteClient";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as HookInboxStore from "../../src/hooks/HookInboxStore.ts";
-import { commitHold } from "../../src/hooks/HookInboxTransaction.ts";
+import { commitHold, commitStorage, scheduleBy } from "../../src/hooks/HookInboxTransaction.ts";
 
 const PROTOCOL = "t3-relay-inbox-workerd-v1";
 const BASE_TIME = Date.UTC(2035, 0, 1);
@@ -27,12 +27,61 @@ export class InboxProbe {
     };
   }
 
+  async wakeDuringSend() {
+    const storage = this.ctx.storage;
+    const alarm = {
+      get: () => Effect.promise(() => storage.getAlarm()),
+      set: (at) => Effect.promise(() => storage.setAlarm(at)),
+    };
+    const nextTarget = "https://reopened.invalid/";
+    const sent = [];
+    const retried = [];
+    const operation = Effect.gen(function* () {
+      const nextAt = yield* HookInboxStore.deliverDue((baseUrl, hook) =>
+        Effect.gen(function* () {
+          sent.push({ baseUrl, id: hook.id });
+          if (sent.length === 1) {
+            yield* commitStorage(storage, Effect.gen(function* () {
+              if (!(yield* HookInboxStore.wake(nextTarget))) throw new Error("Expected a held request");
+              yield* alarm.set(BASE_TIME);
+            }));
+          }
+          return "unreachable";
+        }),
+      );
+      if (nextAt !== null) yield* scheduleBy(alarm, nextAt);
+      const afterWake = yield* Effect.promise(() => this.inspect());
+      const afterRetry = yield* HookInboxStore.deliverDue((baseUrl, hook) => Effect.sync(() => {
+        retried.push({ baseUrl, id: hook.id, rawToken: hook.rawToken, body: Array.from(hook.body) });
+        return "delivered";
+      }));
+      return { nextAt, afterWake, afterRetry };
+    }.bind(this)).pipe(this.withClock(BASE_TIME), Effect.provide(this.layer));
+    const result = await Effect.runPromise(operation);
+    await storage.sync();
+    return Response.json({ protocol: PROTOCOL, ...result, sent, retried, state: await this.inspect() });
+  }
+
+  withClock(now) {
+    return (operation) => Effect.gen(function* () {
+      const liveClock = yield* Clock.Clock;
+      const fixedClock = Object.create(liveClock, {
+        currentTimeMillisUnsafe: { value: () => now },
+        currentTimeMillis: { value: Effect.succeed(now) },
+        currentTimeNanosUnsafe: { value: () => BigInt(now) * 1000000n },
+        currentTimeNanos: { value: Effect.succeed(BigInt(now) * 1000000n) },
+      });
+      return yield* operation.pipe(Effect.provideService(Clock.Clock, fixedClock));
+    });
+  }
+
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === "/inspect") {
       return Response.json({ protocol: PROTOCOL, bootId: this.bootId, alarmRuns: this.alarmRuns,
         state: await this.inspect() });
     }
+    if (url.pathname === "/wake-during-send" && request.method === "POST") return this.wakeDuringSend();
     if (url.pathname !== "/hold" || request.method !== "POST") return new Response(null, { status: 404 });
     const { id, target, offset, failAt } = await request.json();
     if (!/^(?:first|second|third)$/.test(id) || ![0, -60000, -120000].includes(offset) ||
@@ -59,24 +108,15 @@ export class InboxProbe {
         }
       },
     };
-    const operation = Effect.gen(function* () {
-      const liveClock = yield* Clock.Clock;
-      const fixedClock = Object.create(liveClock, {
-        currentTimeMillisUnsafe: { value: () => now },
-        currentTimeMillis: { value: Effect.succeed(now) },
-        currentTimeNanosUnsafe: { value: () => BigInt(now) * 1000000n },
-        currentTimeNanos: { value: Effect.succeed(BigInt(now) * 1000000n) },
-      });
-      return yield* commitHold(storage, HookInboxStore.hold(hook, target).pipe(
-        Effect.tap(() => failAt === "state" ? Effect.promise(async () => {
-          staged = await this.inspect();
-          throw new Error("injected-after-state");
-        }) : Effect.void),
-      ), {
-        get: () => Effect.promise(() => storage.getAlarm()),
-        set: (at) => Effect.promise(() => storage.setAlarm(at)),
-      }).pipe(Effect.provideService(Clock.Clock, fixedClock));
-    }.bind(this)).pipe(Effect.provide(this.layer));
+    const operation = commitHold(storage, HookInboxStore.hold(hook, target).pipe(
+      Effect.tap(() => failAt === "state" ? Effect.promise(async () => {
+        staged = await this.inspect();
+        throw new Error("injected-after-state");
+      }) : Effect.void),
+    ), {
+      get: () => Effect.promise(() => storage.getAlarm()),
+      set: (at) => Effect.promise(() => storage.setAlarm(at)),
+    }).pipe(this.withClock(now), Effect.provide(this.layer));
     let accepted;
     try {
       accepted = await Effect.runPromise(operation);
