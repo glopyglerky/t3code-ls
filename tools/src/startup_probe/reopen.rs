@@ -117,8 +117,10 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
         return Err("seeded workspace used an unexpected database".into());
     }
 
+    let resource_baseline = super::resources::Baseline::capture(browser.driver_pid())?;
     let started = Instant::now();
     let mut reopened = OwnedChild(make_server()?.spawn()?);
+    let resources = resource_baseline.start(reopened.0.id(), started)?;
     let _pairing_output = pairing_link(reopened.0.stdout.take().ok_or("missing reopen output")?);
     let (reopened_origin, descriptor_micros, html_micros, migration) =
         sample(&mut reopened.0, &state, started)?;
@@ -152,6 +154,7 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
         .as_object_mut()
         .ok_or("missing reopen snapshot")?
         .remove("messages");
+    let resources = resources.finish()?;
     browser.close()?;
     stop_gracefully(&mut reopened)?;
     println!(
@@ -165,6 +168,7 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
             "browser": result["timing"], "snapshot": snapshot,
             "cache": "same authenticated browser profile with observed persisted shell and selected-thread records",
             "filesystem_cache": "unmanaged, after fixture import and clean stop",
+            "resources": resources,
             "cpu_rss_qualified": false, "cached_paint_attribution_qualified": false,
         })
     );

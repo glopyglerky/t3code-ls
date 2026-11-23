@@ -221,6 +221,8 @@ jobs:
           export CARGO_HOME="$RUNNER_TEMP/conversation-cargo-home"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/conversation-target"
           cd measurement
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test \
+            --locked -p t3code-ls-tools startup_probe::resources::tests
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
             --release --locked -p t3code-ls-tools
           cd ..
@@ -249,6 +251,7 @@ jobs:
             '{journey:"J02",stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,workload:{threads:32,messagesPerThread:200},cache:"same browser and saved profile per trial, unmanaged filesystem cache after import"}' \
             > "$evidence/inputs.json"
           printf 'pair\tposition\tprofile\tdescriptor_us\tshell_visible_ms\tselected_visible_ms\tauthoritative_shell_ms\tauthoritative_thread_ms\n' > "$evidence/reopen.tsv"
+          printf 'pair\tprofile\tserver_cpu_ms\tbrowser_cpu_ms\tserver_peak_rss_bytes\tbrowser_peak_rss_bytes\tsampler_scan_wall_ms\tmax_sample_gap_ms\n' > "$evidence/reopen-resources.tsv"
           trial_root="$RUNNER_TEMP/reopen-trials"
           mkdir "$trial_root"
           trap 'rm -r "${trial_root:?}"' EXIT
@@ -272,6 +275,9 @@ jobs:
               jq -er --argjson pair "$pair" --argjson position "$((position + 1))" --arg profile "$profile" \
                 'select(.journey == "J02" and .snapshot.valid and .fixture.total_messages == 6400) | [$pair,$position,$profile,.descriptor_micros,.browser.firstShellVisibleMillis,.browser.selectedTextVisibleMillis,.browser.authoritativeShellHttpMillis,.browser.authoritativeThreadMillis] | @tsv' \
                 "$result" >> "$evidence/reopen.tsv"
+              jq -er --argjson pair "$pair" --arg profile "$profile" \
+                'select(.resources.samples >= 2 and (.resources.server.processes | length) > 0 and any(.resources.browser.processes[]; .role == "browser-renderer") and (.profile != "native" or any(.resources.server.processes[]; .role == "native-database-helper"))) | [$pair,$profile,.resources.server.observed_cpu_millis,.resources.browser.observed_cpu_millis,.resources.server.sampled_peak_sum_rss_bytes,.resources.browser.sampled_peak_sum_rss_bytes,.resources.sampler_scan_wall_millis,.resources.max_sample_gap_millis] | @tsv' \
+                "$result" >> "$evidence/reopen-resources.tsv"
               rm -r "${trial_root:?}/${trial:?}"
             done
             diff <(jq -c '.snapshot | {valid,threadCount,messageCount,selectedThreadId}' "$evidence/sample-$pair-stock.json") \

@@ -25,6 +25,10 @@ pub(super) struct Browser {
 }
 
 impl Browser {
+    pub(super) fn driver_pid(&self) -> u32 {
+        self.driver.0.id()
+    }
+
     pub(super) fn start(driver: &Path, chrome: &Path, trial: &Path) -> Result<Self> {
         let chrome = fs::canonicalize(chrome)?;
         let startup = trial.join("webdriver-startup.log");
