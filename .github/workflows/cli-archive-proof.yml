@@ -211,14 +211,21 @@ jobs:
         with:
           name: cli-windows-amd64-archive
           path: ${{ runner.temp }}/cli-windows-archive/
-      - name: Install the frozen smoke harness
+      - name: Install the pinned Windows pnpm command
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           node -e 'if(process.platform!=="win32"||process.arch!=="x64"||process.versions.node!=="26.12.1") process.exit(1)'
-          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
-          pnpm install --frozen-lockfile
+          npm.cmd install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+      - name: Install and verify the frozen smoke harness
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ((pnpm.cmd --version) -ne '12.14.0') { throw 'Unexpected pnpm version' }
+          pnpm.cmd install --frozen-lockfile
+          node --input-type=module -e 'await import("@t3tools/contracts"); await import("effect/Effect");'
       - name: Validate and exercise the transferred archive on Windows
         shell: pwsh
         timeout-minutes: 8
