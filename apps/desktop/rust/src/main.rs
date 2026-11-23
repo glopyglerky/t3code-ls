@@ -100,7 +100,7 @@ impl Workspace {
                         .default_value(reply)
                         .context_menu(false);
                     state.set_accessibility(
-                        InputAccessibility::new(Some(Role::MultilineTextInput))
+                        InputAccessibility::new(Some(Role::Document))
                             .with_label(Some(REPLY_LABEL.into()))
                             .with_accessibility_id(Some("fixture-reply".into())),
                     );
