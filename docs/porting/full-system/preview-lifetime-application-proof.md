@@ -14,10 +14,12 @@ control, CDP input and binary image frames. The application must:
 - Follow a page link, report the destination title, and return with the normal
   Back control while the outer application route and page count stay unchanged.
 - Deliver pointer input through the canvas to a button whose local HTTP round
-  trip and updated title are independently observed by the fixture listener.
+  trip and actual button DOM label are independently observed by the fixture listener.
 - Close all viewer sockets when the right panel is hidden. No more image frames
   may arrive on those closed sockets. Showing it must reconnect the same preview
-  tab and retain the page counter.
+  tab and retain the page counter. Close controls are selected from the active
+  production tab and checked against the visible surface's stream tab ID and URL;
+  they do not depend on script-only document title changes.
 - Close that preview tab, detach its stream and open a different tab with fresh
   page state. Final close must release every fixture viewer.
 
@@ -25,7 +27,10 @@ A bounded page animation ensures that a quiet page cannot make a stalled stream
 look healthy. Connections, event history, HTTP input, viewport dimensions and
 waits are bounded. Socket tickets are never included in the proof summary. The
 summary records thread-scoped socket identity checks, binary frame count,
-interaction events and lifecycle outcomes; `preview.png` captures the real canvas.
+interaction events and lifecycle outcomes. The observed count/DOM-label sequence
+must be exactly `1, 2, 1`, establishing retention and reset separately.
+`preview-first-click.png`, `preview-reconnected-click.png` and `preview.png` capture
+the real canvas at those checkpoints.
 
 Source inspection found the existing visibility cleanup in
 `ServerBrowserSurface` already calls both painter stop and client stop. The server
@@ -85,3 +90,19 @@ The source oracle remains stock `pingdotgg/t3code` at
 `28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`, with MIT provenance retained.
 The mandatory method is SHA-256
 `5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
+
+## First hosted failure and fixture repair
+
+Exact run `45174188562` built source `8b4c03ac70390c56072bad02d24a73683843b9ac`
+and reached real navigation, Back and the first button/HTTP acknowledgement.
+The first failure was `hybrid-client-preview.ts:137`: a 90-second wait for
+`Close Preview count 1`. Artifact `14820055295` retained ARIA with the navigation
+label `Controlled preview first`, while its failure screenshot visibly showed
+`Count: 1` and viewer control. The run did not reach hide/reconnect/close acceptance.
+
+The repair keeps navigation title checks but uses the production stream tab ID,
+current address and active-tab close control for lifecycle actions. The synthetic
+page now reports its actual DOM label and path along with its counter. The expected
+`1, 2, 1` states and all original socket, frame, navigation and ownership assertions
+remain required. No production title or preview policy changed. Local validation
+of this repair remains static; hosted execution of the follow-up is pending.

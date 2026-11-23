@@ -35,13 +35,14 @@ interface StreamObservation {
 
 export async function verifyPreviewLifetime(page: Page, threadId: string, screenshot: string) {
   const events: string[] = [];
+  const pageStates: Array<{ count: number; label: string; page: "first" }> = [];
   const appUrl = page.url();
   const appPages = page.context().pages().length;
   const prefix = `/controlled-preview-${randomUUID()}`;
   const pageHtml = (second: boolean) => `<!doctype html><meta charset="utf-8"><title>Controlled preview ${second ? "second" : "first"}</title>
 <style>body{margin:0;background:#fff;color:#111;font:20px sans-serif}button{position:absolute;left:20px;top:20px;width:180px;height:60px;font:20px sans-serif}a{position:absolute;left:20px;top:110px}h1{position:absolute;left:20px;top:160px;font:24px sans-serif}#motion{position:absolute;left:20px;top:230px;width:90px;height:90px;background:#15803d}</style>
 <button id="count">Count: 0</button><a href="${prefix}/${second ? "first" : "second"}">${second ? "First" : "Second"} page</a><h1>Controlled preview ${second ? "second" : "first"}</h1><div id="motion"></div>
-<script>let count=0;document.getElementById('count').onclick=async()=>{count++;document.getElementById('count').textContent='Count: '+count;document.title='Preview count '+count;await fetch('${prefix}/interaction',{method:'POST',body:String(count)})};let step=0;setInterval(()=>{document.getElementById('motion').style.background=step++%2?'#15803d':'#1d4ed8'},200)</script>`;
+<script>let count=0;document.getElementById('count').onclick=async()=>{count++;document.getElementById('count').textContent='Count: '+count;document.title='Preview count '+count;await fetch('${prefix}/interaction',{method:'POST',body:JSON.stringify({count,label:document.getElementById('count').textContent,path:location.pathname})})};let step=0;setInterval(()=>{document.getElementById('motion').style.background=step++%2?'#15803d':'#1d4ed8'},200)</script>`;
   const server = Http.createServer((request, response) => {
     if (request.method === "GET" && [prefix + "/first", prefix + "/second"].includes(request.url ?? "")) {
       if (events.length < 64) events.push(request.url!.endsWith("second") ? "second" : "first");
@@ -50,10 +51,18 @@ export async function verifyPreviewLifetime(page: Page, threadId: string, screen
       response.end(pageHtml(request.url!.endsWith("second")));
     } else if (request.method === "POST" && request.url === prefix + "/interaction") {
       let body = "";
-      request.on("data", (chunk: Buffer) => { body += chunk.toString(); if (body.length > 16) request.destroy(); });
+      request.on("data", (chunk: Buffer) => { body += chunk.toString(); if (body.length > 256) request.destroy(); });
       request.on("end", () => {
-        if (!/^[1-9][0-9]?$/u.test(body) || events.length >= 64) { response.writeHead(400).end(); return; }
-        events.push(`count:${body}`);
+        let state: { count?: unknown; label?: unknown; path?: unknown };
+        try { state = JSON.parse(body) as typeof state; }
+        catch { response.writeHead(400).end(); return; }
+        if (state === null || typeof state !== "object" || !Number.isInteger(state.count) ||
+            (state.count as number) < 1 || (state.count as number) > 99 ||
+            state.label !== `Count: ${state.count}` || state.path !== prefix + "/first" || events.length >= 64) {
+          response.writeHead(400).end(); return;
+        }
+        pageStates.push({ count: state.count as number, label: state.label as string, page: "first" });
+        events.push(`count:${state.count}`);
         response.writeHead(204).end();
       });
     } else response.writeHead(404).end();
@@ -123,6 +132,15 @@ export async function verifyPreviewLifetime(page: Page, threadId: string, screen
     await page.mouse.click(bounds.x + (bounds.width - width) / 2 + x * width / stream.viewport.width,
       bounds.y + (bounds.height - height) / 2 + y * height / stream.viewport.height);
   };
+  const activeClose = async (tabId: string) => {
+    Assert.equal(await canvas.evaluate((element) => element.closest("[data-server-browser-surface]")?.getAttribute("data-server-browser-surface")), tabId,
+      "The visible surface must belong to the production stream tab");
+    Assert.equal(await page.getByRole("textbox", { name: "Search or enter URL", exact: true }).inputValue(), origin + prefix + "/first");
+    const active = page.locator('[data-right-panel-tab-list] [data-active-tab="true"]');
+    Assert.equal(await active.count(), 1);
+    await active.hover();
+    return active.getByRole("button", { name: /^Close /u });
+  };
   try {
     const first = await openBrowser();
     await clickPage(80, 120);
@@ -134,7 +152,8 @@ export async function verifyPreviewLifetime(page: Page, threadId: string, screen
     await page.getByRole("button", { name: "Close Controlled preview first", exact: true }).waitFor({ state: "visible" });
     await clickPage(80, 50);
     await waitFor(() => events.includes("count:1"), "Normal streamed pointer input must reach the local page");
-    await page.getByRole("button", { name: "Close Preview count 1", exact: true }).waitFor({ state: "visible" });
+    await (await activeClose(first.tabId)).waitFor({ state: "visible" });
+    await canvas.screenshot({ path: Path.join(Path.dirname(screenshot), "preview-first-click.png") });
     const beforeHide = streams.length;
     await toggle.click();
     await canvas.waitFor({ state: "hidden" });
@@ -148,7 +167,8 @@ export async function verifyPreviewLifetime(page: Page, threadId: string, screen
     Assert.equal(streams.findLast((s) => !s.closed)!.tabId, first.tabId);
     await clickPage(80, 50);
     await waitFor(() => events.includes("count:2"), "The retained page must remain interactive after reconnect");
-    await page.getByRole("button", { name: "Close Preview count 2", exact: true }).click();
+    await canvas.screenshot({ path: Path.join(Path.dirname(screenshot), "preview-reconnected-click.png") });
+    await (await activeClose(first.tabId)).click();
     await waitFor(() => streams.every((s) => s.closed), "Closing a preview tab must detach the viewer");
     const reopened = await openBrowser();
     Assert.notEqual(reopened.tabId, first.tabId);
@@ -156,14 +176,19 @@ export async function verifyPreviewLifetime(page: Page, threadId: string, screen
     await clickPage(80, 50);
     await waitFor(() => events.filter((e) => e === "count:1").length === priorCount + 1, "The reopened tab must have fresh page state");
     await canvas.screenshot({ path: screenshot });
-    await page.getByRole("button", { name: "Close Preview count 1", exact: true }).click();
+    await (await activeClose(reopened.tabId)).click();
     await waitFor(() => streams.every((s) => s.closed), "Final close must detach every fixture viewer");
     if (await toggle.getAttribute("aria-pressed") === "true") await toggle.click();
     Assert.equal(page.url(), appUrl);
     Assert.equal(page.context().pages().length, appPages);
+    Assert.deepEqual(pageStates, [
+      { count: 1, label: "Count: 1", page: "first" },
+      { count: 2, label: "Count: 2", page: "first" },
+      { count: 1, label: "Count: 1", page: "first" },
+    ], "The observed DOM must retain state on reconnect and reset for a fresh tab");
     return { runtime: "server", loopbackOnly: true, navigationOwned: true, pointerRoundTrip: true,
       hiddenViewerDetached: true, sameTabReconnected: true, closedViewerDetached: true, reopenedFresh: true,
-      pageEvents: events, frames: streams.reduce((n, s) => n + s.frames, 0), streamConnections: streams.length,
+      pageEvents: events, pageStates, frames: streams.reduce((n, s) => n + s.frames, 0), streamConnections: streams.length,
       sandbox: process.env.T3CODE_SERVER_BROWSER_SANDBOX === "0" ? "disabled-for-isolated-fixture" : "enabled" };
   } finally {
     page.off("websocket", onSocket);
