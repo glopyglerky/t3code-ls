@@ -23,7 +23,11 @@ import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { restartContinuationRun } from "./RestartContinuation.ts";
+import {
+  isRelayWebhookMessage,
+  relayContinuationMessageIds,
+  restartContinuationRun,
+} from "./RestartContinuation.ts";
 import { isBufferedProviderNotification } from "./NotificationMailbox.ts";
 import { queuedRunsInDeliveryOrder } from "./QueuedRunOrder.ts";
 import * as ProviderRecoveryPlanner from "./ProviderRecoveryPlanner.ts";
@@ -825,7 +829,21 @@ export const make = Effect.gen(function* () {
               now,
             )
           : undefined;
-      const effects: Array<EffectOutbox.PendingOrchestrationEffectV2> = continuationRun
+      const relayMessageIds = continuationRun === undefined
+        ? []
+        : relayContinuationMessageIds(continuationRun, projection.runs);
+      const relayMessages = relayMessageIds.length === 0
+        ? undefined
+        : yield* projections.getMessagesById(projection.thread.id, relayMessageIds).pipe(
+            Effect.mapError((cause) => new ProviderRuntimeRecoveryError({
+              operation: "read-projections",
+              threadId: projection.thread.id,
+              cause,
+            })),
+          );
+      // An unattended relay delivery cannot confirm provider-side effects after process loss.
+      const effects: Array<EffectOutbox.PendingOrchestrationEffectV2> =
+        continuationRun !== undefined && ![...relayMessages?.values() ?? []].some(isRelayWebhookMessage)
         ? [
             {
               id: `effect:restart-continuation:${continuationRun.id}`,

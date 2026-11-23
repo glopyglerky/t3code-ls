@@ -141,6 +141,11 @@ jobs:
           pnpm --dir apps/server exec vp test run --maxWorkers 2 src/peer/PeerLinks.test.ts
           pnpm --filter @t3tools/task-cache test src/Cleanup.test.ts src/Cache.test.ts \
             src/NativeClients.test.ts src/Savings.test.ts
+      - name: Exercise restart recovery and persisted continuation effects
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t09-relay-')
+        run: |
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 \
+            src/orchestration-v2/RestartContinuation.test.ts src/orchestration-v2/ProviderRuntimeRecoveryService.test.ts
       - name: Build and open the application with the Rust composer binding
         if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
         env:
