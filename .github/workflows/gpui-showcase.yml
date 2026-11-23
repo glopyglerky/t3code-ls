@@ -26,11 +26,15 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "26.12.1"
-      - name: Install the pinned compiler and the X11 test host
+      - name: Install the pinned compiler
+        timeout-minutes: 4
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/gpui-compiler"
+      - name: Install the X11 test host
+        timeout-minutes: 5
         run: |
-          node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/gpui-compiler"
-          sudo apt-get update
-          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev \
+          apt_options=(-o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-dev \
             libx11-xcb-dev libxrandr-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-render0-dev \
             libasound2-dev libudev-dev xvfb xauth xdotool mesa-vulkan-drivers fonts-dejavu-core \
             dbus-x11 at-spi2-core python3-pyatspi python3-xlib
