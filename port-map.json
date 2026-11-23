@@ -2058,6 +2058,7 @@
       ],
       "hosted_acceptance": {
         "apps/server/scripts/verify-gpui-thread-snapshot.ts": ".github/workflows/gpui-showcase.yml",
+        "apps/server/scripts/verify-gpui-thread-submit.ts": ".github/workflows/gpui-showcase.yml",
         "tools/check-gpui-showcase.py": ".github/workflows/gpui-showcase.yml"
       },
       "retired_paths": [],
