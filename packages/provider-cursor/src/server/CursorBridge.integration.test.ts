@@ -320,7 +320,7 @@ describe.skipIf(!executable)("Cursor adapter through the Rust Connect host", () 
       yield* Effect.promise(() => Promise.all(children.map((child) =>
         child.exitCode !== null || child.signalCode !== null ? Promise.resolve() :
           new Promise<void>((resolve) => { child.once("close", () => resolve()); }),
-      ))));
+      )));
       const lateTerminal = yield* runtime.events.pipe(
         Stream.filter((event) => event.type === "turn.terminal"), Stream.runHead,
         Effect.timeoutOption("50 millis"),
