@@ -2083,7 +2083,7 @@
     },
     {
       "id": "terminal-pty-host",
-      "state": "candidate",
+      "state": "integrated",
       "domain_owner": "apps/server/src/terminal",
       "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
       "upstream_sources": [
@@ -2097,19 +2097,23 @@
         "apps/server/rust/pty-host/src/linux.rs",
         "apps/server/rust/pty-host/src/main.rs"
       ],
-      "adapter_paths": [],
+      "adapter_paths": ["apps/server/src/terminal/NativePtyAdapter.ts"],
       "platform_routes": [
         {
           "targets": ["linux-x64"],
-          "state": "candidate",
-          "implementation": "standalone-component",
+          "state": "integrated",
+          "implementation": "rust",
           "compiler_route": "lustr-bluefe-compatibility",
           "acceptance_evidence": {}
         }
       ],
-      "acceptance_tests": ["apps/server/rust/pty-host/tests/owner.rs"],
+      "acceptance_tests": [
+        "apps/server/rust/pty-host/tests/owner.rs",
+        "apps/server/src/terminal/Manager.test.ts",
+        "apps/web/scripts/verify-hybrid-client.ts"
+      ],
       "retired_paths": [],
-      "notes": "T07 Linux PTY host candidate using portable-pty 0.9.0 and nix 0.28.0. Explicit executable, cwd and environment. Bounded nonblocking byte input, exact output acknowledgement and child close/reap. The application retains NodePtyAdapter selection. Host SIGKILL, interactive foreground jobs, session-escaping descendants, platform integration and performance remain unqualified.",
+      "notes": "T07 Linux PTY host using portable-pty 0.9.0 and nix 0.28.0. The Linux x64 server opts in with T3_CODE_LS_PTY_HOST_EXECUTABLE. The default selection uses NodePtyAdapter. The native owner uses bounded nonblocking byte input, exact output acknowledgement and kill/reap for the initial process group. Restart, signal behavior, interactive foreground jobs, session-escaping descendants and performance remain unqualified.",
       "rust_crates": ["apps/server/rust/pty-host"]
     }
   ],
