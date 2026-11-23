@@ -537,11 +537,19 @@ jobs:
           export CARGO_HOME="$RUNNER_TEMP/outbox-server-cargo"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-server-target"
           export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 T3_CODE_LS_IMPLEMENTATION=native
-          trap 'rm -rf -- "$CARGO_HOME" "$CARGO_TARGET_DIR" "$RUNNER_TEMP/outbox-server-components" "$RUNNER_TEMP/outbox-server-toolchain"' EXIT
-          T3_CODE_LS_TOOLCHAIN=$(node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/outbox-server-toolchain")
+          toolchain_root="$RUNNER_TEMP/outbox-server-toolchain"
+          cleanup() {
+            if [[ -d "$toolchain_root" ]]; then
+              find "$toolchain_root" -type d ! -perm -u+w -exec chmod u+w '{}' +
+            fi
+            rm -rf -- "$CARGO_HOME" "$CARGO_TARGET_DIR" "$RUNNER_TEMP/outbox-server-components" "$toolchain_root"
+          }
+          trap cleanup EXIT
+          T3_CODE_LS_TOOLCHAIN=$(node tools/install-toolchain.mjs --destination "$toolchain_root")
           export T3_CODE_LS_TOOLCHAIN
           test -x "$T3_CODE_LS_TOOLCHAIN/bin/lustr"
           test -d "$T3_CODE_LS_TOOLCHAIN/lib/rustlib/x86_64-unknown-linux-gnu/lib"
+          test -s "$toolchain_root/installation-proof.json"
           pnpm --dir apps/web run build
           node tools/build-native.mjs "$RUNNER_TEMP/outbox-server-components"
           T3_CODE_LS_NATIVE_DIR="$RUNNER_TEMP/outbox-server-components" pnpm --dir apps/server run build:bundle
@@ -550,7 +558,7 @@ jobs:
           mv apps/server/dist "$server"
           test -f "$server/bin.mjs" && test -f "$server/client/index.html" && test -x "$server/native-bin/t3-code-ls-db"
           proof="$RUNNER_TEMP/outbox-runtime-proof"
-          cp "$T3_CODE_LS_TOOLCHAIN/installation-proof.json" "$proof/server-toolchain.json"
+          cp "$toolchain_root/installation-proof.json" "$proof/server-toolchain.json"
           git rev-parse HEAD HEAD^{tree} > "$proof/server-source.txt"
           (cd "$server" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$proof/server-package.sha256"
       - name: Reject absent JNI and verify outbox persistence across process restarts
