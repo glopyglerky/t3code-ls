@@ -540,13 +540,13 @@ it.layer(layerTest, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
         if (typeof expectedRevision !== "string") throw new Error("Missing file revision");
         expect(expectedRevision).toMatch(/^[0-9a-f]{64}$/);
 
-        const results = yield* Effect.all(
-          ["first", "second"].map((contents) =>
+        const results = yield* Effect.forEach(
+          ["first", "second"],
+          (contents) =>
             files.writeFile({ cwd, relativePath, contents, expectedRevision }).pipe(
               Effect.map(({ revision }) => ({ contents, revision })),
               Effect.catchTag("WorkspaceFileChangedError", () => Effect.succeed(null)),
             ),
-          ),
           { concurrency: 2 },
         );
         const [saved, ...other] = results.filter((result) => result !== null);
