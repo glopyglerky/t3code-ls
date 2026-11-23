@@ -46,20 +46,21 @@ export async function verifyThreadNavigation(
     Assert.deepEqual(nativeBehavior, { contextAllowed: true, modifiers: true });
     Assert.equal(page.url(), sourceUrl);
   }
+  const targetReply = page.getByText(targetText, { exact: true }).and(page.locator(":visible"));
   const href = await anchor.getAttribute("href");
   Assert.equal(new URL(href!, sourceUrl).href, expectedTarget);
   await anchor.focus();
   Assert.ok(await anchor.evaluate((node) => document.activeElement === node));
   await page.keyboard.press("Enter");
   await page.waitForURL(expectedTarget);
-  await page.getByText(targetText, { exact: true }).waitFor({ state: "visible" });
+  await targetReply.waitFor({ state: "visible" });
   if (entry === "sidebar") {
     await page.waitForFunction((href) => [...document.querySelectorAll<HTMLElement>('[data-sidebar-row][aria-current="page"] a')]
       .some((node) => node.getAttribute("href") === href), new URL(expectedTarget).pathname);
   }
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForURL(expectedTarget);
-  await page.getByText(targetText, { exact: true }).waitFor({ state: "visible" });
+  await targetReply.waitFor({ state: "visible" });
   await page.goBack();
   await page.waitForURL(sourceUrl);
   await editor.waitFor({ state: "visible" });
@@ -71,7 +72,7 @@ export async function verifyThreadNavigation(
     // Plain pointer activation must take the same selected-thread route as Enter.
     await anchor.click();
     await page.waitForURL(expectedTarget);
-    await page.getByText(targetText, { exact: true }).waitFor({ state: "visible" });
+    await targetReply.waitFor({ state: "visible" });
     await page.waitForFunction((href) => [...document.querySelectorAll<HTMLElement>('[data-sidebar-row][aria-current="page"] a')]
       .some((node) => node.getAttribute("href") === href), new URL(expectedTarget).pathname);
     await page.goBack();

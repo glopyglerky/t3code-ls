@@ -937,7 +937,7 @@ async function verifyComposerStop(
   const stop = footer.getByRole("button", { name: "Stop generation", exact: true });
   const draft = "This unsent draft must survive Stop and reopen.";
   const visiblePartialText = formattedAssistantProof ? formattedAssistantDisplay : capturedStop.partialText;
-  const partialText = page.getByText(visiblePartialText, { exact: true });
+  const partialText = page.getByText(visiblePartialText, { exact: true }).and(page.locator(":visible"));
   await partialText.waitFor({ state: "visible" });
   const pending = await readThreadSnapshot(page, threadId);
   const identity = replayTurnIdentity(pending, capturedStop.model);
@@ -3121,7 +3121,7 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       const targetId = stoppedId;
       const targetUrl = stoppedUrl;
       const navigationId = await submitReplay(page, "Thread navigation", `Navigation target: ${targetId}`);
-      await page.getByText("Synthetic navigation ready.", { exact: true }).waitFor({ state: "visible" });
+      await page.getByText("Synthetic navigation ready.", { exact: true }).and(page.locator(":visible")).waitFor({ state: "visible" });
       proof.threadNavigation = await verifyThreadNavigation(page,
         page.locator(`a[href=${JSON.stringify(new URL(targetUrl).pathname)}]:visible:not([data-sidebar-row] a)`),
         targetUrl, formattedAssistantDisplay, composerSubmit.renderer);
@@ -3213,10 +3213,10 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       // Both threads are created by the normal composer and controlled free ACP
       // replay. No DOM injection, real provider or installed profile is used.
       const targetId = await submitReplay(page, "Formatted text", "Synthetic navigation target");
-      await page.getByText(formattedAssistantDisplay, { exact: true }).waitFor({ state: "visible" });
+      await page.getByText(formattedAssistantDisplay, { exact: true }).and(page.locator(":visible")).waitFor({ state: "visible" });
       const targetUrl = page.url();
       const sourceId = await submitReplay(page, "Thread navigation", `Navigation target: ${targetId}`);
-      await page.getByText("Synthetic navigation ready.", { exact: true }).waitFor({ state: "visible" });
+      await page.getByText("Synthetic navigation ready.", { exact: true }).and(page.locator(":visible")).waitFor({ state: "visible" });
       const sourceUrl = page.url();
       const source = await readThreadSnapshot(page, sourceId);
       Assert.ok(source.projection.thread.id === sourceId);
