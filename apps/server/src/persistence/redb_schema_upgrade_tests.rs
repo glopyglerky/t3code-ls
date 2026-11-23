@@ -2872,9 +2872,13 @@ fn forward_packaged_child_cases(
         .join("runtime/versions")
         .join(&witness.activation.target_version)
         .join("native-bin/t3-code-ls-db");
-    // Pin the originally selected image through spawn and exit. Executing the
-    // parent's proc-fd path avoids re-resolving the installed helper name.
-    let executable = std::fs::File::open(&helper).unwrap();
+    // The immutable copy is held through every child exit. No installed source
+    // inode is executed, and no host-policy fallback is permitted.
+    let executable = crate::forward_child_readiness::stage_image(
+        &helper,
+        &witness.activation.target_helper_sha256,
+    )
+    .expect("synthetic readiness requires executable sealed memfd policy");
     let pinned = format!("/proc/{}/fd/{}", std::process::id(), executable.as_raw_fd());
     assert_eq!(
         forward_fixture_sha256(&std::fs::read(&pinned).unwrap()),
@@ -2884,6 +2888,8 @@ fn forward_packaged_child_cases(
         forward_fixture_sha256(&std::fs::read(home.join("userdata/statev2.omdb")).unwrap());
     for case in [
         "valid",
+        "mutable-image",
+        "source-changed",
         "lost",
         "reopened",
         "foreign",
@@ -2893,6 +2899,21 @@ fn forward_packaged_child_cases(
         "output-failure",
         "parent-retry",
     ] {
+        // Change the original bytes only after staging. The sealed copy stays
+        // exact, while readiness refuses the now-mismatching installed package.
+        let original = if case == "source-changed" {
+            let bytes = std::fs::read(&helper).unwrap();
+            let mut changed = bytes.clone();
+            changed[0] ^= 1;
+            std::fs::write(&helper, changed).unwrap();
+            Some(bytes)
+        } else {
+            None
+        };
+        assert_eq!(
+            forward_fixture_sha256(&std::fs::read(&pinned).unwrap()),
+            witness.activation.target_helper_sha256
+        );
         let mut request = serde_json::to_value(witness).unwrap();
         request["database_sha256"] = json!(database_hash);
         if case == "stale" {
@@ -2922,7 +2943,12 @@ fn forward_packaged_child_cases(
         } else {
             Stdio::piped()
         };
-        let mut child = Command::new(&pinned)
+        let launch = if case == "mutable-image" {
+            helper.as_os_str()
+        } else {
+            pinned.as_ref()
+        };
+        let mut child = Command::new(launch)
             .args([
                 "trial-verify-inherited-readiness",
                 home.to_str().unwrap(),
@@ -2950,6 +2976,13 @@ fn forward_packaged_child_cases(
         let mut output = Vec::new();
         if let Some(stdout) = child.stdout.take() {
             stdout.take(1024).read_to_end(&mut output).unwrap();
+        }
+        if let Some(original) = original {
+            std::fs::write(&helper, original).unwrap();
+            assert_eq!(
+                forward_fixture_sha256(&std::fs::read(&pinned).unwrap()),
+                witness.activation.target_helper_sha256
+            );
         }
         let valid = matches!(case, "valid" | "parent-retry");
         assert_eq!(

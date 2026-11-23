@@ -55,7 +55,24 @@ jobs:
           git worktree add --detach "$old_checkout" "$old_commit"
           trap 'git worktree remove --force "$old_checkout"' EXIT
           cmp toolchain.lock.json "$old_checkout/toolchain.lock.json"
-          cmp Cargo.lock "$old_checkout/Cargo.lock"
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-* ]]; then
+            python3 - Cargo.lock "$old_checkout/Cargo.lock" <<'PYTHON'
+          from pathlib import Path
+          import sys
+
+          current, predecessor = (Path(arg).read_bytes() for arg in sys.argv[1:])
+          start = current.index(b'[[package]]\nname = "t3-code-ls-storage"\n')
+          end = current.index(b"[[package]]", start + 1)
+          edge = b' "rustix",\n'
+          storage = current[start:end]
+          assert storage.count(edge) == 1, "Missing single locked Rustix edge"
+          assert current[:start] + storage.replace(edge, b"", 1) + current[end:] == predecessor, (
+              "The predecessor must retain its exact lock apart from the candidate Rustix edge"
+          )
+          PYTHON
+          else
+            cmp Cargo.lock "$old_checkout/Cargo.lock"
+          fi
           git -C "$old_checkout" rev-parse HEAD "HEAD^{tree}" > "$proof/prior-source.txt"
           lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/promotion-prior-target"
@@ -99,6 +116,13 @@ jobs:
               test --locked -j 2 -p t3-code-ls-storage --lib "$test_name" \
               -- --exact --nocapture 2>&1 | tee "$proof/lease-across-engine-handles.log"
             grep -F "test $test_name ... ok" "$proof/lease-across-engine-handles.log"
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-* ]]; then
+              image_test=forward_child_readiness::image_tests::sealed_image_checks_and_refusals
+              timeout -k 5s 180s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+                test --locked -j 2 -p t3-code-ls-storage --lib "$image_test" \
+                -- --exact --nocapture 2>&1 | tee "$proof/sealed-image.log"
+              grep -F "test $image_test ... ok" "$proof/sealed-image.log"
+            fi
             sha256sum --check "$proof/prior-helper.sha256"
             timeout -k 5s 600s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
               test --locked -j 2 -p t3-code-ls-storage --lib \
@@ -124,6 +148,11 @@ jobs:
                 grep -F "T05 packaged readiness $rejected: exit 78" "$proof/forward-catalog.log"
               done
               grep -F 'T05 packaged readiness output-failure: exit 1' "$proof/forward-catalog.log"
+            fi
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-* ]]; then
+              for rejected in mutable-image source-changed; do
+                grep -F "T05 packaged readiness $rejected: exit 78" "$proof/forward-catalog.log"
+              done
             fi
             cp "$RUNNER_TEMP/promotion-toolchain/installation-proof.json" "$proof/"
             exit 0

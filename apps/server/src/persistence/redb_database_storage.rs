@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 #[cfg(unix)]
 const MAX_TRIAL_FILE_BYTES: u64 = 128 * 1024 * 1024;
 #[cfg(unix)]
-const MAX_TRIAL_EXECUTABLE_BYTES: u64 = 256 * 1024 * 1024;
+pub(crate) const MAX_TRIAL_EXECUTABLE_BYTES: u64 = 256 * 1024 * 1024;
 
 #[cfg(target_os = "linux")]
 #[path = "redb_isolated_trial.rs"]
