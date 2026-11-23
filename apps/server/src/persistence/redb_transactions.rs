@@ -469,7 +469,7 @@ impl ApplicationTransactions {
         });
     }
 
-    async fn catalog_and_identity(
+    pub(crate) async fn catalog_and_identity(
         &self,
     ) -> Result<Option<(ApplicationCatalog, Option<ApplicationGenerationIdentity>)>> {
         let mut transaction = self.store.db.begin_read_only().await?;

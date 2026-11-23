@@ -14,7 +14,7 @@ use crate::backend::{Backend, path_identity};
 use crate::{Error, Result, Store};
 use serde::Deserialize;
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
@@ -189,9 +189,22 @@ impl TrialLease {
         let versions_dir = version_dir.parent().ok_or(Error::IncompatibleStore)?;
         if fs::canonicalize(versions_dir).map_err(io_error)? != versions_dir
             || fs::canonicalize(&version_dir).map_err(io_error)? != version_dir
-            || !fs::symlink_metadata(version_dir.join(".install-complete"))
-                .map_err(io_error)?
-                .is_file()
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        let mut options = fs::OpenOptions::new();
+        options.read(true);
+        let marker = crate::backend::open_regular_file(
+            &version_dir.join(".install-complete"),
+            &mut options,
+        )?;
+        let mut content = String::new();
+        if marker
+            .take(257)
+            .read_to_string(&mut content)
+            .map_err(io_error)?
+            > 256
+            || content.trim() != activation.target_version
         {
             return Err(Error::IncompatibleStore);
         }
@@ -210,8 +223,6 @@ impl TrialLease {
             if fs::canonicalize(path).map_err(io_error)? != *path {
                 return Err(Error::IncompatibleStore);
             }
-            let mut options = fs::OpenOptions::new();
-            options.read(true);
             let file = crate::backend::open_regular_file(path, &mut options)?;
             if trial_file_digest(&file)? != *sha256 {
                 return Err(Error::IncompatibleStore);

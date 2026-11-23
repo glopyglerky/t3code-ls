@@ -651,7 +651,7 @@ async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
             fs::create_dir_all(helper.parent().unwrap()).unwrap();
             fs::write(&helper, b"fixture helper").unwrap();
             fs::write(version_dir.join("t3"), b"fixture runtime").unwrap();
-            fs::write(version_dir.join(".install-complete"), b"").unwrap();
+            fs::write(version_dir.join(".install-complete"), b"1.2.4\n").unwrap();
             write_selection(4);
             Some(PreparedServiceActivation {
                 update_id: UPDATE.into(),

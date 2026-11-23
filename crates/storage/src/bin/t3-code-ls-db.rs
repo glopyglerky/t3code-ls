@@ -670,6 +670,9 @@ async fn evaluate(
                 .await?,
         ),
         Request::ApplicationMigrations {} => {
+            if transactions.prepared_service_activation().await?.is_some() {
+                return Err(Error::IncompatibleStore);
+            }
             serde_json::to_value(store.application_migrations().await?)
         }
         Request::ApplicationProjectionWindowQuery {

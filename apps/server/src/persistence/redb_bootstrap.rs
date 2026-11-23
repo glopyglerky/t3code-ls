@@ -60,11 +60,12 @@ impl Store {
     #[cfg(target_os = "linux")]
     pub(crate) async fn verify_bootstrap_schema(&self) -> Result<()> {
         let expected = definition()?;
-        let schema = crate::application::ApplicationTransactions::new(self.clone())
-            .schema()
+        let (catalog, _) = crate::application::ApplicationTransactions::new(self.clone())
+            .catalog_and_identity()
             .await?
             .ok_or(Error::IncompatibleStore)?;
-        if schema != expected.schema || self.application_migrations().await? != expected.migrations
+        if catalog.schema != expected.schema
+            || self.application_migrations().await? != expected.migrations
         {
             return Err(Error::IncompatibleStore);
         }
