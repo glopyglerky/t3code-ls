@@ -14,10 +14,10 @@ mod unix {
     use std::os::unix::process::ExitStatusExt;
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
-    use t3_code_ls_core::claude_stdio_control::Incoming;
+    use t3_code_ls_core::claude_stdio_control::{Incoming, PermissionTicket};
     use t3_code_ls_core::claude_stdio_host::{ClaudeStdioSession, Error};
     use t3_code_ls_core::json::{self, Value};
-    use t3_code_ls_core::provider_process::{Config, Error as ProcessError, Limits};
+    use t3_code_ls_core::provider_process::{Config, Error as ProcessError, Limits, read_frame};
 
     const WAIT: Duration = Duration::from_secs(5);
     const FIRST: &str = r#"{"type":"user","message":{"role":"user","content":"first"},"parent_tool_use_id":null,"uuid":"11111111-1111-4111-8111-111111111111"}"#;
@@ -43,13 +43,17 @@ mod unix {
 
     pub fn run() {
         let mut args = env::args().skip(1);
-        if args.next().as_deref() == Some("--fixture") {
+        let mode = args.next();
+        if mode.as_deref() == Some("--fixture") {
             return fixture(&args.next().expect("fixture mode"));
         }
 
         let directory = env::temp_dir().join(format!("t3ls-claude-fixture-{}", std::process::id()));
         fs::create_dir(&directory).expect("create fresh fixture profile");
         let profile = Profile(directory);
+        if mode.as_deref() == Some("--adapter-bridge") {
+            return adapter_bridge(&profile.0);
+        }
         session(&profile.0);
         eprintln!(
             "Claude stdio fixture: user/steer identity, revocation, interrupt order and reap"
@@ -102,8 +106,12 @@ mod unix {
             }
             _ => {}
         }
+        if mode == "adapter" {
+            reply(&mut output, "foreign-initialize");
+        }
         reply(&mut output, &init_id);
         match mode {
+            "adapter" => adapter_fixture(&mut input, &mut output),
             "session" => {
                 assert_eq!(read(&mut input, &mut line), json::parse(FIRST).unwrap());
                 assert_eq!(line, format!("{FIRST}\n"));
@@ -158,6 +166,164 @@ mod unix {
         // Keep the output and error descriptors open until the host closes.
         line.clear();
         assert_eq!(input.read_line(&mut line).unwrap(), 0);
+    }
+
+    fn adapter_fixture(input: &mut impl BufRead, output: &mut impl Write) {
+        let mut line = String::new();
+        let first = read(input, &mut line);
+        let uuid = |value: &Value| value.get("uuid").unwrap().as_str().unwrap().to_owned();
+        let prompt_uuid = uuid(&first);
+        let expected = FIRST
+            .replace("first", "First 🌱\\n  keep spacing")
+            .replace("11111111-1111-4111-8111-111111111111", &prompt_uuid);
+        assert_eq!(line, format!("{expected}\n"));
+        assert_eq!(prompt_uuid.len(), 36);
+        emit(
+            output,
+            &line.trim_end().replacen(
+                r#"{"type":"user","#,
+                r#"{"type":"user","session_id":"fixture","#,
+                1,
+            ),
+        );
+        let bash = PERMISSION.replace(
+            r#""tool_name":"Read","input":{"file_path":"fixture.txt"}"#,
+            r#""tool_name":"Bash","input":{"command":"fixture-only"}"#,
+        );
+        emit(output, &bash);
+
+        let steer = read(input, &mut line);
+        let steer_uuid = uuid(&steer);
+        assert_ne!(steer_uuid, prompt_uuid);
+        assert_eq!(steer_uuid.len(), 36);
+        assert_eq!(
+            line,
+            format!(
+                r#"{{"type":"user","message":{{"role":"user","content":"Steer 🛠️\n  now"}},"parent_tool_use_id":null,"priority":"now","uuid":"{steer_uuid}"}}"#
+            ) + "\n"
+        );
+        emit(
+            output,
+            &line.trim_end().replacen(
+                r#"{"type":"user","#,
+                r#"{"type":"user","session_id":"fixture","#,
+                1,
+            ),
+        );
+        emit(output, WITHDRAWAL);
+        emit(output, &bash.replace("tool-1", "tool-2"));
+        let permission = read(input, &mut line);
+        check_permission(&permission, "deny");
+        let decision = permission.get("response").unwrap().get("response").unwrap();
+        assert_eq!(
+            decision.get("toolUseID").and_then(Value::as_str),
+            Some("tool-2")
+        );
+        assert_eq!(
+            decision
+                .get("decisionClassification")
+                .and_then(Value::as_str),
+            Some("user_reject")
+        );
+
+        let result = |uuid: &str, turns: u8, text: &str| {
+            format!(
+                r#"{{"type":"result","subtype":"success","session_id":"fixture","uuid":"{uuid}","is_error":false,"num_turns":{turns},"duration_ms":1,"duration_api_ms":1,"total_cost_usd":0,"usage":{{"input_tokens":12,"output_tokens":8}},"modelUsage":{{}},"permission_denials":[],"result":"{text}","terminal_reason":"completed""#
+            )
+        };
+        emit(
+            output,
+            &format!(
+                r#"{},"origin":{{"kind":"task-notification"}}}}"#,
+                result("33333333-3333-4333-8333-333333333333", 0, "background only")
+            ),
+        );
+        let interrupt = control_id(&read(input, &mut line), "interrupt");
+        reply(output, "foreign-interrupt");
+        let foreground = format!(
+            r#"{},"origin":{{"kind":"human"}},"user_message_uuids":["{prompt_uuid}","{steer_uuid}"]}}"#,
+            result("44444444-4444-4444-8444-444444444444", 1, "foreground only")
+        );
+        emit(output, &foreground);
+        emit(output, &foreground);
+        reply(output, &interrupt);
+        reply(output, &interrupt);
+    }
+
+    fn adapter_bridge(profile: &Path) {
+        let mut session = ClaudeStdioSession::open(config(profile, "adapter")).unwrap();
+        assert_eq!(
+            session
+                .initialization_response()
+                .get("request_id")
+                .and_then(Value::as_str),
+            Some("t3-initialize-1")
+        );
+        let mut input = io::stdin().lock();
+        let mut output = io::stdout().lock();
+        let mut approvals = Vec::<(PermissionTicket, bool)>::new();
+        let mut decisions = 0;
+        emit(&mut output, r#""ready""#);
+
+        while let Some(line) = read_frame(&mut input, 1024).expect("bounded adapter command") {
+            let command = json::parse(&line).unwrap();
+            let response = match command.get("type").and_then(Value::as_str).unwrap() {
+                "user" => {
+                    session.offer(&line).unwrap();
+                    Value::Null
+                }
+                "interrupt" => Value::String(session.interrupt().unwrap()),
+                "permission" => {
+                    let index = command.get("ticket").and_then(Value::as_u64).unwrap() as usize;
+                    let (ticket, withdrawn) = &approvals[index];
+                    let decision = command.get("decision").unwrap();
+                    let sent = session
+                        .answer_permission(ticket, &json::stringify(decision))
+                        .unwrap();
+                    assert_eq!(sent, !withdrawn);
+                    decisions += 1;
+                    Value::Bool(sent)
+                }
+                "pull" => match session.poll(Duration::from_millis(50)).unwrap() {
+                    None => Value::Null,
+                    Some(Incoming::Message(value)) => event("message", value),
+                    Some(Incoming::BackgroundResult(value)) => event("background", value),
+                    Some(Incoming::PermissionRequested { ticket, request }) => {
+                        assert!(approvals.len() < 2);
+                        let id = approvals.len();
+                        approvals.push((ticket, false));
+                        event("permission", Value::Array(vec![index_value(id), request]))
+                    }
+                    Some(Incoming::PermissionWithdrawn(ticket)) => {
+                        let index = approvals
+                            .iter()
+                            .position(|(candidate, _)| candidate == &ticket)
+                            .unwrap();
+                        approvals[index].1 = true;
+                        event("withdrawn", index_value(index))
+                    }
+                    Some(Incoming::InterruptResponse {
+                        request_id,
+                        success: true,
+                        ..
+                    }) => event("interrupted", Value::String(request_id)),
+                    other => panic!("unexpected fixture event: {other:?}"),
+                },
+                other => panic!("unexpected adapter command: {other}"),
+            };
+            emit(&mut output, &json::stringify(&response));
+        }
+
+        assert_eq!(decisions, 2);
+        assert_reaped(session);
+    }
+
+    fn event(kind: &str, payload: Value) -> Value {
+        Value::Array(vec![Value::String(kind.to_owned()), payload])
+    }
+
+    fn index_value(index: usize) -> Value {
+        Value::Number(index.to_string())
     }
 
     fn read(input: &mut impl BufRead, line: &mut String) -> Value {
