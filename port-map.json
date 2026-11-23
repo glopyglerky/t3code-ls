@@ -2125,6 +2125,9 @@
       ],
       "adapter_paths": [
         "apps/server/src/terminal/NativePtyAdapter.ts",
+        "tools/build-native.mjs",
+        "tools/check-hybrid.mjs",
+        "tools/native-artifacts.mjs",
         ".github/workflows/composer-offsets.yml"
       ],
       "platform_routes": [
@@ -2149,7 +2152,7 @@
         "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
       },
       "retired_paths": [],
-      "notes": "T07 Linux PTY host using portable-pty 0.9.0 and nix 0.28.0. The Linux x64 server opts in with T3_CODE_LS_PTY_HOST_EXECUTABLE. The default selection uses NodePtyAdapter. The native owner uses bounded nonblocking byte input, exact output acknowledgement and kill/reap for the initial process group. Restart, signal behavior, interactive foreground jobs, session-escaping descendants and performance remain unqualified.",
+      "notes": "T07 Linux PTY host using portable-pty 0.9.0 and nix 0.28.0. The Linux x64 server can opt in to the verified packaged helper with T3_CODE_LS_BUNDLED_PTY_HOST=1 or use an explicit helper with T3_CODE_LS_PTY_HOST_EXECUTABLE. The default selection uses NodePtyAdapter. The bundled browser fixture verifies the packaged helper hash, shell ancestry, Unicode input and same-shell reattachment. The native owner uses bounded nonblocking byte input, exact output acknowledgement and kill/reap for the initial process group. Restart, signal behavior, interactive foreground jobs, session-escaping descendants and performance remain unqualified.",
       "rust_crates": ["apps/server/rust/pty-host"]
     },
     {

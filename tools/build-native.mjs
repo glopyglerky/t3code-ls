@@ -22,6 +22,9 @@ const targetKey = process.env.T3_CODE_LS_NATIVE_TARGET ?? `${NodeOS.platform()}-
 const rustTarget = nativeTargets[targetKey];
 if (!rustTarget) throw new Error(`Unsupported native component target: ${targetKey}`);
 const requestedImplementation = process.env.T3_CODE_LS_IMPLEMENTATION;
+const bundlePtyHost = process.env.T3_CODE_LS_BUNDLE_PTY_HOST;
+if (bundlePtyHost !== undefined && bundlePtyHost !== "1")
+  throw new Error("T3_CODE_LS_BUNDLE_PTY_HOST must be 1 when selected");
 if (
   requestedImplementation !== undefined &&
   !["native", "upstream"].includes(requestedImplementation)
@@ -45,6 +48,7 @@ if (
   (process.env.T3_CODE_LS_TOOLCHAIN !== undefined ||
     process.env.T3_CODE_LS_SYSROOT !== undefined ||
     explicitHelper ||
+    bundlePtyHost !== undefined ||
     requestedImplementation === "native")
 ) {
   throw new Error(
@@ -57,6 +61,8 @@ if (process.env.T3_CODE_LS_NATIVE_DIR) {
   const selected = JSON.parse(
     NodeFS.readFileSync(NodePath.join(process.env.T3_CODE_LS_NATIVE_DIR, "manifest.json"), "utf8"),
   );
+  if (bundlePtyHost === "1" && !selected.files?.[nativeFile("pty-host", targetKey)])
+    throw new Error("The selected native bundle does not include its PTY host");
   if (
     (requestedImplementation === "upstream" && selected.implementation !== "upstream") ||
     (requestedImplementation === "native" && selected.implementation === "upstream") ||
@@ -124,9 +130,20 @@ if (process.env.T3_CODE_LS_NATIVE_DIR) {
     ],
     { cwd: root, env, stdio: "inherit" },
   );
+  if (bundlePtyHost === "1") {
+    NodeChildProcess.execFileSync(
+      NodePath.resolve(toolchain, "bin/lustr"),
+      [
+        "--bluefe-root", toolchain, "build", "--locked", "--release",
+        "--manifest-path", NodePath.join(root, "apps/server/rust/pty-host/Cargo.toml"),
+        "--target", rustTarget, "--target-dir", target,
+      ],
+      { cwd: root, env, stdio: "inherit" },
+    );
+  }
   NodeFS.mkdirSync(destination, { recursive: true });
   const files = {};
-  for (const component of nativeComponents) {
+  for (const component of [...nativeComponents, ...(bundlePtyHost === "1" ? ["pty-host"] : [])]) {
     const file = nativeFile(component, targetKey);
     NodeFS.copyFileSync(
       NodePath.resolve(target, rustTarget, "release", file),

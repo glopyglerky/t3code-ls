@@ -6,7 +6,9 @@ import * as OS from "node:os";
 import * as Path from "node:path";
 import * as ChildProcess from "node:child_process";
 import * as NodeURL from "node:url";
-import { nativeComponents, nativeFile, nativeHash, nativeTargets } from "./native-artifacts.mjs";
+import {
+  nativeComponents, optionalNativeComponents, nativeArtifactFiles, nativeFile, nativeHash, nativeTargets,
+} from "./native-artifacts.mjs";
 import { applicationChecks, parseHybridArguments, planAdapterChecks } from "./hybrid-checks.mjs";
 
 const root = NodeURL.fileURLToPath(new URL("../", import.meta.url));
@@ -19,7 +21,10 @@ const target = `${OS.platform()}-${OS.arch()}`;
 Assert.ok(Object.hasOwn(nativeTargets, target), `Unsupported native artifact target: ${target}`);
 Assert.equal(nativeManifest.target, target, "Native artifact host does not match this runner");
 Assert.equal(nativeManifest.rustTarget, nativeTargets[target], "Native artifact target mismatch");
-for (const component of nativeComponents) {
+const components = [...nativeComponents, ...optionalNativeComponents.filter((component) =>
+  Object.hasOwn(nativeManifest.files, nativeFile(component, target)),
+)];
+for (const component of components) {
   const name = nativeFile(component, target);
   const file = Path.join(bin, name);
   Assert.ok(FS.lstatSync(file).isFile(), `Expected a regular native executable: ${name}`);
@@ -28,9 +33,10 @@ for (const component of nativeComponents) {
   if (!target.startsWith("win32-")) FS.chmodSync(file, 0o755);
   FS.accessSync(file, target.startsWith("win32-") ? FS.constants.R_OK : FS.constants.X_OK);
 }
+nativeArtifactFiles(bin, target);
 
 if (mode === "--verify-binaries") {
-  console.log(`Verified ${nativeComponents.length} native executables for ${target}`);
+  console.log(`Verified ${components.length} native executables for ${target}`);
 } else {
   const requested = proofDirectory ?? process.env.T3_CODE_LS_HYBRID_PROOF_DIR;
   Assert.ok(

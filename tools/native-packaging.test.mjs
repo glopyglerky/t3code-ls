@@ -71,10 +71,11 @@ NodeTest.test(
 const NodeFS = require('node:fs'), p = require('node:path');
 const args = process.argv.slice(2);
 const packages = args.flatMap((arg, index) => arg === '-p' ? [args[index + 1]] : []);
+const optional = args.includes('--manifest-path') ? ['pty-host'] : [];
 const dir = p.join(args[args.indexOf('--target-dir') + 1], args[args.indexOf('--target') + 1], 'release');
 NodeFS.mkdirSync(dir, {recursive:true});
-for (const name of ${JSON.stringify(nativeComponents)}) {
-  if (!packages.includes(name === 'db' ? 't3-code-ls-storage' : 't3-code-ls-core')) continue;
+for (const name of [...${JSON.stringify(nativeComponents)}, ...optional]) {
+  if (name !== 'pty-host' && !packages.includes(name === 'db' ? 't3-code-ls-storage' : 't3-code-ls-core')) continue;
   NodeFS.writeFileSync(p.join(dir, 't3-code-ls-' + name), '#!/usr/bin/env node\\nconsole.log("fixture-component")\\n', {mode:0o755});
 }
 NodeFS.writeFileSync(p.join(dir, 'flags.json'), JSON.stringify(process.env.CARGO_ENCODED_RUSTFLAGS));
@@ -122,6 +123,30 @@ NodeFS.writeFileSync(p.join(dir, 'packages.json'), JSON.stringify(packages));
         ),
         inheritedFlags,
       );
+      NodeAssert.equal(Object.hasOwn(manifest.files, "t3-code-ls-pty-host"), false);
+      const optional = NodeChildProcess.spawnSync(
+        process.execPath,
+        [new URL("./build-native.mjs", import.meta.url).pathname, output],
+        { env: { ...env, T3_CODE_LS_BUNDLE_PTY_HOST: "1" }, encoding: "utf8" },
+      );
+      NodeAssert.equal(optional.status, 0, optional.stderr);
+      const optionalManifest = JSON.parse(NodeFS.readFileSync(NodePath.join(output, "manifest.json")));
+      NodeAssert.ok(Object.hasOwn(optionalManifest.files, "t3-code-ls-pty-host"));
+      const packagedPty = NodePath.join(output, "t3-code-ls-pty-host");
+      const originalPty = NodeFS.readFileSync(packagedPty);
+      const optionalStage = NodePath.join(root, "optional-archive/native-bin");
+      stageNativeArtifacts(output, optionalStage, "linux-x64");
+      NodeAssert.deepEqual(NodeFS.readFileSync(NodePath.join(optionalStage, "t3-code-ls-pty-host")), originalPty);
+      NodeFS.appendFileSync(packagedPty, "damaged");
+      NodeAssert.throws(() => stageNativeArtifacts(output, optionalStage, "linux-x64"), /hash mismatch/);
+      NodeFS.writeFileSync(packagedPty, originalPty, { mode: 0o755 });
+      const invalidOptional = NodeChildProcess.spawnSync(
+        process.execPath,
+        [new URL("./build-native.mjs", import.meta.url).pathname, output],
+        { env: { ...env, T3_CODE_LS_BUNDLE_PTY_HOST: "true" }, encoding: "utf8" },
+      );
+      NodeAssert.notEqual(invalidOptional.status, 0);
+      NodeAssert.match(invalidOptional.stderr, /must be 1/);
       const conflicting = NodeChildProcess.spawnSync(
         process.execPath,
         [new URL("./build-native.mjs", import.meta.url).pathname, output],

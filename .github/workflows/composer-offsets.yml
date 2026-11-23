@@ -200,6 +200,7 @@ jobs:
         if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
         env:
           T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
+          T3_CODE_LS_BUNDLED_PTY_PROOF: ${{ env.NATIVE_PTY_PROOF }}
           T3_CODE_LS_SPLICE_NEGOTIATION_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-splice-') }}
           T3_CODE_LS_SPLIT_PTY_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-') }}
           T3_CODE_LS_MULTI_TAB_DRAFT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-') }}
@@ -225,11 +226,15 @@ jobs:
             implementation=native
             export CARGO_HOME="$RUNNER_TEMP/bundled-cargo-home"
             export CARGO_TARGET_DIR="$RUNNER_TEMP/bundled-target"
+            if [[ "$NATIVE_PTY_PROOF" == true ]]; then export T3_CODE_LS_BUNDLE_PTY_HOST=1; fi
             T3_CODE_LS_IMPLEMENTATION=native node tools/build-native.mjs
             node tools/check-hybrid.mjs --verify-binaries
             T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$GITHUB_WORKSPACE/bin" \
               pnpm --dir apps/server run build:bundle
             sha256sum bin/manifest.json apps/server/dist/native-bin/manifest.json > "$proof/native.sha256"
+            if [[ "$NATIVE_PTY_PROOF" == true ]]; then
+              sha256sum apps/server/dist/native-bin/t3-code-ls-pty-host > "$proof/bundled-pty-host.sha256"
+            fi
           else
             env -u T3_CODE_LS_TOOLCHAIN -u T3_CODE_LS_SYSROOT T3_CODE_LS_IMPLEMENTATION=upstream \
               pnpm --dir apps/server run build:bundle
