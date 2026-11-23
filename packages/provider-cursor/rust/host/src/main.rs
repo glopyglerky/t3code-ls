@@ -89,6 +89,14 @@ fn main() {
             .ok_or("missing endpoint")?
             .parse()
             .map_err(|_| "invalid endpoint")?;
+        let cancel = match args.next().as_deref() {
+            None => None,
+            Some("cancel") => Some((
+                args.next().ok_or("missing agent")?,
+                args.next().ok_or("missing run")?,
+            )),
+            _ => return Err("unexpected arguments".into()),
+        };
         if args.next().is_some() {
             return Err("unexpected arguments".into());
         }
@@ -96,7 +104,17 @@ fn main() {
             .enable_all()
             .build()
             .map_err(|_| "runtime")?
-            .block_on(run(endpoint))
+            .block_on(async {
+                if let Some((agent, run_id)) = cancel {
+                    BridgeClient::new(endpoint)
+                        .map_err(|_| "invalid endpoint")?
+                        .cancel_run(&agent, &run_id)
+                        .await
+                        .map_err(|_| "cancel failed".into())
+                } else {
+                    run(endpoint).await
+                }
+            })
     })();
     if let Err(error) = result {
         eprintln!("cursor bridge host rejected request: {error}");
