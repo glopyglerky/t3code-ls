@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { LOCALES } from "../src/i18n/locales.ts";
+import { LOCALES, localizedHref } from "../src/i18n/locales.ts";
 
 const [dist, mode] = process.argv.slice(2);
 assert.ok(dist && (mode === "catalog" || mode === "unavailable"), "Expected DIST catalog|unavailable");
@@ -22,6 +22,14 @@ function getAnchor(html, target) {
 }
 
 for (const locale of LOCALES) {
+  const homePath = join(dist, locale.path, "index.html");
+  const home = readFileSync(homePath, "utf8");
+  const downloadHref = localizedHref(locale.code, "/download");
+  for (const id of ["download-btn", "cta-download-btn"]) {
+    const anchor = [...home.matchAll(/<a\s+[^>]*>/gu)].find(([tag]) => tag.includes(`id="${id}"`));
+    assert.ok(anchor?.[0].includes(`href="${downloadHref}"`), homePath);
+  }
+  console.log(`${createHash("sha256").update(home).digest("hex")}  ${homePath}`);
   const path = join(dist, locale.path, "download", "index.html");
   const html = readFileSync(path, "utf8");
   const repositoryLink = [...html.matchAll(/<a\s+[^>]*>/gu)].find(([tag]) => tag.includes('class="nav-stars"'));

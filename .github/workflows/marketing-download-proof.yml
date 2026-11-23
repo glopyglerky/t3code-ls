@@ -32,6 +32,7 @@ jobs:
           pnpm install --frozen-lockfile
       - name: Generate release links and verify the emitted localized HTML
         run: |
+          node --test apps/marketing/scripts/release-refresh.test.ts
           export CARGO_HOME="$RUNNER_TEMP/marketing-cargo-home"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/marketing-target"
           lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
