@@ -624,9 +624,9 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
         },
         "target_schema_sha256": sha256(definition),
     });
-    let prepare = |request: &Value| {
+    let run_trial = |operation: &str, request: &Value| {
         let mut child = Command::new(executable)
-            .arg("trial-prepare-isolated")
+            .arg(operation)
             .arg(&home)
             .arg(UPDATE)
             .stdin(Stdio::piped())
@@ -641,6 +641,13 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
             1
         );
         serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    let prepare = |request: &Value| run_trial("trial-prepare-isolated", request);
+    let verify = |request: &Value, preparation: &Value| {
+        run_trial(
+            "trial-verify-isolated",
+            &json!({"request": request, "preparation": preparation}),
+        )
     };
     let checkpoint = runtime.join(format!("native-db-backup/{UPDATE}.omdb"));
     let trial = state.join(format!(".statev2-trial-{UPDATE}.omdb"));
@@ -690,6 +697,7 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
     );
     assert!(!trial.exists());
 
+    let mut previous_preparation = None;
     for _ in 0..2 {
         let prepared = prepare(&request);
         assert_eq!(prepared["ok"], true, "{prepared}");
@@ -697,6 +705,27 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
         assert_eq!(prepared["result"]["snapshot"], request["checkpoint"]);
         let trial_bytes = fs::read(&trial).unwrap();
         assert_eq!(prepared["result"]["file_sha256"], sha256(&trial_bytes));
+        let receipt = &prepared["result"];
+        assert_eq!(
+            verify(&request, receipt),
+            json!({"ok": true, "result": {"verified": true}})
+        );
+        assert_eq!(fs::read(&trial).unwrap(), trial_bytes);
+        let mut broken = receipt.clone();
+        broken["file_sha256"] = json!("0".repeat(64));
+        assert_eq!(
+            verify(&request, &broken)["error"]["kind"],
+            "incompatible_store"
+        );
+        if let Some(previous) = previous_preparation.replace(receipt.clone()) {
+            assert_eq!(
+                verify(&request, &previous)["error"]["kind"],
+                "incompatible_store"
+            );
+        }
+        let owner = OwnerLock::acquire(&owner_path).unwrap();
+        assert_eq!(verify(&request, receipt)["error"]["kind"], "writer_busy");
+        drop(owner);
         let reopened = Store::open_read_only(&trial).await.unwrap();
         assert!(reopened.read_receipt("original").await.unwrap().is_some());
         assert!(

@@ -54,44 +54,88 @@ fn disposable_file_exists(path: &Path) -> Result<bool> {
     }
 }
 
+struct TrialLease {
+    home: PathBuf,
+    live: TrialInput,
+    checkpoint: TrialInput,
+    trial: PathBuf,
+    owner: OwnerLock,
+    directories: TrialRestoreDirectories,
+}
+
+impl TrialLease {
+    async fn open(home: PathBuf, request: &IsolatedTrialRequest) -> Result<Self> {
+        if request.target_schema_sha256 != bootstrap_schema_sha256() {
+            return Err(Error::IncompatibleStore);
+        }
+        let directories = TrialRestoreDirectories::open(&home)?;
+        let state = TrialRestoreDirectories::pinned(&directories.state);
+        let backups = TrialRestoreDirectories::pinned(&directories.backups);
+        let owner = OwnerLock::acquire_existing_native(&state.join("server-owner.sqlite"))?;
+        let live = TrialInput::open(state.join("statev2.omdb"), &request.checkpoint).await?;
+        if live.identity != request.database {
+            return Err(Error::IncompatibleStore);
+        }
+        let checkpoint = TrialInput::open(
+            backups.join(format!("{}.omdb", request.update_id)),
+            &request.checkpoint,
+        )
+        .await?;
+        let lease = Self {
+            home,
+            live,
+            checkpoint,
+            trial: state.join(format!(".statev2-trial-{}.omdb", request.update_id)),
+            owner,
+            directories,
+        };
+        lease.verify_inputs()?;
+        Ok(lease)
+    }
+
+    fn verify_inputs(&self) -> Result<()> {
+        self.directories.verify(&self.home)?;
+        self.owner.verify_native()?;
+        self.live.verify()?;
+        self.checkpoint.verify()
+    }
+}
+
+pub(super) async fn verify(
+    home: PathBuf,
+    request: IsolatedTrialRequest,
+    preparation: IsolatedTrialPreparation,
+) -> Result<()> {
+    let lease = TrialLease::open(home, &request).await?;
+    let candidate = TrialInput::open(lease.trial.clone(), &preparation.snapshot).await?;
+    if candidate.identity != preparation.database || candidate.sha256 != preparation.file_sha256 {
+        return Err(Error::IncompatibleStore);
+    }
+    candidate.store.verify_bootstrap_schema().await?;
+    lease.verify_inputs()?;
+    candidate.verify()
+}
+
 pub(super) async fn prepare(
     home: PathBuf,
     request: IsolatedTrialRequest,
 ) -> Result<IsolatedTrialPreparation> {
-    if request.target_schema_sha256 != bootstrap_schema_sha256() {
-        return Err(Error::IncompatibleStore);
-    }
-    let directories = TrialRestoreDirectories::open(&home)?;
-    let state = TrialRestoreDirectories::pinned(&directories.state);
-    let backups = TrialRestoreDirectories::pinned(&directories.backups);
-    let owner = OwnerLock::acquire_existing_native(&state.join("server-owner.sqlite"))?;
-    let live = TrialInput::open(state.join("statev2.omdb"), &request.checkpoint).await?;
-    if live.identity != request.database {
-        return Err(Error::IncompatibleStore);
-    }
-    let checkpoint = TrialInput::open(
-        backups.join(format!("{}.omdb", request.update_id)),
-        &request.checkpoint,
-    )
-    .await?;
-    let verify_inputs = || {
-        directories.verify(&home)?;
-        owner.verify_native()?;
-        live.verify()?;
-        checkpoint.verify()
-    };
-
-    let trial = state.join(format!(".statev2-trial-{}.omdb", request.update_id));
+    let lease = TrialLease::open(home, &request).await?;
+    let trial = &lease.trial;
     let working = trial.with_extension("staging");
-    verify_inputs()?;
-    disposable_file_exists(&trial)?;
+    disposable_file_exists(trial)?;
     // An interrupted bootstrap may have partially changed its copy. Start
     // each attempt from the same checkpoint and leave the preceding result
     // available until a new candidate has been verified.
     if disposable_file_exists(&working)? {
         fs::remove_file(&working).map_err(io_error)?;
     }
-    let (fingerprint, copied) = checkpoint.store.db.storage_backup(working.clone()).await?;
+    let (fingerprint, copied) = lease
+        .checkpoint
+        .store
+        .db
+        .storage_backup(working.clone())
+        .await?;
     if fingerprint.rows != request.checkpoint.rows
         || fingerprint.checksum != request.checkpoint.checksum
     {
@@ -126,18 +170,19 @@ pub(super) async fn prepare(
     let file_sha256 = trial_file_digest(&file)?;
     file.sync_all().map_err(io_error)?;
 
-    verify_inputs()?;
-    disposable_file_exists(&trial)?;
+    lease.verify_inputs()?;
+    disposable_file_exists(trial)?;
     candidate.db.verify_identity()?;
-    fs::rename(&working, &trial).map_err(io_error)?;
-    directories
+    fs::rename(&working, trial).map_err(io_error)?;
+    lease
+        .directories
         .state
         .sync_all()
         .map_err(|_| Error::UnknownCommit)?;
-    verify_inputs().map_err(|_| Error::UnknownCommit)?;
+    lease.verify_inputs().map_err(|_| Error::UnknownCommit)?;
     let published = candidate
         .db
-        .open_verified_offline_file(&trial)
+        .open_verified_offline_file(trial)
         .map_err(|_| Error::UnknownCommit)?;
     if trial_file_identity(&published).map_err(|_| Error::UnknownCommit)? != (database.clone(), 1) {
         return Err(Error::UnknownCommit);

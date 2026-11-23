@@ -30,9 +30,9 @@ use t3_code_ls_storage::application_runtime_state::RuntimeStateOperation;
 use t3_code_ls_storage::application_scheduled::{ScheduledRead, ScheduledWrite};
 use t3_code_ls_storage::application_search::ThreadSearchQuery;
 use t3_code_ls_storage::application_storage::{
-    IsolatedTrialRequest, TrialRestorePublicationRequest, TrialRestoreRequest,
-    backup_service_trial, prepare_isolated_service_trial, prepare_service_trial_restore,
-    publish_service_trial_restore,
+    IsolatedTrialRequest, IsolatedTrialVerification, TrialRestorePublicationRequest,
+    TrialRestoreRequest, backup_service_trial, prepare_isolated_service_trial,
+    prepare_service_trial_restore, publish_service_trial_restore, verify_isolated_service_trial,
 };
 use t3_code_ls_storage::application_thread_find::ThreadFindQuery;
 use t3_code_ls_storage::outbox::{self, EnqueueEffect};
@@ -1584,6 +1584,21 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Err(error) => error_response(&error),
             },
         ),
+        [mode, home, update_id] if mode == "trial-verify-isolated" => Some(
+            match read_trial_request::<IsolatedTrialVerification>(
+                "invalid isolated trial verification",
+            )? {
+                Ok(request) => {
+                    match verify_isolated_service_trial(home.into(), update_id.clone(), request)
+                        .await
+                    {
+                        Ok(()) => json!({"ok": true, "result": {"verified": true}}),
+                        Err(error) => error_response(&error),
+                    }
+                }
+                Err(error) => error_response(&error),
+            },
+        ),
         [mode, home, update_id] if mode == "trial-publish-restore-offline" => Some(
             match read_trial_request::<TrialRestorePublicationRequest>(
                 "invalid trial restore request",
@@ -1621,7 +1636,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         [mode, path] if mode == "exclusive-local" => Store::open_exclusive(path).await,
         _ => {
             return Err(Error::Invalid(
-                "usage: t3-code-ls-db initialize-local PATH | local PATH | read-only-local PATH | exclusive-local PATH | owner-lock PATH | trial-backup HOME UPDATE_ID CATALOG_SHA256 | trial-prepare-isolated HOME UPDATE_ID < REQUEST_JSON | trial-prepare-restore HOME UPDATE_ID < REQUEST_JSON | trial-publish-restore-offline HOME UPDATE_ID < WITNESSED_REQUEST_JSON".into(),
+                "usage: t3-code-ls-db initialize-local PATH | local PATH | read-only-local PATH | exclusive-local PATH | owner-lock PATH | trial-backup HOME UPDATE_ID CATALOG_SHA256 | trial-prepare-isolated HOME UPDATE_ID < REQUEST_JSON | trial-verify-isolated HOME UPDATE_ID < RECEIPT_JSON | trial-prepare-restore HOME UPDATE_ID < REQUEST_JSON | trial-publish-restore-offline HOME UPDATE_ID < WITNESSED_REQUEST_JSON".into(),
             )
             .into());
         }
