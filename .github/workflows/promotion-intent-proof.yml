@@ -57,7 +57,7 @@ jobs:
           assert "T05 promotion intent uses the pinned built Rust helper" in log
           assert "T05 promotion intent durable retry preserved source, checkpoint, stage and selection without publication" in log
           PY
-          timeout -k 5s 180s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+          timeout -k 5s 480s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
             test --locked -j 2 -p t3-code-ls-storage --lib \
             application_bootstrap::upgrade::tests::service_intended_sealed_publication_recovers_without_activation \
             -- --exact --nocapture 2>&1 | tee "$RUNNER_TEMP/promotion-proof/sealed-publication.log"

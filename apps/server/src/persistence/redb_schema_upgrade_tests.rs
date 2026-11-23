@@ -1334,7 +1334,12 @@ async fn service_intended_sealed_publication_recovers_without_activation() {
         ("intended-renamed", false),
         ("sealed-phase-published-durable", false),
     ] {
+        println!("T05 checking sealed publication interruption at {}", case.0);
         promotion_intent_fixture(Some(case)).await;
+        println!(
+            "T05 recovered sealed publication interruption at {}",
+            case.0
+        );
     }
     println!(
         "T05 intended sealed publication recovered exact phases and rollback without selecting or serving"
