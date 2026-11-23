@@ -24,6 +24,13 @@ fn discover(cwd: &Path) -> Option<RepositoryPaths> {
             .bail_if_untrusted(true),
     )
     .ok()?;
+    let snapshot = repo.config_snapshot();
+    let config = snapshot.plumbing();
+    if config.sections_by_name("include").is_some()
+        || config.sections_by_name("includeIf").is_some()
+    {
+        return None;
+    }
     let worktree = repo.workdir()?.canonicalize().ok()?;
     let common_dir = repo.common_dir().canonicalize().ok()?;
     let head = repo.head_name().ok()?;

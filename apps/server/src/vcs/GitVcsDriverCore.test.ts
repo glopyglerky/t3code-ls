@@ -718,7 +718,6 @@ it.effect.skipIf(gixFixture === undefined)(
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const delegate = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const env = yield* HostProcess.Environment;
     const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
     const spawner = ChildProcessSpawner.make((command) => {
       if (ChildProcess.isStandardCommand(command)) {
@@ -726,14 +725,15 @@ it.effect.skipIf(gixFixture === undefined)(
       }
       return delegate.spawn(command);
     });
-    const native = yield* makeGitVcsDriverCore().pipe(
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      Effect.provideService(HostProcess.Environment, {
-        ...env,
-        T3_CODE_LS_IMPLEMENTATION: "native",
-        T3_CODE_LS_GIT_WORKSPACE_EXECUTABLE: gixFixture,
-      }),
-    );
+    const makeNative = (environment: NodeJS.ProcessEnv) => makeGitVcsDriverCore().pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(HostProcess.Environment, {
+          ...environment,
+          T3_CODE_LS_IMPLEMENTATION: "native",
+          T3_CODE_LS_GIT_WORKSPACE_EXECUTABLE: gixFixture,
+        }),
+      );
+    const native = yield* makeNative({});
     const scratch = yield* makeTmpDir("git-native-workspace-");
     const cwd = path.join(scratch, "checkout \n");
     const nested = path.join(cwd, "nested");
@@ -767,11 +767,19 @@ it.effect.skipIf(gixFixture === undefined)(
     yield* native.switchRef({ cwd: linked, refName: yield* git(linked, ["rev-parse", "HEAD"]) });
     const detached = yield* native.listRefs({ cwd: linked, refresh: true });
     assert.isFalse(detached.refs.some((ref) => ref.current));
+    const configured = yield* makeNative({ GIT_CONFIG_COUNT: "0" });
+    const configuredStart = calls.length;
+    assert.deepEqual((yield* configured.listRefs({ cwd: linked })).refs, detached.refs);
+    assert.isFalse(calls.slice(configuredStart).some((call) => call.command === gixFixture));
     const badConfigProbe = path.join(cwd, "bad-config-probe");
     yield* fs.makeDirectory(badConfigProbe);
-    yield* fs.writeFileString(path.join(cwd, ".git", "config"), "[bad\n");
+    const configFile = path.join(cwd, ".git", "config");
+    const config = yield* fs.readFileString(configFile);
+    yield* fs.writeFileString(path.join(cwd, ".git", "fixture-include"), "[bad\n");
+    yield* fs.writeFileString(configFile, `${config}\n[include]\npath = fixture-include\n`);
     const before = calls.length;
     assert.isTrue(Exit.isFailure(yield* Effect.exit(native.listRefs({ cwd: badConfigProbe }))));
+    assert.equal(calls.slice(before).filter((call) => call.command === gixFixture).length, 1);
     assert.isTrue(calls.slice(before).some((call) => call.args.includes("--git-common-dir")));
   })).pipe(Effect.provide(layerTest)),
 );

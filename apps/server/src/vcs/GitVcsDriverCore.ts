@@ -982,8 +982,14 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const hostPlatform = yield* HostProcess.Platform;
   const environment = yield* HostProcess.Environment;
   const gixExecutable = environment.T3_CODE_LS_GIT_WORKSPACE_EXECUTABLE;
+  const gitDiscoveryOverrides = Object.keys(environment).some((name) =>
+    name.startsWith("GIT_CONFIG") ||
+    name === "GIT_NAMESPACE" ||
+    name === "GIT_CEILING_DIRECTORIES" ||
+    name === "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+  );
   const gixRunner = hostPlatform === "linux" && environment.T3_CODE_LS_IMPLEMENTATION !== "upstream" &&
-    gixExecutable !== undefined && path.isAbsolute(gixExecutable)
+    gixExecutable !== undefined && path.isAbsolute(gixExecutable) && !gitDiscoveryOverrides
     ? yield* ProcessRunner.make()
     : undefined;
   const serviceScope = yield* Effect.scope;
