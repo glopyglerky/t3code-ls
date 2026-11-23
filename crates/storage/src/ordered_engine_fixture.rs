@@ -394,3 +394,164 @@ async fn ordered_engines_apply_an_uncommitted_application_command()
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn ordered_engines_decode_application_reads_from_a_held_candidate_snapshot()
+-> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    store.bootstrap_application().await?;
+    store.prepare_application_events().await?;
+    store.prepare_application_receipts().await?;
+    let mut app = ApplicationTransactions::new(store.clone());
+    let receipt = ReceiptRow {
+        command_id: COMMAND.into(),
+        aggregate_kind: "thread".into(),
+        aggregate_id: THREAD.into(),
+        command_type: "fixture.command".into(),
+        accepted_at: TIME.into(),
+        result_sequence: 3,
+        status: "accepted".into(),
+        error: None,
+    };
+    app.begin("seed").await?;
+    assert!(app.receipts_insert("seed", receipt.clone()).await?);
+    for sequence in 1..=3 {
+        app.events_append("seed", event(sequence), None).await?;
+    }
+    app.commit("seed").await?;
+    let (start, end) = prefix_range("");
+    let mut source = store.db.begin_read_only().await?;
+    let seed = source.scan(&start, &end, MAX_FIXTURE_ROWS + 1).await?;
+    assert!(seed.len() <= MAX_FIXTURE_ROWS);
+    assert!(seed.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() < MAX_FIXTURE_BYTES);
+    source.rollback().await?;
+    let catalog = decode_catalog(&seed.iter().find(|(k, _)| *k == schema_key()).unwrap().1)?;
+    let receipt_key = row_key(&catalog.generation, RECEIPTS, &[text_cell(COMMAND)])?;
+    let missing = store_key("comparison/missing");
+    // Make the source differ from the candidate seed. Candidate reads must
+    // return the seeded result, even while the helper retains a source handle.
+    app.begin("source-only").await?;
+    let mut source_receipt = receipt.clone();
+    source_receipt.result_sequence = 99;
+    app.receipts_upsert("source-only", source_receipt).await?;
+    app.commit("source-only").await?;
+
+    for (engine, name) in [
+        (Engine::Fjall, "snapshot.fjall"),
+        (Engine::DirectRedb, "snapshot.redb"),
+    ] {
+        let comparison = Database::open(engine, &fixture.path().with_file_name(name))?;
+        comparison.write(|tx| {
+            for (key, value) in &seed {
+                tx.put(key, value)?;
+            }
+            Ok::<_, Error>(())
+        })?;
+        app.begin_comparison_read("held", comparison.snapshot()?)
+            .await?;
+        assert!(!app.has_active_writer());
+        assert!(
+            app.begin_comparison_read("held", comparison.snapshot()?)
+                .await
+                .is_err()
+        );
+        // No receipt/event read has occurred in this session yet. A later read
+        // must use the held engine snapshot, rather than a fresh read or cache.
+        let removed = receipt_key.clone();
+        let comparison = std::thread::spawn(move || {
+            comparison.write(|tx| tx.delete(&removed))?;
+            Ok::<_, Error>(comparison)
+        })
+        .join()
+        .expect("comparison writer panicked")?;
+        assert_eq!(
+            app.receipts_get("held", COMMAND).await?,
+            Some(receipt.clone())
+        );
+        let history = app
+            .events_read(
+                "held",
+                EventRead {
+                    after_sequence: 0,
+                    through_sequence: Some(3),
+                    thread_id: Some(THREAD.into()),
+                    command_id: Some(COMMAND.into()),
+                    event_type: None,
+                    only_agent_events: None,
+                    limit: 8,
+                },
+            )
+            .await?;
+        assert_eq!(
+            history.iter().map(|row| row.sequence).collect::<Vec<_>>(),
+            [1, 2, 3]
+        );
+        for (index, row) in history.iter().enumerate() {
+            assert_eq!(row.payload_json, event(index as i64 + 1).payload_json);
+        }
+        let mut session = app.take("held")?;
+        assert_eq!(
+            session
+                .transaction
+                .scan(&start, &end, MAX_FIXTURE_ROWS + 1)
+                .await?,
+            seed
+        );
+        let values = session
+            .transaction
+            .get_many(&[receipt_key.clone(), missing.clone(), receipt_key.clone()])
+            .await?;
+        assert!(values[0].is_some());
+        assert_eq!(values[0], values[2]);
+        assert_eq!(values[1], None);
+        assert!(session.transaction.get_many(&[]).await?.is_empty());
+        assert!(session.transaction.scan(&end, &start, 1).await.is_err());
+        app.finish("held", session, Ok(())).await?;
+        // Read-only savepoints use the same failure/rollback rules. No staged
+        // write is admitted, so this does not claim candidate read-your-writes.
+        app.savepoint("held", "nested").await?;
+        assert!(matches!(
+            app.receipts_upsert("held", receipt.clone()).await,
+            Err(crate::Error::Invalid(_))
+        ));
+        assert!(app.receipts_get("held", COMMAND).await.is_err());
+        app.rollback_to("held", "nested").await?;
+        app.release("held", "nested").await?;
+        assert_eq!(
+            app.receipts_get("held", COMMAND).await?,
+            Some(receipt.clone())
+        );
+        app.rollback("held").await?;
+        assert!(app.receipts_get("held", COMMAND).await.is_err());
+        app.begin_comparison_read("fresh", comparison.snapshot()?)
+            .await?;
+        assert_eq!(app.receipts_get("fresh", COMMAND).await?, None);
+        app.commit("fresh").await?; // Read-only commit only releases the snapshot.
+        assert_eq!(comparison.snapshot()?.get(&receipt_key)?, None);
+        // Engine metadata is verified even on a catalog cache hit. These copied
+        // bytes describe the source generation, never the comparison engine.
+        let identity_key = store_key(&format!(
+            "application/generation/{}/metadata/engine-layout",
+            catalog.generation,
+        ));
+        comparison.write(|tx| tx.put(&identity_key, b"{}"))?;
+        assert!(matches!(
+            app.begin_comparison_read("bad-identity", comparison.snapshot()?)
+                .await,
+            Err(crate::Error::IncompatibleStore)
+        ));
+        let identity = &seed.iter().find(|(key, _)| *key == identity_key).unwrap().1;
+        comparison.write(|tx| tx.put(&identity_key, identity))?;
+        // Catalog decoding is shared too; a bad catalog cannot use the cache.
+        comparison.write(|tx| tx.put(&schema_key(), b"invalid catalog"))?;
+        assert!(matches!(
+            app.begin_comparison_read("bad", comparison.snapshot()?)
+                .await,
+            Err(crate::Error::IncompatibleStore)
+        ));
+    }
+    drop(app);
+    store.shutdown().await?;
+    Ok(())
+}

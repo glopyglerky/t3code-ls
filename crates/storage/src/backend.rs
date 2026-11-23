@@ -917,7 +917,7 @@ impl Backend {
             .map_err(worker_error)??;
         Ok(Transaction {
             backend: self.clone(),
-            snapshot: Arc::new(snapshot),
+            snapshot: TransactionSnapshot::Omdb(Arc::new(snapshot)),
             reads: BTreeMap::new(),
             mutation_reads: BTreeMap::new(),
             writes: BTreeMap::new(),
@@ -963,7 +963,7 @@ impl Backend {
         let snapshot = snapshot.await.map_err(worker_error_from_channel)??;
         Ok(Transaction {
             backend: self.clone(),
-            snapshot,
+            snapshot: TransactionSnapshot::Omdb(snapshot),
             reads: BTreeMap::new(),
             mutation_reads: BTreeMap::new(),
             writes: BTreeMap::new(),
@@ -1044,9 +1044,26 @@ struct ObservedRange {
     rows: Vec<Pair>,
 }
 
+#[derive(Clone)]
+enum TransactionSnapshot {
+    Omdb(Arc<ReadTransaction>),
+    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    Comparison(Arc<redb_bench_compare::ordered::Snapshot>),
+}
+
+impl TransactionSnapshot {
+    fn omdb(&self) -> Result<Arc<ReadTransaction>> {
+        match self {
+            Self::Omdb(snapshot) => Ok(Arc::clone(snapshot)),
+            #[cfg(all(test, feature = "ordered-engine-fixture"))]
+            Self::Comparison(_) => Err(Error::Invalid("comparison snapshot is read-only".into())),
+        }
+    }
+}
+
 pub(crate) struct Transaction {
     backend: Backend,
-    snapshot: Arc<ReadTransaction>,
+    snapshot: TransactionSnapshot,
     reads: BTreeMap<Vec<u8>, Option<Vec<u8>>>,
     mutation_reads: BTreeMap<Vec<u8>, Option<(usize, [u8; 32])>>,
     writes: BTreeMap<Vec<u8>, Option<Vec<u8>>>,
@@ -1072,6 +1089,28 @@ pub(crate) struct TransactionCheckpoint {
 }
 
 impl Transaction {
+    /// Comparison snapshots never acquire a source snapshot or a writer. The
+    /// backend handle is retained only to fit the existing transaction owner.
+    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    pub(crate) fn comparison_read_only(
+        backend: Backend,
+        snapshot: redb_bench_compare::ordered::Snapshot,
+    ) -> Self {
+        Self {
+            backend,
+            snapshot: TransactionSnapshot::Comparison(Arc::new(snapshot)),
+            reads: BTreeMap::new(),
+            mutation_reads: BTreeMap::new(),
+            writes: BTreeMap::new(),
+            staged_bytes: 0,
+            observed_bytes: 0,
+            observed_records: 0,
+            ranges: Vec::new(),
+            reserved: None,
+            read_only: true,
+        }
+    }
+
     pub(crate) fn is_active(&self) -> bool {
         self.reserved.as_ref().is_none_or(|reserved| {
             !reserved
@@ -1136,8 +1175,16 @@ impl Transaction {
         if let Some(value) = self.writes.get(key).or_else(|| self.reads.get(key)) {
             return Ok(value.clone());
         }
+        #[cfg(all(test, feature = "ordered-engine-fixture"))]
+        if let TransactionSnapshot::Comparison(snapshot) = &self.snapshot {
+            let snapshot = Arc::clone(snapshot);
+            let key = key.to_vec();
+            return tokio::task::spawn_blocking(move || snapshot.get(&key).map_err(Error::from))
+                .await
+                .map_err(worker_error)?;
+        }
         let owned_key = key.to_vec();
-        let snapshot = self.snapshot.clone();
+        let snapshot = self.snapshot.omdb()?;
         let value = tokio::task::spawn_blocking(move || {
             let table = snapshot.open_table(TABLE).map_err(storage_error)?;
             let value = table.get(owned_key.as_slice()).map_err(storage_error)?;
@@ -1219,7 +1266,7 @@ impl Transaction {
         if self.reads.contains_key(key) || self.mutation_reads.contains_key(key) {
             return Ok(());
         }
-        let snapshot = self.snapshot.clone();
+        let snapshot = self.snapshot.omdb()?;
         let owned_key = key.to_vec();
         let observed = tokio::task::spawn_blocking(move || {
             let table = snapshot.open_table(TABLE).map_err(storage_error)?;
@@ -1240,11 +1287,34 @@ impl Transaction {
     /// Fetch a previously size-checked set of values in one blocking operation.
     pub(crate) async fn get_many(&mut self, keys: &[Vec<u8>]) -> Result<Vec<Option<Vec<u8>>>> {
         self.ensure_active()?;
+        #[cfg(all(test, feature = "ordered-engine-fixture"))]
+        if let TransactionSnapshot::Comparison(snapshot) = &self.snapshot {
+            if keys.len() > MAX_BATCH_RECORDS {
+                return Err(Error::ResourceLimit(ResourceLimit::ReadBytes));
+            }
+            let snapshot = Arc::clone(snapshot);
+            let keys = keys.to_vec();
+            return tokio::task::spawn_blocking(move || {
+                let mut bytes = 0usize;
+                let mut values = Vec::with_capacity(keys.len());
+                for key in keys {
+                    let value = snapshot.get(&key).map_err(Error::from)?;
+                    bytes = bytes.saturating_add(value.as_ref().map_or(0, Vec::len));
+                    if bytes > MAX_BATCH_BYTES {
+                        return Err(Error::ResourceLimit(ResourceLimit::ReadBytes));
+                    }
+                    values.push(value);
+                }
+                Ok(values)
+            })
+            .await
+            .map_err(worker_error)?;
+        }
         if self.read_only {
             if keys.len() > MAX_BATCH_RECORDS {
                 return Err(Error::ResourceLimit(ResourceLimit::ReadBytes));
             }
-            let snapshot = self.snapshot.clone();
+            let snapshot = self.snapshot.omdb()?;
             let keys = keys.to_vec();
             return tokio::task::spawn_blocking(move || {
                 let table = snapshot.open_table(TABLE).map_err(storage_error)?;
@@ -1271,7 +1341,7 @@ impl Transaction {
             .cloned()
             .collect();
         if !missing.is_empty() {
-            let snapshot = self.snapshot.clone();
+            let snapshot = self.snapshot.omdb()?;
             let loaded = tokio::task::spawn_blocking(move || {
                 let table = snapshot.open_table(TABLE).map_err(storage_error)?;
                 let mut total = 0usize;
@@ -1325,13 +1395,24 @@ impl Transaction {
         if start >= end || limit == 0 {
             return Err(Error::Invalid("invalid database scan".into()));
         }
+        #[cfg(all(test, feature = "ordered-engine-fixture"))]
+        if let TransactionSnapshot::Comparison(snapshot) = &self.snapshot {
+            let snapshot = Arc::clone(snapshot);
+            let start = start.to_vec();
+            let end = end.to_vec();
+            return tokio::task::spawn_blocking(move || {
+                snapshot.scan(&start, &end, limit).map_err(Error::from)
+            })
+            .await
+            .map_err(worker_error)?;
+        }
         let pending = self.writes.range(start.to_vec()..end.to_vec()).count();
         let fetch_limit = limit
             .checked_add(pending)
             .ok_or_else(|| Error::Invalid("database scan limit overflow".into()))?;
         let owned_start = start.to_vec();
         let owned_end = end.to_vec();
-        let snapshot = self.snapshot.clone();
+        let snapshot = self.snapshot.omdb()?;
         let rows = tokio::task::spawn_blocking(move || {
             let table = snapshot.open_table(TABLE).map_err(storage_error)?;
             scan_table(&table, &owned_start, &owned_end, fetch_limit)

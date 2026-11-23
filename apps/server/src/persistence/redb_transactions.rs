@@ -575,6 +575,14 @@ impl ApplicationTransactions {
                 "writer acquisition timeout must be between 1 and 30000 milliseconds",
             ));
         }
+        self.check_new_session(transaction_id)?;
+        let session = self.open_session(mode, lock_timeout_ms).await?;
+        self.sessions.insert(transaction_id.into(), session);
+        Ok(())
+    }
+
+    fn check_new_session(&mut self, transaction_id: &str) -> Result<()> {
+        validate_transaction_id(transaction_id)?;
         self.expire();
         if self.sessions.contains_key(transaction_id) {
             return Err(invalid("application transaction already exists"));
@@ -582,7 +590,20 @@ impl ApplicationTransactions {
         if self.sessions.len() >= MAX_SESSIONS {
             return Err(invalid("too many application transactions"));
         }
-        let session = self.open_session(mode, lock_timeout_ms).await?;
+        Ok(())
+    }
+
+    /// Decode comparison bytes with the real application read APIs. This does
+    /// not validate or activate the candidate as a production storage engine.
+    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    pub(crate) async fn begin_comparison_read(
+        &mut self,
+        transaction_id: &str,
+        snapshot: redb_bench_compare::ordered::Snapshot,
+    ) -> Result<()> {
+        self.check_new_session(transaction_id)?;
+        let transaction = Transaction::comparison_read_only(self.store.db.clone(), snapshot);
+        let session = self.session_from_transaction(transaction).await?;
         self.sessions.insert(transaction_id.into(), session);
         Ok(())
     }
@@ -597,7 +618,7 @@ impl ApplicationTransactions {
         mode: ApplicationTransactionMode,
         lock_timeout_ms: u64,
     ) -> Result<Session> {
-        let mut transaction = match mode {
+        let transaction = match mode {
             ApplicationTransactionMode::Read => self.store.db.begin_read_only().await?,
             ApplicationTransactionMode::Write => {
                 self.store
@@ -606,6 +627,10 @@ impl ApplicationTransactions {
                     .await?
             }
         };
+        self.session_from_transaction(transaction).await
+    }
+
+    async fn session_from_transaction(&mut self, mut transaction: Transaction) -> Result<Session> {
         let bytes = transaction
             .get(&schema_key())
             .await?
