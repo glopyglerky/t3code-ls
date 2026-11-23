@@ -8,9 +8,11 @@ import * as OS from "node:os";
 import * as Path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
-const [phase, proofArgument] = process.argv.slice(2);
+const [phase, proofArgument, variant] = process.argv.slice(2);
 Assert.ok(phase === "admit" || phase === "run");
-Assert.equal(process.argv.length, 4);
+const normalApp = variant === "--normal-app";
+Assert.ok(variant === undefined || (phase === "run" && normalApp), "Invalid proof variant");
+Assert.equal(process.argv.length, normalApp ? 5 : 4);
 Assert.equal(process.env.GITHUB_ACTIONS, "true", "Only the admitted hosted lane may operate this fixture");
 Assert.equal(process.platform, "linux");
 Assert.equal(process.arch, "x64");
@@ -62,7 +64,8 @@ let ownsScratch = false;
 let ownsAdb = false;
 let failure: unknown;
 
-type FixturePhase = "seed" | "reopen-remove" | "reopen-empty";
+type FixturePhase = "seed" | "seed-creation" | "reopen-remove" | "reopen-empty";
+const pendingTaskTitle = "T12 offline pending task";
 
 const launchedPids = new Set<string>();
 
@@ -132,7 +135,7 @@ function assertCompleted(receipt: Record<string, unknown>) {
   Assert.equal(receipt.checkpoint, "complete");
 }
 
-function assertSeededDraft(receipt: Record<string, unknown>) {
+function assertSeededDraft(receipt: Record<string, unknown>, isCreation = false) {
   const attachmentBytes = Buffer.from("T12 offline attachment\nπ 🙂\n", "utf8");
   Assert.equal(receipt.threadKey, "t12-offline-environment:t12-offline-thread");
   Assert.equal(receipt.attachmentBase64, attachmentBytes.toString("base64"));
@@ -153,7 +156,7 @@ function assertSeededDraft(receipt: Record<string, unknown>) {
     threadId: "t12-offline-thread",
     messageId: "t12-offline-message",
     commandId: "t12-offline-command",
-    text: "T12 offline draft",
+    text: isCreation ? pendingTaskTitle : "T12 offline draft",
     attachments: [{
       id: attachment.id,
       type: "file",
@@ -165,7 +168,90 @@ function assertSeededDraft(receipt: Record<string, unknown>) {
     }],
     dispatchMode: "queue",
     createdAt: "2026-01-01T00:00:00.000Z",
+    ...(isCreation ? {
+      creation: {
+        projectId: "t12-offline-project",
+        projectTitle: "Fixture project",
+        workspaceMode: "local",
+        branch: null,
+        worktreePath: null,
+      },
+    } : {}),
   });
+}
+
+async function verifyNormalApp(positiveApk: string) {
+  checkpoint("normal-app:package");
+  const apk = Path.join(temporary, "outbox-runtime-normal.apk");
+  const members = run("unzip", ["-Z1", apk]).stdout.split("\n");
+  Assert.ok(members.includes("assets/index.android.bundle"));
+  const library = ChildProcess.execFileSync("unzip", ["-p", apk, "lib/x86_64/libt3_outbox.so"], {
+    env: commandEnvironment, timeout: 30_000, maxBuffer: 16_777_216,
+  });
+  Assert.equal(Crypto.createHash("sha256").update(library).digest("hex"), report.packagedLibrarySha256);
+  const hash = Crypto.createHash("sha256");
+  for await (const data of FS.createReadStream(apk)) hash.update(data);
+  report.normalApkSha256 = hash.digest("hex");
+  Assert.notEqual(report.normalApkSha256, report.positiveApkSha256);
+
+  const seeded = await launchFixture("normal-app-seed", "seed-creation");
+  assertCompleted(seeded.receipt);
+  assertSeededDraft(seeded.receipt, true);
+  await stopFixture("normal-app-seed", seeded.pid);
+
+  checkpoint("normal-app:install-and-launch");
+  run(adb, ["-s", serial, "install", "-r", "-g", "--no-streaming", apk], { timeout: 120_000 });
+  device(["logcat", "-c"]);
+  device(["shell", "am", "start", "-W", "-n", `${packageName}/.MainActivity`]);
+  const pid = fixturePid();
+  Assert.ok(pid !== null && !launchedPids.has(pid), "Expected a fresh process for the normal app");
+  launchedPids.add(pid);
+  report["normal-appProcess"] = { pid, stopped: false };
+
+  checkpoint("normal-app:await-pending-task");
+  const hierarchyFile = "/data/local/tmp/t3-normal-outbox.xml";
+  const deadline = Date.now() + 60_000;
+  while (true) {
+    Assert.equal(fixturePid(), pid, "The normal app exited before showing the pending task");
+    device(["shell", "rm", "-f", hierarchyFile]);
+    const dump = device(["shell", "uiautomator", "dump", "--compressed", hierarchyFile], true);
+    if (dump.status === 0) {
+      const xml = device(["shell", "cat", hierarchyFile], true);
+      const nodes = [...xml.stdout.matchAll(/<node\b[^>]*>/gu)].filter(([node]) =>
+        node.includes(` package="${packageName}"`) &&
+        node.includes(' clickable="true"') &&
+        node.includes(' enabled="true"') &&
+        (node.includes(` content-desc="${pendingTaskTitle}"`) ||
+          node.includes(` text="${pendingTaskTitle}"`)),
+      );
+      if (nodes.length > 0) {
+        Assert.equal(nodes.length, 1, "Expected one accessible pending task in the normal app");
+        report.normalAppPendingTask = { pid, title: pendingTaskTitle, package: packageName };
+        break;
+      }
+    }
+    Assert.ok(Date.now() < deadline, "The normal app did not render the saved pending task");
+    await delay(500, undefined, { signal: abort.signal });
+  }
+  device(["shell", "rm", "-f", hierarchyFile]);
+  const fixtureLog = device(["logcat", "-d", "-v", "raw", `--pid=${pid}`, "-s", "T3OutboxRuntimeProof:I", "*:S"]);
+  Assert.ok(!fixtureLog.stdout.split("\n").some((line) => line.startsWith("{")));
+  await stopFixture("normal-app", pid);
+
+  checkpoint("normal-app:restore-inspection-package");
+  run(adb, ["-s", serial, "install", "-r", "--no-streaming", positiveApk], { timeout: 120_000 });
+  const reopened = await launchFixture("normal-app-reopen-remove", "reopen-remove");
+  assertCompleted(reopened.receipt);
+  assertSeededDraft(reopened.receipt, true);
+  Assert.deepEqual(reopened.receipt.message, seeded.receipt.message);
+  Assert.equal(reopened.receipt.queueCount, 0);
+  Assert.equal(reopened.receipt.attachmentFileExists, false);
+  await stopFixture("normal-app-reopen-remove", reopened.pid);
+  const empty = await launchFixture("normal-app-reopen-empty", "reopen-empty");
+  assertCompleted(empty.receipt);
+  Assert.equal(empty.receipt.queueCount, 0);
+  Assert.equal(empty.receipt.attachmentFileCount, 0);
+  await stopFixture("normal-app-reopen-empty", empty.pid);
 }
 
 async function unusedPort(port: number) {
@@ -308,6 +394,7 @@ try {
       Assert.equal(empty.receipt.queueCount, 0);
       Assert.equal(empty.receipt.attachmentFileCount, 0);
       await stopFixture("reopen-empty", empty.pid);
+      if (normalApp) await verifyNormalApp(apk);
     }
   }
   report.status = "passed";
