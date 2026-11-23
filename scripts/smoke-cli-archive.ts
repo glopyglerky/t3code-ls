@@ -2,6 +2,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - The signal fixture records the exact POSIX child exit.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeReadline from "node:readline";
+import { ORCHESTRATION_PROTOCOL_VERSION } from "@t3tools/contracts";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Duration from "effect/Duration";
@@ -48,6 +49,10 @@ const executableEnvironment = (cwd: string) => ({
   USERPROFILE: cwd,
   TMPDIR: cwd,
   TEMP: cwd,
+  // Windows needs the OS directory even when host Node and user PATH are isolated.
+  ...(process.env.SystemRoot === undefined ? {} : { SystemRoot: process.env.SystemRoot }),
+  ...(process.env.windir === undefined ? {} : { windir: process.env.windir }),
+  ...(process.env.ComSpec === undefined ? {} : { ComSpec: process.env.ComSpec }),
   NO_COLOR: "1",
   T3CODE_TELEMETRY_ENABLED: "false",
 });
@@ -80,10 +85,11 @@ const runExecutable = Effect.fn("runExecutable")(
   Effect.timeout(Duration.seconds(60)),
 );
 
-const smokeNativeSessionOutput = Effect.fn("smokeNativeSessionOutput")(function* (
+const smokeSessionOutput = Effect.fn("smokeSessionOutput")(function* (
   executable: string,
   contentDir: string,
   home: string,
+  expectNative = true,
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -91,15 +97,17 @@ const smokeNativeSessionOutput = Effect.fn("smokeNativeSessionOutput")(function*
   const nativeDir = path.join(contentDir, "native-bin");
   const dbFile = nativeFile("db", target);
   const db = path.join(nativeDir, dbFile);
-  yield* Effect.try({
-    try: () => {
-      if (!nativeArtifactFiles(nativeDir, target).includes(dbFile)) {
-        throw new Error("archive contains an upstream-only manifest");
-      }
-    },
-    catch: (cause) =>
-      new CliArchiveSmokeError({ step: "verifying the bundled Rust helper", detail: String(cause) }),
-  });
+  if (expectNative) {
+    yield* Effect.try({
+      try: () => {
+        if (!nativeArtifactFiles(nativeDir, target).includes(dbFile)) {
+          throw new Error("archive contains an upstream-only manifest");
+        }
+      },
+      catch: (cause) =>
+        new CliArchiveSmokeError({ step: "verifying the bundled Rust helper", detail: String(cause) }),
+    });
+  }
 
   const state = path.join(home, "userdata");
   const attachments = path.join(state, "attachments");
@@ -166,6 +174,16 @@ const smokeNativeSessionOutput = Effect.fn("smokeNativeSessionOutput")(function*
       step: "listing sessions from the extracted archive",
       detail: `exit ${String(listed.exitCode)}. Expected one JSON session on stdout, no token and empty stderr.`,
     });
+  }
+
+  if (!expectNative) {
+    if (!(yield* fs.exists(path.join(state, "statev2.sqlite"))) ||
+        (yield* fs.exists(path.join(state, "statev2.omdb")))) {
+      return yield* new CliArchiveSmokeError({ step: "checking retained session storage",
+        detail: "Expected the explicitly selected retained SQLite store and no omdb store." });
+    }
+    yield* Effect.log("[cli-smoke] Retained session token-only and JSON output passed with empty stderr.");
+    return;
   }
 
   const transactionId = "archive-smoke";
@@ -285,7 +303,7 @@ const smokeInstalledLifecycle = Effect.fn("smokeInstalledLifecycle")(function* (
     "checking the disposable home's service state",
     `exit ${String(service.exitCode)}. Expected an uninstalled service before removing this fixture runtime.`,
   );
-  yield* smokeNativeSessionOutput(executable, versionDir, home);
+  yield* smokeSessionOutput(executable, versionDir, home);
   const database = path.join(home, "userdata", "statev2.omdb");
   const before = yield* Effect.sync(() => nativeHash(database));
   const uninstalled = yield* run(["uninstall", "--base-dir", home, "--yes"], launcher);
@@ -606,7 +624,11 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
   readonly archive: string;
   readonly expectVersion: string;
   readonly expectNative: boolean;
+  readonly expectUpstream: boolean;
 }) {
+  if (input.expectNative && input.expectUpstream) {
+    return yield* new CliArchiveSmokeError({ step: "selecting archive qualification", detail: "Choose exactly one implementation expectation." });
+  }
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const platform = yield* HostProcess.Platform;
@@ -642,6 +664,18 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
   }
   const contentDir = path.join(scratch, root);
   const executable = path.join(contentDir, platform === "win32" ? "t3.exe" : "t3");
+  if (input.expectUpstream) {
+    const target = `${platform}-${yield* HostProcess.Architecture}`;
+    const nativeDir = path.join(contentDir, "native-bin");
+    const manifest = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Struct({
+      implementation: Schema.Literal("upstream"), target: Schema.Literal(target),
+      selection: Schema.Literal("explicit-upstream"),
+    })))(yield* fs.readFileString(path.join(nativeDir, "manifest.json")));
+    const files = nativeArtifactFiles(nativeDir, target);
+    if (Option.isNone(manifest) || files.length !== 1 || files[0] !== "manifest.json") {
+      return yield* new CliArchiveSmokeError({ step: "checking retained archive selection", detail: "Expected the explicit upstream manifest for this host with no native replacement components." });
+    }
+  }
   const bundledLibatomic = path.join(contentDir, "lib/libatomic.so.1");
   for (const required of [
     executable,
@@ -673,11 +707,22 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
   }
 
   const version = yield* runExecutable(executable, ["--version"], contentDir);
-  if (version.exitCode !== 0 || !version.stdout.includes(input.expectVersion)) {
+  if (version.exitCode !== 0 || (input.expectUpstream && version.stderr !== "") || !version.stdout.includes(input.expectVersion)) {
     return yield* new CliArchiveSmokeError({
       step: "running --version",
       detail: `exit ${String(version.exitCode)}\n${version.stdout}${version.stderr}`,
     });
+  }
+
+  if (input.expectUpstream) {
+    const help = yield* runExecutable(executable, ["--help"], contentDir);
+    if (help.exitCode !== 0 || help.stderr !== "" || !help.stdout.includes("serve") || !help.stdout.includes("project") || help.stdout.includes("\u001b")) {
+      return yield* new CliArchiveSmokeError({ step: "reading bundled CLI help", detail: "Expected useful plain stdout and empty stderr." });
+    }
+    const install = yield* runExecutable(executable, ["install"], contentDir);
+    if (install.exitCode !== 1 || install.stdout !== "" || !install.stderr.includes("Only the standalone t3 can install itself")) {
+      return yield* new CliArchiveSmokeError({ step: "refusing archive-local installation outside its managed runtime", detail: "Expected exit 1 with actionable stderr and empty stdout." });
+    }
   }
 
   // The service launcher loads outside the embedded CLI; without T3CODE_HOME it exits right away.
@@ -693,15 +738,15 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
     });
   }
 
-  if (input.expectNative) {
-    yield* smokeNativeSessionOutput(executable, contentDir, path.join(scratch, "auth-home"));
+  if (input.expectNative || input.expectUpstream) {
+    yield* smokeSessionOutput(executable, contentDir, path.join(scratch, "auth-home"), input.expectNative);
   }
 
   const net = yield* NetService.NetService;
   const port = yield* net.findAvailablePort(47700);
   const home = path.join(scratch, "home");
   const workspace = path.join(scratch, "replay-workspace");
-  if (input.expectNative) {
+  if (input.expectNative || input.expectUpstream) {
     const replay = yield* path.fromFileUrl(
       new URL("../apps/server/scripts/dev-replay-agent.ts", import.meta.url),
     );
@@ -728,9 +773,7 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
       {
         cwd: contentDir,
         env: {
-          PATH: "",
-          HOME: home,
-          USERPROFILE: home,
+          ...executableEnvironment(home),
           TMPDIR: scratch,
           TEMP: scratch,
           T3CODE_HOME: home,
@@ -762,10 +805,25 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
     Effect.timeout(Duration.seconds(30)),
     Effect.orElseSucceed(() => false),
   );
-  if (ready && input.expectNative) {
+  if (ready && input.expectUpstream) {
+    yield* Effect.gen(function* () {
+      const page = yield* httpClient.execute(HttpClientRequest.get(`http://127.0.0.1:${String(port)}/`));
+      const html = yield* page.text;
+      const descriptor = yield* httpClient.execute(HttpClientRequest.get(`http://127.0.0.1:${String(port)}/.well-known/t3/environment`));
+      const protocol = Schema.decodeUnknownOption(Schema.Struct({
+        environmentId: Schema.NonEmptyString,
+        orchestrationProtocolVersion: Schema.Literal(ORCHESTRATION_PROTOCOL_VERSION),
+      }))(yield* descriptor.json);
+      if (page.status !== 200 || !html.includes("<html") || !html.includes("<script") || descriptor.status !== 200 || Option.isNone(protocol)) {
+        return yield* new CliArchiveSmokeError({ step: "reading bundled web and protocol output", detail: "Expected a bundled HTML application and the current environment protocol." });
+      }
+      yield* Effect.log(`[cli-smoke] Bundled web HTML and environment protocol ${String(ORCHESTRATION_PROTOCOL_VERSION)} passed.`);
+    }).pipe(Effect.timeout(Duration.seconds(10)));
+  }
+  if (ready && (input.expectNative || input.expectUpstream)) {
     yield* smokePipedThread(executable, home, workspace);
     yield* smokeThreadFailure(executable, home, workspace);
-    if (platform === "linux") {
+    if (input.expectNative && platform === "linux") {
       yield* smokeThreadTerminal(executable, home, workspace);
       yield* smokeThreadWaitInterrupt(executable, home, workspace);
       yield* smokeSshHelper(executable, home, port, Number(server.pid));
@@ -786,6 +844,9 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
   if (input.expectNative && platform === "linux") {
     yield* smokeInstalledLifecycle(contentDir, path.join(scratch, "lifecycle-home"), input.expectVersion);
   }
+  if (input.expectUpstream) {
+    yield* Effect.log(`[cli-smoke] Retained executable SHA-256 ${nativeHash(executable)}. Archive SHA-256 ${nativeHash(input.archive)}.`);
+  }
   yield* Effect.log(
     `[cli-smoke] ${root}: --version and __service-launcher passed, and serve answered on ${String(port)}.`,
   );
@@ -796,6 +857,10 @@ const command = Command.make(
   {
     archive: Flag.String("archive"),
     expectVersion: Flag.String("expect-version"),
+    expectUpstream: Flag.Boolean("expect-upstream").pipe(
+      Flag.withDescription("Check the explicit retained host manifest, session/CLI streams, piped replay and bundled web protocol."),
+      Flag.withDefault(false),
+    ),
     expectNative: Flag.Boolean("expect-native").pipe(
       Flag.withDescription("Check token-only and JSON output against the archive's Rust database."),
       Flag.withDefault(false),
