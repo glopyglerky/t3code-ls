@@ -60,6 +60,71 @@ const STATE_DIR_OWNER_POLL_MS = 30_000;
 type TerminalStatus = "committed" | "rolled-back" | "failed";
 type ChildRole = "active" | "trial";
 
+interface SealedPendingState {
+  readonly protocol: 5;
+  readonly activeVersion: string;
+  readonly update: PendingServiceUpdate;
+}
+
+type LauncherDurableState = ServiceState | SealedPendingState;
+
+function sameSealedPendingState(left: LauncherDurableState, right: SealedPendingState): boolean {
+  return left.protocol === 5 && left.activeVersion === right.activeVersion &&
+    left.update.id === right.update.id && left.update.fromVersion === right.update.fromVersion &&
+    left.update.targetVersion === right.update.targetVersion && left.update.dbPath === right.update.dbPath;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const hasKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
+  Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+
+function parseSealedPendingState(contents: string, baseDir: string): SealedPendingState | undefined {
+  const state: unknown = JSON.parse(contents);
+  if (!isRecord(state) || !hasKeys(state, ["protocol", "activeVersion", "update"]) ||
+    state.protocol !== 5 || typeof state.activeVersion !== "string" ||
+    state.activeVersion.length > 256 || !isExactServiceVersion(state.activeVersion) ||
+    !isRecord(state.update)) return undefined;
+  const update = state.update;
+  if (!hasKeys(update, ["id", "fromVersion", "targetVersion", "dbPath", "status"]) ||
+    typeof update.id !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(update.id) ||
+    update.fromVersion !== state.activeVersion || typeof update.targetVersion !== "string" ||
+    update.targetVersion.length > 256 || !isExactServiceVersion(update.targetVersion) ||
+    compareExactServiceVersions(update.targetVersion, state.activeVersion) <= 0 ||
+    update.status !== "pending" || typeof update.dbPath !== "string" || !NodePath.isAbsolute(baseDir) ||
+    update.dbPath !== NodePath.join(baseDir, "userdata", "statev2.omdb")) return undefined;
+  return { protocol: 5, activeVersion: state.activeVersion, update: {
+    id: update.id, fromVersion: state.activeVersion, targetVersion: update.targetVersion,
+    dbPath: update.dbPath, status: "pending",
+  } };
+}
+
+function isTrialFileIdentity(value: unknown): value is {
+  device: string; inode: string; created: string;
+} {
+  return isRecord(value) && hasKeys(value, ["device", "inode", "created"]) &&
+    typeof value.device === "string" && /^[0-9a-f]{16}$/u.test(value.device) &&
+    typeof value.inode === "string" && /^[0-9a-f]{16}$/u.test(value.inode) &&
+    typeof value.created === "string" && /^[0-9]{1,30}$/u.test(value.created);
+}
+
+async function readLauncherState(
+  filePath: string,
+  baseDir: string,
+  environment: Readonly<NodeJS.ProcessEnv>,
+): Promise<LauncherDurableState> {
+  const contents = await NodeFSP.readFile(filePath, "utf8");
+  const ordinary = parseServiceState(contents) ?? adoptLegacyServiceState(contents);
+  if (ordinary !== undefined) return ordinary;
+  if (environment.T3_CODE_LS_SEALED_TRIAL_RECOVERY === "1" &&
+    Buffer.byteLength(contents) <= 8192) {
+    const sealed = parseSealedPendingState(contents, baseDir);
+    if (sealed !== undefined) return sealed;
+  }
+  throw new Error("Service state is invalid or unsupported.");
+}
+
 interface ManagedChild {
   readonly version: string;
   role: ChildRole;
@@ -85,6 +150,8 @@ const runtimeSpawnArguments = (paths: ReturnType<typeof runtimePaths>) => ({
 async function readBundledNativeTrialHelper(entry: string, executable: string): Promise<{
   readonly engineRevision: string;
   readonly targetSchemaSha256: string;
+  readonly sealedTrialRollback: boolean;
+  readonly sha256: string;
 } | null> {
   // The update contract belongs to the installed native binary beside this runtime.
   const directory = NodePath.join(NodePath.dirname(await NodeFSP.realpath(entry)), "native-bin");
@@ -126,7 +193,10 @@ async function readBundledNativeTrialHelper(entry: string, executable: string): 
     return response?.ok === true && result?.version === 1 && result.engine === "omdb" &&
       typeof result.engineRevision === "string" && /^[0-9a-f]{40}$/u.test(result.engineRevision) &&
       typeof result.targetSchemaSha256 === "string" && /^[0-9a-f]{64}$/u.test(result.targetSchemaSha256)
-      ? { engineRevision: result.engineRevision, targetSchemaSha256: result.targetSchemaSha256 }
+      ? {
+          engineRevision: result.engineRevision, targetSchemaSha256: result.targetSchemaSha256,
+          sealedTrialRollback: result.sealedTrialRollback === 1, sha256: declaredDigest,
+        }
       : null;
   } finally {
     await helper.close();
@@ -903,7 +973,7 @@ const restartPendingPath = (baseDir: string) =>
 export class Launcher {
   readonly #baseDir: string;
   readonly #statePath: string;
-  #state: ServiceState;
+  #state: LauncherDurableState;
   #child: ManagedChild | null = null;
   #timer: NodeJS.Timeout | undefined;
   #transitions: Promise<void> = Promise.resolve();
@@ -922,7 +992,7 @@ export class Launcher {
 
   constructor(
     baseDir: string,
-    state: ServiceState,
+    state: LauncherDurableState,
     options: {
       readonly backupSpaceProbe?: Partial<BackupSpaceProbe>;
       readonly serviceUnit?: ServiceUnit;
@@ -959,7 +1029,7 @@ export class Launcher {
         this.#lockPath === undefined ? undefined : await this.#acquireLock(this.#lockPath);
       try {
         // The launcher that held the lock may have moved the state since main read it.
-        if (lock !== undefined) this.#state = await readServiceState(this.#statePath);
+        if (lock !== undefined) this.#state = await this.#readState();
         // A stop that arrived before this point leaves nothing to start or recover.
         if (!this.#stopRequested) this.#enqueue(() => this.#recover());
         await this.#completion.promise;
@@ -1049,10 +1119,12 @@ export class Launcher {
   async #selectState(next: ServiceState): Promise<void> {
     const release = await acquireServiceSelectionLock(this.#statePath);
     try {
-      const selected = await readServiceState(this.#statePath);
+      const selected = await this.#readState();
       // Local installs replace the selection and clear its update record. An old
       // launcher must not restore its own selection when asked to update again.
       if (
+        (this.#state.protocol === 5 && !sameSealedPendingState(selected, this.#state)) ||
+        selected.protocol !== this.#state.protocol ||
         selected.activeVersion !== this.#state.activeVersion ||
         selected.update?.id !== this.#state.update?.id ||
         selected.update?.status !== this.#state.update?.status
@@ -1067,6 +1139,10 @@ export class Launcher {
   }
 
   async #recover(): Promise<void> {
+    if (this.#state.protocol === 5) {
+      await this.#recoverSealedTrial(this.#state);
+      return;
+    }
     // Clear old stop markers to preserve future tunnels; clear restart-pending only for the awaited version to avoid CLI races.
     await NodeFSP.rm(stopMarkerPath(this.#baseDir), { force: true }).catch(() => undefined);
     const restartPending = restartPendingPath(this.#baseDir);
@@ -1117,6 +1193,73 @@ export class Launcher {
       return;
     }
     await this.#startTrial(update);
+  }
+
+  #readState(): Promise<LauncherDurableState> {
+    return readLauncherState(this.#statePath, this.#baseDir, this.#environment);
+  }
+
+  async #recoverSealedTrial(state: SealedPendingState): Promise<void> {
+    if (this.#environment.T3_CODE_LS_SEALED_TRIAL_RECOVERY !== "1" ||
+      process.platform !== "linux" || process.arch !== "x64" ||
+      this.#environment.T3_CODE_LS_DB_EXECUTABLE !== undefined) {
+      throw new Error("Sealed native trial recovery requires an opted-in Linux x64 installed helper.");
+    }
+    const selected = await this.#readState();
+    if (!sameSealedPendingState(selected, state)) {
+      throw new Error("The sealed native trial selection changed.");
+    }
+    const pending = state.update;
+    if (!(await runtimeExists(this.#baseDir, pending.fromVersion))) {
+      throw new Error("The sealed native trial's previous runtime is unavailable.");
+    }
+    const { entryPath } = runtimePaths(this.#baseDir, pending.fromVersion);
+    const selection = installedApplicationDatabase(entryPath, this.#environment);
+    if (selection.kind !== "omdb") throw new Error("The previous runtime does not select native storage.");
+    const helper = await readBundledNativeTrialHelper(entryPath, selection.executable);
+    if (helper?.sealedTrialRollback !== true) {
+      throw new Error("The previous runtime's installed helper does not qualify sealed rollback.");
+    }
+    const { stdout } = await NodeUtil.promisify(NodeChildProcess.execFile)(
+      selection.executable,
+      ["trial-rollback-sealed", this.#baseDir, pending.id],
+      { env: {}, shell: false, timeout: 60_000, maxBuffer: 8192, killSignal: "SIGKILL" },
+    );
+    const response: unknown = JSON.parse(stdout);
+    const result = isRecord(response) && hasKeys(response, ["ok", "result"]) && response.ok === true
+      ? response.result : undefined;
+    const activation = isRecord(result) ? result.activation : undefined;
+    const database = isRecord(result) ? result.database : undefined;
+    if (!isRecord(result) || !hasKeys(result, ["activation", "database", "preserved_database", "reused"]) ||
+      !isRecord(activation) || !hasKeys(activation, [
+        "update_id", "from_version", "target_version", "target_entry_sha256",
+        "target_helper_sha256", "target_schema_sha256",
+      ]) || !isTrialFileIdentity(database) || !isTrialFileIdentity(result.preserved_database) ||
+      activation.update_id !== pending.id || activation.from_version !== pending.fromVersion ||
+      activation.target_version !== pending.targetVersion || typeof result.reused !== "boolean" ||
+      ![activation.target_entry_sha256, activation.target_helper_sha256, activation.target_schema_sha256]
+        .every((digest) => typeof digest === "string" && /^[0-9a-f]{64}$/u.test(digest))) {
+      throw new Error("The sealed rollback receipt does not match the pending trial.");
+    }
+    const verified = await readBundledNativeTrialHelper(entryPath, selection.executable);
+    const restored = await NodeFSP.lstat(pending.dbPath, { bigint: true });
+    if (verified?.sealedTrialRollback !== true || verified.sha256 !== helper.sha256 ||
+      !restored.isFile() || restored.nlink !== 1n ||
+      restored.dev.toString(16).padStart(16, "0") !== database.device ||
+      restored.ino.toString(16).padStart(16, "0") !== database.inode ||
+      restored.birthtimeNs.toString() !== database.created) {
+      throw new Error("The sealed rollback helper or restored database changed.");
+    }
+    const outcome = terminalUpdate({ pending, status: "rolled-back", reason: "sealed-trial-recovery" });
+    await this.#selectState({
+      protocol: SERVICE_LAUNCHER_PROTOCOL, activeVersion: pending.fromVersion, update: outcome,
+    });
+    if (this.#stopRequested) return;
+    try {
+      await this.#startChild(pending.fromVersion, "active", outcome);
+    } finally {
+      await this.#repointServiceUnit(pending.fromVersion);
+    }
   }
 
   async #databaseTrialBlocker(
@@ -1357,7 +1500,7 @@ export class Launcher {
       dbPath: message.dbPath,
       status: "pending",
     };
-    const next: ServiceState = { ...this.#state, update: pending };
+    const next: ServiceState = { ...this.#state, protocol: SERVICE_LAUNCHER_PROTOCOL, update: pending };
     try {
       await this.#selectState(next);
     } catch (error) {
@@ -1415,6 +1558,7 @@ export class Launcher {
     const committed = terminalUpdate({ pending, status: "committed" });
     const next: ServiceState = {
       ...this.#state,
+      protocol: SERVICE_LAUNCHER_PROTOCOL,
       activeVersion: pending.targetVersion,
       update: committed,
     };
@@ -1526,6 +1670,7 @@ export class Launcher {
       if (!discarded) {
         const next: ServiceState = {
           ...this.#state,
+          protocol: SERVICE_LAUNCHER_PROTOCOL,
           activeVersion: pending.fromVersion,
           update: terminalUpdate({ pending, status: "failed", reason: "state-dir-owned" }),
         };
@@ -1578,6 +1723,7 @@ export class Launcher {
     const outcome = terminalUpdate({ pending, status, reason });
     const next: ServiceState = {
       ...this.#state,
+      protocol: SERVICE_LAUNCHER_PROTOCOL,
       activeVersion: pending.fromVersion,
       update: outcome,
     };
@@ -1619,11 +1765,11 @@ export async function main(options: LauncherOptions = {}): Promise<void> {
     const environment = await readServiceEnvironment(baseDir, managerEnvironment);
     const statePath = NodePath.join(baseDir, "runtime", SERVICE_STATE_FILE);
     const contents = await NodeFSP.readFile(statePath, "utf8");
-    let state = parseServiceState(contents);
+    let state: LauncherDurableState | undefined = parseServiceState(contents);
     if (state === undefined) {
       state = adoptLegacyServiceState(contents);
-      if (state === undefined) throw new Error("Service state is invalid or unsupported.");
-      if (!(await runtimeExists(baseDir, state.activeVersion))) {
+      if (state === undefined) state = await readLauncherState(statePath, baseDir, environment);
+      else if (!(await runtimeExists(baseDir, state.activeVersion))) {
         throw new Error(`Selected t3@${state.activeVersion} runtime is missing or incomplete.`);
       }
     }

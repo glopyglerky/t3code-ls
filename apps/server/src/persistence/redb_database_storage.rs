@@ -206,6 +206,7 @@ pub fn service_trial_capabilities() -> Result<serde_json::Value> {
             "engine": "omdb",
             "engineRevision": crate::application::OMDB_REVISION,
             "targetSchemaSha256": crate::application_bootstrap::bootstrap_schema_sha256(),
+            "sealedTrialRollback": 1,
         }))
     }
     #[cfg(not(target_os = "linux"))]
