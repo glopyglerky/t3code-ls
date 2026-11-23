@@ -960,9 +960,11 @@ function nativeFaultCases(faults) {
           before,
           `Uncertain ${operation} must discard the complete transaction`,
         );
-        Assert.equal(
-          faults.frames.filter((frame) => frame.operation === "application_events_append").length,
-          1,
+        Assert.deepEqual(
+          faults.frames
+            .filter((frame) => frame.operation === "application_events_append")
+            .map((frame) => frame.row.event_id),
+          events.map((event) => event.id),
           "An uncertain write must not be replayed through either backend",
         );
         if (operation === "application_projections_apply_many") {
