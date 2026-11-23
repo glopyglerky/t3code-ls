@@ -27,15 +27,15 @@ import {
 } from "./hybrid-client-turn.ts";
 
 type Implementation = "upstream" | "native";
-type DevReplayWindow = Window & {
-  t3dev?: { replayScenarios: () => string[]; replay: (scenario: string) => Promise<string> };
-};
 type OwnedApplication = { pid: number; pairingUrl: string; stop: () => Promise<void> };
 
 const repoRoot = NodeFS.realpathSync(NodeURL.fileURLToPath(new URL("../../../", import.meta.url)));
 const timeoutMs = 90_000;
 const startupTimeoutMs = 180_000;
+const replayPrompt = "Replay: showcase";
 const replayMarker = "This turn is a replay.";
+const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
+const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
 const decodeSnapshot = Schema.decodeUnknownSync(
   Schema.toCodecJson(OrchestrationV2ThreadDetailSnapshot),
 );
@@ -140,7 +140,7 @@ async function startApplication(
   webPort: number,
   logPath: string,
 ): Promise<OwnedApplication> {
-  const env = { ...process.env };
+  const env: NodeJS.ProcessEnv = bundledClient ? { PATH: process.env.PATH } : { ...process.env };
   // Component overrides would invalidate an explicit upstream/native comparison.
   for (const name of Object.keys(env)) {
     if (/^T3_CODE_LS_.*_EXECUTABLE$/.test(name)) delete env[name];
@@ -156,30 +156,44 @@ async function startApplication(
     FORCE_COLOR: "0",
     NO_COLOR: "1",
   });
+  if (bundledClient) Object.assign(env, { HOME: stateDirectory });
   NodeFS.writeFileSync(logPath, "");
+  const args = bundledClient
+    ? [
+        "apps/server/dist/bin.mjs",
+        "serve",
+        "--base-dir",
+        stateDirectory,
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String(serverPort),
+        "--no-browser",
+      ]
+    : [
+        "scripts/dev-runner.ts",
+        "dev",
+        "--home-dir",
+        stateDirectory,
+        "--no-seed",
+        "--no-auto-bootstrap-project-from-cwd",
+        "--port",
+        String(serverPort),
+      ];
   const child = ChildProcess.spawn(
     process.execPath,
-    [
-      "scripts/dev-runner.ts",
-      "dev",
-      "--home-dir",
-      stateDirectory,
-      "--no-seed",
-      "--no-auto-bootstrap-project-from-cwd",
-      "--port",
-      String(serverPort),
-    ],
+    args,
     { cwd: repoRoot, env, detached: true, stdio: ["ignore", "pipe", "pipe"] },
   );
   const pid = child.pid;
   if (pid === undefined) {
     await new Promise<never>((_, reject) => child.once("error", reject));
-    throw new Error("The development runner did not receive a process ID");
+    throw new Error("The application did not receive a process ID");
   }
 
   let stopping = false;
   let pairingUrl: string | undefined;
-  let viteReady = false;
+  let webReady = bundledClient;
   let readyResolve: () => void;
   let readyReject: (error: Error) => void;
   const ready = new Promise<void>((resolve, reject) => {
@@ -194,7 +208,7 @@ async function startApplication(
   child.once("error", (error) => readyReject(error));
   child.once("exit", (code, signal) => {
     if (!stopping)
-      readyReject(new Error(`Development runner exited (${code ?? signal}); see ${logPath}`));
+      readyReject(new Error(`Application exited (${code ?? signal}); see ${logPath}`));
   });
 
   function consumeLine(raw: string): void {
@@ -203,14 +217,17 @@ async function startApplication(
     const candidate = line.match(/https?:\/\/[^\s"'<>]+\/pair#token=[^\s"'<>]+/u)?.[0];
     if (candidate) {
       const url = new URL(candidate);
-      if (url.origin !== `http://localhost:${webPort}`) {
+      const expectedOrigin = bundledClient
+        ? `http://127.0.0.1:${serverPort}`
+        : `http://localhost:${webPort}`;
+      if (url.origin !== expectedOrigin) {
         readyReject(new Error(`Pairing URL has an unexpected origin: ${url.origin}`));
       } else {
         pairingUrl = candidate;
       }
     }
-    if (/\bready in\b/iu.test(line)) viteReady = true;
-    if (pairingUrl && viteReady) readyResolve();
+    if (/\bready in\b/iu.test(line)) webReady = true;
+    if (pairingUrl && webReady) readyResolve();
   }
 
   for (const stream of [child.stdout, child.stderr]) {
@@ -320,6 +337,30 @@ async function readThreadSnapshot(
   return snapshot;
 }
 
+async function submitShowcase(page: Page): Promise<string> {
+  await page.getByRole("button", { name: "New thread in hybrid-fixture", exact: true }).click();
+  await page.waitForURL((url) => url.pathname.startsWith("/draft/"));
+  const picker = page.locator('[data-chat-provider-model-picker="true"]:visible');
+  const search = page.getByPlaceholder("Search models...");
+  await picker.click();
+  await search.fill("Showcase");
+  await page.getByRole("option", { name: /Showcase/u }).click();
+  if (!(await search.isVisible())) await picker.click();
+  await page.locator("[data-composer-permissions-trigger]:visible").click();
+  await page.getByRole("menuitemradio", { name: "Supervised", exact: true }).click();
+  if (await search.isVisible()) await search.press("Escape");
+  await search.waitFor({ state: "hidden" });
+
+  const editor = page.getByTestId("composer-editor");
+  await editor.click();
+  await editor.fill(replayPrompt);
+  await page.getByRole("button", { name: "Submit message", exact: true }).click();
+  await page.waitForURL((url) => /^\/(?!draft\/)[^/]+\/[^/]+$/u.test(url.pathname));
+  const thread = new URL(page.url()).pathname.split("/").at(-1);
+  Assert.ok(thread, "The composer must navigate to the submitted thread");
+  return decodeURIComponent(thread);
+}
+
 function summarizeSnapshot(snapshot: OrchestrationV2ThreadDetailSnapshot) {
   const projection = snapshot.projection;
   return {
@@ -421,6 +462,23 @@ async function exercise(implementation: Implementation): Promise<void> {
   NodeFS.mkdirSync(directory, { recursive: true });
   const workspace = NodePath.join(runRoot, implementation, "hybrid-fixture");
   const stateDirectory = NodePath.join(runRoot, implementation, "state");
+  if (bundledClient) {
+    const settingsDirectory = NodePath.join(stateDirectory, "userdata");
+    NodeFS.mkdirSync(settingsDirectory, { recursive: true });
+    writeJson(NodePath.join(settingsDirectory, "settings.json"), {
+      providerInstances: {
+        devReplay: {
+          displayName: "Replay (dev)",
+          driver: "acpRegistry",
+          config: {
+            source: "local",
+            commandPath: process.execPath,
+            commandArgs: [NodePath.join(repoRoot, "apps/server/scripts/dev-replay-agent.ts")],
+          },
+        },
+      },
+    });
+  }
   NodeFS.mkdirSync(NodePath.join(workspace, "src"), { recursive: true });
   NodeFS.writeFileSync(
     NodePath.join(workspace, "package.json"),
@@ -454,8 +512,10 @@ async function exercise(implementation: Implementation): Promise<void> {
     schemaVersion: 1,
     status: "running",
     implementation,
+    client: bundledClient ? "built" : "development",
+    composer: "unverified",
     scope:
-      "Linux original web client; local project; free ACP showcase approval; reload; same-state server restart",
+      "Linux original web client; local project; composer submission; free ACP showcase approval; reload; same-state server restart",
     startedAt: new Date().toISOString(),
     finishedAt: null as string | null,
     source,
@@ -550,21 +610,26 @@ async function exercise(implementation: Implementation): Promise<void> {
     await page.getByText("hybrid-fixture", { exact: true }).first().waitFor({ state: "visible" });
     completed("Created local project through the normal client");
 
-    starting("controlled replay and approval");
-    await page.waitForFunction(
-      () => (window as DevReplayWindow).t3dev?.replayScenarios().includes("showcase"),
-      undefined,
-      { timeout: timeoutMs },
-    );
-    const threadId = await page.evaluate(async () => {
-      const replay = (window as DevReplayWindow).t3dev;
-      if (!replay) throw new Error("The original development replay host is unavailable");
-      return await replay.replay("showcase");
-    });
+    starting("normal composer submission and controlled approval");
+    const threadId = await submitShowcase(page);
     proof.threadId = threadId;
+    const usedRustComposer = await page.evaluate(
+      () => performance.getEntriesByName("t3-composer-rust-offsets").length === 1,
+    );
+    Assert.equal(usedRustComposer, expectsRustComposer, "The composer must use the selected mapper");
+    proof.composer = usedRustComposer ? "rust-wasm" : "retained";
     const approval = page.getByRole("button", { name: /^(Yes|Approve)$/u }).first();
     await approval.waitFor({ state: "visible" });
-    const turnIdentity = replayTurnIdentity(await readThreadSnapshot(page, threadId));
+    const pending = await readThreadSnapshot(page, threadId);
+    Assert.equal(pending.projection.thread.modelSelection?.instanceId, "devReplay");
+    Assert.equal(pending.projection.thread.modelSelection?.model, "showcase");
+    Assert.ok(
+      pending.projection.messages.some(
+        (message) => message.role === "user" && message.text === replayPrompt,
+      ),
+      "The submitted prompt must be present in the authoritative thread snapshot",
+    );
+    const turnIdentity = replayTurnIdentity(pending);
     proof.turnIdentity = turnIdentity;
     await capture(page, directory, "approval");
     await approval.click();
