@@ -11,6 +11,7 @@ on:
       - "candidate/t3code-ls-t12-outbox-native-*"
       - "candidate/t3code-ls-t12-outbox-package-*"
       - "candidate/t3code-ls-t12-outbox-runtime-*"
+      - "candidate/t3code-ls-t13-device-viewer-*"
       - "candidate/t3code-ls-t15-task-cache-*"
       - "candidate/t3code-ls-t15-maintenance-snapshot-*"
       - "candidate/t3code-ls-t02-bundled-native-integrated-*"
@@ -61,6 +62,14 @@ jobs:
           # apps/server/src/serverRuntimeStartup.autoPull.test.ts
           pnpm exec vp test run --maxWorkers 2 \
             src/serverRuntimeStartup.test.ts src/serverRuntimeStartup.autoPull.test.ts
+      - name: Exercise device preview close through the authenticated server route
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t13-device-viewer-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
+        run: |
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- env PATH="$2" VP_REMOTE_CACHE=off VP_REMOTE_CACHE_URL= "$3" \
+              exec vp test run --maxWorkers 1 apps/server/src/device/DeviceHubProxy.stream.test.ts
+          ' _ "$(id -un)" "$PATH" "$(command -v pnpm)"
       - name: Exercise an active child stream during an ancestor commit
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-live-')
         env:
