@@ -22,6 +22,9 @@ const targetKey = process.env.T3_CODE_LS_NATIVE_TARGET ?? `${NodeOS.platform()}-
 const rustTarget = nativeTargets[targetKey];
 if (!rustTarget) throw new Error(`Unsupported native component target: ${targetKey}`);
 const requestedImplementation = process.env.T3_CODE_LS_IMPLEMENTATION;
+const bundleClaudeStdio = process.env.T3_CODE_LS_BUNDLE_CLAUDE_STDIO;
+if (bundleClaudeStdio !== undefined && bundleClaudeStdio !== "1")
+  throw new Error("T3_CODE_LS_BUNDLE_CLAUDE_STDIO must be 1 when selected");
 const bundlePtyHost = process.env.T3_CODE_LS_BUNDLE_PTY_HOST;
 const bundleGitWorkspace = process.env.T3_CODE_LS_BUNDLE_GIT_WORKSPACE;
 if (bundleGitWorkspace !== undefined && bundleGitWorkspace !== "1")
@@ -52,6 +55,7 @@ if (
     process.env.T3_CODE_LS_SYSROOT !== undefined ||
     explicitHelper ||
     bundlePtyHost !== undefined ||
+    bundleClaudeStdio !== undefined ||
     bundleGitWorkspace !== undefined ||
     requestedImplementation === "native")
 ) {
@@ -65,6 +69,8 @@ if (process.env.T3_CODE_LS_NATIVE_DIR) {
   const selected = JSON.parse(
     NodeFS.readFileSync(NodePath.join(process.env.T3_CODE_LS_NATIVE_DIR, "manifest.json"), "utf8"),
   );
+  if (bundleClaudeStdio === "1" && !selected.files?.[nativeFile("claude-stdio", targetKey)])
+    throw new Error("The selected native bundle does not include its Claude stdio helper");
   if (bundlePtyHost === "1" && !selected.files?.[nativeFile("pty-host", targetKey)])
     throw new Error("The selected native bundle does not include its PTY host");
   if (bundleGitWorkspace === "1" && !selected.files?.[nativeFile("git-workspace", targetKey)])
@@ -133,6 +139,7 @@ if (process.env.T3_CODE_LS_NATIVE_DIR) {
       "-p",
       "t3-code-ls-storage",
       "--bins",
+      ...(bundleClaudeStdio === "1" ? ["--features", "t3-code-ls-core/claude-stdio-helper"] : []),
     ],
     { cwd: root, env, stdio: "inherit" },
   );
@@ -153,7 +160,8 @@ if (process.env.T3_CODE_LS_NATIVE_DIR) {
   }
   NodeFS.mkdirSync(destination, { recursive: true });
   const files = {};
-  for (const component of [...nativeComponents, ...optionalComponents]) {
+  for (const component of [...nativeComponents, ...optionalComponents,
+    ...(bundleClaudeStdio === "1" ? ["claude-stdio"] : [])]) {
     const file = nativeFile(component, targetKey);
     NodeFS.copyFileSync(
       NodePath.resolve(target, rustTarget, "release", file),

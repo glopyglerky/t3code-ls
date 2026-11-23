@@ -65,13 +65,19 @@ mod unix {
             assert!(env::var_os("T3_CLAUDE_TEST_PARENT_ONLY").is_none());
             assert!(env::var_os("ANTHROPIC_API_KEY").is_none());
             fs::write("adapter-child-started", []).unwrap();
-            return fixture("adapter");
+            return fixture(if Path::new("packaged-conversation").is_file() {
+                "packaged-conversation"
+            } else {
+                "adapter"
+            });
         }
         assert!(mode.is_none(), "unknown Claude test executable mode");
 
         let directory = env::temp_dir().join(format!("t3ls-claude-fixture-{}", std::process::id()));
         fs::create_dir(&directory).expect("create fresh fixture profile");
         let profile = Profile(directory);
+        conversation_session(&profile.0);
+        eprintln!("Claude stdio fixture: exact Unicode conversation and reap");
         session(&profile.0);
         eprintln!(
             "Claude stdio fixture: user/steer identity, revocation, interrupt order and reap"
@@ -130,6 +136,7 @@ mod unix {
         reply(&mut output, &init_id);
         match mode {
             "adapter" => adapter_fixture(&mut input, &mut output),
+            "packaged-conversation" => conversation_fixture(&mut input, &mut output),
             "session" => {
                 assert_eq!(read(&mut input, &mut line), json::parse(FIRST).unwrap());
                 assert_eq!(line, format!("{FIRST}\n"));
@@ -184,6 +191,43 @@ mod unix {
         // Keep the output and error descriptors open until the host closes.
         line.clear();
         assert_eq!(input.read_line(&mut line).unwrap(), 0);
+    }
+
+    // Separate from the approval/steer fixture. A second prompt or process is a failure.
+    fn conversation_fixture(input: &mut impl BufRead, output: &mut impl Write) {
+        fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open("conversation-child-started")
+            .expect("one synthetic conversation process");
+        let mut line = String::new();
+        let first = read(input, &mut line);
+        let uuid = first.get("uuid").and_then(Value::as_str).unwrap();
+        assert_eq!(uuid.len(), 36);
+        let expected = FIRST
+            .replace("first", "Claude 🌱 café é\\n  終了 🛠️")
+            .replace("11111111-1111-4111-8111-111111111111", uuid);
+        assert_eq!(line, format!("{expected}\n"));
+        fs::write("conversation-prompt.json", &line).unwrap();
+        emit(
+            output,
+            &line.trim_end().replacen(
+                r#"{"type":"user","#,
+                r#"{"type":"user","session_id":"fixture","#,
+                1,
+            ),
+        );
+        emit(
+            output,
+            r#"{"type":"assistant","uuid":"55555555-5555-4555-8555-555555555555","session_id":"fixture","parent_tool_use_id":null,"message":{"id":"msg_fixture","type":"message","role":"assistant","model":"fixture","content":[{"type":"text","text":"Claude 🌱 café é\n  終了 🛠️"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}"#,
+        );
+        emit(
+            output,
+            &format!(
+                r#"{{"type":"result","subtype":"success","session_id":"fixture","uuid":"66666666-6666-4666-8666-666666666666","is_error":false,"num_turns":1,"duration_ms":1,"duration_api_ms":1,"total_cost_usd":0,"usage":{{"input_tokens":1,"output_tokens":1}},"modelUsage":{{}},"permission_denials":[],"result":"Claude 🌱 café é\n  終了 🛠️","terminal_reason":"completed","origin":{{"kind":"human"}},"user_message_uuids":["{uuid}"]}}"#
+            ),
+        );
+        // The enclosing fixture requires EOF next, detecting duplicate delivery.
     }
 
     fn adapter_fixture(input: &mut impl BufRead, output: &mut impl Write) {
@@ -339,6 +383,49 @@ mod unix {
             .poll(WAIT)
             .expect("fixture output")
             .expect("fixture emitted event")
+    }
+
+    fn conversation_session(profile: &Path) {
+        let text = "Claude 🌱 café é\n  終了 🛠️";
+        let prompt = FIRST.replace("first", "Claude 🌱 café é\\n  終了 🛠️");
+        let mut session =
+            ClaudeStdioSession::open(config(profile, "packaged-conversation")).unwrap();
+        session.offer(&prompt).unwrap();
+        let Incoming::Message(user) = next(&session) else {
+            panic!("expected user echo");
+        };
+        assert_eq!(
+            user.get("message")
+                .unwrap()
+                .get("content")
+                .and_then(Value::as_str),
+            Some(text)
+        );
+        assert_eq!(user.get("uuid"), json::parse(FIRST).unwrap().get("uuid"));
+        let Incoming::Message(assistant) = next(&session) else {
+            panic!("expected assistant");
+        };
+        assert_eq!(
+            assistant.get("type").and_then(Value::as_str),
+            Some("assistant")
+        );
+        let Value::Array(content) = assistant.get("message").unwrap().get("content").unwrap()
+        else {
+            panic!("expected assistant content");
+        };
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0].get("text").and_then(Value::as_str), Some(text));
+        let Incoming::Message(result) = next(&session) else {
+            panic!("expected foreground result");
+        };
+        assert_eq!(result.get("type").and_then(Value::as_str), Some("result"));
+        assert_eq!(result.get("result").and_then(Value::as_str), Some(text));
+        assert_eq!(session.poll(Duration::ZERO).unwrap(), None);
+        assert_reaped(session);
+        assert_eq!(
+            fs::read_to_string(profile.join("conversation-prompt.json")).unwrap(),
+            prompt + "\n"
+        );
     }
 
     fn session(profile: &Path) {

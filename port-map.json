@@ -2359,7 +2359,10 @@
       ],
       "adapter_paths": [
         ".github/workflows/claude-stdio.yml",
-        "apps/server/src/orchestration-v2/Adapters/ClaudeStdioHost.testkit.ts"
+        ".github/workflows/cli-archive-proof.yml",
+        "apps/server/src/orchestration-v2/Adapters/ClaudeStdioHost.testkit.ts",
+        "apps/server/src/orchestration-v2/Adapters/ClaudeStdioRunner.ts",
+        "apps/server/src/orchestration-v2/Adapters/ClaudeStdioSelection.ts"
       ],
       "platform_routes": [
         {
@@ -2372,16 +2375,20 @@
       ],
       "acceptance_tests": [
         "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts",
+        "apps/server/src/orchestration-v2/Adapters/ClaudeStdioSelection.test.ts",
         "apps/server/scripts/check-claude-stdio-helper.mjs",
+        "apps/server/scripts/verify-packaged-claude-stdio.ts",
         "crates/core/tests/claude_stdio_control.rs",
         "crates/core/tests/claude_stdio_host.rs"
       ],
       "hosted_acceptance": {
         "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts": ".github/workflows/claude-stdio.yml",
-        "apps/server/scripts/check-claude-stdio-helper.mjs": ".github/workflows/claude-stdio.yml"
+        "apps/server/src/orchestration-v2/Adapters/ClaudeStdioSelection.test.ts": ".github/workflows/claude-stdio.yml",
+        "apps/server/scripts/check-claude-stdio-helper.mjs": ".github/workflows/claude-stdio.yml",
+        "apps/server/scripts/verify-packaged-claude-stdio.ts": ".github/workflows/cli-archive-proof.yml"
       },
       "retired_paths": [],
-      "notes": "T01/T08 Unix stream-JSON candidate for @anthropic-ai/claude-agent-sdk 0.3.321 initialize, user input, permission and interrupt frames. The scoped t3-code-ls-claude-stdio executable owns the deterministic child in the ClaudeAdapterV2 test and the isolated vendor initialization proof. Run 45201606959 at 2b3672d76f3ceadb254381784c77475cca1f1b04 verified the built Rust helper with the real Claude adapter and deterministic child, then initialized and reaped the pinned Linux CLI with no prompt in a loopback-only namespace. Live sessions select the SDK runner. Vendor turns, hooks, account behavior, and full control parity remain unqualified.",
+      "notes": "T01/T08 Unix stream-JSON candidate for @anthropic-ai/claude-agent-sdk 0.3.321 initialize, user input, permission and interrupt frames. Run 45201606959 at 2b3672d76f3ceadb254381784c77475cca1f1b04 verified the built Rust helper with the real Claude adapter and deterministic child, then initialized and reaped the pinned Linux CLI with no prompt. Linux archive run 45237395885 at 295781f9c1e83683eaddae6eb5755131f9d4f7d8 exercised one Unicode synthetic conversation with one completed run and receipt after native reopen. Its MCP-option and unrelated-model controls refused before helper startup. Ordinary sessions select the SDK runner. Vendor turns, hooks, account behavior, and full control parity remain unqualified.",
       "rust_crates": ["crates/core"]
     },
     {

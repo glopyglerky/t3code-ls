@@ -114,3 +114,75 @@ An explicit missing executable failed the fixture at startup. The existing
 approval-cancellation test also passed. The server typecheck returned the same
 108 error diagnostics on the base and the candidate with the same cached
 dependencies.
+
+
+## Controlled packaged selection candidate
+
+`T3_CODE_LS_BUNDLE_CLAUDE_STDIO=1` adds the optional `claude-stdio` helper to
+`tools/build-native.mjs`. It uses the existing pinned compiler, target, manifest,
+SHA-256 validation and native staging path. The default package is unchanged.
+A prebuilt bundle selected with that flag must already contain the helper.
+
+At runtime, `T3_CODE_LS_CLAUDE_STDIO_SYNTHETIC` is a bounded JSON object in the
+server environment. It contains `version: 1`, an exact `instanceId` matching
+`claude-stdio-synthetic-[a-z0-9-]+`, an absolute deterministic Cargo test executable
+`program` named `claude_stdio_host-<hex>`, an absolute task-owned isolated
+`directory`, and `expectedOptions`. The latter is the captured SDK query options
+without the three callback functions. Preserve omitted fields, Unicode and nulls.
+No real provider, credentials, live profile or real prompt is admitted by this
+candidate's qualification contract. The executable name is an accident guard,
+not attestation of the program; the qualification owner must bind its Cargo
+artifact and hash to the captured synthetic source.
+
+The existing `createClaudeAdapterV2` selects this runner for that exact instance
+before discovering a vendor executable. The selector JSON is removed from the
+selected query environment so captured options cannot recursively contain their
+own selection payload. Package helper target/hash/executable
+checks happen before adapter creation. The helper acknowledges protocol version 1
+before the first user frame. Exact option equality is checked before helper spawn.
+The selected profile requires permission mode `default`, a fresh `fixture` session
+and matching cwd, and refuses resume, MCP, hooks and permission bypass. A missing,
+incompatible or mismatched helper fails the selected instance. There is no SDK
+retry following a selected failure or an uncertain user-frame delivery.
+
+The old adapter test and selected path share `ClaudeStdioRunner.ts`. That runner
+translates SDK user frames and the Rust helper's `message`, `background`,
+`permission`, `withdrawn` and `interrupted` events. It preserves approval ticket
+identity, callback cancellation, offer acknowledgement, interrupt acknowledgement,
+terminal ownership and close/reap. It does not implement SDK settings, transcript,
+account, fork, model, MCP or background-management APIs. Calls outside the bounded
+profile are refused. These capabilities and all ordinary instances retain the
+existing SDK production selection. This opt-in is a controlled candidate, not a
+normal-user SDK replacement or platform acceptance claim. No port state is promoted.
+
+### Packaged Linux proof
+
+The [archive workflow](../../../.github/workflows/cli-archive-proof.yml)
+builds the optional helper and the deterministic Rust child with the pinned
+compiler and frozen dependencies. It opens a fresh profile through the
+packaged CLI, authenticates through the desktop bootstrap, and submits one
+controlled Unicode prompt over WebSocket. The profile's expected options come
+from the existing option builder with explicit fixture inputs. The runner
+compares all callback-free options before spawning the helper.
+
+The explicit `mcp: "disabled"` profile applies only to the verified runner,
+matching model instance and exact workspace. It skips reading the registered
+MCP session for that turn. The controlled environment contains only the
+variables required by the launch fixture. Ordinary sessions use the SDK with
+their existing MCP and environment settings.
+
+[Linux archive run 45237395885](https://github.com/glopyglerky/t3code-ls/actions/runs/45237395885)
+passed at `295781f9c1e83683eaddae6eb5755131f9d4f7d8`. The receipt records one
+command dispatch, one completed terminal event, the exact Unicode assistant
+message and identity, and a retained omdb receipt after reopening the same
+profile. The MCP-options and unrelated-model controls each produced a failed
+terminal event and native reopen evidence without starting the helper or
+provider. The logs report differing option names only.
+
+The ZIP for artifact `14850463109` has SHA-256
+`02910cde58ccf3794ae73ab6a22293ebcac967e15bc212393debff14fb12dbdd`.
+It contains the three scoped receipts with package, helper, child and compiler
+identities. All three runs use loopback-only network namespaces and clean up
+their disposable profiles. The proof covers a controlled Linux conversation.
+Live vendor turns, installed profiles, and broader provider and platform
+coverage remain open.

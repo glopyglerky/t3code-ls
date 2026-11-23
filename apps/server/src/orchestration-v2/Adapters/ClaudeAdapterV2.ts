@@ -1,3 +1,8 @@
+import {
+  controlledClaudeStdioDisablesMcp,
+  controlledClaudeStdioQueryEnvironment,
+  selectControlledClaudeStdioRunner,
+} from "./ClaudeStdioSelection.ts";
 import * as DocumentText from "../../provider/DocumentText.ts";
 import {
   compactDynamicToolOutput,
@@ -12030,7 +12035,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           nativeThreadId: string,
         ) {
           const queryPolicy = yield* queryPolicyForTurn(turnInput);
-          const mcpSession = yield* mcpSessions.read(turnInput.threadId);
+          // Decide before reading the authenticated session. Only the package-verified
+          // synthetic runner can omit MCP, for its exact owner and selected cwd.
+          const noMcp = controlledClaudeStdioDisablesMcp(
+            queryRunner, adapterOptions.instanceId,
+            turnInput.modelSelection.instanceId, turnInput.runtimePolicy.cwd,
+          );
+          const mcpSession = noMcp ? undefined : yield* mcpSessions.read(turnInput.threadId);
           const mcpOverrides = claudeMcpQueryOverrides({
             mcpSession,
             readOnlySandbox:
@@ -13722,7 +13733,12 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
     const fileSystem = yield* FileSystem.FileSystem;
     const hostEnvironment = yield* HostProcess.Environment;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
-    const queryRunner = yield* ClaudeAgentSdkQueryRunner;
+    const sdkQueryRunner = yield* ClaudeAgentSdkQueryRunner;
+    const controlledQueryRunner = yield* Effect.tryPromise({
+      try: () => selectControlledClaudeStdioRunner(instanceId, hostEnvironment),
+      catch: (cause) => new ClaudeAgentSdkQueryRunnerError({ method: "select", cause }),
+    });
+    const queryRunner = controlledQueryRunner ?? sdkQueryRunner;
     const serverConfig = yield* ServerConfig.ServerConfig;
     const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
     const installationGate = yield* ProviderInstallationGate.ProviderInstallationGate;
@@ -13731,10 +13747,13 @@ export const createClaudeAdapterV2 = Effect.fn("ClaudeAdapterV2Driver.create")(
       environment,
       hostEnvironment,
     );
-    const claudeEnvironment = yield* makeClaudeEnvironment(config, baseEnvironment);
+    const queryEnvironment = controlledQueryRunner === undefined
+      ? baseEnvironment
+      : controlledClaudeStdioQueryEnvironment(controlledQueryRunner, baseEnvironment);
+    const claudeEnvironment = yield* makeClaudeEnvironment(config, queryEnvironment);
     const path = yield* Path.Path;
     const random = yield* SecureRandom.SecureRandom;
-    const binaryPath = yield* resolveClaudeSdkExecutablePath(
+    const binaryPath = controlledQueryRunner !== undefined ? config.binaryPath : yield* resolveClaudeSdkExecutablePath(
       expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
       claudeEnvironment,
     );
