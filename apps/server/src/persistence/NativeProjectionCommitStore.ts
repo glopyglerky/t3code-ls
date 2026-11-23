@@ -14,6 +14,7 @@ import {
   ProjectionCommitStoreError,
   applyWithThreadLinkNormalization,
   toProjectionCommitStoreError,
+  userInputRequestMatchesCancellation,
   type ProjectionCommitStoreShape,
 } from "../orchestration-v2/ProjectionCommitStore.ts";
 import { RedbClient } from "./RedbClient.ts";
@@ -27,6 +28,9 @@ const decodeThread = Schema.decodeUnknownEffect(
 const decodeRun = Schema.decodeUnknownEffect(Schema.fromJsonString(OrchestrationV2RunJson));
 const decodeRequest = Schema.decodeUnknownEffect(
   Schema.fromJsonString(OrchestrationV2RuntimeRequestJson),
+);
+const UserInputCancellation = Schema.NullOr(
+  Schema.Struct({ eligible: Schema.NullOr(Schema.Boolean), payload_json: Schema.String }),
 );
 const ThreadPayload = Schema.fromJsonString(OrchestrationV2AppThreadJson);
 const TurnPayload = Schema.fromJsonString(OrchestrationV2ProviderTurnJson);
@@ -140,16 +144,21 @@ export const make = Effect.gen(function* () {
       },
       Effect.mapError(toProjectionCommitStoreError("get-run")),
     ),
-    getRuntimeRequest: Effect.fnUntraced(
-      function* (threadId, requestId) {
-        const payload = yield* client.request(
-          "application_projections_read",
+    userInputCancellationCurrent: Effect.fnUntraced(
+      function* ({ threadId, requestId, providerTurnId }) {
+        const result = yield* client.request(
+          "application_projections_user_input_cancellation",
           {
-            read: { kind: "runtime_request", thread_id: threadId, record_id: requestId },
+            thread_id: threadId,
+            request_id: requestId,
+            provider_turn_id: providerTurnId,
           },
-          Schema.NullOr(Schema.String),
+          UserInputCancellation,
         );
-        return payload === null ? undefined : yield* decodeRequest(payload);
+        if (result === null) return false;
+        // Keep the existing full validation of a selected historical row.
+        const request = yield* decodeRequest(result.payload_json);
+        return result.eligible ?? userInputRequestMatchesCancellation(request, providerTurnId);
       },
       Effect.mapError(toProjectionCommitStoreError("get-runtime-request")),
     ),

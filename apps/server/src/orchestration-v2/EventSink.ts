@@ -353,16 +353,12 @@ const layerBase: Layer.Layer<
             event.payload.status !== "cancelled"
           )
             continue;
-          const current = yield* projectionStore.getRuntimeRequest(
-            event.threadId,
-            event.payload.id,
-          );
-          if (
-            current?.status !== "pending" ||
-            current.kind !== "user_input" ||
-            current.providerTurnId !== event.payload.providerTurnId ||
-            current.responseCapability.type === "message"
-          ) {
+          const current = yield* projectionStore.userInputCancellationCurrent({
+            threadId: event.threadId,
+            requestId: event.payload.id,
+            providerTurnId: event.payload.providerTurnId,
+          });
+          if (!current) {
             staleRequests.add(event.payload.id);
             staleNodes.add(event.payload.nodeId);
           }
