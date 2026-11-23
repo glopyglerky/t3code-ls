@@ -202,6 +202,9 @@ const decodeGixRepositoryPaths = Schema.decodeUnknownOption(Schema.fromJsonStrin
 const decodeGixRefPresence = Schema.decodeUnknownOption(
   Schema.fromJsonString(Schema.NullOr(Schema.Boolean)),
 );
+const decodeGixBranchNames = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.NullOr(Schema.Array(Schema.String))),
+);
 
 interface GitRefsSnapshot {
   readonly localBranches: ReadonlyArray<VcsRef>;
@@ -998,6 +1001,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const runGix = Effect.fn("GitVcsDriver.runGix")(function* (
     cwd: string,
     args: ReadonlyArray<string>,
+    maxOutputBytes = 32_768,
   ) {
     if (gixRunner === undefined || gixExecutable === undefined) return null;
     const native = yield* gixRunner.run({
@@ -1007,9 +1011,10 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       env: {},
       extendEnv: false,
       timeout: "2 seconds",
-      maxOutputBytes: 32_768,
+      maxOutputBytes,
     }).pipe(Effect.option);
-    return Option.isSome(native) && native.value.code === 0 && !native.value.stdoutInvalidUtf8
+    return Option.isSome(native) && native.value.code === 0 && !native.value.stdoutInvalidUtf8 &&
+      !native.value.stdoutTruncated
       ? native.value.stdout
       : null;
   });
@@ -1336,19 +1341,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     requestedBranch: string,
   ) {
     // Exceeding the limit fails the command, so the set is never built from a partial list.
-    const { stdout } = yield* executeGit(
-      "GitVcsDriver.resolveAvailableBranchName",
-      cwd,
-      ["for-each-ref", "--format=%(refname:strip=2)", "refs/heads/"],
-      { maxOutputBytes: 16 * 1024 * 1024 },
-    );
+    const native = yield* runGix(cwd, ["local-branch-names", cwd], 16 * 1024 * 1024);
+    const nativeNames = native === null ? null : Option.getOrNull(decodeGixBranchNames(native));
+    const names = nativeNames ?? (yield* executeGit(
+        "GitVcsDriver.resolveAvailableBranchName",
+        cwd,
+        ["for-each-ref", "--format=%(refname:strip=2)", "refs/heads/"],
+        { maxOutputBytes: 16 * 1024 * 1024 },
+      ).pipe(Effect.map(({ stdout }) => stdout.split("\n").filter(Boolean))));
     // Reserve case variants too: loose refs can live on case-insensitive filesystems.
-    const branches = new Set(
-      stdout
-        .split("\n")
-        .filter(Boolean)
-        .map((name) => name.toLowerCase()),
-    );
+    const branches = new Set(names.map((name) => name.toLowerCase()));
     // A branch nested under a name (`t3-fix/child`) blocks it as surely as one with the name.
     const blockedNames = new Set(branches);
     for (const branch of branches) {

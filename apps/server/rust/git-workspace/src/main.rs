@@ -73,6 +73,31 @@ fn has_remote_ref(cwd: &Path, name: &str) -> Option<bool> {
     (header.kind() == gix::objs::Kind::Commit).then_some(true)
 }
 
+fn local_branch_names(cwd: &Path) -> Option<Vec<String>> {
+    const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+    let (_, repo) = open_repository(cwd)?;
+    let references = repo.references().ok()?;
+    let mut names = Vec::new();
+    let mut bytes = 0usize;
+    for reference in references.local_branches().ok()? {
+        let reference = reference.ok()?;
+        // Symbolic branches require Git's own resolution and diagnostics.
+        let id = reference.try_id()?;
+        repo.try_find_header(id).ok()??;
+        let name = std::str::from_utf8(reference.name().as_bstr())
+            .ok()?
+            .strip_prefix("refs/heads/")?;
+        bytes = bytes.checked_add(name.len() + 1)?;
+        if bytes > MAX_OUTPUT_BYTES {
+            return None;
+        }
+        names.push(name.to_owned());
+    }
+    // for-each-ref's default order compares complete ref names bytewise.
+    names.sort_unstable();
+    (serde_json::to_vec(&names).ok()?.len() <= MAX_OUTPUT_BYTES).then_some(names)
+}
+
 fn reply(value: impl Serialize) -> ExitCode {
     match serde_json::to_writer(std::io::stdout().lock(), &value) {
         Ok(()) => ExitCode::SUCCESS,
@@ -84,12 +109,17 @@ fn main() -> ExitCode {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
     match args.as_slice() {
         [cwd] => reply(discover(Path::new(cwd))),
+        [operation, cwd] if operation == "local-branch-names" => {
+            reply(local_branch_names(Path::new(cwd)))
+        }
         [operation, cwd, name] if operation == "has-remote-ref" => reply(
             name.to_str()
                 .and_then(|name| has_remote_ref(Path::new(cwd), name)),
         ),
         _ => {
-            eprintln!("Usage: t3-code-ls-git-workspace [has-remote-ref] ABSOLUTE_DIRECTORY [REF]");
+            eprintln!(
+                "Usage: t3-code-ls-git-workspace [has-remote-ref|local-branch-names] ABSOLUTE_DIRECTORY [REF]"
+            );
             ExitCode::from(2)
         }
     }
