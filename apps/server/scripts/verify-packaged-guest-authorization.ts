@@ -48,11 +48,12 @@ import {
 } from "./packaged-server-fixture.ts";
 
 const root = FS.realpathSync(Path.resolve(import.meta.dirname, "../../.."));
-const [outputPath, archiveEntry, ...extra] = process.argv.slice(2);
+const [outputPath, archiveEntry, browserFlag, ...extra] = process.argv.slice(2);
 Assert.ok(
   outputPath && Path.isAbsolute(outputPath) && archiveEntry && Path.isAbsolute(archiveEntry),
 );
 Assert.equal(extra.length, 0);
+Assert.ok(browserFlag === undefined || browserFlag === "--browser");
 Assert.equal(process.platform, "linux");
 Assert.equal(process.arch, "x64");
 Assert.deepEqual(
@@ -209,7 +210,7 @@ try {
       "-subj",
       "/CN=Packaged guest fixture",
       "-addext",
-      "subjectAltName=IP:127.0.0.1",
+      `subjectAltName=IP:127.0.0.1,DNS:${connectorHostname}`,
       "-keyout",
       key,
       "-out",
@@ -584,9 +585,55 @@ try {
   const afterRevocation = read();
   await refuse(await session(reopened, cookie), 403, "inactive");
   Assert.deepEqual(read(), afterRevocation);
-  Assert.ok(await reopened.stop(), "Reopened process must close");
-  active = undefined;
-  Assert.deepEqual(read(), afterRevocation);
+  if (browserFlag === "--browser") {
+    checkpoint("redeem in Chromium and validate the secure browser cookie");
+    const { openPackagedGuestBrowser } = await import("../../web/scripts/packaged-guest-browser.ts");
+    const browser = await openPackagedGuestBrowser({
+      invite: replacement.url,
+      cookieName: guestSessionCookieName(replacement.share.id),
+      threadTitle: "Guest fixture thread",
+      name: "Browser guest Café",
+      cert: FS.readFileSync(certificate),
+      key: FS.readFileSync(key),
+      targetPort: reopenPort,
+    });
+    try {
+      const browserCommitted = read();
+      assertRedeemCommit(afterRevocation, browserCommitted, threadId, "single");
+      const rawThread = cellValue(browserCommitted.threads[0]?.row.payload_json);
+      Assert.ok(typeof rawThread === "string");
+      Assert.equal(JSON.parse(rawThread).guestShare.guestName, "Browser guest Café");
+      checkpoint("reopen the same browser session after a packaged server restart");
+      const restartPort = await reservePort();
+      Assert.ok(restartPort !== initialPort && restartPort !== reopenPort);
+      Assert.ok(await reopened.stop(), "The process serving the browser redemption must close");
+      active = undefined;
+      Assert.deepEqual(read(), browserCommitted);
+      const restarted = await start("browser-reopened", restartPort);
+      const restartedClient = await authenticatePackagedServer(restarted, abort.signal);
+      await waitForConnector(restartedClient, connectorHostname);
+      Assert.ok(registrations.has(restartPort));
+      await browser.reopen(restartPort);
+      Assert.deepEqual(read(), browserCommitted);
+      checkpoint("refuse the revoked browser session without writing native state");
+      const revoked = await restartedClient.rpc((rpc) => rpc[WS_METHODS.guestShareCreate]({ threadId }));
+      Assert.notEqual(revoked.share.id, replacement.share.id);
+      const browserRevoked = read();
+      await browser.assertRevoked();
+      Assert.deepEqual(read(), browserRevoked);
+      Assert.ok(await restarted.stop(), "The restarted process must close");
+      active = undefined;
+      Assert.deepEqual(read(), browserRevoked);
+      report.browser = { chromium: browser.chromium, secureScopedCookie: true, keyboardJoined: true,
+        recoveredWithoutCredential: true, revokedAfterProcessReopen: true };
+    } finally {
+      await browser.close();
+    }
+  } else {
+    Assert.ok(await reopened.stop(), "Reopened process must close");
+    active = undefined;
+    Assert.deepEqual(read(), afterRevocation);
+  }
   assertNoApplicationSqlite(state);
 
   report.observed = {
@@ -636,7 +683,9 @@ try {
   }
 }
 if (failure !== undefined) {
-  const label = failure instanceof Error ? failure.stack?.split("\n").slice(1, 5).join("\n") : "";
+  const label = failure instanceof Error
+    ? failure.stack?.split("\n").filter((line) => /^\s+at /u.test(line)).slice(0, 4).join("\n")
+    : "";
   throw new Error(
     `Guest authorization proof failed at ${report.phase}: ${report.failure ?? report.cleanupFailure}\n${label}`,
   );

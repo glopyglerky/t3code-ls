@@ -28,7 +28,12 @@ function appendedRows(before: RowPage["rows"], after: RowPage["rows"], id: strin
   return after.filter(({ row }) => !oldIds.has(cellValue(row[id]))).map(({ row }) => row);
 }
 
-export function assertRedeemCommit(before: GuestState, after: GuestState, threadId: string) {
+export function assertRedeemCommit(
+  before: GuestState,
+  after: GuestState,
+  threadId: string,
+  attempts: "single" | "concurrent" = "concurrent",
+) {
   const updates = appendedRows(before.events, after.events, "event_id");
   const [update] = updates;
   Assert.equal(updates.length, 1);
@@ -36,7 +41,10 @@ export function assertRedeemCommit(before: GuestState, after: GuestState, thread
   Assert.equal(cellValue(update.event_type), "thread.guest-share-updated");
   Assert.equal(cellValue(update.stream_id), threadId);
   const receipts = appendedRows(before.receipts, after.receipts, "command_id");
-  Assert.deepEqual(receipts.map((row) => cellValue(row.status)).sort(), ["accepted", "rejected"]);
+  Assert.deepEqual(
+    receipts.map((row) => cellValue(row.status)).sort(),
+    attempts === "single" ? ["accepted"] : ["accepted", "rejected"],
+  );
   Assert.ok(receipts.every((row) => cellValue(row.command_type) === redeemCommand));
   const accepted = receipts.find((row) => cellValue(row.status) === "accepted");
   Assert.ok(accepted);

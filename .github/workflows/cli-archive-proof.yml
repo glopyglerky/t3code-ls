@@ -172,6 +172,9 @@ jobs:
             ip link set dev lo up
             exec runuser -u "$1" -- "$2" apps/server/scripts/verify-packaged-git-workspace.ts "$3" "$4"
           ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/cli-proof/git-workspace" "$entry"
+      - name: Install Chromium for the HTTPS browser guest fixture
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t10-packaged-guest-browser-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
+        run: node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
       - name: Verify guest authorization and redemption across a native reopen
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t10-packaged-guest-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
         shell: bash
@@ -183,10 +186,22 @@ jobs:
           tar -xzf "$RUNNER_TEMP/cli-archive/t3-$version-linux-x64.tar.gz" -C "$extracted"
           entry="$extracted/t3-$version-linux-x64/t3"
           test -x "$entry"
+          args=()
+          case "$GITHUB_REF_NAME" in
+            candidate/t3code-ls-t10-packaged-guest-browser-*|candidate/t3code-ls-t02-bundled-native-integrated-*) args=(--browser) ;;
+          esac
           sudo -n unshare --net -- bash -euc '
             ip link set dev lo up
-            exec runuser -u "$1" -- "$2" apps/server/scripts/verify-packaged-guest-authorization.ts "$3" "$4"
-          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/cli-proof/guest-authorization" "$entry"
+            runner=$1
+            command=$2
+            shift 2
+            exec runuser -u "$runner" -- "$command" apps/server/scripts/verify-packaged-guest-authorization.ts "$@"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/cli-proof/guest-authorization" "$entry" "${args[@]}"
+          if (( ${#args[@]} > 0 )); then
+            jq -e '.status == "passed" and .browser.secureScopedCookie and .browser.keyboardJoined and
+              .browser.recoveredWithoutCredential and .browser.revokedAfterProcessReopen' \
+              "$RUNNER_TEMP/cli-proof/guest-authorization/proof.json"
+          fi
       - name: Retain the archive identity and smoke results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
