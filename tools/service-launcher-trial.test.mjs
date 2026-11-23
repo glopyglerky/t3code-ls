@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
@@ -7,6 +8,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { SERVICE_LAUNCHER_PROTOCOL } from "../apps/server/src/cloud/serviceProtocol.ts";
+import { isQualifiedNativeHost } from "../packages/shared/src/nativeExecutable.ts";
 
 // Run the launcher source without building the product or installing workspace dependencies.
 const hooks = registerHooks({
@@ -117,6 +119,73 @@ for (const source of ["native", "unknown"]) {
       assert.equal(await fs.readFile(f.starts, "utf8"), `${activeVersion}\n`);
       await assert.rejects(fs.stat(helperStarted), { code: "ENOENT" });
       await assert.rejects(fs.stat(path.join(f.runtime, "db-backup")), { code: "ENOENT" });
+    } finally {
+      await launcher.stop("SIGTERM");
+      await running;
+    }
+  });
+}
+
+for (const mode of ["compatible", "wrong digest", "different engine"]) {
+  test(`native trial matches both bundled helper contracts with ${mode}`, { skip: !isQualifiedNativeHost() }, async (t) => {
+    const f = await fixture(t);
+    const dbPath = path.join(f.userdata, "statev2.omdb");
+    const reply = path.join(f.runtime, "helper-contract-reply.json");
+    await fs.writeFile(dbPath, "native profile placeholder");
+    await fs.writeFile(path.join(f.userdata, "server-owner.sqlite"), "t3code-omdb-owner-v1\n");
+    const active = await f.install(activeVersion, `
+      process.on("message", (message) => {
+        const reply = ${JSON.stringify(reply)};
+        fs.writeFileSync(reply + ".tmp", JSON.stringify({ ...message, pid: process.pid }));
+        fs.renameSync(reply + ".tmp", reply);
+      });
+      process.send(${JSON.stringify({ type: "request-update", targetVersion, dbPath })});
+    `);
+    const target = await f.install(targetVersion, "process.exit(7);");
+    for (const [runtime, isTarget] of [[active, false], [target, true]]) {
+      const directory = path.join(runtime, "native-bin");
+      const ran = path.join(directory, "ran");
+      const result = {
+        version: 1,
+        engine: "omdb",
+        engineRevision: (isTarget && mode === "different engine" ? "b" : "a").repeat(40),
+        targetSchemaSha256: (isTarget ? "c" : "d").repeat(64),
+      };
+      const helper = `#!${process.execPath}\n` +
+        `if (process.argv[2] !== "trial-capabilities") process.exit(8);\n` +
+        `require("node:fs").writeFileSync(${JSON.stringify(ran)}, "read capabilities");\n` +
+        `console.log(${JSON.stringify(JSON.stringify({ ok: true, result }))});\n`;
+      await fs.mkdir(directory);
+      await fs.writeFile(path.join(directory, "t3-code-ls-db"), helper, { mode: 0o700 });
+      await fs.writeFile(path.join(directory, "manifest.json"), JSON.stringify({
+        target: "linux-x64",
+        rustTarget: "x86_64-unknown-linux-gnu",
+        files: {
+          "t3-code-ls-db": isTarget && mode === "wrong digest"
+            ? "0".repeat(64)
+            : createHash("sha256").update(helper).digest("hex"),
+        },
+      }));
+    }
+    const launcher = f.launcher(initial);
+    const running = launcher.run().then(() => "completed", (error) => error.message);
+    try {
+      const outcome = await readReply(reply, running);
+      assert.equal(outcome.type, "update-rejected");
+      const expectedReason = {
+        compatible: /requires a durable checkpoint/u,
+        "wrong digest": /could not verify both installed helpers/u,
+        "different engine": /requires a supported transition/u,
+      };
+      assert.match(outcome.reason, expectedReason[mode]);
+      assert.doesNotThrow(() => process.kill(outcome.pid, 0));
+      assert.deepEqual(await readServiceState(f.statePath), initial);
+      assert.equal(await fs.readFile(dbPath, "utf8"), "native profile placeholder");
+      assert.equal(await fs.readFile(f.starts, "utf8"), `${activeVersion}\n`);
+      assert.equal(await fs.readFile(path.join(active, "native-bin", "ran"), "utf8"), "read capabilities");
+      const targetRun = path.join(target, "native-bin", "ran");
+      if (mode === "wrong digest") await assert.rejects(fs.stat(targetRun), { code: "ENOENT" });
+      else assert.equal(await fs.readFile(targetRun, "utf8"), "read capabilities");
     } finally {
       await launcher.stop("SIGTERM");
       await running;

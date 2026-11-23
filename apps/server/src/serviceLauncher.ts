@@ -82,6 +82,57 @@ const runtimeSpawnArguments = (paths: ReturnType<typeof runtimePaths>) => ({
   args: ["serve"],
 });
 
+async function readBundledNativeTrialHelper(entry: string, executable: string): Promise<{
+  readonly engineRevision: string;
+  readonly targetSchemaSha256: string;
+} | null> {
+  // The update contract belongs to the installed native binary beside this runtime.
+  const directory = NodePath.join(NodePath.dirname(await NodeFSP.realpath(entry)), "native-bin");
+  const expected = NodePath.join(directory, "t3-code-ls-db");
+  if (executable !== expected) return null;
+  const readFlags = NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW | NodeFS.constants.O_NONBLOCK;
+  const manifestFile = await NodeFSP.open(NodePath.join(directory, "manifest.json"), readFlags);
+  let manifest;
+  try {
+    const metadata = await manifestFile.stat();
+    if (!metadata.isFile() || metadata.size > 1_048_576) return null;
+    manifest = JSON.parse(await manifestFile.readFile("utf8"));
+  } finally {
+    await manifestFile.close();
+  }
+  if (manifest?.target !== "linux-x64" || manifest.rustTarget !== "x86_64-unknown-linux-gnu") return null;
+  const declaredDigest = manifest?.files?.["t3-code-ls-db"];
+  if (typeof declaredDigest !== "string" || !/^[0-9a-f]{64}$/u.test(declaredDigest)) return null;
+
+  const helper = await NodeFSP.open(expected, readFlags);
+  try {
+    const before = await helper.stat();
+    if (!before.isFile()) return null;
+    const digest = NodeCrypto.createHash("sha256");
+    for await (const chunk of helper.createReadStream({ autoClose: false })) digest.update(chunk);
+    if (digest.digest("hex") !== declaredDigest) return null;
+    const { stdout } = await NodeUtil.promisify(NodeChildProcess.execFile)(
+      expected,
+      ["trial-capabilities"],
+      { env: {}, shell: false, timeout: 5_000, maxBuffer: 8192, killSignal: "SIGKILL" },
+    );
+    const after = await NodeFSP.lstat(expected);
+    if (
+      !after.isFile() || before.dev !== after.dev || before.ino !== after.ino ||
+      before.size !== after.size || before.ctimeMs !== after.ctimeMs
+    ) return null;
+    const response = JSON.parse(stdout);
+    const result = response?.result;
+    return response?.ok === true && result?.version === 1 && result.engine === "omdb" &&
+      typeof result.engineRevision === "string" && /^[0-9a-f]{40}$/u.test(result.engineRevision) &&
+      typeof result.targetSchemaSha256 === "string" && /^[0-9a-f]{64}$/u.test(result.targetSchemaSha256)
+      ? { engineRevision: result.engineRevision, targetSchemaSha256: result.targetSchemaSha256 }
+      : null;
+  } finally {
+    await helper.close();
+  }
+}
+
 /**
  * The unit or launch agent that `t3 service install` wrote. Its program names
  * the runtime that ran the install, and a remote update never replaces it, so
@@ -1107,7 +1158,22 @@ export class Launcher {
           NodePath.resolve(update.dbPath) === NodePath.resolve(source) &&
           (await filePrefix(source, 1))?.length === 1
         ) {
-          return "The native database trial requires exact compatible helpers, a durable checkpoint and a trusted preactivation witness or isolated database generation.";
+          // A component override is valid for testing the normal server. The launcher
+          // needs a capability bound to each version's own installed helper.
+          if (this.#environment.T3_CODE_LS_DB_EXECUTABLE !== undefined) {
+            return "The native database trial requires the installed native helper for each runtime.";
+          }
+          const [currentHelper, candidateHelper] = await Promise.all([
+            readBundledNativeTrialHelper(runtimePaths(this.#baseDir, update.fromVersion).entryPath, active.executable),
+            readBundledNativeTrialHelper(runtimePaths(this.#baseDir, update.targetVersion).entryPath, target.executable),
+          ]).catch(() => [null, null]);
+          if (currentHelper == null || candidateHelper == null) {
+            return "The native database trial could not verify both installed helpers.";
+          }
+          if (currentHelper.engineRevision !== candidateHelper.engineRevision) {
+            return "The native database trial requires a supported transition between the installed storage engines.";
+          }
+          return "The native database trial requires a durable checkpoint and an isolated database generation before activation.";
         }
         return "The native database ownership, existing source and selected runtimes do not establish a compatible service trial.";
       }
