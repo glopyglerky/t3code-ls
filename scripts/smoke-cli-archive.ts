@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// @effect-diagnostics nodeBuiltinImport:off - The signal fixture records the exact POSIX child exit.
+import * as NodeChildProcess from "node:child_process";
+import * as NodeReadline from "node:readline";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Duration from "effect/Duration";
@@ -39,6 +42,16 @@ const collect = <E>(stream: Stream.Stream<Uint8Array, E>) =>
     ),
   );
 
+const executableEnvironment = (cwd: string) => ({
+  PATH: "",
+  HOME: cwd,
+  USERPROFILE: cwd,
+  TMPDIR: cwd,
+  TEMP: cwd,
+  NO_COLOR: "1",
+  T3CODE_TELEMETRY_ENABLED: "false",
+});
+
 const runExecutable = Effect.fn("runExecutable")(
   function* (executable: string, args: ReadonlyArray<string>, cwd: string, input?: string) {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -46,15 +59,7 @@ const runExecutable = Effect.fn("runExecutable")(
       ChildProcess.make(executable, args, {
         cwd,
         // Isolate system Node and inherited launcher context from the archive smoke check.
-        env: {
-          PATH: "",
-          HOME: cwd,
-          USERPROFILE: cwd,
-          TMPDIR: cwd,
-          TEMP: cwd,
-          NO_COLOR: "1",
-          T3CODE_TELEMETRY_ENABLED: "false",
-        },
+        env: executableEnvironment(cwd),
         extendEnv: false,
         ...(input === undefined ? {} : { stdin: { stream: Stream.encodeText(Stream.make(input)) } }),
       }),
@@ -371,6 +376,84 @@ const smokeThreadFailure = Effect.fn("smokeThreadFailure")(function* (
   yield* Effect.log("[cli-smoke] Failed turn returned exit 1, JSON run identity and a stderr diagnostic.");
 });
 
+const smokeThreadWaitInterrupt = Effect.fn("smokeThreadWaitInterrupt")(function* (
+  executable: string,
+  home: string,
+  workspace: string,
+) {
+  const prompt = "Fixture question retained after the CLI wait is interrupted.";
+  const result = yield* Effect.tryPromise({
+    try: async (abort) => {
+      const child = NodeChildProcess.spawn(
+        executable,
+        ["thread", "start", workspace, prompt, "--base-dir", home,
+          "--provider", "devReplay", "--model", "question", "--wait"],
+        { cwd: workspace, env: executableEnvironment(workspace), stdio: ["ignore", "pipe", "pipe"] },
+      );
+      const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+        child.once("error", reject);
+        child.once("close", (code, signal) => resolve({ code, signal }));
+      });
+      const lines = NodeReadline.createInterface({ input: child.stderr });
+      const accepted = async () => {
+        for await (const line of lines) {
+          const threadId = /^Thread (\S+)$/u.exec(line)?.[1];
+          if (threadId !== undefined) return threadId;
+        }
+        throw new Error("The CLI closed before printing the accepted thread ID.");
+      };
+      const killOwnedWaiter = () => child.kill("SIGKILL");
+      abort.addEventListener("abort", killOwnedWaiter, { once: true });
+      let stdout = "";
+      child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+      try {
+        const threadId = await Promise.race([
+          accepted(),
+          exited.then(() => { throw new Error("The CLI stopped before the interrupt."); }),
+        ]);
+        if (!child.kill("SIGINT")) throw new Error("The CLI refused SIGINT.");
+        return { threadId, ...await exited, stdout };
+      } finally {
+        abort.removeEventListener("abort", killOwnedWaiter);
+        lines.close();
+        if (child.exitCode === null && child.signalCode === null) killOwnedWaiter();
+        await exited.catch(() => undefined);
+      }
+    },
+    catch: (error) => new CliArchiveSmokeError({ step: "interrupting the owned CLI waiter", detail: String(error) }),
+  }).pipe(Effect.timeout(Duration.seconds(20)));
+  if ((result.signal !== "SIGINT" && result.code !== 130) || result.stdout !== "") {
+    return yield* new CliArchiveSmokeError({
+      step: "checking that the CLI waiter exits on SIGINT",
+      detail: "Expected a shell interrupt status and empty stdout.",
+    });
+  }
+
+  const decode = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Struct({
+    thread: Schema.Struct({ pendingRequestCount: Schema.Int }),
+    messages: Schema.Array(Schema.Struct({ role: Schema.String, text: Schema.String })),
+  })));
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const shown = yield* runExecutable(
+      executable, ["thread", "show", result.threadId, "--base-dir", home, "--json"], workspace,
+    );
+    const history = decode(shown.stdout);
+    if (shown.exitCode === 0 && Option.isSome(history) && history.value.thread.pendingRequestCount === 1) {
+      const users = history.value.messages.filter((message) => message.role === "user");
+      if (users.length === 1 && users[0]?.text === prompt) {
+        yield* Effect.log("[cli-smoke] SIGINT stopped the CLI wait while the accepted turn continued to its question.");
+        return;
+      }
+      break;
+    }
+    yield* Effect.sleep(Duration.millis(150));
+  }
+  return yield* new CliArchiveSmokeError({
+    step: "reading the accepted turn after interrupting the CLI",
+    detail: "Expected the unchanged prompt and its pending question from the running server.",
+  });
+});
+
 const smokeSshHelper = Effect.fn("smokeSshHelper")(function* (
   executable: string,
   home: string,
@@ -565,6 +648,7 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
     yield* smokeThreadFailure(executable, home, workspace);
     if (platform === "linux") {
       yield* smokeThreadTerminal(executable, home, workspace);
+      yield* smokeThreadWaitInterrupt(executable, home, workspace);
       yield* smokeSshHelper(executable, home, port, Number(server.pid));
     }
   }
