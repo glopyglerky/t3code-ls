@@ -14,8 +14,8 @@ jobs:
     env:
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
       STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
-      CANDIDATE_COMMIT: ${{ (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
-      CANDIDATE_TREE: ${{ (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '78647c8e507b6b677fa6f1585839bd8bdc12bc55' || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
+      CANDIDATE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && 'ef0456af530a8d8aff6e3d661a13f40207b53891' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
+      CANDIDATE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && 'ffa4eb7e42a6249c797a03101fff356d9ed61ead' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '78647c8e507b6b677fa6f1585839bd8bdc12bc55' || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
       CATALOG_COMMIT: 2bb6ae9e57559bde6cff0feeddcff8ddf02de009
       CATALOG_TREE: 55e2c8aba6fc06642b06a8d60861c7bdaf3c67f9
       ROOT_RELEASE_COMMIT: a7ca741bd4c4d508fef316e164fb1ae897301965
@@ -29,10 +29,11 @@ jobs:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
       GIT_TERMINAL_PROMPT: "0"
-      TRACE_CONVERSATION: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-diagnose-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-catalog-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-') }}
+      TRACE_CONVERSATION: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-diagnose-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-catalog-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-') }}
       TRACE_SERVER_SPANS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-diagnose-server-') }}
       COMPARE_CATALOG: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-catalog-') }}
       COMPARE_SINGLE_READS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') }}
+      COMPARE_INDEPENDENT_READS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') }}
       COMPARE_ROOT_RELEASE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -176,7 +177,7 @@ jobs:
             bundles+=(catalog)
             pairs=8
           fi
-          if [[ "$COMPARE_SINGLE_READS" == true ]]; then pairs=8; fi
+          if [[ "$COMPARE_SINGLE_READS" == true || "$COMPARE_INDEPENDENT_READS" == true ]]; then pairs=8; fi
           if [[ "$COMPARE_ROOT_RELEASE" == true ]]; then bundles+=(root-release); pairs=8; fi
           for profile in "${bundles[@]}"; do
             (
@@ -189,13 +190,14 @@ jobs:
             --arg candidate "$CANDIDATE_COMMIT" --arg candidateTree "$CANDIDATE_TREE" \
             --arg catalog "$CATALOG_COMMIT" --arg catalogTree "$CATALOG_TREE" --argjson compareCatalog "$COMPARE_CATALOG" \
             --argjson compareSingleReads "$COMPARE_SINGLE_READS" \
+            --argjson compareIndependentReads "$COMPARE_INDEPENDENT_READS" \
             --arg rootRelease "$ROOT_RELEASE_COMMIT" --arg rootReleaseTree "$ROOT_RELEASE_TREE" --argjson compareRootRelease "$COMPARE_ROOT_RELEASE" \
             --arg probe "$(git -C measurement rev-parse HEAD)" --arg node "$(node --version)" \
             --arg chrome "$("$chrome" --version)" --arg driver "$("$driver" --version)" \
             --arg image "${ImageOS:-unknown}/${ImageVersion:-unknown}" --arg kernel "$(uname -r)" \
             --arg cpu "$(LC_ALL=C lscpu | sed -n 's/^Model name:[[:space:]]*//p')" --argjson trace "$TRACE_CONVERSATION" \
             --arg systemLoad "$(uptime)" --argjson cpus "$(nproc)" \
-            '{stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},catalog:(if $compareCatalog then {commit:$catalog,tree:$catalogTree,durability:"omdb Immediate"} else null end),rootRelease:(if $compareRootRelease then {commit:$rootRelease,tree:$rootReleaseTree,durability:"omdb Immediate"} else null end),singleProjectionReads:$compareSingleReads,forkSqliteControl:$trace,providerTrace:$trace,probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
+            '{stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},catalog:(if $compareCatalog then {commit:$catalog,tree:$catalogTree,durability:"omdb Immediate"} else null end),rootRelease:(if $compareRootRelease then {commit:$rootRelease,tree:$rootReleaseTree,durability:"omdb Immediate"} else null end),singleProjectionReads:$compareSingleReads,independentReads:$compareIndependentReads,forkSqliteControl:$trace,providerTrace:$trace,probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
             > "$evidence/inputs.json"
           printf 'pair\tposition\tprofile\tfirst_visible_ms\tterminal_ms\tmax_frame_gap_ms\n' > "$evidence/trials.tsv"
           for ((pair=1; pair<=pairs; pair++)); do
@@ -204,6 +206,7 @@ jobs:
             if [[ "$TRACE_CONVERSATION" == true ]]; then profiles=(stock candidate fork-sqlite); fi
             if [[ "$COMPARE_CATALOG" == true ]]; then profiles+=(catalog); fi
             if [[ "$COMPARE_SINGLE_READS" == true ]]; then profiles+=(single-reads); fi
+            if [[ "$COMPARE_INDEPENDENT_READS" == true ]]; then profiles+=(independent-reads); fi
             if [[ "$COMPARE_ROOT_RELEASE" == true ]]; then profiles+=(root-release); fi
             for ((position=0; position<${#profiles[@]}; position++)); do
               index="$position"
@@ -216,6 +219,7 @@ jobs:
               if [[ "$profile" == candidate || "$profile" == catalog || "$profile" == root-release ]]; then mode=native; fi
               if [[ "$profile" == fork-sqlite ]]; then mode=fork-sqlite; bundle_profile=candidate; fi
               if [[ "$profile" == single-reads ]]; then mode=native-single-reads; bundle_profile=candidate; fi
+              if [[ "$profile" == independent-reads ]]; then mode=native-independent-reads; bundle_profile=candidate; fi
               sudo -n unshare --net -- bash -euc '
                 ip link set dev lo up
                 user="$1"
@@ -225,7 +229,7 @@ jobs:
                 "$PWD/$bundle_profile/apps/server/dist/bin.mjs" "$RUNNER_TEMP/conversation-trial-$trial" \
                 "$driver" "$chrome" "$replay" "$mode" "${trace[@]}" | tee "$result" > /dev/null
               jq -er --argjson pair "$pair" --argjson position "$((position + 1))" --arg profile "$profile" \
-                'select(.single_projection_reads == ($profile == "single-reads") and .browser.loaded_rust_composer == ($profile != "stock") and .browser.conversation.snapshot.valid) | .browser.conversation.timing | [$pair,$position,$profile,.firstVisibleMillis,.terminalMillis,.maxFrameGapMillis] | @tsv' \
+                'select(.single_projection_reads == ($profile == "single-reads") and .independent_reads == ($profile == "independent-reads") and .browser.loaded_rust_composer == ($profile != "stock") and .browser.conversation.snapshot.valid) | .browser.conversation.timing | [$pair,$position,$profile,.firstVisibleMillis,.terminalMillis,.maxFrameGapMillis] | @tsv' \
                 "$result" >> "$evidence/trials.tsv"
               rm -r "$RUNNER_TEMP/conversation-trial-$trial"
             done
