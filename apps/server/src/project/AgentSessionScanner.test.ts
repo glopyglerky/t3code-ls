@@ -5,6 +5,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodeSqlite from "node:sqlite";
+import * as NodeZlib from "node:zlib";
 import { describe, expect, it } from "@effect/vitest";
 import {
   AgentSessionImportSource,
@@ -398,6 +399,37 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
             git: null,
           },
         ]);
+      }),
+    );
+
+    it.effect("discovers and imports a compressed Codex rollout with its physical source identity", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const claudeHomePath = yield* makeTempDir("t3code-claude-compressed-");
+        const codexHomePath = yield* makeTempDir("t3code-codex-compressed-");
+        const workspace = yield* makeTempDir("t3code-workspace-compressed-");
+        const directory = path.join(codexHomePath, "sessions", "2026", "04", "01");
+        const filePath = path.join(directory, "rollout-2026-04-01T09-00-00-fixture.jsonl.zst");
+        const prompt = "Restore the compressed café 🦀";
+        const contents = codexRolloutLine(workspace) + encodeTranscriptRecord({
+          type: "event_msg",
+          payload: { type: "user_message", message: prompt },
+        });
+        const compressed = NodeZlib.zstdCompressSync(contents);
+        yield* fs.makeDirectory(directory, { recursive: true });
+        yield* fs.writeFile(filePath, compressed);
+        const seconds = DateTime.toEpochMillis(yield* DateTime.now) / 1000;
+        yield* fs.utimes(filePath, seconds, seconds);
+        const input = { claudeHomePath, codexHomePath };
+        const scan = yield* runScan(input);
+        expect(scan.candidates.map(({ path, threadCount }) => [path, threadCount])).toEqual([
+          [workspace, 1],
+        ]);
+        const outcomes = yield* runRecentThreadOutcomes({ ...input, workspaceRoot: workspace });
+        const imported = outcomes.find((outcome) => outcome._tag === "Importable");
+        expect(imported?.source).toMatchObject({ filePath, size: compressed.byteLength });
+        expect(imported?.thread.messages).toMatchObject([{ role: "user", text: prompt }]);
       }),
     );
 
