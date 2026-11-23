@@ -4,6 +4,7 @@ import {
   OrchestrationV2ProviderTurnJson,
   OrchestrationV2RunJson,
   OrchestrationV2RuntimeRequestJson,
+  type OrchestrationV2DomainEvent,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -21,6 +22,17 @@ import { RedbClient } from "./RedbClient.ts";
 
 const encodeEvent = Schema.encodeEffect(OrchestrationV2DomainEventJson);
 const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+const encodeProjectionApply = Effect.fnUntraced(function* (event: OrchestrationV2DomainEvent) {
+  const encoded = yield* encodeEvent(event);
+  return {
+    event_type: encoded.type,
+    thread_id: encoded.threadId,
+    occurred_at: encoded.occurredAt,
+    payload_json: yield* encodeJson(encoded.payload),
+  };
+});
+const MAX_PROJECTION_BATCH_EVENTS = 16;
+const MAX_PROJECTION_BATCH_BYTES = 256 * 1024;
 const encodeTime = Schema.encodeEffect(Schema.DateTimeUtcFromString);
 const decodeThread = Schema.decodeUnknownEffect(
   Schema.fromJsonString(OrchestrationV2AppThreadJson),
@@ -44,20 +56,15 @@ const Normalization = Schema.NullOr(
 export const make = Effect.gen(function* () {
   const client = yield* RedbClient;
   while (!(yield* client.prepareProjections).prepared) yield* Effect.yieldNow;
-  const store: ProjectionCommitStoreShape = {
+  type ApplyInput = Effect.Success<ReturnType<typeof encodeProjectionApply>>;
+  const applyOne = (event: ApplyInput) =>
+    client.request("application_projections_apply", { event }, Schema.Null).pipe(Effect.asVoid);
+  const store: Omit<ProjectionCommitStoreShape, "applyMany"> = {
     apply: Effect.fnUntraced(
       function* (event) {
-        const encoded = yield* encodeEvent(event);
-        const input = {
-          event_type: encoded.type,
-          thread_id: encoded.threadId,
-          occurred_at: encoded.occurredAt,
-          payload_json: yield* encodeJson(encoded.payload),
-        };
+        const input = yield* encodeProjectionApply(event);
         if (event.type !== "provider-thread.updated" && event.type !== "provider-turn.updated") {
-          return yield* client
-            .request("application_projections_apply", { event: input }, Schema.Null)
-            .pipe(Effect.asVoid);
+          return yield* applyOne(input);
         }
         yield* client.withTransaction(
           Effect.gen(function* () {
@@ -67,9 +74,7 @@ export const make = Effect.gen(function* () {
               Normalization,
             );
             if (context === null) {
-              return yield* client
-                .request("application_projections_apply", { event: input }, Schema.Null)
-                .pipe(Effect.asVoid);
+              return yield* applyOne(input);
             }
             // This is the same codec round trip performed by the SQLite writer.
             // Rust chooses the old row and owns every merge and column mutation.
@@ -270,16 +275,59 @@ export const make = Effect.gen(function* () {
         .pipe(Effect.mapError(toProjectionCommitStoreError("interrupt-pending"))),
   };
   const normalizedApply = applyWithThreadLinkNormalization(store);
+  // Thread-link normalization reads before it writes. Standalone calls need the same
+  // writer reservation that EventSink already owns for its full commit.
+  const apply = Effect.fnUntraced(function* (event: OrchestrationV2DomainEvent) {
+    if (event.type !== "thread.pull-request-link-updated") return yield* store.apply(event);
+    yield* client
+      .withTransaction(normalizedApply(event))
+      .pipe(Effect.mapError(toProjectionCommitStoreError("apply")));
+  });
   return ProjectionCommitStore.of({
     ...store,
-    // This normalization reads before it writes. A standalone apply needs the
-    // same writer reservation that EventSink already owns for its full commit.
-    apply: Effect.fnUntraced(function* (event) {
-      if (event.type !== "thread.pull-request-link-updated") return yield* store.apply(event);
-      yield* client
-        .withTransaction(normalizedApply(event))
-        .pipe(Effect.mapError(toProjectionCommitStoreError("apply")));
-    }),
+    apply,
+    applyMany: Effect.fnUntraced(function* (events) {
+      let pending: ApplyInput[] = [];
+      let pendingBytes = 0;
+      const flush = Effect.suspend(() => {
+        const batch = pending;
+        pending = [];
+        pendingBytes = 0;
+        if (batch.length === 0) return Effect.void;
+        if (batch.length === 1) return applyOne(batch[0]!);
+        return client.request("application_projections_apply_many", { events: batch }, Schema.Null);
+      });
+      for (const event of events) {
+        if (
+          event.type === "provider-thread.updated" ||
+          event.type === "provider-turn.updated" ||
+          event.type === "thread.pull-request-link-updated"
+        ) {
+          yield* flush;
+          yield* apply(event);
+          continue;
+        }
+        const encoded = yield* encodeProjectionApply(event);
+        const bytes =
+          encoded.payload_json.length >= MAX_PROJECTION_BATCH_BYTES
+            ? MAX_PROJECTION_BATCH_BYTES + 1
+            : Buffer.byteLength(JSON.stringify(encoded)) + 1;
+        if (bytes > MAX_PROJECTION_BATCH_BYTES) {
+          yield* flush;
+          yield* applyOne(encoded);
+          continue;
+        }
+        if (
+          pending.length === MAX_PROJECTION_BATCH_EVENTS ||
+          pendingBytes + bytes > MAX_PROJECTION_BATCH_BYTES
+        ) {
+          yield* flush;
+        }
+        pending.push(encoded);
+        pendingBytes += bytes;
+      }
+      yield* flush;
+    }, Effect.mapError(toProjectionCommitStoreError("apply"))),
   });
 });
 

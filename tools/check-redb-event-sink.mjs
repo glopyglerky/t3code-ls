@@ -918,6 +918,7 @@ function nativeFaultCases(faults) {
       Assert.equal(publications.length, beforeUnknown);
       for (const operation of [
         "application_projections_apply",
+        "application_projections_apply_many",
         "application_release",
         "application_rollback_to",
       ]) {
@@ -925,15 +926,19 @@ function nativeFaultCases(faults) {
         const published = publications.length;
         faults.frames.length = 0;
         faults.drop = operation;
+        const events = [detached(`fault:${operation}`)];
+        if (operation === "application_projections_apply_many") {
+          events.push(detached(`fault:${operation}:second`));
+        }
         const write = sink.commitCommand(
           command(
             `fault:${operation}`,
-            [detached(`fault:${operation}`)],
+            events,
             [pending(`fault:${operation}`)],
           ),
         );
         const body =
-          operation === "application_projections_apply"
+          operation === "application_projections_apply" || operation === "application_projections_apply_many"
             ? sink.withProviderBatch(write)
             : client.withTransaction(
                 (operation === "application_release"
@@ -960,6 +965,16 @@ function nativeFaultCases(faults) {
           1,
           "An uncertain write must not be replayed through either backend",
         );
+        if (operation === "application_projections_apply_many") {
+          const batches = faults.frames.filter((frame) => frame.operation === operation);
+          Assert.equal(batches.length, 1);
+          Assert.equal(batches[0].events.length, 2, "A single native request applies both rows");
+          Assert.equal(
+            faults.frames.filter((frame) => frame.operation === "application_projections_apply").length,
+            0,
+            "The batch must not fall back to individual writes",
+          );
+        }
       }
     });
 }

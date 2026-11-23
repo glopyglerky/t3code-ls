@@ -20,9 +20,11 @@ const encodeTime = Schema.encodeEffect(Schema.DateTimeUtcFromString);
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const projections = yield* ProjectionStoreV2;
+  const apply: ProjectionCommitStoreShape["apply"] = (event) =>
+    projections.apply(event).pipe(Effect.mapError(toProjectionCommitStoreError("apply")));
   return ProjectionCommitStore.of({
-    apply: (event) =>
-      projections.apply(event).pipe(Effect.mapError(toProjectionCommitStoreError("apply"))),
+    apply,
+    applyMany: (events) => Effect.forEach(events, apply, { concurrency: 1, discard: true }),
     getThread: (threadId) =>
       projections
         .getThread(threadId)

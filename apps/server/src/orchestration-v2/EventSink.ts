@@ -407,9 +407,7 @@ const layerBase: Layer.Layer<
     const applyStoredEvents =
       /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
       Effect.fnUntraced(function* (storedEvents: ReadonlyArray<OrchestrationV2StoredEvent>) {
-        yield* Effect.forEach(storedEvents, (stored) => projectionStore.apply(stored.event), {
-          concurrency: 1,
-        });
+        yield* projectionStore.applyMany(storedEvents.map((stored) => stored.event));
         const sequence = storedEvents.at(-1)?.sequence;
         if (sequence !== undefined) {
           yield* projectionStore.markApplied(sequence, yield* DateTime.now);

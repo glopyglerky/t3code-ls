@@ -1909,6 +1909,33 @@ impl ApplicationTransactions {
         self.finish(id, session, result).await
     }
 
+    pub async fn projections_apply_many(
+        &mut self,
+        id: &str,
+        events: Vec<ProjectionApply>,
+    ) -> Result<()> {
+        let mut session = self.take(id)?;
+        let result = async {
+            if !(2..=16).contains(&events.len()) {
+                return Err(invalid("projection batch must contain 2 to 16 events"));
+            }
+            for event in events {
+                if matches!(
+                    event.event_type.as_str(),
+                    "provider-thread.updated"
+                        | "provider-turn.updated"
+                        | "thread.pull-request-link-updated"
+                ) {
+                    return Err(invalid("event requires the individual projection path"));
+                }
+                apply_event(&mut session, event).await?;
+            }
+            Ok(())
+        }
+        .await;
+        self.finish(id, session, result).await
+    }
+
     pub async fn projections_read(
         &mut self,
         id: &str,

@@ -46,6 +46,7 @@ const applicationOperations = {
   application_projects_select: "read",
   application_projects_upsert: "write",
   application_projections_apply: "write",
+  application_projections_apply_many: "write",
   application_projections_normalization: "read",
   application_projections_read: "read",
   application_projections_guard: "read",
