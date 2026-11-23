@@ -261,7 +261,19 @@ jobs:
                 node apps/web/scripts/verify-hybrid-client.ts "$proof/$renderer" "$implementation"
             done
           fi
-          node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t02-bundled-native-t13-pdf-external-* ]]; then
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- env T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 \
+                T3_CODE_LS_PDF_LINK_PROOF=true T3_CODE_LS_PDF_EXTERNAL_LINK_PROOF=true \
+                VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
+                "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
+            ' _ "$(id -un)" "$(command -v node)" "$proof"
+            jq -e '.status == "passed" and .pdfLinks.pointerDestination == 2 and .pdfLinks.keyboardDestination == 2 and .pdfLinks.external.pointerOpened and .pdfLinks.external.keyboardOpened and .pdfLinks.external.requests == 2 and .pdfLinks.external.noUnsolicitedRequests and .pdfLinks.external.openerIsolated' \
+              "$proof/native/proof.json"
+          else
+            node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
+          fi
           if [[ "$T3_CODE_LS_HTML_INTERACTION_PROOF" == true ]]; then
             jq -e '.status == "passed" and .htmlInteraction.signedAssetStatus == 200 and .htmlInteraction.toolCalls == 1 and .htmlInteraction.opaqueOrigin and .htmlInteraction.ownFrameResize and .htmlInteraction.unrelatedFrameUnchanged and .htmlInteraction.modalDetached and .htmlInteraction.reopenedFresh' \
               "$proof/native/proof.json"

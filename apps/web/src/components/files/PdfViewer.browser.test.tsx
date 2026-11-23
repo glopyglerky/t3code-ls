@@ -225,7 +225,7 @@ it("restores page, within-page offset and zoom after a remount", async () => {
   }
 });
 
-it("follows a link to another page and exposes a web link", async () => {
+it("keeps PDF links passive, activates web links, and jumps internally", async () => {
   const url = URL.createObjectURL(
     testPdf([
       {
@@ -235,15 +235,17 @@ it("follows a link to another page and exposes a web link", async () => {
         annots: [
           "<< /Type /Annot /Subtype /Link /Rect [30 690 200 730] /Border [0 0 0] /Dest [5 0 R /XYZ 0 792 0] >>",
           "<< /Type /Annot /Subtype /Link /Rect [30 630 200 670] /Border [0 0 0] /A << /S /URI /URI (https://example.com/) >> >>",
+          "<< /Type /Annot /Subtype /Link /Rect [30 570 200 610] /Border [0 0 0] /A << /S /URI /URI (mailto:fixture@example.invalid) >> >>",
         ].join(" "),
       },
       { box: "0 0 612 792", rotate: 0, text: "BT /F1 24 Tf 30 700 Td (Target) Tj ET" },
     ]),
   );
   try {
+    const opened = vi.fn();
     await using screen = await render(
       <div className="flex h-[300px] w-[320px]">
-        <PdfViewer src={url} title="Linked PDF" />
+        <PdfViewer src={url} title="Linked PDF" onOpenLink={opened} />
       </div>,
     );
     await expect.element(screen.getByText("1 / 2 pages")).toBeVisible();
@@ -254,6 +256,10 @@ it("follows a link to another page and exposes a web link", async () => {
       return link!;
     });
     expect(getComputedStyle(web).cursor).toBe("pointer");
+    expect(web.getAttribute("target")).toBe("_blank");
+    expect(web.getAttribute("rel")).toContain("noopener");
+    expect(region.querySelector('a[href^="mailto:"]')).toBeNull();
+    expect(opened).not.toHaveBeenCalled();
     const internal = await vi.waitFor(() => {
       const link = Array.from(region.querySelectorAll<HTMLAnchorElement>("a")).find(
         (anchor) => anchor !== web,
@@ -263,6 +269,18 @@ it("follows a link to another page and exposes a web link", async () => {
     });
     internal.click();
     await expect.element(screen.getByText("2 / 2 pages")).toBeVisible();
+    expect(opened).not.toHaveBeenCalled();
+    screen.getByRole("button", { name: "Previous page" }).element().click();
+    await expect.element(screen.getByText("1 / 2 pages")).toBeVisible();
+    const external = await vi.waitFor(() => {
+      const link = region.querySelector<HTMLAnchorElement>('a[href="https://example.com/"]');
+      expect(link).not.toBeNull();
+      return link!;
+    });
+    expect(external.getAttribute("aria-label")).toBe("https://example.com/");
+    external.click();
+    expect(opened).toHaveBeenCalledTimes(1);
+    expect(opened.mock.calls[0]![0]).toBe("https://example.com/");
   } finally {
     URL.revokeObjectURL(url);
   }
