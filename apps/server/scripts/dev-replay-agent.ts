@@ -57,6 +57,11 @@ export const SCENARIOS = [
   { id: "text-appends", name: "Text appends", file: "./dev-replay/text_appends_transcript.ndjson" },
   { id: "text-splices", name: "Text splices", file: "./dev-replay/text_splices_transcript.ndjson" },
   {
+    id: "formatted-text",
+    name: "Formatted text",
+    file: "./dev-replay/formatted_text_transcript.ndjson",
+  },
+  {
     id: "todo-list",
     name: "Plan and reads",
     file: `${FIXTURES}/todo_list/registry_transcript.ndjson`,

@@ -325,10 +325,22 @@ jobs:
               mkdir "$proof/submit-$renderer"
               timeline=false
               if [[ "$DIOXUS_TIMELINE_PROOF" == true ]]; then timeline=true; fi
+              inline=false
+              if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t02-bundled-native-t11-dioxus-timeline-inline-* ]]; then inline=true; fi
+              T3_CODE_LS_ASSISTANT_INLINE_PROOF="$inline" \
               T3_CODE_LS_ASSISTANT_TEXT_PROOF="$timeline" \
               T3_CODE_LS_COMPOSER_STOP_PROOF="$DIOXUS_STOP_PROOF" \
               T3_CODE_LS_COMPOSER_SUBMIT_PROOF="$renderer" \
                 node apps/web/scripts/verify-hybrid-client.ts "$proof/submit-$renderer" "$implementation"
+              if [[ "$inline" == true ]]; then
+                jq -e --arg renderer "$renderer" '
+                  .status == "passed" and .composerStop.formattedAssistantText == "Bold calm 雪." and
+                  (if $renderer == "dioxus" then
+                    .composerStop.timeline.streamingRow.streaming and
+                    (.composerStop.timeline.reopenedRow.streaming | not)
+                  else .composerStop.timeline.retainedFallback end)
+                ' "$proof/submit-$renderer/$implementation/proof.json"
+              fi
             done
           elif [[ "$DIOXUS_APPROVAL_PROOF" == true ]]; then
             sha256sum apps/web/dist/pairing-wasm/local_pairing.js \

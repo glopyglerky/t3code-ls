@@ -102,7 +102,17 @@ Assert.ok(guestNameProof === undefined || (bundledClient && ["retained", "dioxus
 const dioxusFindProof = process.env.T3_CODE_LS_DIOXUS_FIND_PROOF;
 const composerSubmitRenderer = process.env.T3_CODE_LS_COMPOSER_SUBMIT_PROOF;
 const composerStopProof = process.env.T3_CODE_LS_COMPOSER_STOP_PROOF === "true";
-const capturedStop = {
+const formattedAssistantProof = process.env.T3_CODE_LS_ASSISTANT_INLINE_PROOF === "true";
+const formattedAssistantText = "**Bold** *calm* 雪.";
+const formattedAssistantDisplay = "Bold calm 雪.";
+const capturedStop = formattedAssistantProof ? {
+  path: "apps/server/scripts/dev-replay/formatted_text_transcript.ndjson",
+  sha256: "cd181febbb577f922c7e732605d1930c34a8073ca23d982e93cb865c53149333",
+  model: "formatted-text",
+  modelLabel: "Formatted text",
+  prompt: "Replay the formatted assistant message",
+  partialText: formattedAssistantText,
+} : {
   path: "apps/server/src/orchestration-v2/testkit/fixtures/todo_list/registry_transcript.ndjson",
   sha256: "560623d69777188138a1d9a7fbc0cc994f4067eb2a7d30ae113b0667456ec45e",
   model: "todo-list",
@@ -838,13 +848,25 @@ async function assertNativeAssistantText(page: Page, threadId: string, messageId
   const row = page.locator(`[data-assistant-citation-source=${JSON.stringify(messageId)}]`)
     .locator('[data-assistant-text-renderer="dioxus-wasm"]');
   await row.waitFor({ state: "visible" });
-  Assert.equal(await row.textContent(), item.text);
+  if (formattedAssistantProof) {
+    Assert.equal(item.text, formattedAssistantText);
+    Assert.equal(await row.getAttribute("data-source-text"), item.text);
+    await assertFormattedAssistantText(row);
+  } else {
+    Assert.equal(await row.textContent(), item.text);
+  }
   Assert.equal(await row.getAttribute("data-message-updated-at"), DateTime.formatIso(item.updatedAt));
   Assert.equal(await row.getAttribute("data-streaming"), String(item.streaming));
   const sequence = Number(await row.getAttribute("data-snapshot-sequence"));
   Assert.ok(sequence >= snapshot.snapshotSequence, "Rendered text must reflect the observed committed snapshot");
   return { messageId, text: item.text, updatedAt: DateTime.formatIso(item.updatedAt), sequence,
     streaming: item.streaming };
+}
+
+async function assertFormattedAssistantText(row: ReturnType<Page["locator"]>) {
+  Assert.equal(await row.textContent(), formattedAssistantDisplay);
+  Assert.equal(await row.locator("strong").textContent(), "Bold");
+  Assert.equal(await row.locator("em").textContent(), "calm");
 }
 
 async function verifyComposerStop(
@@ -860,7 +882,9 @@ async function verifyComposerStop(
   const native = footer.locator('button[data-composer-stop-renderer="dioxus-wasm"]');
   const stop = footer.getByRole("button", { name: "Stop generation", exact: true });
   const draft = "This unsent draft must survive Stop and reopen.";
-  await page.getByText(capturedStop.partialText, { exact: true }).waitFor({ state: "visible" });
+  const visiblePartialText = formattedAssistantProof ? formattedAssistantDisplay : capturedStop.partialText;
+  const partialText = page.getByText(visiblePartialText, { exact: true });
+  await partialText.waitFor({ state: "visible" });
   const pending = await readThreadSnapshot(page, threadId);
   const identity = replayTurnIdentity(pending, capturedStop.model);
   Assert.equal(pending.projection.runs[0]?.status, "running");
@@ -958,7 +982,7 @@ async function verifyComposerStop(
   );
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.waitForURL(threadUrl);
-  await page.getByText(capturedStop.partialText, { exact: true }).waitFor({ state: "visible" });
+  await partialText.waitFor({ state: "visible" });
   await page.waitForFunction(
     (expected) => document.querySelector<HTMLElement>('[data-testid="composer-editor"]')
       ?.innerText === expected,
@@ -968,7 +992,11 @@ async function verifyComposerStop(
   const reopenedRow = timelineProof && renderer === "dioxus" ? await assertNativeAssistantText(page, threadId, partial.id) : undefined;
   if (timelineProof && renderer === "dioxus-fallback") {
     Assert.equal(await page.locator('[data-assistant-text-renderer="dioxus-wasm"]:visible').count(), 0);
-    await page.getByText(capturedStop.partialText, { exact: true }).waitFor({ state: "visible" });
+    await partialText.waitFor({ state: "visible" });
+    if (formattedAssistantProof) {
+      const retainedRow = page.locator(`[data-assistant-citation-source=${JSON.stringify(partial.id)}] p`);
+      await assertFormattedAssistantText(retainedRow);
+    }
   }
   if (reopenedRow) Assert.equal(reopenedRow.streaming, false);
   Assert.equal(requests.length, 1, "Keyboard Stop must send exactly one interruption command");
@@ -983,6 +1011,7 @@ async function verifyComposerStop(
     request,
     sentMessageId,
     capturedFixtureSha256: capturedStop.sha256,
+    formattedAssistantText: formattedAssistantProof ? formattedAssistantDisplay : undefined,
     timeline: timelineProof ? { streamingRow, reopenedRow, runningRouteResumed: renderer === "dioxus", retainedFallback: renderer === "dioxus-fallback" } : undefined,
     draftPreserved: true,
     interruptedReopened: true,
