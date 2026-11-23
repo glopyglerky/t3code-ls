@@ -628,3 +628,18 @@ The command is available for stopped Linux x64 profiles with a verified trial.
 The restart fixture uses synthetic runtime entry bytes. Launcher selection
 handoff, catalog unsealing and ordinary native update admission still require
 their production recovery proof.
+
+## Native startup migration inspection
+
+Startup reads catalog presence and ordered migration rows in one read-only
+snapshot. The helper validates the generation identity and serving fence
+before reading migration rows. The server compares that history with its
+compiled migration list. The regular schema and migration helper operations
+remain available.
+
+The startup fixture covered an uncataloged file, a current file, a schema 88
+upgrade, and recovery after a killed writer. The isolated native trial test
+verified refusal against a sealed catalog. Successful bootstrap still provides
+the migration witness used by serving descriptors. These checks cover
+behavior. A paired startup measurement remains open.
+[Startup recovery and sealed inspection checks](https://github.com/glopyglerky/t3code-ls/actions/runs/45175802072)

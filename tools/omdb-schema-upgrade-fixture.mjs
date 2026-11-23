@@ -458,6 +458,12 @@ export async function verifyNativeSchema88Upgrade(executable) {
       nativeRequest(executable, fixture, "connect", { operation: "application_migrations" }),
       schema88.migrations,
     );
+    const beforeInspection = hash(await NodeFSP.readFile(fixture.databasePath));
+    NodeAssert.deepEqual(
+      nativeRequest(executable, fixture, "inspect", { operation: "application_startup_migrations" }),
+      schema88.migrations,
+    );
+    NodeAssert.equal(hash(await NodeFSP.readFile(fixture.databasePath)), beforeInspection);
     const preservedTables = [
       "projection_projects",
       "orchestration_v2_projection_threads",
