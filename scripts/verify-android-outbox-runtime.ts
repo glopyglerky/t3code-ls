@@ -132,7 +132,7 @@ try {
   }
   Assert.equal(device(["shell", "getprop", "ro.kernel.qemu"]).stdout.trim(), "1");
   Assert.equal(device(["shell", "getprop", "ro.product.cpu.abi"]).stdout.trim(), "x86_64");
-  Assert.equal(device(["emu", "avd", "name"]).stdout.trim().split("\n")[0], avdName);
+  Assert.equal(device(["emu", "avd", "name"]).stdout.split(/\r?\n/u, 1)[0], avdName);
   report.boot = { serial, abi: "x86_64", completed: true };
 
   if (phase === "run") {
