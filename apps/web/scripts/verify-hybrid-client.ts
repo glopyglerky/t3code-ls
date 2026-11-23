@@ -44,6 +44,7 @@ const startupTimeoutMs = 180_000;
 const replayPrompt = "Replay: showcase";
 const replayMarker = "This turn is a replay.";
 const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
+const spliceNegotiationProof = process.env.T3_CODE_LS_SPLICE_NEGOTIATION_PROOF === "true";
 const multiTabDraftProof = process.env.T3_CODE_LS_MULTI_TAB_DRAFT_PROOF === "true";
 const fileEditorProof = process.env.T3_CODE_LS_FILE_EDITOR_PROOF === "true";
 const tasksFile = "fixture-tasks.md";
@@ -955,6 +956,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     draftMerge: null as Awaited<ReturnType<typeof verifyDraftMerge>> | null,
     messageAppends: null as {
       requests: number;
+      spliceCapableRequests: number;
       frames: number;
       rustDecoder: boolean;
       messageUpdates: Array<{ sequence: number; length: number; streaming: boolean }>;
@@ -1007,6 +1009,7 @@ async function exercise(implementation: Implementation): Promise<void> {
   let threadFindRequests = 0;
   let messageAppendFrames = 0;
   let messageAppendRequests = 0;
+  let messageSpliceRequests = 0;
   const wireMessages = new Map<string, Array<{ sequence: number; length: number; streaming: boolean }>>();
   const fileWrites = new EventEmitter();
   function observePage(current: Page): void {
@@ -1024,7 +1027,8 @@ async function exercise(implementation: Implementation): Promise<void> {
         if (json.includes('"orchestration.searchThreadStream"')) {
           threadFindRequests += 1;
         }
-        if (json.includes('"messageTextAppends":1')) messageAppendRequests += 1;
+        if (/"messageTextAppends":[12](?!\d)/u.test(json)) messageAppendRequests += 1;
+        if (/"messageTextAppends":2(?!\d)/u.test(json)) messageSpliceRequests += 1;
       });
       socket.on("framereceived", ({ payload }) => {
         const json = payload.toString();
@@ -1276,6 +1280,7 @@ async function exercise(implementation: Implementation): Promise<void> {
       starting("negotiated Rust text appends");
       const framesBefore = messageAppendFrames;
       const requestsBefore = messageAppendRequests;
+      const splicesBefore = messageSpliceRequests;
       const appendThread = await submitReplay(page, "Text appends", "Replay: text appends");
       const approve = page.getByRole("button", { name: /^(Yes|Approve)$/u }).first();
       await approve.waitFor({ state: "visible" });
@@ -1290,6 +1295,7 @@ async function exercise(implementation: Implementation): Promise<void> {
       );
       proof.messageAppends = {
         requests: messageAppendRequests - requestsBefore,
+        spliceCapableRequests: messageSpliceRequests - splicesBefore,
         frames: messageAppendFrames - framesBefore,
         rustDecoder,
         messageUpdates: wireMessages.get(appendThread) ?? [],
@@ -1301,6 +1307,12 @@ async function exercise(implementation: Implementation): Promise<void> {
       };
       saveProof();
       Assert.ok(proof.messageAppends.requests > 0, "The client must negotiate text appends");
+      if (spliceNegotiationProof) {
+        Assert.ok(
+          proof.messageAppends.spliceCapableRequests > 0,
+          "The Rust binding must negotiate version 2",
+        );
+      }
       Assert.ok(proof.messageAppends.frames > 0, "The thread subscription must receive an append");
       Assert.ok(
         proof.messageAppends.storedUpdates.filter((update) => update.streaming).length >= 2,

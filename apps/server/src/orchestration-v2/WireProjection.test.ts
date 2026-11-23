@@ -500,6 +500,31 @@ describe("live body deduper", () => {
     }
   });
 
+  it("uses a bounded splice without splitting either UTF-16 surrogate pair", () => {
+    const prefix = "prefix 日本 🐈 ".repeat(9);
+    const suffix = " suffix with Unicode ".repeat(9);
+    for (const [previous, next] of [["🐟", "🚀"], ["𐀀", "𐐀"], ["🐈", ""]] as const) {
+      const initial = message(1, `${prefix}${previous}${suffix}`);
+      const updated = message(2, `${prefix}${next}${suffix}`);
+      const legacy = makeMessageTextAppendEncoder();
+      legacy(initial);
+      expect(legacy(updated)).toBe(updated);
+
+      const modern = makeMessageTextAppendEncoder(true);
+      modern(initial);
+      expect(modern(updated)).toEqual({
+        kind: "message-text-splice",
+        baseSequence: 1,
+        sequence: 2,
+        startUtf16: prefix.length,
+        endUtf16: prefix.length + previous.length,
+        event: { ...updated.event, payload: { ...updated.event.payload, text: next } },
+      });
+      const replacement = message(3, "Short replacement.");
+      expect(modern(replacement)).toBe(replacement);
+    }
+  });
+
   it("blanks a reply that repeats the message delivered before it, after coalescing", () => {
     const delivered = coalesceLiveUpdatedEvents([
       message(1, "a"),

@@ -4,7 +4,6 @@ import {
   type EnvironmentId as EnvironmentIdType,
   type OrchestrationV2ThreadDetailSnapshot,
   type OrchestrationV2ThreadProjection,
-  type OrchestrationV2ThreadStreamItem as WireThreadItem,
   type OrchestrationV2TurnItem,
   type ThreadId as ThreadIdType,
 } from "@t3tools/contracts";
@@ -38,7 +37,10 @@ import {
   subscribeThread,
   subscriptionRetryDelay,
 } from "../rpc/client.ts";
-import { canDecodeThreadMessageText } from "../rpc/threadMessageText.ts";
+import {
+  threadMessageTextVersion,
+  type DecodedThreadStreamItem as OrchestrationV2ThreadStreamItem,
+} from "../rpc/threadMessageText.ts";
 import { parseThreadKey, threadKey } from "./entities.ts";
 import { applyOrchestrationV2ProjectionEvent } from "./orchestrationV2Projection.ts";
 import { THREAD_SNAPSHOT_IDLE_TTL_MS } from "./threadRetention.ts";
@@ -62,7 +64,6 @@ import {
 } from "./threadState.ts";
 
 const THREAD_SUBSCRIPTION_RETRY_DELAY = "250 millis";
-type OrchestrationV2ThreadStreamItem = Exclude<WireThreadItem, { kind: "message-text-append" }>;
 
 function statusWithoutLiveData(
   data: Option.Option<OrchestrationV2ThreadProjection>,
@@ -1103,6 +1104,9 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         const sequence = yield* SubscriptionRef.get(lastSequence);
         const canResume = Option.isSome(current.data);
         const acceptBoundedSnapshot = yield* Ref.get(acceptsBoundedSocketSnapshots);
+        const textVersion = threadMessageTextVersion();
+        const serverAppends = Option.exists(config, (value) => value.threadMessageTextAppends === 1);
+        const serverSplices = Option.exists(config, (value) => value.threadMessageTextSplices === 1);
 
         return {
           threadId,
@@ -1117,9 +1121,8 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
               }
             : {}),
           acceptDedupedBodies: true as const,
-          ...(canDecodeThreadMessageText() &&
-          Option.exists(config, (value) => value.threadMessageTextAppends === 1)
-            ? { messageTextAppends: 1 as const }
+          ...(textVersion !== undefined && serverAppends
+            ? { messageTextAppends: textVersion === 2 && serverSplices ? 2 : 1 }
             : {}),
         };
       }),
