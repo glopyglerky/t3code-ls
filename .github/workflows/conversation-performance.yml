@@ -15,12 +15,12 @@ jobs:
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
       STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
       CANDIDATE_COMMIT: >-
-        ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-backend-') && 'b30ae209e98f1e2b98360c3f284d43be918e4107'
+        ${{ (startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-backend-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-trace-')) && 'b30ae209e98f1e2b98360c3f284d43be918e4107'
         || startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-lookups-') && '7216183e0c013c7f5d7e9975d8aee7beda42b880'
         || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') && '9201e4b80c5b13503ce4763a296a7294c0bada7d'
         || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
       CANDIDATE_TREE: >-
-        ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-backend-') && '3e80e454307c4189cde56d6caaab8cfc83ce4214'
+        ${{ (startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-backend-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-trace-')) && '3e80e454307c4189cde56d6caaab8cfc83ce4214'
         || startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-lookups-') && '675636c7feb22a55179fa726af94e5cfa49212b8'
         || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') && '78647c8e507b6b677fa6f1585839bd8bdc12bc55'
         || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
@@ -42,6 +42,7 @@ jobs:
       REOPEN_WORKSPACE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-') }}
       REOPEN_LOOKUPS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-lookups-') }}
       REOPEN_BACKEND: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-backend-') }}
+      REOPEN_SPANS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-trace-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -252,16 +253,18 @@ jobs:
             ) > "$evidence/$profile.sha256"
           done
           extra_profile=""
+          trace_args=()
           if [[ "$REOPEN_LOOKUPS" == true ]]; then extra_profile=candidate-lookups; fi
-          if [[ "$REOPEN_BACKEND" == true ]]; then extra_profile=fork-sqlite; fi
+          if [[ "$REOPEN_BACKEND" == true || "$REOPEN_SPANS" == true ]]; then extra_profile=fork-sqlite; fi
+          if [[ "$REOPEN_SPANS" == true ]]; then trace_args=(server-spans); fi
           jq -n --arg stock "$STOCK_COMMIT" --arg stockTree "$STOCK_TREE" \
             --arg candidate "$CANDIDATE_COMMIT" --arg candidateTree "$CANDIDATE_TREE" \
             --arg probe "$(git -C measurement rev-parse HEAD)" --arg node "$(node --version)" \
             --arg chrome "$("$chrome" --version)" --arg driver "$("$driver" --version)" \
             --arg image "${ImageOS:-unknown}/${ImageVersion:-unknown}" --arg kernel "$(uname -r)" \
             --arg cpu "$(LC_ALL=C lscpu | sed -n 's/^Model name:[[:space:]]*//p')" \
-            --arg systemLoad "$(uptime)" --argjson cpus "$(nproc)" --arg extra "$extra_profile" \
-            '{journey:"J02",stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},extra:(if $extra == "fork-sqlite" then {profile:$extra,servingSelection:"upstream",artifact:"candidate.sha256",durability:"SQLite WAL/NORMAL"} elif $extra != "" then {profile:$extra,artifact:"candidate.sha256",durability:"omdb Immediate"} else null end),probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,workload:{threads:32,messagesPerThread:200},cache:"same browser and saved profile per trial, unmanaged filesystem cache after import"}' \
+            --arg systemLoad "$(uptime)" --argjson cpus "$(nproc)" --arg extra "$extra_profile" --argjson traced "$REOPEN_SPANS" \
+            '{journey:"J02",stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},extra:(if $extra == "fork-sqlite" then {profile:$extra,servingSelection:"upstream",artifact:"candidate.sha256",durability:"SQLite WAL/NORMAL"} elif $extra != "" then {profile:$extra,artifact:"candidate.sha256",durability:"omdb Immediate"} else null end),probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,workload:{threads:32,messagesPerThread:200},cache:"same browser and saved profile per trial, unmanaged filesystem cache after import",serverTraceIsDiagnostic:$traced}' \
             > "$evidence/inputs.json"
           printf 'pair\tposition\tprofile\tdescriptor_us\tshell_visible_ms\tselected_visible_ms\tauthoritative_shell_ms\tauthoritative_thread_ms\n' > "$evidence/reopen.tsv"
           printf 'pair\tprofile\tserver_cpu_ms\tbrowser_cpu_ms\tserver_peak_rss_bytes\tbrowser_peak_rss_bytes\tsampler_scan_wall_ms\tmax_sample_gap_ms\tobserved_db_helper_cpu_ms\n' > "$evidence/reopen-resources.tsv"
@@ -300,13 +303,16 @@ jobs:
                 exec runuser -u "$user" -- "$@"
               ' _ "$(id -un)" "$probe" probe-reopen "$node_path" \
                 "$PWD/$bundle_profile/apps/server/dist/bin.mjs" "$trial_root/$trial" \
-                "$driver" "$chrome" "$mode" | tee "$result" > /dev/null
+                "$driver" "$chrome" "$mode" "${trace_args[@]}" | tee "$result" > /dev/null
               jq -er --argjson pair "$pair" --argjson position "$((position + 1))" --arg profile "$profile" --arg mode "$mode" \
                 'select(.journey == "J02" and .profile == $mode and .snapshot.valid and .fixture.total_messages == 6400 and .database_migration > 0 and .native_lookups == ($mode == "native-lookups") and .migration_evidence.source == (if ($mode | startswith("native")) then "stopped-native-catalog" else "live-sqlite-descriptors" end)) | [$pair,$position,$profile,.descriptor_micros,.browser.firstShellVisibleMillis,.browser.selectedTextVisibleMillis,.browser.authoritativeShellHttpMillis,.browser.authoritativeThreadMillis] | @tsv' \
                 "$result" >> "$evidence/reopen.tsv"
               jq -er --argjson pair "$pair" --arg profile "$profile" --arg mode "$mode" \
                 '.resources as $r | [$r.server.processes[] | select(.role == "native-database-helper")] as $helpers | select($r.samples >= 2 and ($r.server.processes | length) > 0 and any($r.browser.processes[]; .role == "browser-renderer") and (($helpers | length > 0) == ($mode | startswith("native")))) | [$pair,$profile,$r.server.observed_cpu_millis,$r.browser.observed_cpu_millis,$r.server.sampled_peak_sum_rss_bytes,$r.browser.sampled_peak_sum_rss_bytes,$r.sampler_scan_wall_millis,$r.max_sample_gap_millis,(([$helpers[] | .last_cpu_ticks - .baseline_cpu_ticks] | add // 0) * 1000 / $r.ticks_per_second)] | @tsv' \
                 "$result" >> "$evidence/reopen-resources.tsv"
+              if [[ "$REOPEN_SPANS" == true ]]; then
+                jq -e '.persistence_spans | length > 0' "$result" > /dev/null
+              fi
               rm -r "${trial_root:?}/${trial:?}"
             done
             for profile in "${profiles[@]}"; do

@@ -1,4 +1,7 @@
-use super::{OwnedChild, POLL_INTERVAL, STARTUP_TIMEOUT, browser::Browser, pairing_link, sample};
+use super::{
+    OwnedChild, POLL_INTERVAL, STARTUP_TIMEOUT, browser::Browser, pairing_link, read_server_spans,
+    sample,
+};
 use crate::Result;
 use serde_json::{Value, json};
 use std::{
@@ -10,7 +13,7 @@ use std::{
     path::Path,
     process::{Command, Stdio},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 const THREADS: usize = 32;
@@ -23,9 +26,13 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     if !cfg!(target_os = "linux") {
         return Err("the mature-workspace probe currently requires Linux".into());
     }
-    let args: Vec<_> = args.collect();
+    let mut args: Vec<_> = args.collect();
+    let trace_spans = args.last().is_some_and(|option| option == "server-spans");
+    if trace_spans {
+        args.pop();
+    }
     let [node, bundle, trial, driver, chrome, mode] = args.as_slice() else {
-        return Err("usage: t3code-ls-tools probe-reopen NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME stock|native|native-lookups|fork-sqlite".into());
+        return Err("usage: t3code-ls-tools probe-reopen NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME stock|native|native-lookups|fork-sqlite [server-spans]".into());
     };
     let mode_label = mode.to_str().ok_or("invalid reopen profile")?;
     let implementation = match mode_label {
@@ -131,8 +138,17 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     }
 
     let resource_baseline = super::resources::Baseline::capture(browser.driver_pid())?;
+    let trace_path = trial.join("reopened-server-trace.ndjson");
+    let mut command = make_server()?;
+    if trace_spans {
+        command
+            .env("T3CODE_TRACE_MIN_LEVEL", "Trace")
+            .env("T3CODE_TRACE_BATCH_WINDOW_MS", "100")
+            .env("T3CODE_TRACE_FILE", &trace_path);
+    }
+    let epoch_millis = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64() * 1000.0;
     let started = Instant::now();
-    let mut reopened = OwnedChild(make_server()?.spawn()?);
+    let mut reopened = OwnedChild(command.spawn()?);
     let resources = resource_baseline.start(reopened.0.id(), started)?;
     let _pairing_output = pairing_link(reopened.0.stdout.take().ok_or("missing reopen output")?);
     let (reopened_origin, descriptor_micros, html_micros, migration) =
@@ -168,9 +184,35 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
         .as_object_mut()
         .ok_or("missing reopen snapshot")?
         .remove("messages");
+    let measured_millis = started.elapsed().as_secs_f64() * 1000.0;
     let resources = resources.finish()?;
     browser.close()?;
     stop_gracefully(&mut reopened)?;
+    let persistence_spans = if trace_spans {
+        let mut spans =
+            read_server_spans(&trace_path, epoch_millis, epoch_millis + measured_millis)?;
+        spans.retain(|span| {
+            matches!(
+                span["name"].as_str(),
+                Some(
+                    "Omdb.make"
+                        | "Sqlite.setup"
+                        | "NativeDatabase.make"
+                        | "NativeDatabase.connect"
+                        | "NativeDatabase.request"
+                        | "NativeDatabase.send"
+                        | "NativeDatabase.withSession"
+                )
+            )
+        });
+        let required = if native { "Omdb.make" } else { "Sqlite.setup" };
+        if !spans.iter().any(|span| span["name"] == required) || spans.len() > 2048 {
+            return Err(format!("missing {required} or excessive reopen persistence spans").into());
+        }
+        Some(spans)
+    } else {
+        None
+    };
     // The live native descriptor may omit migrations while the writer owns the engine.
     // Verify the committed catalog after stopping, outside every measured interval.
     let database_migration = if native {
@@ -207,6 +249,7 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
             "cache": "same authenticated browser profile with observed persisted shell and selected-thread records",
             "filesystem_cache": "unmanaged, after fixture import and clean stop",
             "resources": resources,
+            "persistence_spans": persistence_spans,
             "cpu_rss_qualified": false, "cached_paint_attribution_qualified": false,
         })
     );
