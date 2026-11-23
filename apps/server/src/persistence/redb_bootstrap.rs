@@ -1,7 +1,8 @@
 //! Compile-time current schema: fresh application startup has no SQL dependency.
 use crate::application::{
-    ApplicationCatalog, ApplicationSchema, decode_catalog, decode_row, encode_catalog, row_prefix,
-    schema_key, table, validate_schema,
+    ApplicationCatalog, ApplicationSchema, decode_catalog, decode_row, encode_catalog,
+    read_generation_identity, record_generation_identity, row_prefix, schema_key, table,
+    validate_schema,
 };
 use crate::application_rows::{int_cell, integer, text, text_cell, write_row};
 use crate::{Error, Result, Store};
@@ -51,6 +52,7 @@ impl Store {
             return Ok(Vec::new());
         };
         let catalog = decode_catalog(&bytes)?;
+        read_generation_identity(&mut tx, &catalog, &bytes).await?;
         let prefix = row_prefix(&catalog.generation, "effect_sql_migrations")?;
         let mut end = prefix.clone();
         *end.last_mut().ok_or(Error::IncompatibleStore)? += 1;
@@ -95,6 +97,7 @@ impl Store {
             .await?;
         if let Some(bytes) = tx.get(&schema_key()).await? {
             let catalog = decode_catalog(&bytes)?;
+            read_generation_identity(&mut tx, &catalog, &bytes).await?;
             tx.rollback().await?;
             if catalog.schema != definition.schema {
                 return self.upgrade_application_80(catalog, definition).await;
@@ -112,7 +115,9 @@ impl Store {
             schema: definition.schema,
             generation: "native".into(),
         };
-        tx.put(schema_key(), encode_catalog(&catalog)?).await?;
+        let bytes = encode_catalog(&catalog)?;
+        record_generation_identity(&mut tx, &catalog, &bytes).await?;
+        tx.put(schema_key(), bytes).await?;
         for migration in &definition.migrations {
             let id = migration
                 .id
