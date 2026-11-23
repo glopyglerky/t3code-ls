@@ -2724,7 +2724,16 @@ async function exercise(implementation: Implementation): Promise<void> {
     proof.composer = usedRustComposer ? "rust-wasm" : "retained";
     const wasmAtSend = composerWasm;
     const refusedWasmAtSend = refusedComposerWasmRequests;
-    async function recordComposerSubmit(
+    let wasmSha256AtSend: string | null = null;
+    if (composerSubmit?.renderer === "dioxus") {
+      Assert.ok(wasmAtSend !== undefined && wasmAtSend.ok(), "Send must load the bundled Wasm");
+      // Chromium may discard this response body on the Stop proof's reload.
+      wasmSha256AtSend = NodeCrypto.createHash("sha256").update(await wasmAtSend.body()).digest("hex");
+      const bundledWasm = NodePath.join(repoRoot, "apps/web/dist", composerSubmitWasmPath.slice(1));
+      Assert.equal(wasmSha256AtSend, NodeCrypto.createHash("sha256")
+        .update(NodeFS.readFileSync(bundledWasm)).digest("hex"));
+    }
+    function recordComposerSubmit(
       composerSubmit: ComposerSubmitProof,
       sentMessageId: string | undefined,
     ) {
@@ -2735,20 +2744,14 @@ async function exercise(implementation: Implementation): Promise<void> {
       Assert.equal(request.threadId, threadId);
       Assert.ok(sentMessageId);
       Assert.equal(sentMessageId, request.messageId);
-      let wasmSha256: string | null = null;
       if (composerSubmit.renderer === "dioxus") {
-        const response = wasmAtSend;
-        Assert.ok(response !== undefined && response.ok(), "Send must load the bundled Wasm");
-        wasmSha256 = NodeCrypto.createHash("sha256").update(await response.body()).digest("hex");
-        const bundledWasm = NodePath.join(repoRoot, "apps/web/dist", composerSubmitWasmPath.slice(1));
-        Assert.equal(wasmSha256, NodeCrypto.createHash("sha256")
-          .update(NodeFS.readFileSync(bundledWasm)).digest("hex"));
+        Assert.ok(wasmSha256AtSend);
       } else {
         Assert.equal(refusedWasmAtSend, 1, "The explicit fallback must follow a blocked Wasm load");
       }
       proof.composerSubmit = {
         ...composerSubmit,
-        wasmSha256,
+        wasmSha256: wasmSha256AtSend,
         refusedWasmRequests: refusedWasmAtSend,
         localRefusalPreservedDraft: true,
       };
@@ -2756,7 +2759,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     if (composerStopProof && composerSubmit) {
       proof.composerStop = await verifyComposerStop(page, threadId, composerSubmit.renderer, stopRequests);
       proof.threadUrl = page.url();
-      await recordComposerSubmit(composerSubmit, proof.composerStop.sentMessageId);
+      recordComposerSubmit(composerSubmit, proof.composerStop.sentMessageId);
       completed("Verified one keyboard Stop, the interrupted run, and the unsent draft after reopen");
       proof.status = "passed";
       return;
@@ -2788,7 +2791,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     if (composerSubmit) {
       const messages = pending.projection.messages.filter((message) => message.role === "user");
       Assert.equal(messages.length, 1);
-      await recordComposerSubmit(composerSubmit, messages[0]?.id);
+      recordComposerSubmit(composerSubmit, messages[0]?.id);
       completed("Verified the Send button, local refusal, and exactly one authenticated turn");
       proof.status = "passed";
       return;
