@@ -2097,7 +2097,10 @@
         "apps/server/rust/pty-host/src/linux.rs",
         "apps/server/rust/pty-host/src/main.rs"
       ],
-      "adapter_paths": ["apps/server/src/terminal/NativePtyAdapter.ts"],
+      "adapter_paths": [
+        "apps/server/src/terminal/NativePtyAdapter.ts",
+        ".github/workflows/composer-offsets.yml"
+      ],
       "platform_routes": [
         {
           "targets": ["linux-x64"],
@@ -2110,8 +2113,15 @@
       "acceptance_tests": [
         "apps/server/rust/pty-host/tests/owner.rs",
         "apps/server/src/terminal/Manager.test.ts",
+        "apps/server/src/terminal/NativePtyAdapter.integration.test.ts",
         "apps/web/scripts/verify-hybrid-client.ts"
       ],
+      "hosted_acceptance": {
+        "apps/server/rust/pty-host/tests/owner.rs": ".github/workflows/composer-offsets.yml",
+        "apps/server/src/terminal/Manager.test.ts": ".github/workflows/composer-offsets.yml",
+        "apps/server/src/terminal/NativePtyAdapter.integration.test.ts": ".github/workflows/composer-offsets.yml",
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
+      },
       "retired_paths": [],
       "notes": "T07 Linux PTY host using portable-pty 0.9.0 and nix 0.28.0. The Linux x64 server opts in with T3_CODE_LS_PTY_HOST_EXECUTABLE. The default selection uses NodePtyAdapter. The native owner uses bounded nonblocking byte input, exact output acknowledgement and kill/reap for the initial process group. Restart, signal behavior, interactive foreground jobs, session-escaping descendants and performance remain unqualified.",
       "rust_crates": ["apps/server/rust/pty-host"]
