@@ -7,7 +7,7 @@ import type { Locator, Page } from "playwright";
  * This helper creates no DOM and never bypasses the selected-thread router. */
 export async function verifyThreadNavigation(
   page: Page,
-  link: Locator,
+  anchor: Locator,
   expectedTarget: string,
   targetText: string,
   renderer: "dioxus" | "dioxus-fallback",
@@ -16,7 +16,6 @@ export async function verifyThreadNavigation(
   const editor = page.getByTestId("composer-editor");
   const draft = "Navigation must retain this unsent 雪 draft.";
   await editor.fill(draft);
-  const anchor = link.locator("a").or(link.and(page.locator("a")));
   await revealThreadReadLink(page, anchor);
   if (renderer === "dioxus") {
     await assertEventuallyNative(anchor);
@@ -63,10 +62,13 @@ export async function denyThreadLinkWasm(page: Page) {
 }
 
 async function revealThreadReadLink(page: Page, anchor: Locator) {
-  // The existing live-work disclosure intentionally has no nested link. Open
-  // that production disclosure when the selected-thread view is collapsed.
-  if (!(await anchor.isVisible())) {
-    await page.getByRole("button").filter({ hasText: /Read (?:a T3 )?thread/u }).first().click();
-  }
+  const collapsed = page.locator('[aria-expanded="false"]');
+  const work = page.getByRole("button", { name: /^Worked for /u }).and(collapsed);
+  const read = page.getByRole("button", { name: /^Read (?:a T3 )?thread/u }).and(collapsed);
+  // Returning to the conversation can collapse the enclosing work group.
+  await anchor.or(work).or(read).first().waitFor({ state: "visible" });
+  if (!(await anchor.isVisible()) && (await work.isVisible())) await work.click();
+  await anchor.or(read).first().waitFor({ state: "visible" });
+  if (!(await anchor.isVisible())) await read.click();
   await anchor.waitFor({ state: "visible" });
 }
