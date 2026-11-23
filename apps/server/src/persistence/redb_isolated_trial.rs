@@ -1234,19 +1234,24 @@ pub(super) async fn run_forward_owner(home: PathBuf, update_id: String) -> Resul
             return Ok(());
         }
         #[derive(Deserialize)]
-        #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
-        enum Request {
+        #[serde(deny_unknown_fields)]
+        struct Request {
+            operation: Operation,
+        }
+        #[derive(Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        enum Operation {
             ForwardOwnerCheck,
             ForwardOwnerBindEntry,
         }
         if count > 4096 || frame.last() != Some(&b'\n') {
             return Err(Error::IncompatibleStore);
         }
-        let request: Request =
+        let Request { operation } =
             serde_json::from_slice(&frame).map_err(|_| Error::IncompatibleStore)?;
         lease.verify_promotion_runtimes(&saved).await?;
         verify()?;
-        if matches!(request, Request::ForwardOwnerBindEntry) && entry_image.is_none() {
+        if matches!(operation, Operation::ForwardOwnerBindEntry) && entry_image.is_none() {
             // Both path and digest come from the retained, checked activation.
             // The request supplies no executable, version, digest or authority.
             let entry = lease
@@ -1277,12 +1282,12 @@ pub(super) async fn run_forward_owner(home: PathBuf, update_id: String) -> Resul
         closed?;
         lease.verify_promotion_runtimes(&saved).await?;
         verify()?;
-        match request {
-            Request::ForwardOwnerCheck => writeln!(
+        match operation {
+            Operation::ForwardOwnerCheck => writeln!(
                 output,
                 "{{\"ok\":true,\"result\":{{\"checked\":true,\"serving\":false}}}}"
             ),
-            Request::ForwardOwnerBindEntry => {
+            Operation::ForwardOwnerBindEntry => {
                 let image = entry_image.as_ref().ok_or(Error::IncompatibleStore)?;
                 crate::forward_child_readiness::verify_image(
                     image,
