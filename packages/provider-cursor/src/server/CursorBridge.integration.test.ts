@@ -234,7 +234,7 @@ function cursorAgentSdkSession(
 }
 
 describe.skipIf(!executable)("Cursor adapter through the Rust Connect host", () => {
-  it.effect.each(["complete", "truncated", "cancel", "wrong-run"] as const)("preserves the controlled turn, mode=%s", (mode) =>
+  it.live.each(["complete", "truncated", "cancel", "wrong-run"] as const)("preserves the controlled turn, mode=%s", (mode) =>
     Effect.gen(function* () {
       const bridge = yield* Effect.acquireRelease(Effect.promise(() => peer(mode)), (peer) => Effect.promise(peer.close));
       const fs = yield* FileSystem.FileSystem;
