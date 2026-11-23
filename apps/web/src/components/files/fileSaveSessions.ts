@@ -1,13 +1,23 @@
-import { AuthFilesystemWriteScope, type EnvironmentId } from "@t3tools/contracts";
-import { type AtomCommandResult, runAtomCommand } from "@t3tools/client-runtime/state/runtime";
+import {
+  AuthFilesystemWriteScope,
+  type EnvironmentId,
+  ProjectWriteFileError,
+} from "@t3tools/contracts";
+import {
+  type AtomCommandResult,
+  runAtomCommand,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { useEffect } from "react";
 
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { projectEnvironment } from "~/state/projects";
 import { environmentSession, readEnvironmentScope, sessionHasScope } from "~/state/session";
+import { toastManager } from "~/components/ui/toast";
 
 import { FileSaveCoordinator } from "./fileSaveCoordinator";
 import {
+  advanceProjectFileRevision,
   confirmProjectFileQueryData,
   getUnsavedProjectFileQueryData,
 } from "./projectFilesQueryState";
@@ -150,11 +160,40 @@ const fileSaveSessions = createFileSaveSessions({
       },
     );
   },
-  persist: ({ environmentId, cwd, relativePath }, contents) =>
-    runAtomCommand(appAtomRegistry, projectEnvironment.writeFile, {
+  persist: async ({ environmentId, cwd, relativePath }, contents) => {
+    const expectedRevision =
+      getUnsavedProjectFileQueryData(environmentId, cwd, relativePath)?.revision;
+    const result = await runAtomCommand(appAtomRegistry, projectEnvironment.writeFile, {
       environmentId,
-      input: { cwd, relativePath, contents },
-    }),
+      input: {
+        cwd,
+        relativePath,
+        contents,
+        ...(expectedRevision === undefined ? {} : { expectedRevision }),
+      },
+    });
+    if (result._tag === "Success") {
+      if (expectedRevision !== undefined && result.value.revision !== undefined) {
+        advanceProjectFileRevision(
+          environmentId,
+          cwd,
+          relativePath,
+          expectedRevision,
+          result.value.revision,
+        );
+      }
+    } else {
+      const failure = squashAtomCommandFailure(result);
+      if (failure instanceof ProjectWriteFileError && failure.failure === "file_changed") {
+        toastManager.add({
+          type: "error",
+          title: "File changed on disk",
+          description: "Your unsaved edits are still in the editor.",
+        });
+      }
+    }
+    return result;
+  },
   confirm: ({ environmentId, cwd, relativePath }, contents) =>
     confirmProjectFileQueryData(environmentId, cwd, relativePath, contents),
   readUnsaved: ({ environmentId, cwd, relativePath }) =>
