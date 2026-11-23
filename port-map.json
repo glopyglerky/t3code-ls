@@ -2048,11 +2048,11 @@
       "id": "browser-assistant-text-dioxus",
       "state": "candidate",
       "domain_owner": "apps/web/src/components/chat",
-      "reviewed_upstream_commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
       "upstream_sources": [
         {
           "path": "apps/web/src/components/chat/TimelineAssistantRows.tsx",
-          "blob": "72fcf79013e87d58682de982521c9e2e43e5fb43"
+          "blob": "36c04da893275229889741ff85881edc69b7fe9d"
         }
       ],
       "rust_paths": [
