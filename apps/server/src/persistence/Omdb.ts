@@ -290,40 +290,51 @@ export const make = Effect.fn("Omdb.make")(
       // Finish every resumable index preparation before making the cutover durable.
       // A failed preparation leaves the preserved SQLite source and the retryable
       // native candidate intact, without activating the older-server fence.
+      const preparations = [
+        client.prepareEvents,
+        client.prepareReceipts,
+        client.preparePositions,
+        client.prepareProjects,
+        client.prepareProjections,
+        client.prepareOutbox,
+        client.prepareViewedFiles,
+        client.prepareAuth,
+        client.preparePeers,
+        client.prepareRuntimeState,
+        client.prepareScheduled,
+        client.prepareProjectionReads,
+        client.prepareAuxiliary,
+        client.prepareMessageRowids,
+        client.prepareSearch,
+        client.prepareLegacyV1,
+        client.prepareMaintenance,
+      ];
+      let completedOwners = 0;
       if (options.startupPreparation === "prefix-v1") {
-        const preparation = Schema.Struct({
-          prepared: Schema.Boolean,
-          completed_owners: Schema.Number,
-        });
-        while (!(yield* database.request(
+        const result = yield* database.request(
           {
             operation: "application_startup_prepare_prefix",
             ...(client.durableRelayWebhooks ? { durable_relay: true } : {}),
           },
-          preparation,
-        )).prepared) yield* Effect.yieldNow;
-      } else {
-        for (const prepare of [
-          client.prepareEvents,
-          client.prepareReceipts,
-          client.preparePositions,
-          client.prepareProjects,
-          client.prepareProjections,
-          client.prepareOutbox,
-          client.prepareViewedFiles,
-          client.prepareAuth,
-          client.preparePeers,
-          client.prepareRuntimeState,
-          client.prepareScheduled,
-          client.prepareProjectionReads,
-          client.prepareAuxiliary,
-          client.prepareMessageRowids,
-          client.prepareSearch,
-          client.prepareLegacyV1,
-          client.prepareMaintenance,
-        ]) {
-          while (!(yield* prepare).prepared) yield* Effect.yieldNow;
+          Schema.Struct({ prepared: Schema.Boolean, completed_owners: Schema.Int }),
+        );
+        completedOwners = result.completed_owners;
+        if (
+          completedOwners < 0 ||
+          completedOwners > preparations.length ||
+          result.prepared !== (completedOwners === preparations.length)
+        ) {
+          return yield* new OmdbStartupError({
+            path: options.databasePath,
+            cause: new Error("Invalid startup preparation prefix"),
+          });
         }
+        if (!result.prepared) yield* Effect.yieldNow;
+      }
+      // Resume with the first unfinished owner. Some owners can affect work earlier
+      // in the ordered startup pass, so repeatedly starting at owner zero can stall.
+      for (const prepare of preparations.slice(completedOwners)) {
+        while (!(yield* prepare).prepared) yield* Effect.yieldNow;
       }
       if (readDatabase !== undefined) {
         yield* readDatabase.request({ operation: "application_schema" }, RedbClient.ApplicationSchema);

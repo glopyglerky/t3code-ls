@@ -2035,12 +2035,27 @@ mod startup_prefix_tests {
         let path = directory.path().join("state.redb");
         let store = Store::initialize_local(&path).await.unwrap();
         store.bootstrap_application().await.unwrap();
-        while !store
-            .prepare_application_startup_prefix(false)
-            .await
-            .unwrap()
-            .prepared
-        {}
+        let mut initializing = ApplicationTransactions::new(store.clone());
+        let mut initialization_acks = 0;
+        for owner in OWNERS {
+            let mut prepared = false;
+            for _ in 0..20 {
+                let result = wire(
+                    &store,
+                    &mut initializing,
+                    json!({"operation": format!("application_{owner}_prepare")}),
+                    &mut initialization_acks,
+                )
+                .await
+                .unwrap();
+                if result["prepared"] == true {
+                    prepared = true;
+                    break;
+                }
+            }
+            assert!(prepared, "initial preparation stalled for {owner}");
+        }
+        drop(initializing);
         store.shutdown().await.unwrap();
         let store = Store::open_local(&path).await.unwrap();
         let mut transactions = ApplicationTransactions::new(store.clone());

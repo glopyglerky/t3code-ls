@@ -65,7 +65,7 @@ pub(crate) fn bootstrap_schema_sha256() -> String {
 
 impl Store {
     /// Opt-in wire v1. Reuse every owner's validation, bounded batch and transaction.
-    /// Stop at the first unfinished owner so the caller can yield before resuming.
+    /// Stop at the first unfinished owner so the caller can yield and finish the tail.
     /// Errors propagate even after earlier owners committed; no success is replayed.
     pub async fn prepare_application_startup_prefix(
         &self,
@@ -396,47 +396,43 @@ mod tests {
     #[tokio::test]
     async fn startup_prefix_stops_at_first_incomplete_page_and_resumes() {
         use crate::application::ApplicationTransactions;
-        use crate::application_events::EventAppendRow;
         let fixture = TestFixture::start().await;
         let store = fixture.initialize().await;
         store.bootstrap_application().await.unwrap();
-        while !store.prepare_application_events().await.unwrap().prepared {}
         let mut app = ApplicationTransactions::new(store.clone());
         app.begin("seed").await.unwrap();
-        for index in 0..33 {
-            app.events_append(
+        // Imported rows have no live event indexes. Seed only the canonical rows.
+        for sequence in 1..=33 {
+            let event = json!({
+                "sequence": int_cell(sequence),
+                "stream_version": int_cell(sequence - 1),
+                "event_id": text_cell(&format!("synthetic-{sequence}")),
+                "aggregate_kind": text_cell("thread"),
+                "stream_id": text_cell("synthetic-thread"),
+                "event_type": text_cell("thread.created"),
+                "occurred_at": text_cell("2026-11-10T00:00:00.000Z"),
+                "command_id": {"type": "null"},
+                "causation_event_id": {"type": "null"},
+                "correlation_id": {"type": "null"},
+                "actor_kind": text_cell("server"),
+                "payload_json": text_cell("{}"),
+                "metadata_json": text_cell("{}"),
+                "application_event_version": int_cell(2)
+            })
+            .as_object()
+            .unwrap()
+            .clone();
+            app.put(
                 "seed",
-                EventAppendRow {
-                    event_id: format!("synthetic-{index}"),
-                    aggregate_kind: "thread".into(),
-                    stream_id: "synthetic-thread".into(),
-                    event_type: "thread.created".into(),
-                    occurred_at: "2026-11-10T00:00:00.000Z".into(),
-                    command_id: None,
-                    causation_event_id: None,
-                    correlation_id: None,
-                    actor_kind: "server".into(),
-                    payload_json: "{}".into(),
-                    metadata_json: "{}".into(),
-                    application_event_version: 2,
-                },
-                None,
+                "orchestration_events",
+                vec![int_cell(sequence)],
+                event,
             )
             .await
             .unwrap();
         }
         app.commit("seed").await.unwrap();
         drop(app);
-        // Reuse real persisted source rows to exercise the owner's 32-row page.
-        let mut tx = store.db.begin().await.unwrap();
-        tx.put(
-            store_key("application/generation/native/events/v1/preparation"),
-            serde_json::to_vec(&json!({"version":1,"ready":false,"after":null,"indexed_rows":0}))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-        tx.commit().await.unwrap();
         let first = store
             .prepare_application_startup_prefix(false)
             .await
@@ -449,152 +445,74 @@ mod tests {
         // A helper interruption between batches retains the cursor, not success.
         store.shutdown().await.unwrap();
         let store = fixture.connect().await;
-        let mut passes = 0;
-        loop {
-            passes += 1;
-            if store
-                .prepare_application_startup_prefix(false)
-                .await
-                .unwrap()
-                .prepared
-            {
-                break;
-            }
-            assert!(passes < 20);
-        }
+        let prefix = store
+            .prepare_application_startup_prefix(false)
+            .await
+            .unwrap();
+        finish_startup_tail(&store, false, prefix.completed_owners).await;
         let state = store.prepare_application_events().await.unwrap();
         assert!(state.prepared);
         assert_eq!(state.indexed_rows, 33);
         store.shutdown().await.unwrap();
     }
+    async fn finish_startup_tail(store: &Store, durable_relay: bool, from: usize) {
+        let mut index = 0;
+        macro_rules! finish {
+            ($operation:expr) => {
+                if index >= from {
+                    let mut complete = false;
+                    for _ in 0..20 {
+                        if $operation.await.unwrap().prepared {
+                            complete = true;
+                            break;
+                        }
+                    }
+                    assert!(complete, "preparation owner {index} made no progress");
+                }
+                index += 1;
+            };
+        }
+        finish!(store.prepare_application_events());
+        finish!(store.prepare_application_receipts());
+        finish!(store.prepare_application_positions());
+        finish!(store.prepare_application_projects());
+        finish!(store.prepare_application_projections());
+        finish!(store.prepare_application_outbox());
+        finish!(store.prepare_application_viewed_files());
+        finish!(store.prepare_application_auth());
+        finish!(store.prepare_application_peers());
+        finish!(store.prepare_application_runtime_state());
+        finish!(store.prepare_application_scheduled(durable_relay));
+        finish!(store.prepare_application_projection_reads());
+        finish!(store.prepare_application_auxiliary());
+        finish!(store.prepare_application_message_rowids());
+        finish!(store.prepare_application_search());
+        finish!(store.prepare_application_legacy_v1());
+        finish!(store.prepare_application_maintenance());
+        assert_eq!(index, 17);
+    }
+
     #[tokio::test]
     async fn startup_prefix_matches_individual_owners_for_both_relay_profiles() {
         for durable_relay in [false, true] {
             let individual_fixture = TestFixture::start().await;
             let individual = individual_fixture.initialize().await;
             individual.bootstrap_application().await.unwrap();
-            while !individual
-                .prepare_application_events()
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_receipts()
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_positions()
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_projects()
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_projections()
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_outbox()
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_viewed_files()
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_auth()
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_peers()
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_runtime_state()
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_scheduled(durable_relay)
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_projection_reads()
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_auxiliary()
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_message_rowids()
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_search()
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_legacy_v1()
-                .await
-                .unwrap()
-                .prepared
-            {}
-            while !individual
-                .prepare_application_maintenance()
-                .await
-                .unwrap()
-                .prepared
-            {}
+            finish_startup_tail(&individual, durable_relay, 0).await;
             let expected = startup_snapshot(&individual).await;
             individual.shutdown().await.unwrap();
+
             let prefix_fixture = TestFixture::start().await;
-            let prefix = prefix_fixture.initialize().await;
-            prefix.bootstrap_application().await.unwrap();
-            let mut passes = 0;
-            loop {
-                passes += 1;
-                if prefix
-                    .prepare_application_startup_prefix(durable_relay)
-                    .await
-                    .unwrap()
-                    .prepared
-                {
-                    break;
-                }
-                assert!(passes < 20);
-            }
-            assert_eq!(startup_snapshot(&prefix).await, expected);
-            prefix.shutdown().await.unwrap();
+            let prefix_store = prefix_fixture.initialize().await;
+            prefix_store.bootstrap_application().await.unwrap();
+            let prefix = prefix_store
+                .prepare_application_startup_prefix(durable_relay)
+                .await
+                .unwrap();
+            assert_eq!(prefix.prepared, prefix.completed_owners == 17);
+            finish_startup_tail(&prefix_store, durable_relay, prefix.completed_owners).await;
+            assert_eq!(startup_snapshot(&prefix_store).await, expected);
+            prefix_store.shutdown().await.unwrap();
         }
     }
 }
