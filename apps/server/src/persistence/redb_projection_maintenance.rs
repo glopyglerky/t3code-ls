@@ -445,11 +445,12 @@ impl Store {
             .db
             .begin_reserved(Duration::from_secs(5), Duration::from_secs(300))
             .await?;
-        let catalog = decode_catalog(
-            &tx.get(&schema_key())
-                .await?
-                .ok_or(Error::IncompatibleStore)?,
-        )?;
+        let bytes = tx
+            .get(&schema_key())
+            .await?
+            .ok_or(Error::IncompatibleStore)?;
+        let catalog = decode_catalog(&bytes)?;
+        read_generation_identity(&mut tx, &catalog, &bytes).await?;
         if !preparation(&mut tx, &catalog).await?.ready {
             return Err(invalid("event indexes must be prepared before maintenance"));
         }
@@ -493,7 +494,9 @@ impl Store {
         let page = tx.scan(&start, &prefix_end(&prefix), limit).await?;
         let full = page.len() == limit;
         for (encoded, bytes) in page {
-            let source = decode_row(&catalog, table(&catalog, name)?, &encoded, &bytes)?;
+            let source =
+                decode_transaction_row(&mut tx, &catalog, table(&catalog, name)?, &encoded, &bytes)
+                    .await?;
             if name == EVENTS {
                 index_event(&mut tx, &catalog, &EventRecord::from_row(source.row)?).await?;
             } else {
@@ -581,6 +584,7 @@ async fn remove_event(tx: &mut Transaction, c: &ApplicationCatalog, sequence: u6
     {
         return Err(Error::IncompatibleStore);
     }
+    text_revisions::before_delete(tx, c, &event).await?;
     if event.application() {
         let delta = Aggregate {
             count: 1,
@@ -719,7 +723,7 @@ async fn remove_event(tx: &mut Transaction, c: &ApplicationCatalog, sequence: u6
             tx.delete(stream).await?;
         }
     }
-    delete_row(tx, c, EVENTS, &[int_cell(sequence)]).await?;
+    tx.delete(event_key(c, sequence)?).await?;
     Ok(())
 }
 

@@ -6,7 +6,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use t3_code_ls_core::json as core_json;
 use t3_code_ls_storage::application::{
-    ApplicationSchema, ApplicationTransactionMode, ApplicationTransactions,
+    ApplicationEventLayout, ApplicationSchema, ApplicationTransactionMode, ApplicationTransactions,
 };
 use t3_code_ls_storage::application_auth::AuthOperation;
 use t3_code_ls_storage::application_auxiliary_reads::AuxiliaryRead;
@@ -55,7 +55,9 @@ enum Request {
         transaction_id: String,
         query: ThreadSearchQuery,
     },
-    ApplicationBootstrap {},
+    ApplicationBootstrap {
+        event_layout: Option<ApplicationEventLayout>,
+    },
     ApplicationMigrations {},
     ApplicationProjectionWindowQuery {
         transaction_id: String,
@@ -149,6 +151,7 @@ enum Request {
         request: RuntimeStateOperation,
     },
     ApplicationSchema {},
+    ApplicationGenerationIdentity {},
     ApplicationInit {
         schema: ApplicationSchema,
     },
@@ -528,6 +531,7 @@ impl Request {
             | Self::ArchiveSqlite { .. } => true,
             Self::Shutdown { .. }
             | Self::ApplicationSchema { .. }
+            | Self::ApplicationGenerationIdentity { .. }
             | Self::ApplicationProjectionsContext { .. }
             | Self::ApplicationProjectionsRecovery { .. }
             | Self::ApplicationProjectionsShell { .. }
@@ -649,9 +653,11 @@ async fn evaluate(
             transaction_id,
             query,
         } => Ok(transactions.thread_search(&transaction_id, query).await?),
-        Request::ApplicationBootstrap {} => {
-            serde_json::to_value(store.bootstrap_application().await?)
-        }
+        Request::ApplicationBootstrap { event_layout } => serde_json::to_value(
+            store
+                .bootstrap_application_with_event_layout(event_layout)
+                .await?,
+        ),
         Request::ApplicationMigrations {} => {
             serde_json::to_value(store.application_migrations().await?)
         }
@@ -711,6 +717,9 @@ async fn evaluate(
             .projections_control(&transaction_id, query)
             .await?),
         Request::ApplicationSchema {} => serde_json::to_value(transactions.schema().await?),
+        Request::ApplicationGenerationIdentity {} => {
+            serde_json::to_value(transactions.generation_identity().await?)
+        }
         Request::ApplicationInit { schema } => {
             Ok(json!({"initialized": transactions.initialize(schema).await?}))
         }
@@ -1505,6 +1514,7 @@ fn error_response(error: &Error) -> Value {
     let kind = match error {
         Error::Invalid(_) | Error::ResourceLimit(_) => "invalid_request",
         Error::IncompatibleStore => "incompatible_store",
+        Error::RecoveryRequired => "recovery_required",
         Error::StaleRevision { .. } => "stale_revision",
         Error::CommandConflict => "command_conflict",
         Error::DuplicateRecord => "duplicate_record",

@@ -55,6 +55,7 @@ fn target_89(source: &ApplicationCatalog, current: &Definition) -> ApplicationCa
             current.schema
         ])),
         schema: current.schema.clone(),
+        event_layout: None,
     }
 }
 
@@ -415,6 +416,7 @@ impl Store {
                 current.schema
             ])),
             schema: current.schema.clone(),
+            event_layout: None,
         };
         for stage in [
             Stage::Clear,
@@ -528,7 +530,9 @@ impl Store {
             .await?;
         // The sole publish point: canonical rows, index backfills and migration
         // history become visible together. The source generation stays intact.
-        tx.put(schema_key(), encode_catalog(&target)?).await?;
+        let bytes = encode_catalog(&target)?;
+        record_generation_identity(&mut tx, &target, &bytes).await?;
+        tx.put(schema_key(), bytes).await?;
         tx.commit().await?;
         Ok(BootstrapResult {
             initialized: false,

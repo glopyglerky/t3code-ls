@@ -92,6 +92,7 @@ fn imported_row(id: &str, thread: &str) -> Map<String, Value> {
 
 async fn imported(store: &Store, rows: Vec<Map<String, Value>>) -> ApplicationCatalog {
     let catalog = ApplicationCatalog {
+        event_layout: None,
         schema: schema(),
         generation: "a".repeat(64),
     };

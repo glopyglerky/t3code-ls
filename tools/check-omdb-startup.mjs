@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import * as NodeAssert from "node:assert/strict";
+import * as NodeChildProcess from "node:child_process";
+import { once } from "node:events";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as NodeReadline from "node:readline";
 import * as Effect from "effect/Effect";
 import * as Logger from "effect/Logger";
 import * as Schema from "effect/Schema";
@@ -18,6 +21,24 @@ const [executable, proofPath] = process.argv.slice(2);
 NodeAssert.ok(executable && NodePath.isAbsolute(executable));
 const checks = [];
 const fixture = await createFixture();
+const generationIdentity = {
+  engine: "omdb",
+  engine_version: "4.5.0",
+  engine_revision: "b2ff031398b1f0a793a352db7a699575b5d4d3d4",
+  layout: "t3-application-keyspace-v1",
+  schema_version: 1,
+};
+const readIdentity = (profile) => {
+  const { catalog_sha256, generation, ...identity } = nativeRequest(
+    executable,
+    profile,
+    "connect",
+    { operation: "application_generation_identity" },
+  );
+  NodeAssert.deepEqual(identity, generationIdentity);
+  NodeAssert.match(catalog_sha256, /^[a-f0-9]{64}$/);
+  return { catalog_sha256, generation };
+};
 const isolated = (fixture, effect) =>
   effect.pipe(
     Effect.provideService(HostProcess.HomeDirectory, fixture.root),
@@ -80,11 +101,14 @@ try {
   checks.push(
     "fresh native schema initializes without an application SQLite file, activates the old-server fence and releases its bootstrap lease while the database remains open",
   );
+  const initialIdentity = readIdentity(fixture);
+  NodeAssert.equal(initialIdentity.generation, "native");
   await run(({ database }) =>
     database
       .request({ operation: "application_bootstrap" }, Omdb.Bootstrap)
       .pipe(Effect.tap((value) => Effect.sync(() => NodeAssert.equal(value.initialized, false)))),
   );
+  NodeAssert.deepEqual(readIdentity(fixture), initialIdentity);
   checks.push("reopen verifies schema and migration identity without reinitializing state");
 } finally {
   await fixture.close();
@@ -106,6 +130,10 @@ try {
     }).pipe((effect) => isolated(migrated, effect)),
   );
   NodeAssert.equal(hash(await NodeFSP.readFile(source)), before);
+  const imported = nativeRequest(executable, migrated, "connect", {
+    operation: "application_import",
+  });
+  NodeAssert.equal(readIdentity(migrated).generation, imported.generation);
   NodeAssert.equal(
     (await NodeFSP.readdir(migrated.root)).filter((path) => path.startsWith(".omdb-import-"))
       .length,
@@ -116,6 +144,87 @@ try {
   );
 } finally {
   await migrated.close();
+}
+const crashed = await createFixture();
+try {
+  const reopen = (use) =>
+    Effect.runPromise(
+      isolated(
+        crashed,
+        Effect.flatMap(Omdb.make({ executable, databasePath: crashed.databasePath }), use),
+      ),
+    );
+  await reopen(() => Effect.void);
+  const beforeCrash = readIdentity(crashed);
+  const writer = NodeChildProcess.spawn(executable, crashed.cliArgs(), {
+    env: {},
+    stdio: ["pipe", "pipe", "inherit"],
+    signal: AbortSignal.timeout(15_000),
+  });
+  const exited = once(writer, "exit");
+  const lines = NodeReadline.createInterface({ input: writer.stdout });
+  const replies = lines[Symbol.asyncIterator]();
+  const request = async (operation) => {
+    writer.stdin.write(JSON.stringify(operation) + "\n");
+    const response = await replies.next();
+    NodeAssert.equal(response.done, false);
+    const envelope = JSON.parse(response.value);
+    NodeAssert.equal(envelope.ok, true, JSON.stringify(envelope));
+  };
+  const guideKey = (number) => ({ host: "fixture.invalid", repository: "owner/repo", number });
+  const guideJson = JSON.stringify({ summary: "Fixture guide" });
+  const stage = async (name, number) => {
+    await request({ operation: "application_begin", transaction_id: name, mode: "write" });
+    await request({
+      operation: "application_guide_put",
+      transaction_id: name,
+      key: guideKey(number),
+      guide_json: guideJson,
+    });
+  };
+  try {
+    await stage("crash-committed", 1);
+    await request({ operation: "application_commit", transaction_id: "crash-committed" });
+    await stage("crash-uncommitted", 2);
+  } finally {
+    writer.kill("SIGKILL");
+    const [, signal] = await exited;
+    NodeAssert.equal(signal, "SIGKILL");
+    lines.close();
+  }
+  const dirtyHash = hash(await NodeFSP.readFile(crashed.databasePath));
+  await NodeAssert.rejects(
+    Effect.runPromise(
+      isolated(
+        crashed,
+        Effect.gen(function* () {
+          const owner = yield* NativeOwnership.make(executable);
+          yield* owner.acquire(NodePath.join(crashed.root, "server-owner.sqlite"));
+          yield* Omdb.make({ executable, databasePath: crashed.databasePath });
+        }),
+      ),
+    ),
+    (error) => error._tag === "OmdbStartupError" && error.cause?._tag === "ServerAlreadyRunningError",
+  );
+  NodeAssert.equal(hash(await NodeFSP.readFile(crashed.databasePath)), dirtyHash);
+  await reopen(({ client }) =>
+    Effect.gen(function* () {
+      const readGuide = (number) =>
+        client.request(
+          "application_guide_get",
+          { key: guideKey(number) },
+          Schema.NullOr(Schema.String),
+        );
+      NodeAssert.equal(yield* readGuide(1), guideJson);
+      NodeAssert.equal(yield* readGuide(2), null);
+    }),
+  );
+  NodeAssert.deepEqual(readIdentity(crashed), beforeCrash);
+  checks.push(
+    "Startup requires exclusive recovery ownership, then reopens the acknowledged generation after SIGKILL and discards uncommitted rows",
+  );
+} finally {
+  await crashed.close();
 }
 const liveLegacy = await createFixture();
 try {
@@ -272,6 +381,30 @@ try {
   );
 } finally {
   await unwitnessed.close();
+}
+const otherHome = await createFixture();
+const linkedHome = await createFixture();
+try {
+  nativeRequest(executable, otherHome, "initialize", { operation: "application_bootstrap" });
+  const before = hash(await NodeFSP.readFile(otherHome.databasePath));
+  await NodeFSP.symlink(otherHome.databasePath, linkedHome.databasePath, "file");
+  await NodeAssert.rejects(
+    Effect.runPromise(isolated(
+      linkedHome,
+      Omdb.make({ executable, databasePath: linkedHome.databasePath }),
+    )),
+    (error) => error._tag === "OmdbStartupError",
+  );
+  NodeAssert.equal(hash(await NodeFSP.readFile(otherHome.databasePath)), before);
+  NodeAssert.equal(await NodeFSP.readlink(linkedHome.databasePath), otherHome.databasePath);
+  await NodeAssert.rejects(
+    NodeFSP.access(NodePath.join(linkedHome.root, "server-owner.sqlite")),
+    { code: "ENOENT" },
+  );
+  checks.push("Native startup rejects a symlinked database before activating its ownership fence");
+} finally {
+  await linkedHome.close();
+  await otherHome.close();
 }
 checks.push(await verifyNativeSchema88Upgrade(executable));
 console.log(JSON.stringify({ checks }, null, 2));

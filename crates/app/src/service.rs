@@ -54,6 +54,7 @@ impl From<Error> for RpcError {
         let kind = match error {
             Error::Invalid(_) | Error::ResourceLimit(_) => "invalid_request",
             Error::IncompatibleStore => "incompatible_store",
+            Error::RecoveryRequired => "recovery_required",
             Error::StaleRevision { .. } => "stale_revision",
             Error::CommandConflict => "command_conflict",
             Error::DuplicateRecord => "duplicate_record",

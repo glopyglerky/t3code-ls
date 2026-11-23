@@ -1385,6 +1385,7 @@
         "apps/server/src/persistence/redb_import.rs",
         "apps/server/src/persistence/redb_import_tests.rs",
         "apps/server/src/persistence/redb_event_rows.rs",
+        "apps/server/src/persistence/redb_event_text_revisions.rs",
         "apps/server/src/persistence/redb_event_rows_tests.rs",
         "apps/server/src/persistence/redb_application_rows.rs",
         "apps/server/src/persistence/redb_json.rs",

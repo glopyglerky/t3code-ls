@@ -62,6 +62,37 @@ fail closed. Read-only handles cannot perform an upgrade. Further schema transit
 require their own explicit native upgrade path; omdb does not execute arbitrary SQL
 migrations.
 
+## Opt-in assistant event revisions
+
+The native database helper accepts
+`{"operation":"application_bootstrap","event_layout":"assistant_text_revisions_v1"}`
+when initializing an empty application namespace. Use a fresh native profile with
+no SQLite source. Normal application startup verifies and reopens the selected
+layout. A baseline or imported catalog cannot opt in through bootstrap. The
+catalog digest and generation identity bind the layout, and older helpers reject
+its catalog field.
+
+The event repository writes a full checkpoint followed by up to eight suffix
+rows. It considers the most recent streaming message update in the same thread
+and requires the same message, run, node and creation time. Only an exact append
+to the encoded text is eligible. Completion, rewrites and ambiguous payloads
+stay full. The encoded JSON payload limit for this representation is 256 KiB and
+the encoded suffix limit is 32 KiB. Only typed rows of up to 1 MiB can take
+part in a chain. Larger events use the existing full-row path. Replay and generic
+event readers recover the original JSON bytes. The usual response limits apply
+to expanded reads.
+
+Suffix rows and their head and dependency records share the existing application
+transaction. Pruning a base makes its immediate dependent a full checkpoint in
+that same transaction. A surviving descendant then resolves through the
+re-anchored row. Missing or inconsistent predecessor data fails closed on read.
+Projection, search and snapshot readers use their existing sources.
+
+Source rollback can reopen baseline and imported profiles with the prior helper.
+An opted-in profile needs a helper that understands its layout. Rolling it back
+to a prior helper requires restoring a compatible pre-trial backup. This version
+has no lossless in-place downgrade for writes made after opt-in.
+
 ## Implemented boundary
 
 `apps/server/src/persistence/redb_transactions.rs` is compiled by the existing
