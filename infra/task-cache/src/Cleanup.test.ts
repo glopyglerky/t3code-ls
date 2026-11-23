@@ -6,7 +6,9 @@ import { expect, it } from "@effect/vitest";
 import { cleanup } from "../vendor/vite-plus-remote-cache-cloudflare/src/database.ts";
 import * as Cache from "./Cache.ts";
 import * as Cleanup from "./Cleanup.ts";
-import { checkAssociationCleanup } from "./Cleanup.fixture.ts";
+import { checkAssociationCleanup, checkConcurrentPublication } from "./Cleanup.fixture.ts";
+
+it("preserves the publication winner through failure and bounded GC retry", checkConcurrentPublication);
 
 it("keeps concurrent association sweeps and retries on their own pages", checkAssociationCleanup);
 
