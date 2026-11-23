@@ -43,10 +43,10 @@ const report: Record<string, unknown> = { schema: 1, status: "running", phase, c
   stock: "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f" };
 const save = () => FS.writeFileSync(Path.join(proof, `${phase}.json`), JSON.stringify(report, null, 2) + "\n");
 const checkpoint = (name: string) => { report.checkpoint = name; save(); };
-const run = (command: string, args: string[], options: { input?: string; env?: NodeJS.ProcessEnv; allowFailure?: boolean } = {}) => {
+const run = (command: string, args: string[], options: { input?: string; env?: NodeJS.ProcessEnv; allowFailure?: boolean; timeout?: number } = {}) => {
   abort.signal.throwIfAborted();
   const result = ChildProcess.spawnSync(command, args, {
-    env: options.env ?? commandEnvironment, input: options.input, encoding: "utf8", timeout: 30_000,
+    env: options.env ?? commandEnvironment, input: options.input, encoding: "utf8", timeout: options.timeout ?? 30_000,
     maxBuffer: 1_048_576, killSignal: "SIGKILL",
   });
   if (!options.allowFailure) Assert.equal(result.status, 0,
@@ -167,7 +167,7 @@ try {
         device(["shell", "am", "force-stop", packageName]);
         device(["uninstall", packageName]);
       }
-      device(["install", "--no-streaming", apk]);
+      run(adb, ["-s", serial, "install", "--no-streaming", apk], { timeout: 120_000 });
       checkpoint(`${variant}:launch`);
       device(["logcat", "-c"]);
       device(["shell", "am", "start", "-W", "-n", `${packageName}/.MainActivity`]);
