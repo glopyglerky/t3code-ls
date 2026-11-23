@@ -193,7 +193,7 @@ export async function withAndroidPairingFixture(input: {
           return;
         }
         Assert.ok(configured);
-        if (request.method === "GET" && request.url === "/reopen-config" && reopening) {
+        if (request.method === "POST" && request.url === "/reopen-config" && reopening) {
           response.end(JSON.stringify({ environmentId: descriptor.environmentId }));
           return;
         }
