@@ -76,7 +76,8 @@ jobs:
           node tools/check-hybrid.mjs --verify-binaries
           pnpm --dir apps/web run build
           T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$GITHUB_WORKSPACE/bin" \
-            pnpm --dir apps/server run build:bundle
+            pnpm exec node apps/server/scripts/cli.ts build --verbose
+          test -s apps/server/dist/client/index.html
           sha256sum apps/server/dist/bin.mjs apps/server/dist/native-bin/manifest.json
       - name: Read a real native thread through the GPUI window
         timeout-minutes: 4
