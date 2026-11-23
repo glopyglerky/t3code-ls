@@ -3208,9 +3208,9 @@ async function exercise(implementation: Implementation): Promise<void> {
               return;
             }
             let changed = false;
-            for (const item of envelope.values ?? []) {
-              if (item.event?.type !== "message.updated" ||
-                item.event.payload.threadId !== recoveryThread) continue;
+            for (const item of Array.isArray(envelope?.values) ? envelope.values : []) {
+              if (item?.event?.type !== "message.updated" ||
+                item.event.payload?.threadId !== recoveryThread) continue;
               if (rejectedSequence === undefined && item.kind === "message-text-splice") {
                 Assert.ok(item.baseSequence > 0);
                 rejectedSequence = item.sequence;
