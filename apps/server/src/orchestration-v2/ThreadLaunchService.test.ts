@@ -259,22 +259,28 @@ function makeHarness(options: HarnessOptions = {}) {
     Effect.gen(function* () {
       const threads = yield* ThreadManagement.ThreadManagementService;
       let launchReadCount = 0;
+      const getThreadRecords: ThreadManagement.ThreadManagementService["Service"]["getThreadRecords"] =
+        (...args) => {
+          if (options.launchReads) options.launchReads.runFilters.push(args[2]?.runIds ?? []);
+          return threads.getThreadRecords(...args).pipe(Effect.tap(() => {
+            const runId = args[2]?.runIds?.[0];
+            return options.interruptAfterLaunchRead && runId !== undefined && ++launchReadCount === 1
+              ? threads.dispatch({
+                  type: "run.interrupt",
+                  commandId: CommandId.make("interrupt-before-reservation"),
+                  threadId: args[0],
+                  runId,
+                }).pipe(Effect.orDie, Effect.asVoid)
+              : Effect.void;
+          }));
+        };
       return {
         ...threads,
         getThreadProjection: (threadId: ThreadId) => {
           if (options.launchReads) options.launchReads.full++;
           return threads.getThreadProjection(threadId);
         },
-        getThreadRecords: (...args: Parameters<typeof threads.getThreadRecords>) => {
-          if (options.launchReads) options.launchReads.runFilters.push(args[2]?.runIds ?? []);
-          return threads.getThreadRecords(...args).pipe(Effect.tap(() => {
-            const runId = args[2]?.runIds?.[0];
-            return options.interruptAfterLaunchRead && runId !== undefined && ++launchReadCount === 1
-              ? threads.dispatch({ type: "run.interrupt", commandId: CommandId.make("interrupt-before-reservation"),
-                  threadId: args[0], runId }).pipe(Effect.asVoid)
-              : Effect.void;
-          }));
-        },
+        getThreadRecords,
       };
     }),
   ).pipe(Layer.provide(layerThreadManagement));
@@ -403,7 +409,7 @@ it.effect("commits root workspace metadata with the prepared run release", () =>
     assert.deepEqual(
       events.filter((stored) => stored.event.type === "thread.metadata-updated")
         .map((stored) => stored.commandId),
-      ["root-launch:initial-message", "root-launch:release"],
+      [CommandId.make("root-launch:initial-message"), CommandId.make("root-launch:release")],
     );
   }).pipe(Effect.provide(harness.layer));
 });
@@ -2985,6 +2991,9 @@ it.effect("replays an accepted send after the project disables the instance", ()
   }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerFiles)));
 });
 
+const receiptFiles = ServerConfig.layerTest(process.cwd(), { prefix: "t3-launch-receipt-" }).pipe(
+  Layer.provideMerge(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
+);
 
 it.effect("returns an exact launch receipt without loading the full projection on first call or retry", () => {
   const reads = { full: 0, runFilters: [] as Array<ReadonlyArray<string>> };
@@ -3007,7 +3016,7 @@ it.effect("returns an exact launch receipt without loading the full projection o
     assert.equal(legacy.projection.messages.length, 1);
     assert.equal(legacy.projection.runs.length, 1);
     assert.equal(reads.full, 1);
-  }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(Layer.mergeAll(harness.layer, receiptFiles)));
 });
 
 it.effect("keeps the full legacy response for an opted-in launch without an initial message", () => {
@@ -3018,7 +3027,7 @@ it.effect("keeps the full legacy response for an opted-in launch without an init
     );
     assert.isTrue("projection" in result);
     assert.isUndefined(result.sequence);
-  }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(Layer.mergeAll(harness.layer, receiptFiles)));
 });
 
 
@@ -3048,7 +3057,7 @@ it.effect("schedules concurrent receipt retries once and preserves the accepted 
       assert.equal(legacy.projection.runs.length, 1);
       assert.equal(legacy.projection.messages.length, 1);
       yield* Deferred.succeed(allowSetup, undefined);
-    }).pipe(Effect.provide(harness.layer));
+    }).pipe(Effect.provide(Layer.mergeAll(harness.layer, receiptFiles)));
   }),
 );
 
@@ -3070,5 +3079,5 @@ it.effect("rechecks current state after reserving a receipt launch before starti
     assert.equal(replay.sequence, result.sequence);
     assert.isTrue(replay.resumed);
     assert.equal(harness.runSetup.mock.calls.length, 0);
-  }).pipe(Effect.provide(harness.layer));
+  }).pipe(Effect.provide(Layer.mergeAll(harness.layer, receiptFiles)));
 });
