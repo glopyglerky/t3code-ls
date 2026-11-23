@@ -10,6 +10,7 @@ on:
       - "candidate/t3code-ls-t14-linux-arm64-cli-*"
       - "candidate/t3code-ls-t14-windows-arm64-cli-*"
       - "candidate/t3code-ls-t05-packaged-preparation-*"
+      - "candidate/t3code-ls-t05-packaged-sea-identity-*"
       - "candidate/t3code-ls-t06-gix-packaged-*"
       - "candidate/t3code-ls-t08-claude-package-refusal-*"
       - "candidate/t3code-ls-t10-packaged-guest-*"
@@ -110,6 +111,48 @@ jobs:
           sha256sum "$archive" > "$RUNNER_TEMP/cli-proof/archive.sha256"
           node scripts/smoke-cli-archive.ts --archive "$archive" --expect-version "$version" \
             --expect-native | tee "$RUNNER_TEMP/cli-proof/smoke.log"
+      - name: Observe the actual SEA executable with its sidecars absent
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-packaged-sea-identity-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test tools/sea-identity.test.mjs
+          isolated=$(mktemp -d "$RUNNER_TEMP/sea-identity.XXXXXX")
+          trap 'rm -rf -- "$isolated"' EXIT
+          version=$(node -p 'require("./apps/server/package.json").version')
+          name=$(node -p 'require("./apps/server/package.json").name')
+          stem="t3-$version-linux-x64"
+          archive="$RUNNER_TEMP/cli-archive/$stem.tar.gz"
+          mkdir "$isolated/home" "$isolated/tmp" "$isolated/cwd"
+          tar -xzOf "$archive" "$stem/t3" > "$isolated/t3"
+          chmod 0755 "$isolated/t3"
+          proof="$RUNNER_TEMP/cli-proof"
+          sha256sum "$isolated/t3" > "$proof/sea-entry.sha256"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            cd "$2/cwd"
+            run_probe() {
+              runuser -u "$1" -- timeout -k 2s 10s env -i HOME="$2/home" TMPDIR="$2/tmp" "$2/t3" "$3" "${@:4}"
+            }
+            run_probe "$1" "$2" __sea-identity > "$2/observed.json" 2> "$2/observed.stderr"
+            status=0
+            run_probe "$1" "$2" __sea-identity extra > "$2/refused.stdout" 2> "$2/refused.stderr" || status=$?
+            test "$status" -eq 78
+          ' _ "$(id -un)" "$isolated"
+          test ! -s "$isolated/observed.stderr"
+          test ! -s "$isolated/refused.stdout"
+          test ! -s "$isolated/refused.stderr"
+          test -z "$(find "$isolated/home" "$isolated/tmp" "$isolated/cwd" -mindepth 1 -print)"
+          test "$(wc -l < "$isolated/observed.json")" -eq 1
+          jq -e --arg version "$version" --arg name "$name" '
+            .protocol == "t3-sea-identity-v1" and .packageVersion == $version and .packageName == $name and
+            .sea == true and .serving == false and .platform == "linux" and .arch == "x64" and
+            (.pid | type == "number" and . > 1 and . == floor) and
+            (.nodeVersion | type == "string" and test("^[0-9]+[.][0-9]+[.][0-9]+$")) and
+            .assetName == "binMain.mjs" and (.assetBytes | type == "number" and . > 0 and . <= 134217728) and
+            (.assetSha256 | type == "string" and test("^[0-9a-f]{64}$"))
+          ' "$isolated/observed.json" > /dev/null
+          install -m 0644 "$isolated/observed.json" "$proof/sea-identity.json"
       - name: Verify the isolated candidate through the packaged executable
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-packaged-preparation-') || startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
         env:
