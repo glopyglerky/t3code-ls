@@ -130,6 +130,7 @@ import {
   isUndeliveredMailboxSteer,
 } from "./NotificationMailbox.ts";
 import { EventSinkV2 } from "./EventSink.ts";
+import { watchForkHistory } from "./ForkHistoryInvalidations.ts";
 import type { GuestShareCommand } from "./GuestShareDecider.ts";
 import * as NativeGuestShare from "./NativeGuestShare.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
@@ -515,6 +516,7 @@ export interface OrchestratorV2Shape {
     threadId: ThreadId,
   ) => Effect.Effect<number, OrchestratorV2Error>;
   readonly streamStoredEvents: Stream.Stream<OrchestrationV2StoredEvent, OrchestratorV2Error>;
+  readonly watchForkHistory: (threadId: ThreadId) => ReturnType<typeof watchForkHistory>;
   /** Events arrive projected for the wire and shared by every subscriber; never mutate them. */
   readonly streamStoredEventsFrom: (input?: {
     readonly threadId?: ThreadId;
@@ -15931,6 +15933,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           }),
       ),
     ),
+    watchForkHistory: (threadId) => watchForkHistory(threadId, projectionStore, eventSink),
     streamStoredEventsFrom: (input) =>
       eventSink.stream({ ...input, bounded: true }).pipe(
         Stream.mapError(

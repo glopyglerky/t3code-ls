@@ -3975,6 +3975,8 @@ export const OrchestrationV2SubscribeThreadInput = Schema.Struct({
   afterSequence: Schema.optionalKey(NonNegativeInt),
   requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
   acceptBoundedSnapshot: Schema.optionalKey(Schema.Boolean),
+  /** Receive live history invalidations on a bounded subscription. */
+  acceptHistoryInvalidation: Schema.optionalKey(Schema.Boolean),
   acceptDeferredWork: Schema.optionalKey(Schema.Boolean),
   acceptCompactTurnItems: Schema.optionalKey(Schema.Boolean),
   /** The client restores `*Omitted` bodies from records it already holds. */
@@ -4089,6 +4091,9 @@ export const OrchestrationV2ThreadStreamItem = withRecordIdTable(
   Schema.Union([
     Schema.Struct({
       kind: Schema.Literal("synchronized"),
+    }),
+    Schema.Struct({
+      kind: Schema.Literal("history-invalidated"),
     }),
     Schema.Struct({
       kind: Schema.Literal("snapshot"),

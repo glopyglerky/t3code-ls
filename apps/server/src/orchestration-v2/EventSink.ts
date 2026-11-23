@@ -20,6 +20,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
+import type * as Scope from "effect/Scope";
 import * as Semaphore from "effect/Semaphore";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -236,6 +237,10 @@ export interface EventSinkV2Shape {
     /** Bound RPC subscribers; internal workers must not drop their subscription under load. */
     readonly bounded?: boolean;
   }) => Stream.Stream<OrchestrationV2StoredEvent, EventSinkV2Error>;
+  /** Observe future commits for these threads. Keep the callback synchronous and bounded. */
+  readonly observeCommittedThreadEvents: (
+    threads: ReadonlyMap<ThreadId, (event: OrchestrationV2DomainEvent) => void>,
+  ) => Effect.Effect<void, never, Scope.Scope>;
   readonly latestSequence: (input?: {
     readonly threadId?: ThreadId;
   }) => Effect.Effect<number, EventSinkV2Error>;
@@ -269,6 +274,31 @@ const layerBase: Layer.Layer<
     const projectStore = yield* ProjectStore.ProjectStoreV2;
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
     const liveEvents = yield* PubSub.unbounded<OrchestrationV2StoredEvent>();
+    const committedThreadObservers = new Map<
+      ThreadId,
+      Set<(event: OrchestrationV2DomainEvent) => void>
+    >();
+    const observeCommittedThreadEvents: EventSinkV2Shape["observeCommittedThreadEvents"] = (threads) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          // Each registration gets its own identity even if callers reuse a callback.
+          return Array.from(threads, ([threadId, notify]) => {
+            const observer = (event: OrchestrationV2DomainEvent) => notify(event);
+            const observers = committedThreadObservers.get(threadId) ?? new Set();
+            observers.add(observer);
+            committedThreadObservers.set(threadId, observers);
+            return [threadId, observer] as const;
+          });
+        }),
+        (registrations) =>
+          Effect.sync(() => {
+            for (const [threadId, observer] of registrations) {
+              const observers = committedThreadObservers.get(threadId);
+              observers?.delete(observer);
+              if (observers?.size === 0) committedThreadObservers.delete(threadId);
+            }
+          }),
+      ).pipe(Effect.asVoid);
     const liveEventsByType = new Map<
       OrchestrationV2DomainEvent["type"],
       PubSub.PubSub<OrchestrationV2StoredEvent>
@@ -276,6 +306,11 @@ const layerBase: Layer.Layer<
     const publishLiveEvents =
       /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
       Effect.fnUntraced(function* (events: ReadonlyArray<OrchestrationV2StoredEvent>) {
+        if (committedThreadObservers.size > 0) {
+          for (const { event } of events) {
+            for (const notify of committedThreadObservers.get(event.threadId) ?? []) notify(event);
+          }
+        }
         yield* PubSub.publishAll(liveEvents, events);
         for (const [type, pubsub] of liveEventsByType) {
           yield* PubSub.publishAll(
@@ -1100,6 +1135,7 @@ const layerBase: Layer.Layer<
               }),
           ),
         ),
+      observeCommittedThreadEvents,
       latestSequence: (input) =>
         eventStore.latestSequence(input).pipe(
           Effect.mapError(
