@@ -157,7 +157,7 @@ try {
   const shared = {
     title,
     projectId,
-    modelSelection: { instanceId: provider, model: "showcase" },
+    modelSelection: { instanceId: provider, model: "todo-list" },
     runtimeMode: "full-access",
     interactionMode: "default",
     workspaceStrategy: { type: "root" },
@@ -181,7 +181,7 @@ try {
     schedule: { type: "webhook" },
   }));
   webhookPath = task.webhook?.path;
-  Assert.ok(webhookPath?.startsWith(`/api/hooks/${task.id}/`));
+  Assert.ok(webhookPath?.startsWith(`/api/hooks/${encodeURIComponent(task.id)}/`));
   const environmentId = FS.readFileSync(Path.join(userdata, "environment-id"), "utf8").trim();
   Assert.ok(environmentId);
   const receivedAt = new Date().toISOString();
@@ -260,7 +260,7 @@ try {
   Assert.equal(user[0]!.id, `scheduled-task-message:${task.id}:webhook:${deliveryId}`);
   Assert.equal(user[0]!.scheduledTaskId, task.id);
   Assert.equal(user[0]!.text, delivery.renderedPrompt);
-  Assert.ok(final.messages.some((message) => message.role === "assistant" && message.text.includes("This turn is a replay.")));
+  Assert.ok(final.messages.some((message) => message.role === "assistant" && message.text.includes("todo list fixture complete")));
   Assert.ok(FS.lstatSync(database).isFile());
   assertNoApplicationSqlite(baseDir);
   report.durableDelivery = { deliveryId, outcome: delivery.outcome, runCount: 1, promptSha256: witness.promptSha256 };
