@@ -1,0 +1,58 @@
+name: Claude adapter through Rust stdio
+
+on:
+  push:
+    branches: ["candidate/t3code-ls-t01-claude-adapter-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      VP_REMOTE_CACHE: "off"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install the pinned native compiler
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/claude-compiler"
+      - name: Build and test the bounded Rust session host
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/claude-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/claude-target"
+          lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-core --test claude_stdio_control --test claude_stdio_host
+          messages="$RUNNER_TEMP/claude-artifacts.ndjson"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked --no-run --message-format=json \
+            -p t3-code-ls-core --test claude_stdio_host > "$messages"
+          fixture="$(node --input-type=module - "$messages" <<'JS'
+          import { readFileSync } from "node:fs";
+          const artifact = readFileSync(process.argv[2], "utf8").trim().split("\n").map(JSON.parse)
+            .find((entry) => entry.target?.name === "claude_stdio_host" && entry.executable);
+          if (!artifact) process.exit(1);
+          process.stdout.write(artifact.executable);
+          JS
+          )"
+          test -x "$fixture"
+          sha256sum "$fixture"
+          echo "T3_CLAUDE_STDIO_FIXTURE=$fixture" >> "$GITHUB_ENV"
+      - name: Install locked application dependencies
+        run: |
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+      - name: Exercise the real Claude adapter against a deterministic child
+        run: |
+          pnpm exec vp test run --project t3 --maxWorkers 1 \
+            apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts \
+            -t 'runs ClaudeAdapterV2 against the Rust stdio host'
