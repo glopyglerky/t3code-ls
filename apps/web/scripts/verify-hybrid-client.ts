@@ -2635,6 +2635,8 @@ async function exercise(implementation: Implementation): Promise<void> {
     composerSubmitRenderer === "dioxus" || composerSubmitRenderer === "dioxus-fallback"
       ? { renderer: composerSubmitRenderer, requests: [] }
       : undefined;
+  const voiceSubmissions: string[] = [];
+  const voiceAlternateSocketHosts: string[] = [];
   const stopRequests: ComposerStopRequest[] = [];
   let composerWasm: BrowserResponse | undefined;
   let refusedComposerWasmRequests = 0;
@@ -2661,8 +2663,21 @@ async function exercise(implementation: Implementation): Promise<void> {
       if (message.type() === "error") proof.browserErrors.push(redact(message.text()));
     });
     current.on("websocket", (socket) => {
+      if (voiceDraftProof && new URL(socket.url()).host !== new URL(current.url()).host) {
+        voiceAlternateSocketHosts.push(new URL(socket.url()).host);
+      }
       socket.on("framesent", ({ payload }) => {
         const json = payload.toString();
+        if (voiceDraftProof && (
+          json.includes(ORCHESTRATION_V2_WS_METHODS.launchThread) ||
+          json.includes(ORCHESTRATION_V2_WS_METHODS.dispatchCommand)
+        )) {
+          const request = JSON.parse(json);
+          if (
+            (request.tag === ORCHESTRATION_V2_WS_METHODS.launchThread && request.payload?.initialMessage) ||
+            (request.tag === ORCHESTRATION_V2_WS_METHODS.dispatchCommand && request.payload?.type === "message.dispatch")
+          ) voiceSubmissions.push(request.tag);
+        }
         if (composerSubmit && (
           json.includes(ORCHESTRATION_V2_WS_METHODS.launchThread) ||
           json.includes(ORCHESTRATION_V2_WS_METHODS.dispatchCommand)
@@ -2813,8 +2828,10 @@ async function exercise(implementation: Implementation): Promise<void> {
     if (voiceDraftProof) {
       Assert.ok(bundledClient && implementation === "native" && expectsRustComposer);
       starting("capture synthetic microphone audio into an unsent draft");
-      proof.voiceDraft = await verifyBundledVoiceDraft(page);
-      completed("Preserved the unsent Unicode draft through dictated insertion and cancellation");
+      proof.voiceDraft = await verifyBundledVoiceDraft(
+        page, () => voiceSubmissions, () => voiceAlternateSocketHosts, observePage,
+      );
+      completed("Preserved unsent Unicode drafts through insertion, cancellation, destination failure and concurrent-edit reopen");
       proof.status = "passed";
       return;
     }

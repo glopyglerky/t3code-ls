@@ -54,7 +54,12 @@ function observeCaptureFailure() {
   };
 }
 
-export async function verifyBundledVoiceDraft(page: Page) {
+export async function verifyBundledVoiceDraft(
+  page: Page,
+  readSubmissions: () => readonly string[],
+  readAlternateSocketHosts: () => readonly string[],
+  observePage: (page: Page) => void,
+) {
   const origin = new URL(page.url()).origin;
   const descriptor = await page.evaluate(async () => {
     const response = await fetch("/.well-known/t3/environment");
@@ -71,8 +76,21 @@ export async function verifyBundledVoiceDraft(page: Page) {
   const voiceUrl = (url: URL) => url.pathname.startsWith("/api/voice/");
   const transcribeUrl = `${origin}/api/voice/transcribe`;
   const transcript = "a recorded fixture phrase";
-  const release = Promise.withResolvers<boolean>();
-  const responseServed = Promise.withResolvers<boolean>();
+  let release = Promise.withResolvers<boolean>();
+  let responseServed = Promise.withResolvers<boolean>();
+  let failDestination = false;
+  const alternateHostAttempts: string[] = [];
+  const context = page.context();
+  const guardHost = async (route: Route) => {
+    const url = new URL(route.request().url());
+    if (url.origin !== origin) {
+      alternateHostAttempts.push(url.origin);
+      await route.abort();
+      return;
+    }
+    if (voiceUrl(url)) await serveSpeechFixture(route);
+    else await route.fallback();
+  };
   const unexpectedWrites: string[] = [];
   let transcriptionRequests = 0;
   let statusRequests = 0;
@@ -88,7 +106,9 @@ export async function verifyBundledVoiceDraft(page: Page) {
       transcriptionRequests += 1;
       const complete = await release.promise;
       try {
-        if (complete) await route.fulfill({ json: { text: transcript } });
+        if (complete) await route.fulfill(failDestination
+          ? { status: 503, json: { error: "Synthetic selected destination unavailable" } }
+          : { json: { text: transcript } });
         else await route.abort();
         responseServed.resolve(complete);
       } catch {
@@ -106,7 +126,8 @@ export async function verifyBundledVoiceDraft(page: Page) {
       await route.fulfill({ status: 404 });
     }
   };
-  await page.route(voiceUrl, serveSpeechFixture);
+  await context.route(/^https?:/u, guardHost);
+  let concurrent: Page | undefined;
   try {
     await page.getByRole("button", { name: "New thread in hybrid-fixture", exact: true }).click();
     await page.waitForURL((url) => url.pathname.startsWith("/draft/"));
@@ -167,6 +188,70 @@ export async function verifyBundledVoiceDraft(page: Page) {
     Assert.equal(transcriptionRequests, 1);
     Assert.ok(statusRequests > 0);
     Assert.deepEqual(unexpectedWrites, []);
+    Assert.deepEqual(readSubmissions(), [], "Voice must never automatically submit a message");
+
+    // A second real editor changes the durable draft while the selected destination is pending.
+    // The recording editor is intentionally frozen by the production UI.
+    release = Promise.withResolvers<boolean>();
+    responseServed = Promise.withResolvers<boolean>();
+    failDestination = true;
+    const draftId = decodeURIComponent(new URL(draftRoute).pathname.split("/").at(-1)!);
+    const saved = async (prompt: string) => {
+      const handle = await page.waitForFunction(({ draftId, prompt }) => {
+        const raw = localStorage.getItem("t3code:composer-drafts:v1");
+        return raw !== null && JSON.parse(raw).state.draftsByThreadKey[draftId]?.prompt === prompt;
+      }, { draftId, prompt }, { timeout: 10_000 });
+      await handle.dispose();
+    };
+    await saved(expected);
+    concurrent = await context.newPage();
+    observePage(concurrent);
+    await concurrent.goto(draftRoute, { waitUntil: "domcontentloaded" });
+    const concurrentEditor = concurrent.getByTestId("composer-editor");
+    await concurrentEditor.waitFor({ state: "visible" });
+    Assert.equal(await concurrentEditor.innerText(), expected);
+    await start.click();
+    await recording.getByText(/^0:0[1-9](?: \/ 5:00)?$/u).waitFor({ state: "visible", timeout: 10_000 });
+    const [failedRequest] = await Promise.all([
+      page.waitForRequest((request) => request.url() === transcribeUrl && request.method() === "POST"),
+      page.getByRole("button", { name: "Finish voice input", exact: true }).click(),
+    ]);
+    const failedEncoded = failedRequest.postDataBuffer();
+    Assert.ok(failedEncoded);
+    const failedPcm = decodeSpeechPcmRequest(failedEncoded).pcm;
+    Assert.ok(failedPcm.length > 0 && failedPcm.length % 4 === 0);
+    await page.getByRole("status", { name: "Transcribing…", exact: true }).waitFor({ state: "visible" });
+    const concurrentDraft = "🦀 café e\u0301 👩‍💻 雪\nConcurrent unsent draft";
+    await concurrentEditor.fill(concurrentDraft);
+    Assert.equal(await concurrentEditor.innerText(), concurrentDraft);
+    await saved(concurrentDraft);
+    release.resolve(true);
+    Assert.equal(await responseServed.promise, true);
+    await page.getByRole("status", {
+      name: "Voice transcription failed. Check the destination in Settings → Voice.", exact: true,
+    }).waitFor({ state: "visible" });
+    Assert.equal(await editor.innerText(), expected);
+    Assert.equal(await editor.evaluate((element) => (element as HTMLElement).isContentEditable), true);
+    Assert.equal(await concurrentEditor.innerText(), concurrentDraft);
+    await saved(concurrentDraft);
+    Assert.equal(page.url(), draftRoute);
+    await page.getByRole("button", { name: "Dismiss voice input error", exact: true }).click();
+    await start.waitFor({ state: "visible" });
+    await saved(concurrentDraft);
+    await concurrent.close();
+    concurrent = undefined;
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await editor.waitFor({ state: "visible" });
+    Assert.equal(await editor.innerText(), concurrentDraft);
+    Assert.equal(await editor.evaluate((element) => (element as HTMLElement).isContentEditable), true);
+    await start.waitFor({ state: "visible" });
+    await saved(concurrentDraft);
+    Assert.equal(page.url(), draftRoute);
+    Assert.equal(transcriptionRequests, 2, "A failed destination must not be automatically retried");
+    Assert.deepEqual(unexpectedWrites, []);
+    Assert.deepEqual(alternateHostAttempts, []);
+    Assert.deepEqual(readAlternateSocketHosts(), []);
+    Assert.deepEqual(readSubmissions(), []);
     return {
       destination: "selected fixture environment",
       speechResponse: "deterministic HTTP fixture",
@@ -175,10 +260,26 @@ export async function verifyBundledVoiceDraft(page: Page) {
       draftPreserved: true,
       cancellationPreservedDraft: true,
       remainedUnsent: true,
-      transcriptionRequests,
+      transcriptionRequests: 1,
+      failedDestination: {
+        status: 503,
+        pcmBytes: failedPcm.length,
+        transcriptionRequests: transcriptionRequests - 1,
+        concurrentDraft,
+        concurrentDraftPreserved: true,
+        errorDismissed: true,
+        editorRecovered: true,
+        reopenedDraft: concurrentDraft,
+        durableDraftPreserved: true,
+        noAutomaticRetry: true,
+        noAutomaticSubmission: true,
+        alternateHostAttempts,
+        alternateSocketHosts: [...readAlternateSocketHosts()],
+      },
     };
   } finally {
     release.resolve(false);
-    await page.unroute(voiceUrl, serveSpeechFixture);
+    await concurrent?.close();
+    await context.unroute(/^https?:/u, guardHost);
   }
 }

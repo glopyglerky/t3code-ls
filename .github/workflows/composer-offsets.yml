@@ -406,7 +406,11 @@ jobs:
                 VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
                 "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
             ' _ "$(id -un)" "$(command -v node)" "$proof/voice"
-            jq -e '.status == "passed" and .voiceDraft.rustSelection and .voiceDraft.draftPreserved and .voiceDraft.transcriptionRequests == 1 and .voiceDraft.cancellationPreservedDraft and .voiceDraft.remainedUnsent' \
+            jq -e '.status == "passed" and .voiceDraft.rustSelection and .voiceDraft.draftPreserved and .voiceDraft.transcriptionRequests == 1 and .voiceDraft.cancellationPreservedDraft and .voiceDraft.remainedUnsent and
+              (.voiceDraft.failedDestination | .status == 503 and .pcmBytes > 0 and .transcriptionRequests == 1 and
+                .concurrentDraftPreserved and .errorDismissed and .editorRecovered and .durableDraftPreserved and
+                .reopenedDraft == .concurrentDraft and .noAutomaticRetry and .noAutomaticSubmission and
+                .alternateHostAttempts == [] and .alternateSocketHosts == [])' \
               "$proof/voice/native/proof.json"
           fi
           if [[ "$INTEGRATED_NATIVE" == true || "$GITHUB_REF_NAME" == candidate/t3code-ls-t02-bundled-native-t16-parallel-* ]]; then
