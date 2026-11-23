@@ -17,7 +17,7 @@ export const nativeComponents = [
   "project-store",
   "db",
 ];
-export const optionalNativeComponents = ["pty-host", "git-workspace"];
+export const optionalNativeComponents = ["pty-host", "git-workspace", "claude-stdio"];
 export const nativeTargets = {
   "linux-x64": "x86_64-unknown-linux-gnu",
   "linux-arm64": "aarch64-unknown-linux-gnu",

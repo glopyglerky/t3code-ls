@@ -114,3 +114,90 @@ An explicit missing executable failed the fixture at startup. The existing
 approval-cancellation test also passed. The server typecheck returned the same
 108 error diagnostics on the base and the candidate with the same cached
 dependencies.
+
+
+## Controlled packaged selection candidate
+
+`T3_CODE_LS_BUNDLE_CLAUDE_STDIO=1` adds the optional `claude-stdio` helper to
+`tools/build-native.mjs`. It uses the existing pinned compiler, target, manifest,
+SHA-256 validation and native staging path. The default package is unchanged.
+A prebuilt bundle selected with that flag must already contain the helper.
+
+At runtime, `T3_CODE_LS_CLAUDE_STDIO_SYNTHETIC` is a bounded JSON object in the
+server environment. It contains `version: 1`, an exact `instanceId` matching
+`claude-stdio-synthetic-[a-z0-9-]+`, an absolute deterministic Cargo test executable
+`program` named `claude_stdio_host-<hex>`, an absolute task-owned isolated
+`directory`, and `expectedOptions`. The latter is the captured SDK query options
+without the three callback functions. Preserve omitted fields, Unicode and nulls.
+No real provider, credentials, live profile or real prompt is admitted by this
+candidate's qualification contract. The executable name is an accident guard,
+not attestation of the program; the qualification owner must bind its Cargo
+artifact and hash to the captured synthetic source.
+
+The existing `createClaudeAdapterV2` selects this runner for that exact instance
+before discovering a vendor executable. The selector JSON is removed from the
+selected query environment so captured options cannot recursively contain their
+own selection payload. Package helper target/hash/executable
+checks happen before adapter creation. The helper acknowledges protocol version 1
+before the first user frame. Exact option equality is checked before helper spawn.
+The selected profile requires permission mode `default`, a fresh `fixture` session
+and matching cwd, and refuses resume, MCP, hooks and permission bypass. A missing,
+incompatible or mismatched helper fails the selected instance. There is no SDK
+retry following a selected failure or an uncertain user-frame delivery.
+
+The old adapter test and selected path share `ClaudeStdioRunner.ts`. That runner
+translates SDK user frames and the Rust helper's `message`, `background`,
+`permission`, `withdrawn` and `interrupted` events. It preserves approval ticket
+identity, callback cancellation, offer acknowledgement, interrupt acknowledgement,
+terminal ownership and close/reap. It does not implement SDK settings, transcript,
+account, fork, model, MCP or background-management APIs. Calls outside the bounded
+profile are refused. These capabilities and all ordinary instances retain the
+existing SDK production selection. This opt-in is a controlled candidate, not a
+normal-user SDK replacement or platform acceptance claim. No port state is promoted.
+
+### Required isolated orchestration gate
+
+This patch has not run a packaged conversation or reopen. The root build owner
+must apply the exact-base patch to its own candidate and use the pinned
+Lustr/BlueFe and frozen dependencies. Run the focused checks first:
+
+```sh
+node --test tools/native-packaging.test.mjs
+pnpm exec vp test run --project t3 --maxWorkers 1 \
+  apps/server/src/orchestration-v2/Adapters/ClaudeStdioSelection.test.ts
+pnpm exec vp test run --project t3 --maxWorkers 1 \
+  apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts \
+  -t "runs ClaudeAdapterV2 against the Rust stdio host"
+```
+
+Retain the existing helper and fixture artifact extraction in `claude-stdio.yml`.
+Build the package with `T3_CODE_LS_BUNDLE_CLAUDE_STDIO=1`. Use
+`apps/server/scripts/packaged-server-fixture.ts`'s `startPackagedServer`,
+`authenticatePackagedServer` and typed WebSocket RPC helpers, with a fresh profile,
+loopback-only binding, stripped credentials and an external network fence.
+Configure one synthetic Claude provider through the ordinary provider registry.
+Capture the exact callback-free options from the controlled harness and bind them
+to that instance; do not relax equality to make arbitrary settings pass. If the
+packaged adapter unconditionally supplies MCP options, keep this candidate refused
+until a narrowly controlled, source-backed no-MCP synthetic profile is implemented.
+Do not discard MCP for ordinary Claude instances.
+
+The current adapter child requires a prompt, steer, approval withdrawal/reissue,
+background notification and interrupt. It is not a one-answer conversation fixture.
+Add a separately selected deterministic child scenario for one captured prompt and
+one assistant response containing exact `Claude 🌱 café é\n  終了 🛠️` text. Assert the
+complete string, including decomposed accent, newline and spaces, in the actual
+event store and projection. Dispatch through packaged the typed orchestration command RPC
+and the normal provider registry, not an injected replay adapter or direct runner.
+Stop and await the owned server, reopen the same isolated store, and require the
+same assistant text, message identity and single terminal event without another
+child spawn or prompt. Keep this gate outstanding until its harness and observed
+receipt exist. A component test does not satisfy it.
+
+In separate fresh profiles, missing helper, wrong target, hash change, symlink and
+unsupported selected options must fail before a prompt or synthetic child marker.
+An ordinary nonselected instance must still select the SDK without a real query.
+Retain source/tree, toolchain, package/manifest/fixture hashes, selected instance,
+event-store/reopen assertions and exact failures. Remove owned generated targets,
+dependencies and isolated profiles after preserving concise receipts. This patch
+adds no workflow trigger, publication, installation or live-profile action.

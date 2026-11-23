@@ -74,6 +74,35 @@ jobs:
           pnpm exec vp test run --project t3 --maxWorkers 1 \
             apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts \
             -t 'runs ClaudeAdapterV2 against the Rust stdio host'
+      - name: Qualify opt-in Claude helper selection and artifact staging
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t08-claude-package-')
+        run: |
+          set -euo pipefail
+          node --test tools/native-packaging.test.mjs
+          pnpm exec vp test run --project t3 --maxWorkers 1 \
+            apps/server/src/orchestration-v2/Adapters/ClaudeStdioSelection.test.ts
+          export CARGO_HOME="$RUNNER_TEMP/claude-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/claude-target"
+          export T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_BUNDLE_CLAUDE_STDIO=1
+          proof="$RUNNER_TEMP/claude-package-proof"
+          mkdir "$proof"
+          node tools/build-native.mjs "$RUNNER_TEMP/claude-native-bin"
+          cp "$RUNNER_TEMP/claude-native-bin/manifest.json" "$proof/"
+          (
+            cd "$RUNNER_TEMP/claude-native-bin"
+            digest=$(jq -er '.files["t3-code-ls-claude-stdio"]' manifest.json)
+            printf '%s  %s\n' "$digest" t3-code-ls-claude-stdio | sha256sum --check
+            sha256sum t3-code-ls-claude-stdio > "$proof/helper.sha256"
+          )
+          git rev-parse HEAD HEAD^{tree} > "$proof/source.txt"
+      - name: Retain the Claude helper package selection evidence
+        if: always() && startsWith(github.ref_name, 'candidate/t3code-ls-t08-claude-package-')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: claude-package-proof
+          path: ${{ runner.temp }}/claude-package-proof/
+          if-no-files-found: warn
+          retention-days: 7
       - name: Open and reap the pinned vendor CLI without network or a prompt
         id: vendor-handshake
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-claude-adapter-vendor-') || startsWith(github.ref_name, 'candidate/t3code-ls-t08-claude-vendor-')

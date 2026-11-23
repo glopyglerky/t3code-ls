@@ -341,7 +341,7 @@ NodeTest.test("optional package helpers require matching manifest identities", {
   const { verifyBundledNativeExecutable } = await import("../packages/shared/src/nativeExecutable.ts");
   const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-optional-package-"));
   try {
-    for (const component of ["pty-host", "git-workspace"]) {
+    for (const component of ["pty-host", "git-workspace", "claude-stdio"]) {
       const helper = NodePath.join(root, `t3-code-ls-${component}`);
       const manifestPath = NodePath.join(root, "manifest.json");
       const bytes = Buffer.from("#!/bin/sh\nexit 0\n");
