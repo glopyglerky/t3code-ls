@@ -1512,15 +1512,21 @@ export class Launcher {
   }
 
   async #beginTrial(child: ManagedChild): Promise<void> {
-    const pending = this.#state.update;
-    if (this.#child !== child || child.role !== "active" || pending?.status !== "pending") {
+    const state = this.#state;
+    const pending = state.update;
+    if (
+      state.protocol !== SERVICE_LAUNCHER_PROTOCOL ||
+      this.#child !== child ||
+      child.role !== "active" ||
+      pending?.status !== "pending"
+    ) {
       return;
     }
     this.#timer = undefined;
     const blocker = await this.#databaseTrialBlocker(pending);
     if (blocker !== undefined) {
       await this.#selectState({
-        ...this.#state,
+        ...state,
         update: terminalUpdate({ pending, status: "failed", reason: blocker }),
       });
       return;
