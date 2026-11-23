@@ -760,7 +760,7 @@ export const make = Effect.gen(function* () {
 
   const clearRemovedEnvironmentData = Effect.fn("EnvironmentRegistry.clearRemovedEnvironmentData")(
     function* (environmentId: EnvironmentId) {
-      const results = yield* Effect.all(
+      const results = yield* Effect.forEach(
         [
           cache.clear(environmentId).pipe(
             Effect.catch((error) =>
@@ -771,7 +771,8 @@ export const make = Effect.gen(function* () {
             ),
           ),
           ownedDataCleanup.clear(environmentId),
-        ].map((cleanup) => Effect.exit(cleanup)),
+        ],
+        Effect.exit,
         { concurrency: "unbounded" },
       );
       for (const result of results) {
