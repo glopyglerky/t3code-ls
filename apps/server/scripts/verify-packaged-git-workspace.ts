@@ -182,10 +182,6 @@ try {
     }
     await active.ready;
     const client = await authenticatePackagedServer(active, abort.signal);
-    if (mode === "native" || mode === "upstream") {
-      await client.createProject({ projectId: ProjectId.make("fixture-git-review"),
-        title: "Synthetic Git review", workspaceRoot: linked });
-    }
     const locations = mode === "native"
       ? [{ label: "root", cwd: workspace }, { label: "nested", cwd: nested },
         { label: "linked", cwd: linked }, { label: "bare", cwd: bare },
@@ -204,28 +200,6 @@ try {
         linkedStatusByMode.set(mode, status);
         if (mode === "upstream") Assert.deepEqual(status, linkedStatusByMode.get("native"));
         report.linkedStatus = Object.fromEntries(linkedStatusByMode);
-        const previewInput = { cwd, baseRef: reviewBase, sourceKind: "working-tree" as const };
-        const preview = await client.rpc((rpc) => rpc[WS_METHODS.reviewGetDiffPreview](previewInput));
-        const metadata = await client.rpc((rpc) => rpc[WS_METHODS.reviewGetDiffPreview]({ ...previewInput, metadataOnly: true }));
-        const contentsInput = { cwd, sourceKind: "working-tree" as const, changeType: "change" as const,
-          baseRef: reviewBase, headRef: null, oldPath: reviewPath, newPath: reviewPath };
-        const contents = await client.rpc((rpc) => rpc[WS_METHODS.reviewGetDiffFileContents](contentsInput));
-        Assert.deepEqual(contents, { oldContents: originalReviewText, newContents: dirtyReviewText });
-        // The independent Git oracle supplies the complete hunk bytes. Metadata
-        // and hashes must also agree with the retained authenticated route below.
-        const oraclePatch = ChildProcess.execFileSync("/usr/bin/git", ["-c", "diff.relative=false",
-          "-c", "diff.suppressBlankEmpty=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv",
-          "--submodule=short", "--find-renames", "--minimal", "--patch", "--src-prefix=a/", "--dst-prefix=b/", reviewBase, "--"],
-          { cwd, env: baseEnv, encoding: "utf8", timeout: 10_000 });
-        const working = preview.sources.find((source) => source.kind === "working-tree");
-        Assert.ok(working);
-        Assert.equal(working.diff, oraclePatch);
-        await Assert.rejects(client.rpc((rpc) => rpc[WS_METHODS.reviewGetDiffFileContents]({ ...contentsInput,
-          oldPath: "binary.dat", newPath: "binary.dat" })));
-        const observedReview = { sources: preview.sources, metadata: metadata.sources, contents };
-        reviewByMode.set(mode, observedReview);
-        if (mode === "upstream") Assert.deepEqual(observedReview, reviewByMode.get("native"));
-        report.review = Object.fromEntries(reviewByMode);
       }
       // Match stock's normal application admission, before GitVcsDriverCore.
       // A valid bare Git database is not a supported application work tree.
@@ -258,11 +232,43 @@ try {
         Assert.equal(result.isAtRepositoryRoot, isAtRepositoryRoot, `${mode}:${label}: root identity`);
       }
     }
+    // Review performs its own workspace authorization. Keep its Git calls
+    // separate from the list/status discovery path being compared below.
+    const discoveryCalls = executions(trace);
+    if (mode === "native" || mode === "upstream") {
+      checkpoint(`${mode}:review`);
+      const cwd = linked;
+      await client.createProject({ projectId: ProjectId.make("fixture-git-review"),
+        title: "Synthetic Git review", workspaceRoot: cwd });
+      const previewInput = { cwd, baseRef: reviewBase, sourceKind: "working-tree" as const };
+      const preview = await client.rpc((rpc) => rpc[WS_METHODS.reviewGetDiffPreview](previewInput));
+      const metadata = await client.rpc((rpc) => rpc[WS_METHODS.reviewGetDiffPreview]({ ...previewInput, metadataOnly: true }));
+      const contentsInput = { cwd, sourceKind: "working-tree" as const, changeType: "change" as const,
+        baseRef: reviewBase, headRef: null, oldPath: reviewPath, newPath: reviewPath };
+      const contents = await client.rpc((rpc) => rpc[WS_METHODS.reviewGetDiffFileContents](contentsInput));
+      Assert.deepEqual(contents, { oldContents: originalReviewText, newContents: dirtyReviewText });
+      // The independent Git oracle supplies the complete hunk bytes. Metadata
+      // and hashes must also agree with the retained authenticated route below.
+      const oraclePatch = ChildProcess.execFileSync("/usr/bin/git", ["-c", "diff.relative=false",
+        "-c", "diff.suppressBlankEmpty=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv",
+        "--submodule=short", "--find-renames", "--minimal", "--patch", "--src-prefix=a/", "--dst-prefix=b/", reviewBase, "--"],
+        { cwd, env: baseEnv, encoding: "utf8", timeout: 10_000 });
+      const working = preview.sources.find((source) => source.kind === "working-tree");
+      Assert.ok(working);
+      Assert.equal(working.diff, oraclePatch);
+      await Assert.rejects(client.rpc((rpc) => rpc[WS_METHODS.reviewGetDiffFileContents]({ ...contentsInput,
+        oldPath: "binary.dat", newPath: "binary.dat" })));
+      const observedReview = { sources: preview.sources, metadata: metadata.sources, contents };
+      reviewByMode.set(mode, observedReview);
+      if (mode === "upstream") Assert.deepEqual(observedReview, reviewByMode.get("native"));
+      report.review = Object.fromEntries(reviewByMode);
+    }
     checkpoint(`${mode}:execution-witness`);
     await active.stop(); active = undefined;
     const calls = executions(trace);
     const nativeCalls = calls.filter(({ line }) => line.startsWith(`execve(${JSON.stringify(helper)},`));
-    const gitDiscovery = calls.filter(({ line }) => line.includes('"--git-common-dir"') || line.includes('"--show-toplevel"'));
+    const gitDiscovery = discoveryCalls.filter(({ line }) =>
+      line.includes('"--git-common-dir"') || line.includes('"--show-toplevel"'));
     const registryProbes = gitDiscovery.filter(({ line }) => line.includes('"--is-inside-work-tree"'));
     const coreDiscovery = gitDiscovery.filter(({ line }) => !line.includes('"--is-inside-work-tree"'));
     for (const { label, cwd } of locations) {
