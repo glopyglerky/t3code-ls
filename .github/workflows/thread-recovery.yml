@@ -629,6 +629,18 @@ jobs:
             ordered_engines_commit_directly_from_an_application_writer_reservation; do
             grep -F "ordered_engine_fixture::$name ... ok" "$proof/ordered-application.log"
           done
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t04-ordered-application-wire-* ]]; then
+            export T3_CODE_LS_TEST_RUNTIME="$scratch/test-runtime"
+            node tools/install-server-tests.mjs
+            "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --locked --release \
+              -p t3-code-ls-storage --features ordered-engine-fixture --bin t3-code-ls-db
+            helper="$CARGO_TARGET_DIR/release/t3-code-ls-db"
+            sha256sum "$helper" > "$proof/ordered-helper.sha256"
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- env TMPDIR="$2" "$3" tools/check-ordered-event-sink.mjs "$4" "$5"
+            ' _ "$(id -un)" "$TMPDIR" "$(command -v node)" "$helper" "$proof/ordered-event-sink.json"
+          fi
           "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked --release \
             -p t3-code-ls-storage --lib application_events::tests \
             -- --test-threads=1 2>&1 | tee "$proof/default-events.log"

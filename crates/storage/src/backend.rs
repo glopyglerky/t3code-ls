@@ -21,7 +21,7 @@ use redb::{
     ReadableDatabase, ReadableTable, StorageBackend, TableDefinition, TableHandle,
     WriteTransaction,
 };
-#[cfg(all(test, feature = "ordered-engine-fixture"))]
+#[cfg(feature = "ordered-engine-fixture")]
 use redb_bench_compare::ordered as comparison;
 use sha2::{Digest, Sha256};
 use tokio::sync::oneshot;
@@ -1023,7 +1023,7 @@ struct ObservedRange {
 #[derive(Clone)]
 enum TransactionSnapshot {
     Omdb(Arc<ReadTransaction>),
-    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    #[cfg(feature = "ordered-engine-fixture")]
     Comparison(Arc<comparison::Snapshot>),
 }
 
@@ -1035,7 +1035,7 @@ impl TransactionSnapshot {
                 let value = table.get(key).map_err(storage_error)?;
                 value.map(|value| bounded_copy(value.value())).transpose()
             }
-            #[cfg(all(test, feature = "ordered-engine-fixture"))]
+            #[cfg(feature = "ordered-engine-fixture")]
             Self::Comparison(snapshot) => snapshot.get(key).map_err(Error::from),
         }
     }
@@ -1047,7 +1047,7 @@ impl TransactionSnapshot {
                 let value = table.get(key).map_err(storage_error)?;
                 Ok(value.map(|value| fingerprint(value.value())))
             }
-            #[cfg(all(test, feature = "ordered-engine-fixture"))]
+            #[cfg(feature = "ordered-engine-fixture")]
             Self::Comparison(snapshot) => Ok(snapshot.get(key)?.as_deref().map(fingerprint)),
         }
     }
@@ -1058,7 +1058,7 @@ impl TransactionSnapshot {
                 let table = snapshot.open_table(TABLE).map_err(storage_error)?;
                 scan_table(&table, start, end, limit)
             }
-            #[cfg(all(test, feature = "ordered-engine-fixture"))]
+            #[cfg(feature = "ordered-engine-fixture")]
             Self::Comparison(snapshot) => snapshot.scan(start, end, limit).map_err(Error::from),
         }
     }
@@ -1089,7 +1089,7 @@ impl TransactionSnapshot {
                     })
                     .collect()
             }
-            #[cfg(all(test, feature = "ordered-engine-fixture"))]
+            #[cfg(feature = "ordered-engine-fixture")]
             Self::Comparison(snapshot) => keys
                 .into_iter()
                 .map(|key| {
@@ -1151,7 +1151,7 @@ impl Transaction {
         }
     }
 
-    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    #[cfg(feature = "ordered-engine-fixture")]
     pub(crate) fn comparison_read_only(snapshot: comparison::Snapshot) -> Self {
         Self::new(
             None,
@@ -1161,7 +1161,7 @@ impl Transaction {
         )
     }
 
-    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    #[cfg(feature = "ordered-engine-fixture")]
     pub(crate) async fn comparison_reserved(
         database: Arc<comparison::Database>,
         lock_timeout: Duration,
@@ -1553,7 +1553,7 @@ impl CommitTable for redb::Table<'_, &'static [u8], &'static [u8]> {
     }
 }
 
-#[cfg(all(test, feature = "ordered-engine-fixture"))]
+#[cfg(feature = "ordered-engine-fixture")]
 impl From<comparison::Error> for Error {
     fn from(error: comparison::Error) -> Self {
         match error {
@@ -1563,7 +1563,7 @@ impl From<comparison::Error> for Error {
     }
 }
 
-#[cfg(all(test, feature = "ordered-engine-fixture"))]
+#[cfg(feature = "ordered-engine-fixture")]
 impl CommitTable for comparison::WriteTransaction {
     fn matches(&self, key: &[u8], expected: Option<&[u8]>) -> Result<bool> {
         Ok(self.get(key)?.as_deref() == expected)
@@ -1857,7 +1857,7 @@ fn claim_reservation_commit(state: &Mutex<ReservationState>) -> bool {
     })
 }
 
-#[cfg(all(test, feature = "ordered-engine-fixture"))]
+#[cfg(feature = "ordered-engine-fixture")]
 fn comparison_reserved_worker(
     database: Arc<comparison::Database>,
     state: Arc<Mutex<ReservationState>>,

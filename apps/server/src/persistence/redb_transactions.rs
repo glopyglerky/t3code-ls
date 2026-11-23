@@ -441,6 +441,8 @@ pub struct ApplicationTransactions {
     store: Store,
     sessions: BTreeMap<String, Session>,
     validated_catalog: Option<ValidatedCatalog>,
+    #[cfg(feature = "ordered-engine-fixture")]
+    ordered_fixture: Option<Arc<redb_bench_compare::ordered::Database>>,
 }
 
 impl ApplicationTransactions {
@@ -449,7 +451,107 @@ impl ApplicationTransactions {
             store,
             sessions: BTreeMap::new(),
             validated_catalog: None,
+            #[cfg(feature = "ordered-engine-fixture")]
+            ordered_fixture: None,
         }
+    }
+
+    /// Isolated helper fixture only. This copies a bounded empty application
+    /// schema, never an existing user's rows and never an engine migration.
+    #[cfg(feature = "ordered-engine-fixture")]
+    pub async fn select_ordered_fixture(
+        &mut self,
+        profile: &str,
+        directory: &std::path::Path,
+        initialize: bool,
+    ) -> Result<()> {
+        use redb_bench_compare::ordered::{Database, Engine};
+        const PROFILE: &str = "t04-direct-redb-efaf649-v1";
+        const MARKER: &[u8] = b"t3-t04-isolated/1/direct-redb/efaf649fb270ce70257e53862295cc10e4bddab0/t3-application-keyspace-v1";
+        // Validate before touching either the candidate path or session state.
+        if profile != PROFILE
+            || !directory.is_absolute()
+            || !self.sessions.is_empty()
+            || self.ordered_fixture.is_some()
+        {
+            return Err(invalid("ordered fixture selection rejected"));
+        }
+        let marker_key = store_key("ordered-fixture/identity");
+        let database = if initialize {
+            let mut source = self.store.db.begin_read_only().await?;
+            let catalog_bytes = source
+                .get(&schema_key())
+                .await?
+                .ok_or(Error::IncompatibleStore)?;
+            let catalog = decode_catalog(&catalog_bytes)?;
+            catalog.ensure_serving()?;
+            if catalog.generation != "native" || catalog.prepared_service_activation_v1.is_some() {
+                return Err(Error::IncompatibleStore);
+            }
+            read_generation_identity(&mut source, &catalog, &catalog_bytes)
+                .await?
+                .ok_or(Error::IncompatibleStore)?;
+            for table in &catalog.schema.tables {
+                if table.name == "effect_sql_migrations" {
+                    continue;
+                }
+                let prefix = row_prefix(&catalog.generation, &table.name)?;
+                let mut end = prefix.clone();
+                *end.last_mut().ok_or(Error::IncompatibleStore)? += 1;
+                if !source.scan(&prefix, &end, 1).await?.is_empty() {
+                    return Err(invalid("ordered fixture requires an empty application"));
+                }
+            }
+            let (start, end) = crate::prefix_range("");
+            let rows = source.scan(&start, &end, 4097).await?;
+            if rows.len() > 4096
+                || rows.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() > MAX_BATCH_BYTES / 2
+            {
+                return Err(invalid("ordered fixture seed budget exceeded"));
+            }
+            source.rollback().await?;
+            // Exclusive directory creation protects existing files/profiles.
+            std::fs::create_dir(directory)
+                .map_err(|_| invalid("ordered fixture directory must be new"))?;
+            let database = Database::open(Engine::DirectRedb, &directory.join("state.redb"))?;
+            database.write(|tx| {
+                for (key, value) in &rows {
+                    tx.put(key, value)?;
+                }
+                tx.put(&marker_key, MARKER)?;
+                Ok::<_, redb_bench_compare::ordered::Error>(())
+            })?;
+            // An interrupted initialization stays unselectable; no automatic retry.
+            std::fs::write(directory.join("profile"), MARKER)
+                .map_err(|_| invalid("ordered fixture marker write failed"))?;
+            database
+        } else {
+            let metadata = std::fs::symlink_metadata(directory)
+                .map_err(|_| invalid("ordered fixture directory missing"))?;
+            if !metadata.is_dir()
+                || std::fs::read(directory.join("profile")).ok().as_deref() != Some(MARKER)
+                || !std::fs::symlink_metadata(directory.join("state.redb"))
+                    .is_ok_and(|metadata| metadata.file_type().is_file())
+            {
+                return Err(Error::IncompatibleStore);
+            }
+            Database::open(Engine::DirectRedb, &directory.join("state.redb"))?
+        };
+        if database.snapshot()?.get(&marker_key)?.as_deref() != Some(MARKER) {
+            return Err(Error::IncompatibleStore);
+        }
+        // Validate the copied catalog and generation before admitting sessions.
+        let transaction = Transaction::comparison_read_only(database.snapshot()?);
+        let session = self.session_from_transaction(transaction).await?;
+        drop(session);
+        self.ordered_fixture = Some(Arc::new(database));
+        self.validated_catalog = None;
+        Ok(())
+    }
+
+    #[cfg(feature = "ordered-engine-fixture")]
+    pub fn has_ordered_fixture(&self) -> bool {
+        self.ordered_fixture.is_some()
     }
 
     pub fn discard_all(&mut self) {
@@ -638,6 +740,24 @@ impl ApplicationTransactions {
         mode: ApplicationTransactionMode,
         lock_timeout_ms: u64,
     ) -> Result<Session> {
+        #[cfg(feature = "ordered-engine-fixture")]
+        if let Some(database) = &self.ordered_fixture {
+            let transaction = match mode {
+                ApplicationTransactionMode::Read => {
+                    Transaction::comparison_read_only(database.snapshot()?)
+                }
+                ApplicationTransactionMode::Write => {
+                    Transaction::comparison_reserved(
+                        Arc::clone(database),
+                        Duration::from_millis(lock_timeout_ms),
+                        MAX_IDLE,
+                        false,
+                    )
+                    .await?
+                }
+            };
+            return self.session_from_transaction(transaction).await;
+        }
         let transaction = match mode {
             ApplicationTransactionMode::Read => self.store.db.begin_read_only().await?,
             ApplicationTransactionMode::Write => {

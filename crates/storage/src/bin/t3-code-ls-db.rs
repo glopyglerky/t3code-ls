@@ -48,6 +48,13 @@ use t3_code_ls_storage::{CommitBatch, Error, MAX_BATCH_BYTES, OutboxBatch, Store
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
     Shutdown {},
+    #[cfg(feature = "ordered-engine-fixture")]
+    ApplicationOrderedFixtureSelect {
+        profile: String,
+        directory: PathBuf,
+        #[serde(default)]
+        initialize: bool,
+    },
     ApplicationProjectionsContext {
         transaction_id: String,
         query: ProjectionContextQuery,
@@ -510,6 +517,8 @@ enum Request {
 impl Request {
     fn is_unscoped_mutation(&self) -> bool {
         match self {
+            #[cfg(feature = "ordered-engine-fixture")]
+            Self::ApplicationOrderedFixtureSelect { .. } => true,
             Self::ApplicationInit { .. }
             | Self::ApplicationAuthPrepare { .. }
             | Self::ApplicationPeersPrepare { .. }
@@ -639,11 +648,75 @@ async fn evaluate(
     transactions: &mut ApplicationTransactions,
     planner: Option<&Path>,
     request: Request,
+    #[cfg(feature = "ordered-engine-fixture")] ordered_fixture_mode: bool,
 ) -> Result<Value, Error> {
+    #[cfg(feature = "ordered-engine-fixture")]
+    if ordered_fixture_mode {
+        if let Request::ApplicationOrderedFixtureSelect {
+            profile,
+            directory,
+            initialize,
+        } = &request
+        {
+            transactions
+                .select_ordered_fixture(profile, directory, *initialize)
+                .await?;
+            return Ok(json!({"selected": true, "profile": profile}));
+        }
+        // This mode has a read-only seed handle. No bootstrap, migration,
+        // maintenance, identity query or unscoped read may reach that seed.
+        if !matches!(
+            &request,
+            Request::ApplicationBegin { .. }
+                | Request::ApplicationSavepoint { .. }
+                | Request::ApplicationRelease { .. }
+                | Request::ApplicationRollbackTo { .. }
+                | Request::ApplicationGet { .. }
+                | Request::ApplicationScan { .. }
+                | Request::ApplicationPut { .. }
+                | Request::ApplicationDelete { .. }
+                | Request::ApplicationCommit { .. }
+                | Request::ApplicationRollback { .. }
+                | Request::ApplicationEventsAppend { .. }
+                | Request::ApplicationEventsRead { .. }
+                | Request::ApplicationEventsStats { .. }
+                | Request::ApplicationEventsLatest { .. }
+                | Request::ApplicationEventsPrunedThrough { .. }
+                | Request::ApplicationReceiptsInsert { .. }
+                | Request::ApplicationReceiptsUpsert { .. }
+                | Request::ApplicationReceiptsGet { .. }
+                | Request::ApplicationPositionsAllocate { .. }
+                | Request::ApplicationProjectsSelect { .. }
+                | Request::ApplicationProjectsUpsert { .. }
+                | Request::ApplicationProjectionsApply { .. }
+                | Request::ApplicationProjectionsApplyMany { .. }
+                | Request::ApplicationProjectionsNormalization { .. }
+                | Request::ApplicationProjectionsRead { .. }
+                | Request::ApplicationProjectionsGuard { .. }
+                | Request::ApplicationProjectionsUserInputCancellation { .. }
+                | Request::ApplicationProjectionsMarkApplied { .. }
+                | Request::ApplicationOutboxEnqueue { .. }
+                | Request::ApplicationOutboxGet { .. }
+                | Request::ApplicationOutboxList { .. }
+        ) {
+            return Err(Error::Invalid(
+                "operation unavailable in ordered fixture mode".into(),
+            ));
+        }
+        if !transactions.has_ordered_fixture() {
+            return Err(Error::Invalid(
+                "ordered fixture must be selected before sessions".into(),
+            ));
+        }
+    }
     if request.is_unscoped_mutation() && transactions.has_active_writer() {
         return Err(Error::WriterBusy);
     }
     match request {
+        #[cfg(feature = "ordered-engine-fixture")]
+        Request::ApplicationOrderedFixtureSelect { .. } => Err(Error::Invalid(
+            "ordered fixture requires isolated helper mode".into(),
+        )),
         Request::Shutdown {} => {
             return Err(Error::Invalid(
                 "shutdown must be handled by the helper owner".into(),
@@ -1730,6 +1803,8 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let opened = match args.as_slice() {
+        #[cfg(feature = "ordered-engine-fixture")]
+        [mode, path] if mode == "ordered-fixture-local" => Store::open_read_only(path).await,
         [mode, path] if mode == "initialize-local" => Store::initialize_local(path).await,
         [mode, path] if mode == "local" => Store::open_local(path).await,
         [mode, path] if mode == "read-only-local" => Store::open_read_only(path).await,
@@ -1809,7 +1884,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             Ok(request) => {
-                match evaluate(&store, &mut transactions, planner.as_deref(), request).await {
+                match evaluate(
+                    &store,
+                    &mut transactions,
+                    planner.as_deref(),
+                    request,
+                    #[cfg(feature = "ordered-engine-fixture")]
+                    args.first()
+                        .is_some_and(|mode| mode == "ordered-fixture-local"),
+                )
+                .await
+                {
                     Ok(result) => json!({"ok": true, "result": result}),
                     Err(error) => error_response(&error),
                 }
