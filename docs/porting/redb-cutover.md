@@ -98,6 +98,13 @@ isolates event storage. Application projections, client traffic, provider work,
 and existing-profile activation require their own evidence.
 Projection, search and snapshot readers use their existing sources.
 
+The packaged browser comparison at `dd37e7056c2811beee0ef4ecf5fc41c423038481`
+reconstructed the same Unicode dialogue and ordered updates in both profiles.
+The closed-profile key/value counter found 57 event rows and zero suffix
+witnesses in each. That short fixture established the accounting path.
+The extended fixture requires a retained suffix witness in the compact profile
+before reporting its raw bytes. [Short packaged fixture](https://github.com/glopyglerky/t3code-ls/actions/runs/45242130177)
+
 Source rollback can reopen baseline and imported profiles with the prior helper.
 An opted-in profile needs a helper that understands its layout. Rolling it back
 to a prior helper requires restoring a compatible pre-trial backup. This version

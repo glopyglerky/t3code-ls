@@ -111,6 +111,8 @@ const FRAME_DELAY_MS = 250;
 const MAX_RECORDED_DELAY_MS = 2_000;
 const WORDS_PER_CHUNK = 3;
 
+export const durableTextPrefix = `${"雪🐟".repeat(512)} `;
+
 function isReplayedFrame(frame: LogicalFrame): boolean {
   if (frame.kind === "request") return REPLAYED_REQUESTS.has(frame.method);
   if (frame.kind !== "notification" || frame.method !== "session/update") return false;
@@ -202,6 +204,7 @@ function permissionRejectedToolCallId(request: LogicalFrame, answer: unknown): s
 
 function runAgent(): void {
   const holdForInterrupt = process.argv.includes("--hold-for-interrupt");
+  const extendTextAppends = process.argv.includes("--extend-text-appends");
   const turnsByScenario = new Map<string, ReadonlyArray<ReplayTurn>>();
   const loadTurns = (scenarioId: string) => {
     const cached = turnsByScenario.get(scenarioId);
@@ -249,6 +252,7 @@ function runAgent(): void {
     const session = sessions.get(sessionId)!;
     // Random, so a session loaded after a restart cannot reuse earlier tool rows.
     const live = { sessionId, workspace: session.cwd, turnKey: NodeCrypto.randomUUID() };
+    let prefixNextAppend = extendTextAppends && session.model === "text-appends";
     for (const recorded of turn.frames) {
       const frame = materialize(recorded.frame, live) as LogicalFrame;
       if (frame.kind === "request") {
@@ -287,7 +291,9 @@ function runAgent(): void {
           : undefined;
       // Live recordings hold one frame per token, so text defaults to the chunk pace.
       const firstDelay = recorded.afterMs ?? (text === undefined ? FRAME_DELAY_MS : CHUNK_DELAY_MS);
-      const chunks = text === undefined ? [undefined] : streamChunks(text);
+      const extend = prefixNextAppend && params.update.sessionUpdate === "agent_message_chunk" && text !== undefined;
+      if (extend) prefixNextAppend = false;
+      const chunks = text === undefined ? [undefined] : streamChunks(extend ? durableTextPrefix + text : text);
       for (const [index, chunk] of chunks.entries()) {
         await sleep(index === 0 ? firstDelay : CHUNK_DELAY_MS, signal);
         if (signal.aborted) return;

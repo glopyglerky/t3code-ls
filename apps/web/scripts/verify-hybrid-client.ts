@@ -34,6 +34,7 @@ import {
 } from "playwright";
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
 import { SOCKET_FRAME_PARTS_QUERY_PARAM } from "@t3tools/shared/socketFrameParts";
+import { durableTextPrefix } from "../../server/scripts/dev-replay-agent.ts";
 import { denyThreadLinkWasm, verifyThreadNavigation } from "./hybrid-client-thread-navigation.ts";
 import { verifyApprovalAction } from "./hybrid-client-approval-action.ts";
 import { verifyGuestNameForm } from "./hybrid-client-guest-name.ts";
@@ -2479,6 +2480,7 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
             commandArgs: [
               NodePath.join(repoRoot, "apps/server/scripts/dev-replay-agent.ts"),
               ...(composerStopProof ? ["--hold-for-interrupt"] : []),
+              ...(byteProfile ? ["--extend-text-appends"] : []),
             ],
           },
         },
@@ -2864,7 +2866,7 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
     if (byteProfile !== undefined) {
       starting(`packaged ${byteProfile} text byte receipt predecessor`);
       const prompt = "Replay: text appends";
-      const first = "This controlled reply sends several messages through the normal provider stream. The composer receives the first sentence while the same message is still open. A different frame brings another sentence and the same message keeps both sentences in their original order. The next frame will continue the reply with Unicode text and then finish the same turn. ";
+      const first = durableTextPrefix + "This controlled reply sends several messages through the normal provider stream. The composer receives the first sentence while the same message is still open. A different frame brings another sentence and the same message keeps both sentences in their original order. The next frame will continue the reply with Unicode text and then finish the same turn. ";
       const second = "日本語 and a 🐟 complete the sequence. The bounded text fixture is complete.";
       const finalText = first + second + " The fixture now ends the turn.";
       const artifacts = Object.fromEntries([
@@ -3625,6 +3627,12 @@ try {
             Assert.equal(sum, receipt.wholeStore[field]);
           }
           Assert.ok(receipt.groups.eventRows.keys > 0);
+          const witnesses = receipt.groups.revisionWitnesses.keys;
+          if (profile === "compact") {
+            Assert.ok(witnesses > 0, "The packaged compact profile must retain a suffix revision");
+          } else {
+            Assert.equal(witnesses, 0, "The full profile must store every update as a full event");
+          }
           Assert.equal(NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(path)).digest("hex"), fixtureSha256);
           return { ...receipt, inspectorSha256 };
         });
@@ -3639,7 +3647,7 @@ try {
           physicalGap: "Raw persisted lengths exclude engine allocation and WAL equivalence; no pooled isolated result",
           gainClaim: null, walEquivalence: false, stockEquivalence: false,
           isolatedResultPooled: false,
-          remaining: "Root must qualify the test inspector and packaged execution, then repeat matched trials before any gain claim",
+          remaining: "Repeat matched trials before any gain claim",
         });
       } else {
         await exercise(implementation);
