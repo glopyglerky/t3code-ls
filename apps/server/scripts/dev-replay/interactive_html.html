@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Controlled interactive document</title>
+  <style>
+    body { margin: 0; font-family: var(--font-sans); color: var(--foreground); }
+    button, input { font: inherit; padding: 6px; margin: 4px; }
+    form { margin-block: 12px; }
+    #extra { height: 540px; padding: 12px; background: var(--muted); }
+  </style>
+</head>
+<body>
+  <h1>Controlled interactive document</h1>
+  <label>Count <input id="count" type="number" value="0" readonly></label>
+  <button id="add" type="button">Add one</button>
+  <form id="calculate">
+    <label>Value <input id="value" type="number" value="3"></label>
+    <button type="submit">Double value</button>
+    <output id="result" aria-live="polite">Ready</output>
+  </form>
+  <p id="theme" aria-live="polite">Waiting for host theme</p>
+  <button id="grow" type="button">Expand content</button>
+  <div id="extra" hidden>Expanded local content</div>
+  <script>
+    document.getElementById("add").addEventListener("click", () => {
+      const count = document.getElementById("count");
+      count.value = String(Number(count.value) + 1);
+    });
+    document.getElementById("calculate").addEventListener("submit", (event) => {
+      event.preventDefault();
+      document.getElementById("result").textContent = `Result: ${Number(document.getElementById("value").value) * 2}`;
+    });
+    document.getElementById("grow").addEventListener("click", () => {
+      document.getElementById("extra").hidden = false;
+    });
+    window.addEventListener("message", (event) => {
+      if (event.source !== parent || event.data?.jsonrpc !== "2.0" || event.data?.method !== "ui/notifications/host-context-changed") return;
+      const appearance = event.data.params?.theme;
+      if (appearance === "light" || appearance === "dark") {
+        document.getElementById("theme").textContent = `Host theme: ${appearance}`;
+      }
+    });
+  </script>
+</body>
+</html>

@@ -3,7 +3,8 @@
 /**
  * A free ACP agent for dev servers. It plays recorded ACP transcripts with simulated
  * streaming, so the real adapter, orchestration, and UI run without a paid model.
- * Each scenario is a "model"; each prompt plays the next recorded turn.
+ * Each scenario is a "model"; each prompt plays the next recorded turn, except
+ * the controlled HTML scenario, which publishes through its own local MCP session.
  * Unlike acp-replay-agent.ts, it does not assert the client's frames.
  */
 import * as NodeCrypto from "node:crypto";
@@ -52,6 +53,7 @@ const FIXTURES = "../src/orchestration-v2/testkit/fixtures";
 // Use acpRegistry transcripts: vendor transcripts carry state in frames this agent drops.
 export const SCENARIOS = [
   { id: "showcase", name: "Showcase", file: "./dev-replay/showcase_transcript.ndjson" },
+  { id: "html-interaction", name: "Interactive HTML", file: null },
   { id: "text-appends", name: "Text appends", file: "./dev-replay/text_appends_transcript.ndjson" },
   { id: "text-splices", name: "Text splices", file: "./dev-replay/text_splices_transcript.ndjson" },
   {
@@ -198,6 +200,7 @@ function runAgent(): void {
     const cached = turnsByScenario.get(scenarioId);
     if (cached !== undefined) return cached;
     const scenario = SCENARIOS.find((candidate) => candidate.id === scenarioId) ?? SCENARIOS[0];
+    if (scenario.file === null) throw new Error("The HTML scenario uses the real local publisher.");
     const turns = parseReplayTurns(
       NodeFS.readFileSync(new URL(scenario.file, import.meta.url), "utf8"),
     );
@@ -341,14 +344,23 @@ function runAgent(): void {
         const sessionId = String(params.sessionId);
         const session = sessions.get(sessionId);
         if (session === undefined) throw new Error(`Unknown session ${sessionId}`);
-        const turns = loadTurns(session.model);
+        const turns = session.model === "html-interaction" ? [] : loadTurns(session.model);
         const turn = turns[session.promptCount % Math.max(turns.length, 1)];
         session.promptCount += 1;
         const controller = new AbortController();
         session.cancel = () => controller.abort();
         let ended: "cancelled" | undefined;
         try {
-          if (turn !== undefined) ended = await playTurn(sessionId, turn, controller.signal);
+          if (session.model === "html-interaction") {
+            const { publishInteractiveHtml } = await import("./dev-replay-html.ts");
+            try {
+              await publishInteractiveHtml({ signal: controller.signal,
+                sendUpdate: (update) => { send({ method: "session/update", params: { sessionId, update } }); } });
+            } catch (cause) {
+              if (controller.signal.aborted) ended = "cancelled";
+              else throw cause;
+            }
+          } else if (turn !== undefined) ended = await playTurn(sessionId, turn, controller.signal);
         } finally {
           session.cancel = undefined;
         }

@@ -210,6 +210,7 @@ jobs:
           T3_CODE_LS_DRAFT_STORAGE_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-storage-') }}
           T3_CODE_LS_FILE_EDITOR_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
           T3_CODE_LS_DURABLE_TEXT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-durable-') }}
+          T3_CODE_LS_HTML_INTERACTION_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-html-') }}
           T3_CODE_LS_PDF_LINK_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-') }}
           VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
         run: |
@@ -256,6 +257,13 @@ jobs:
             done
           fi
           node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
+      - name: Check the controlled HTML publisher and production MCP session
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-html-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 \
+            scripts/dev-replay-agent.test.ts src/mcp/AcpMcpStdioBridge.test.ts
       - name: Exercise PDF link handling in the browser
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-')
         working-directory: apps/web
