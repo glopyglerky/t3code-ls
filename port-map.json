@@ -1937,7 +1937,11 @@
         "infra/task-cache/rust/src/lib.rs",
         "infra/task-cache/rust/web/src/lib.rs"
       ],
-      "adapter_paths": ["infra/task-cache/src/Savings.ts", "infra/task-cache/src/SavingsFold.ts"],
+      "adapter_paths": [
+        "infra/task-cache/src/Savings.ts", "infra/task-cache/src/SavingsFold.ts",
+        "infra/task-cache/src/SavingsRuntime.ts", "infra/task-cache/src/SavingsRuntime.native.ts",
+        "infra/task-cache/src/SavingsBuild.ts", "infra/task-cache/src/worker.ts"
+      ],
       "platform_routes": [
         {
           "targets": ["linux-x64"],
@@ -1947,9 +1951,12 @@
           "acceptance_evidence": {}
         }
       ],
-      "acceptance_tests": ["infra/task-cache/scripts/verify-savings-native.ts"],
+      "acceptance_tests": [
+        "infra/task-cache/scripts/verify-savings-native.ts",
+        "infra/task-cache/scripts/verify-savings-worker.ts"
+      ],
       "retired_paths": [],
-      "notes": "T15/J32 savings policy with a no_std allocation-free fold, Wasm binding and the existing Savings service. D1 owns atomic receipt deduplication and totals publication. The deployed worker uses its retained fold. Wasm packaging, Cloudflare execution and performance remain unqualified.",
+      "notes": "T15/J32 savings policy with a no_std allocation-free fold, Wasm binding and the existing Savings service. D1 owns atomic receipt deduplication and totals publication. A fingerprint-verified Alchemy build can select the native Savings facade. The default build uses the retained fold. Worker packaging, Cloudflare execution and performance require their own qualification.",
       "rust_crates": ["infra/task-cache/rust", "infra/task-cache/rust/web"]
     }
   ],

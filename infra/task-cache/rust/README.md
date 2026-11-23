@@ -21,7 +21,32 @@ The hosted workflow builds the actual module and runs the production Savings
 service against a synthetic SQLite implementation of D1 transactions. It compares
 all five sources, empty and maximum-size input, binary64 rounding, duplicate
 receipts, failed batches and module failure. Cloudflare worker packaging and
-runtime loading remain unqualified. The deployed worker uses the retained fold.
+runtime loading require the separate Worker packaging check. The deployed worker
+uses the retained fold unless its build explicitly selects the native artifacts.
+
+For an opt-in Worker build, generate the facade with wasm-bindgen's `--target web`
+and `--out-name savings`. Set `TASK_CACHE_NATIVE_SAVINGS_DIRECTORY` to its absolute
+canonical directory and `TASK_CACHE_NATIVE_SAVINGS_SHA256` to the combined
+fingerprint reported by `inspectNativeSavings`. The fingerprint includes both
+file names, lengths and bytes. The build refuses missing, redirected, oversized
+or mismatched artifacts. The existing Alchemy build aliases `SavingsRuntime.ts`
+to the native facade and includes the Wasm as a compiled module. The facade uses
+the generated `initSync` with that precompiled module.
+
+`verify-savings-worker.ts` invokes the same pinned Alchemy WorkerBundle provider
+on the actual Worker entry with both selections. It requires the retained graph
+to contain no Wasm and the selected graph to contain the exact provided Wasm.
+It loads the emitted native Savings facade with a synthetic precompiled-module
+loader and calls the normal authenticated telemetry route against synthetic D1
+transactions. This checks packaging and the route's receipt behavior. Actual
+Cloudflare isolate startup, remote bindings and deployment remain unqualified.
+
+The inspected `@alchemy.run/cloudflare` 2.0.0-beta.85 package matches the lockfile
+SHA-512. Its `Workers/Sources/Rolldown.ts` and `Workers/Worker.ts` implement the
+build alias and CompiledWasm routes used here. Cloudflare documents compiled
+Wasm imports and precompiled instantiation in its
+[bundling guidance](https://developers.cloudflare.com/workers/wrangler/bundling/)
+and [Wasm API](https://developers.cloudflare.com/workers/runtime-apis/webassembly/).
 
 Use the `candidate/t3code-ls-t15-task-cache-savings-*` lane for qualification with
 the pinned Lustr/blueFe compiler. Generated binding files and build targets stay
