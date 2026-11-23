@@ -569,7 +569,7 @@ it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
         { kind: "history-invalidated" },
         "The open stream missed the ancestor-only edit",
       );
-      assert.deepStrictEqual(encodeStreamItem({ kind: "history-invalidated" }), refresh);
+      assert.deepStrictEqual(encodeStreamItem({ kind: "history-invalidated" }), { kind: "history-invalidated" });
       assert.isTrue(Option.isNone(yield* Queue.poll(received)));
       assert.isTrue(Option.isNone(yield* Queue.poll(legacy.received)));
       assert.isTrue(Option.isNone(yield* Queue.poll(full.received)));

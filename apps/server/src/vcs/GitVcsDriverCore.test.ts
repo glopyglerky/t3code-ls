@@ -777,7 +777,9 @@ it.effect.skipIf(gixFixture === undefined)(
 
     const readNativeNames = Effect.fn("GitVcsDriver.test.nativeNames")(function* (location: string) {
       const output = yield* delegate.string(ChildProcess.make(gixFixture!, ["local-branch-names", location]));
-      return Schema.decodeUnknownSync(Schema.fromJsonString(Schema.NullOr(Schema.Array(Schema.String))))(output);
+      return yield* Schema.decodeEffect(
+        Schema.fromJsonString(Schema.NullOr(Schema.Array(Schema.String))),
+      )(output);
     });
     const checkNames = Effect.fn("GitVcsDriver.test.checkNativeNames")(function* (location: string) {
       const expected = (yield* git(location, ["for-each-ref", "--format=%(refname:strip=2)", "refs/heads/"]))

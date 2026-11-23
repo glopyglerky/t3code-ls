@@ -377,7 +377,7 @@ it.effect("commits root workspace metadata with the prepared run release", () =>
     assert.deepEqual(
       events.filter((stored) => stored.event.type === "thread.metadata-updated")
         .map((stored) => stored.commandId),
-      ["root-launch:initial-message", "root-launch:release"],
+      [CommandId.make("root-launch:initial-message"), CommandId.make("root-launch:release")],
     );
   }).pipe(Effect.provide(harness.layer));
 });
