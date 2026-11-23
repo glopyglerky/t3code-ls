@@ -91,6 +91,24 @@ jobs:
           export T3_TEST_PROMOTION_HELPER="$CARGO_TARGET_DIR/debug/t3-code-ls-db"
           sha256sum "$T3_TEST_PROMOTION_HELPER" > "$RUNNER_TEMP/promotion-proof/helper.sha256"
           "$T3_TEST_PROMOTION_HELPER" trial-capabilities > "$RUNNER_TEMP/promotion-proof/capabilities.json"
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-* ]]; then
+            proof="$RUNNER_TEMP/promotion-proof"
+            lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+            test_name=backend::tests::exclusive_trial_keeps_peer_locks_across_engine_handles
+            timeout -k 5s 180s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              test --locked -j 2 -p t3-code-ls-storage --lib "$test_name" \
+              -- --exact --nocapture 2>&1 | tee "$proof/lease-across-engine-handles.log"
+            grep -F "test $test_name ... ok" "$proof/lease-across-engine-handles.log"
+            sha256sum --check "$proof/prior-helper.sha256"
+            timeout -k 5s 600s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              test --locked -j 2 -p t3-code-ls-storage --lib \
+              application_bootstrap::upgrade::tests::service_forward_catalog_fences_generic_restore \
+              -- --ignored --exact --nocapture 2>&1 | tee "$proof/forward-catalog.log"
+            grep -F 'T05 native forward catalog recovered the interrupted sealed and marked states' "$proof/forward-catalog.log"
+            grep -F 'T05 forward catalog fenced both installed helpers across generic restore retries' "$proof/forward-catalog.log"
+            cp "$RUNNER_TEMP/promotion-toolchain/installation-proof.json" "$proof/"
+            exit 0
+          fi
           if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-sealed-intent-cancel-* ]]; then
             cp "$RUNNER_TEMP/promotion-toolchain/installation-proof.json" "$RUNNER_TEMP/promotion-proof/"
             timeout -k 5s 180s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
