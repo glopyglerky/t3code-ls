@@ -441,8 +441,12 @@ export const ProjectReadFileInput = Schema.Struct({
   relativePath: Schema.NonEmptyString.check(Schema.isMaxLength(PROJECT_READ_FILE_PATH_MAX_LENGTH)),
   // Optional files can be absent without failing the read.
   allowMissing: Schema.optional(Schema.Boolean),
+  requestRevision: Schema.optionalKey(Schema.Literal(true)),
 });
 export type ProjectReadFileInput = typeof ProjectReadFileInput.Type;
+
+const ProjectFileHash = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/));
+const ProjectFileRevision = Schema.NullOr(ProjectFileHash);
 
 export const ProjectReadFileResult = Schema.Struct({
   relativePath: Schema.NonEmptyString,
@@ -451,6 +455,7 @@ export const ProjectReadFileResult = Schema.Struct({
   truncated: Schema.Boolean,
   // Omitted by older servers; false only for an absent optional file.
   exists: Schema.optional(Schema.Boolean),
+  revision: Schema.optionalKey(ProjectFileRevision),
 });
 export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
 
@@ -459,6 +464,7 @@ export const ProjectFileFailure = Schema.Literals([
   "resolved_path_outside_root",
   "path_not_file",
   "binary_file",
+  "file_changed",
   "operation_failed",
 ]);
 export type ProjectFileFailure = typeof ProjectFileFailure.Type;
@@ -515,11 +521,13 @@ export const ProjectWriteFileInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   relativePath: Schema.NonEmptyString.check(Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH)),
   contents: Schema.String,
+  expectedRevision: Schema.optionalKey(ProjectFileRevision),
 });
 export type ProjectWriteFileInput = typeof ProjectWriteFileInput.Type;
 
 export const ProjectWriteFileResult = Schema.Struct({
   relativePath: Schema.NonEmptyString,
+  revision: Schema.optionalKey(ProjectFileHash),
 });
 export type ProjectWriteFileResult = typeof ProjectWriteFileResult.Type;
 
@@ -571,7 +579,9 @@ export class ProjectWriteFileError extends Schema.TaggedError<ProjectWriteFileEr
       ...props,
       message:
         decodedProjectErrorMessage(props) ??
-        `Failed to write workspace file '${props.relativePath}' in '${props.cwd}'.`,
+        (props.failure === "file_changed"
+          ? `Workspace file '${props.relativePath}' changed after it was opened.`
+          : `Failed to write workspace file '${props.relativePath}' in '${props.cwd}'.`),
     } as any);
   }
 }

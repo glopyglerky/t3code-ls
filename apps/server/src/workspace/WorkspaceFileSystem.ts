@@ -1,4 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off
+import { createHash } from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 
@@ -20,6 +21,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 
 import { makeIsServerInternalPath } from "../auth/serverInternalPaths.ts";
 import * as KnownWorkspaces from "./KnownWorkspaces.ts";
@@ -28,6 +30,8 @@ import * as WorkspacePaths from "./WorkspacePaths.ts";
 import { fileHeaderMimeType } from "./fileHeaderMimeType.ts";
 
 const PROJECT_READ_FILE_MAX_BYTES = 1024 * 1024;
+const revisionOf = (contents: string | Uint8Array) =>
+  createHash("sha256").update(contents).digest("hex");
 
 // NTFS reaches .git through trailing dots/spaces, stream suffixes and GIT~1; compare uppercased names.
 const isGitMetadataName = (segment: string) => {
@@ -100,11 +104,17 @@ export class WorkspaceBinaryFileError extends Schema.TaggedError<WorkspaceBinary
   }
 }
 
+export class WorkspaceFileChangedError extends Schema.TaggedError<WorkspaceFileChangedError>()(
+  "WorkspaceFileChangedError",
+  { relativePath: Schema.String, resolvedPath: Schema.String },
+) {}
+
 export const WorkspaceFileSystemError = Schema.Union([
   WorkspaceFileSystemOperationError,
   WorkspaceFilePathEscapeError,
   WorkspacePathNotFileError,
   WorkspaceBinaryFileError,
+  WorkspaceFileChangedError,
 ]);
 export type WorkspaceFileSystemError = typeof WorkspaceFileSystemError.Type;
 
@@ -141,6 +151,22 @@ export const make = Effect.gen(function* () {
   const knownWorkspaces = yield* KnownWorkspaces.KnownWorkspaces;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const isServerInternalPath = yield* makeIsServerInternalPath;
+  const pendingWrites = new Map<string, { readonly lock: Semaphore.Semaphore; count: number }>();
+
+  const serializeWrite = <A, E>(target: string, write: Effect.Effect<A, E>) =>
+    Effect.suspend(() => {
+      const entry = pendingWrites.get(target) ?? { lock: Semaphore.makeUnsafe(1), count: 0 };
+      pendingWrites.set(target, entry);
+      entry.count += 1;
+      return entry.lock.withPermits(1)(write).pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            entry.count -= 1;
+            if (entry.count === 0) pendingWrites.delete(target);
+          }),
+        ),
+      );
+    });
 
   const metadataForPath = Effect.fnUntraced(function* (requestedPath: string) {
     const expandedPath = expandHomePath(requestedPath, yield* HostProcess.HomeDirectory);
@@ -347,6 +373,7 @@ export const make = Effect.gen(function* () {
       byteLength: 0,
       truncated: false,
       exists: false,
+      ...(input.requestRevision ? { revision: null } : {}),
     };
     const realTargetPath = target.realTargetPath;
     if (realTargetPath === null) return absentResult;
@@ -439,6 +466,9 @@ export const make = Effect.gen(function* () {
             contents: new TextDecoder("utf-8").decode(fileBytes, { stream: truncated }),
             byteLength: stat.size,
             truncated,
+            ...(input.requestRevision && !truncated && offset === stat.size
+              ? { revision: revisionOf(fileBytes) }
+              : {}),
           };
         }),
       (handle) =>
@@ -547,50 +577,115 @@ export const make = Effect.gen(function* () {
     yield* knownWorkspaces.assertContains(input.cwd);
     const target = yield* resolveWriteTarget(input);
     const realTargetPath = target.realTargetPath;
-    const replacesFile = yield* fileSystem
-      .exists(realTargetPath)
-      .pipe(Effect.orElseSucceed(() => false));
+    const expected = input.expectedRevision;
+    const replacesFile =
+      expected === undefined &&
+      (yield* fileSystem.exists(realTargetPath).pipe(Effect.orElseSucceed(() => false)));
 
-    yield* fileSystem.makeDirectory(path.dirname(realTargetPath), { recursive: true }).pipe(
-      Effect.mapError(
-        (cause) =>
+    if (typeof expected !== "string") {
+      yield* fileSystem.makeDirectory(path.dirname(realTargetPath), { recursive: true }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new WorkspaceFileSystemOperationError({
+              workspaceRoot: input.cwd,
+              relativePath: input.relativePath,
+              resolvedPath: realTargetPath,
+              operationPath: path.dirname(realTargetPath),
+              operation: "make-directory",
+              cause,
+            }),
+        ),
+      );
+    }
+    const saved = yield* serializeWrite(
+      realTargetPath,
+      Effect.tryPromise({
+        try: async () => {
+          const { O_WRONLY, O_RDWR, O_CREAT, O_EXCL, O_TRUNC, O_NOFOLLOW, O_NONBLOCK } =
+            NodeFS.constants;
+          const noFollow = O_NOFOLLOW ?? 0;
+          if (expected === undefined) {
+            await NodeFSP.writeFile(realTargetPath, input.contents, {
+              flag: O_WRONLY | O_CREAT | O_TRUNC | noFollow,
+            });
+            return true;
+          }
+          if (expected === null) {
+            try {
+              await NodeFSP.writeFile(realTargetPath, input.contents, {
+                flag: O_WRONLY | O_CREAT | O_EXCL | noFollow,
+              });
+              return true;
+            } catch (cause) {
+              if ((cause as NodeJS.ErrnoException).code === "EEXIST") return false;
+              throw cause;
+            }
+          }
+
+          const handle = await NodeFSP.open(
+            realTargetPath,
+            O_RDWR | noFollow | (O_NONBLOCK ?? 0),
+          ).catch((cause: NodeJS.ErrnoException) => {
+              if (cause.code === "ENOENT") return null;
+              throw cause;
+            });
+          if (handle === null) return false;
+          try {
+            const before = await handle.stat({ bigint: true });
+            if (!before.isFile() || before.size > PROJECT_READ_FILE_MAX_BYTES) return false;
+            const bytes = Buffer.alloc(Number(before.size));
+            const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+            if (bytesRead !== bytes.length || revisionOf(bytes) !== expected) return false;
+            const current = await NodeFSP.lstat(realTargetPath, { bigint: true }).catch(
+              (cause: NodeJS.ErrnoException) => {
+                if (cause.code === "ENOENT") return null;
+                throw cause;
+              },
+            );
+            if (
+              current === null ||
+              current.dev !== before.dev ||
+              current.ino !== before.ino ||
+              current.size !== before.size ||
+              current.mtimeNs !== before.mtimeNs ||
+              current.ctimeNs !== before.ctimeNs
+            ) {
+              return false;
+            }
+            await handle.writeFile(input.contents);
+            await handle.truncate(Buffer.byteLength(input.contents, "utf8"));
+            return true;
+          } finally {
+            await handle.close();
+          }
+        },
+        catch: (cause) =>
           new WorkspaceFileSystemOperationError({
             workspaceRoot: input.cwd,
             relativePath: input.relativePath,
             resolvedPath: realTargetPath,
-            operationPath: path.dirname(realTargetPath),
-            operation: "make-directory",
+            operationPath: realTargetPath,
+            operation: "write-file",
             cause,
           }),
-      ),
+      }).pipe(Effect.uninterruptible),
     );
-    yield* Effect.tryPromise({
-      // A symlink swapped in after the check is not followed. Windows lacks O_NOFOLLOW.
-      try: () =>
-        NodeFSP.writeFile(realTargetPath, input.contents, {
-          flag:
-            NodeFS.constants.O_WRONLY |
-            NodeFS.constants.O_CREAT |
-            NodeFS.constants.O_TRUNC |
-            (NodeFS.constants.O_NOFOLLOW ?? 0),
-        }),
-      catch: (cause) =>
-        new WorkspaceFileSystemOperationError({
-          workspaceRoot: input.cwd,
-          relativePath: input.relativePath,
-          resolvedPath: realTargetPath,
-          operationPath: realTargetPath,
-          operation: "write-file",
-          cause,
-        }),
-    });
+    if (!saved) {
+      return yield* new WorkspaceFileChangedError({
+        relativePath: input.relativePath,
+        resolvedPath: realTargetPath,
+      });
+    }
     // Editor autosave overwrites existing files, which leaves the indexed paths unchanged, and
     // fff's watcher applies the new contents on its own. A forced rescan re-walks the whole
     // workspace, and the save would wait for it.
-    if (!replacesFile) {
+    if (expected === null || (expected === undefined && !replacesFile)) {
       yield* workspaceEntries.refresh(input.cwd);
     }
-    return { relativePath: target.relativePath };
+    return {
+      relativePath: target.relativePath,
+      ...(expected === undefined ? {} : { revision: revisionOf(input.contents) }),
+    };
   });
 
   return WorkspaceFileSystem.of({ getMetadata, readFile, writeFile });
