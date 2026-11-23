@@ -289,6 +289,10 @@ enum Request {
         transaction_id: String,
         event: ProjectionApply,
     },
+    ApplicationProjectionsApplyMany {
+        transaction_id: String,
+        events: Vec<ProjectionApply>,
+    },
     ApplicationProjectionsNormalization {
         transaction_id: String,
         event: ProjectionApply,
@@ -575,6 +579,7 @@ impl Request {
             | Self::ApplicationViewedFilesList { .. }
             | Self::ApplicationViewedFilesSet { .. }
             | Self::ApplicationProjectionsApply { .. }
+            | Self::ApplicationProjectionsApplyMany { .. }
             | Self::ApplicationProjectionsNormalization { .. }
             | Self::ApplicationProjectionsRead { .. }
             | Self::ApplicationProjectionsGuard { .. }
@@ -1086,6 +1091,10 @@ async fn evaluate(
             transactions
                 .projections_apply(&transaction_id, event)
                 .await?;
+            Ok(Value::Null)
+        }
+        Request::ApplicationProjectionsApplyMany { transaction_id, events } => {
+            transactions.projections_apply_many(&transaction_id, events).await?;
             Ok(Value::Null)
         }
         Request::ApplicationProjectionsRead {

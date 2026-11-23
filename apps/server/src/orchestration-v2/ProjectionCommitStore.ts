@@ -34,6 +34,9 @@ export interface ProjectionCommitStoreShape {
   readonly apply: (
     event: OrchestrationV2DomainEvent,
   ) => Effect.Effect<void, ProjectionCommitStoreError>;
+  readonly applyMany: (
+    events: ReadonlyArray<OrchestrationV2DomainEvent>,
+  ) => Effect.Effect<void, ProjectionCommitStoreError>;
   readonly getThread: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2AppThread | undefined, ProjectionCommitStoreError>;
