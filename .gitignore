@@ -51,6 +51,8 @@ node_modules/
 .pnpm-store/
 
 /target/
+/apps/mobile/modules/t3-native-controls/ios/T3Outbox.xcframework/
+/apps/mobile/modules/t3-native-controls/android/src/main/jniLibs/*/libt3_outbox.so
 /apps/web/public/client-text-wasm/
 /apps/web/public/pairing-wasm/
 .lust-cache/

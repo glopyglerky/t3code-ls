@@ -1,9 +1,10 @@
 #![no_std]
 
-//! Offset mapping for the composer's serialized rich document.
+//! Portable client state and offset mapping for the composer's rich document.
 //! The map borrows runs from the editor. UTF-16 text lengths and one-position
 //! atoms match `apps/web/src/composer-rich-text-doc.ts` in the pinned source.
 
+pub mod outbox;
 pub mod text_revision;
 
 #[derive(Clone, Copy, Debug, PartialEq)]

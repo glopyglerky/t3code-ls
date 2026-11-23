@@ -3609,6 +3609,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "t3-code-ls-mobile-outbox"
+version = "0.1.0"
+dependencies = [
+ "t3-code-ls-client-text",
+]
+
+[[package]]
 name = "t3-code-ls-storage"
 version = "0.1.0"
 dependencies = [

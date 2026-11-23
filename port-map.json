@@ -1853,9 +1853,61 @@
         }
       ],
       "acceptance_tests": ["apps/web/scripts/verify-hybrid-client.ts"],
+      "hosted_acceptance": {
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
+      },
       "retired_paths": [],
       "notes": "T01, T11 and J36. VITE_T3_CODE_LS_PAIRING_RENDERER=dioxus selects the local pairing form only. The browser adapter uses Dioxus 0.8.0-alpha.3 release cb27832398e8a3fa30a0fc8d6917c6d8a86fa71a, an ancestor of research pin 0a7242a2a72b08975584bf8ecb05076a5ee0b9c7. Cargo.lock records release artifact checksums. The bundled Chromium proof has yet to run.",
       "rust_crates": ["apps/web/rust/pairing"]
+    },
+    {
+      "id": "mobile-outbox-delivery",
+      "state": "candidate",
+      "domain_owner": "apps/mobile/src/state",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/mobile/src/state/thread-outbox-model.ts",
+          "blob": "64fe62d8a15f753e6e9d3e812eeb880c994d7f9e"
+        },
+        {
+          "path": "apps/mobile/src/state/threadOutboxDelivery.ts",
+          "blob": "c64215ed26cd374b173de56d499e5debc3938265"
+        }
+      ],
+      "rust_paths": [
+        "packages/client-runtime/rust/src/outbox.rs",
+        "apps/mobile/modules/t3-native-controls/rust/src/lib.rs"
+      ],
+      "adapter_paths": [
+        ".github/workflows/thread-recovery.yml",
+        "apps/mobile/src/App.tsx",
+        "apps/mobile/src/state/threadOutboxDelivery.ts",
+        "apps/mobile/src/native/outboxDelivery.ts",
+        "apps/mobile/modules/t3-native-controls/ios/T3NativeControlsModule.swift",
+        "apps/mobile/modules/t3-native-controls/ios/T3NativeControls.podspec",
+        "apps/mobile/modules/t3-native-controls/android/src/main/java/expo/modules/t3nativecontrols/T3NativeControlsModule.kt",
+        "apps/mobile/modules/t3-native-controls/android/src/main/java/expo/modules/t3nativecontrols/T3OutboxDelivery.kt"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["android", "ios"],
+          "state": "candidate",
+          "implementation": "rust-ffi",
+          "compiler_route": "target-sdk",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "packages/client-runtime/rust/tests/outbox.rs",
+        "apps/mobile/src/native/outboxDelivery.test.ts"
+      ],
+      "hosted_acceptance": {
+        "apps/mobile/src/native/outboxDelivery.test.ts": ".github/workflows/thread-recovery.yml"
+      },
+      "retired_paths": [],
+      "notes": "T12. The Expo adapter can select a versioned scalar binding for the portable outbox decision. Actual packaged iOS and Android restart, persistence and permission checks remain required.",
+      "rust_crates": ["packages/client-runtime/rust", "apps/mobile/modules/t3-native-controls/rust"]
     },
     {
       "id": "conversation-text-revisions",

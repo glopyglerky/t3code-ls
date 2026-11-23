@@ -24,6 +24,7 @@ class T3NativeControlsModule : Module() {
   @Suppress("TooGenericExceptionCaught") // Clear the pending promise before rethrowing.
   override fun definition() = ModuleDefinition {
     Name("T3NativeControls")
+    Function("resolveOutboxDeliveryV1") { facts: Int -> T3OutboxDelivery.resolve(facts) }
 
     // React Native sets this once, at launch, from the system theme rather than the app's.
     AsyncFunction("setNavigationBarStyle") { light: Boolean ->

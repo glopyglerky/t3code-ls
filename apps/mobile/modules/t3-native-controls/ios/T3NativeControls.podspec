@@ -12,6 +12,9 @@ Pod::Spec.new do |s|
   s.static_framework = true
 
   s.dependency 'ExpoModulesCore'
+  if File.directory?(File.join(__dir__, 'T3Outbox.xcframework'))
+    s.vendored_frameworks = 'T3Outbox.xcframework'
+  end
   s.pod_target_xcconfig = {
     'DEFINES_MODULE' => 'YES',
   }
