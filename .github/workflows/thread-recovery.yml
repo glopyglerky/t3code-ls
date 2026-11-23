@@ -153,21 +153,18 @@ jobs:
 
   mobile-outbox-ios:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
-    runs-on: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-') && 'macos-15-intel' || startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-macos26-') && 'macos-26' || 'macos-15' }}
+    runs-on: macos-26
     timeout-minutes: 75
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - name: Build device and simulator libraries and link a Swift caller
         run: |
-          case "$GITHUB_REF_NAME" in
-            candidate/t3code-ls-t12-outbox-native-ios-app-intel-*) test "$(uname -m)" = x86_64 ;;
-            *) test "$(uname -m)" = arm64 ;;
-          esac
-          xcodebuild -version | grep -Fx "Build version 17C529"
+          test "$(uname -m)" = arm64
+          xcodebuild -version | grep -Fx "Build version 17E202"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-target"
           export IPHONEOS_DEPLOYMENT_TARGET=18.0
           export CARGO_PROFILE_RELEASE_LTO=false
@@ -264,11 +261,9 @@ jobs:
           shasum -a 256 "$binary" apps/mobile/ios/Podfile.lock \
             "$RUNNER_TEMP/outbox-target/aarch64-apple-ios-sim/release/libt3_outbox.a" \
             > "$evidence/artifacts.sha256"
-          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t12-outbox-native-ios-app-intel-* ]]; then
-            archive="$RUNNER_TEMP/ios-outbox-simulator.tar.gz"
-            tar -czf "$archive" -C "$(dirname "${applications[0]}")" "$(basename "${applications[0]}")"
-            (cd "$RUNNER_TEMP" && shasum -a 256 ios-outbox-simulator.tar.gz) > "$evidence/archive.sha256"
-          fi
+          archive="$RUNNER_TEMP/ios-outbox-simulator.tar.gz"
+          tar -czf "$archive" -C "$(dirname "${applications[0]}")" "$(basename "${applications[0]}")"
+          (cd "$RUNNER_TEMP" && shasum -a 256 ios-outbox-simulator.tar.gz) > "$evidence/archive.sha256"
       - name: Clean generated iOS intermediates
         if: always()
         shell: bash
@@ -285,7 +280,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
       - name: Retain the verified arm64 simulator application
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ios-outbox-simulator-arm64
