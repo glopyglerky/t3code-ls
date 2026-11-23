@@ -6,8 +6,10 @@ import * as FS from "node:fs";
 import * as OS from "node:os";
 import * as Path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { CommandId, MessageId, ProjectId, ProviderInstanceId, ORCHESTRATION_V2_WS_METHODS } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+import { ClaudeSettings, CommandId, MessageId, ProjectId, ProviderInstanceId, ORCHESTRATION_V2_WS_METHODS } from "@t3tools/contracts";
 import type { RowPage } from "../src/persistence/RedbClient.ts";
+import { makeClaudeQueryOptions } from "../src/orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import { cellValue } from "../../../tools/omdb-guest-state.ts";
 import { authenticatePackagedServer, reservePort, startPackagedServer } from "./packaged-server-fixture.ts";
 
@@ -15,8 +17,10 @@ import { authenticatePackagedServer, reservePort, startPackagedServer } from "./
 // into a conversation pass when selection or option equality stops working.
 // The optional no-mcp-refusal arm must instead refuse an unrelated model mismatch.
 const [proofArgument, entryArgument, fixtureArgument, mode = "mcp-refusal", ...extra] = process.argv.slice(2);
-Assert.ok(mode === "mcp-refusal" || mode === "no-mcp-refusal");
-const noMcp = mode === "no-mcp-refusal";
+Assert.ok(mode === "mcp-refusal" || mode === "no-mcp-refusal" || mode === "no-mcp-conversation");
+const conversation = mode === "no-mcp-conversation";
+const noMcp = mode !== "mcp-refusal";
+const terminalStatus = conversation ? "completed" : "failed";
 Assert.equal(extra.length, 0);
 for (const argument of [proofArgument, entryArgument, fixtureArgument]) Assert.ok(argument && Path.isAbsolute(argument));
 Assert.equal(process.platform, "linux");
@@ -35,7 +39,7 @@ const interrupt = () => abort.abort(new Error("Packaged Claude refusal interrupt
 process.once("SIGINT", interrupt);
 process.once("SIGTERM", interrupt);
 const hash = (file: string) => Crypto.createHash("sha256").update(FS.readFileSync(file)).digest("hex");
-const report: Record<string, unknown> = { status: "running", scope: noMcp ? "packaged no-MCP model option refusal and reopen" : "packaged MCP option refusal and reopen",
+const report: Record<string, unknown> = { status: "running", scope: mode,
   stock: "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f", conversationQualified: false };
 const save = () => FS.writeFileSync(Path.join(proof, "proof.json"), JSON.stringify(report, null, 2) + "\n", { mode: 0o600 });
 let active: ReturnType<typeof startPackagedServer> | undefined;
@@ -45,6 +49,8 @@ const instanceId = ProviderInstanceId.make("claude-stdio-synthetic-packaged");
 const projectId = ProjectId.make("claude-stdio-synthetic-project");
 const messageId = MessageId.make(Crypto.randomUUID());
 const commandId = CommandId.make(Crypto.randomUUID());
+const title = "Synthetic Claude fixture";
+const modelSelection = { instanceId, model: "claude-sonnet-4-6" };
 
 try {
   const nativeBin = Path.join(Path.dirname(entry), "native-bin");
@@ -79,17 +85,30 @@ try {
       .map((driver) => [driver, { driver, enabled: false }])),
     [instanceId]: { driver: "claudeAgent", enabled: true, config: {} },
   } }));
-  // Deliberately bounded, callback-free options. Never capture/drop authenticated
-  // MCP settings or widen this allowlist to force a conversation through.
-  const env = { HOME: home, PATH: bin, TMPDIR: temporary,
+  // Both the server process and expected query use explicit, synthetic inputs.
+  // The oracle never observes the server's live options, environment or credentials.
+  const childEnvironment = { HOME: home, PATH: bin, TMPDIR: temporary,
     XDG_CONFIG_HOME: Path.join(home, ".config"), XDG_DATA_HOME: Path.join(home, ".local/share"),
     XDG_CACHE_HOME: Path.join(home, ".cache"),
     T3_CODE_LS_IMPLEMENTATION: "native", T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
     T3CODE_TELEMETRY_ENABLED: "false", T3CODE_OTEL_SDK_DISABLED: "true", NO_COLOR: "1",
-    T3_CODE_LS_CLAUDE_STDIO_SYNTHETIC: JSON.stringify({ version: 1, instanceId, program: fixture, directory: workspace,
+  };
+  const expectedOptions = conversation
+    ? makeClaudeQueryOptions({
+        modelSelection, nativeThreadId: "fixture", title, resume: false, cwd: workspace,
+        attachmentsDir: Path.join(userdata, "attachments"),
+        settings: Schema.decodeUnknownSync(ClaudeSettings)({}),
+        environment: { ...childEnvironment, CLAUDE_CODE_ENTRYPOINT: "t3-code" },
+        tools: { type: "preset", preset: "claude_code" }, permissionMode: "default",
+        supportedDialogKinds: ["resume_return"],
+      })
+    : { permissionMode: "default", sessionId: "fixture", cwd: workspace,
+        ...(noMcp ? { model: "deliberate-unrelated-mismatch" } : {}) };
+  const env = { ...childEnvironment,
+    T3_CODE_LS_CLAUDE_STDIO_SYNTHETIC: JSON.stringify({
+      version: 1, instanceId, program: fixture, directory: workspace, expectedOptions,
       ...(noMcp ? { mcp: "disabled" } : {}),
-      expectedOptions: { permissionMode: "default", sessionId: "fixture", cwd: workspace,
-        ...(noMcp ? { model: "deliberate-unrelated-mismatch" } : {}) } }),
+    }),
   };
   const traces: string[] = [];
   const start = async (phase: string) => {
@@ -104,14 +123,15 @@ try {
   report.phase = "boot";
   const first = await start("initial");
   const client = await authenticatePackagedServer(first, abort.signal);
-  await client.createProject({ projectId, title: "Synthetic Claude refusal", workspaceRoot: workspace });
+  await client.createProject({ projectId, title, workspaceRoot: workspace });
   report.phase = "launch";
   const { threadId } = await client.rpc((rpc) => rpc[ORCHESTRATION_V2_WS_METHODS.launchThread]({
-    commandId: CommandId.make(Crypto.randomUUID()), projectId, title: "Synthetic Claude refusal", generateTitle: false,
-    modelSelection: { instanceId, model: "claude-sonnet-4-6" }, runtimeMode: "approval-required",
+    commandId: CommandId.make(Crypto.randomUUID()), projectId, title, generateTitle: false,
+    modelSelection, runtimeMode: "approval-required",
     interactionMode: "default", workspaceStrategy: { type: "root" },
   }));
   const read = (connection: typeof client) => connection.rpc((rpc) => rpc[ORCHESTRATION_V2_WS_METHODS.getThreadProjection]({ threadId }));
+  const witnessFile = Path.join(workspace, "claude-stdio-options-refused.json");
   const empty = await read(client);
   Assert.equal(empty.messages.length, 0);
   Assert.equal(empty.runs.length, 0);
@@ -122,7 +142,11 @@ try {
     dispatchMode: { type: "start_immediately" } }));
   let settled = await read(client);
   const deadline = AbortSignal.any([abort.signal, AbortSignal.timeout(45_000)]);
-  while (!settled.runs.some((run) => run.status === "failed")) {
+  while (!settled.runs.some((run) => run.status === terminalStatus)) {
+    if (settled.runs.some((run) => run.status === (conversation ? "failed" : "completed"))) {
+      if (FS.existsSync(witnessFile)) FS.copyFileSync(witnessFile, Path.join(proof, "options-refused.json"));
+      throw new Error("Unexpected terminal state for the selected fixture arm");
+    }
     await delay(100, undefined, { signal: deadline });
     settled = await read(client);
   }
@@ -131,33 +155,47 @@ try {
   const user = settled.messages.find((message) => message.id === messageId);
   Assert.equal(user?.text, text);
   Assert.equal(user?.runId, settled.runs[0]?.id);
-  Assert.equal(settled.messages.filter((message) => message.role === "assistant" && message.text.length > 0).length, 0);
-  // The runner witness proves selection reached the controlled open.
-  // A failed earlier account/binary check cannot satisfy this gate.
-  report.phase = "runner-refusal";
-  const witnessFile = Path.join(workspace, "claude-stdio-options-refused.json");
-  const witness = JSON.parse(FS.readFileSync(witnessFile, "utf8"));
-  Assert.equal(witness.version, 1);
-  Assert.equal(witness.type, "options-refused");
-  Assert.ok(Array.isArray(witness.differing));
-  if (noMcp) {
-    Assert.ok(!witness.differing.includes("mcpServers"));
-    Assert.ok(!witness.differing.includes("hooks"));
-    Assert.ok(witness.differing.includes("model"));
-  } else {
-    Assert.ok(witness.differing.includes("mcpServers"));
+  const assistant = settled.messages.filter((message) => message.role === "assistant" && message.text.length > 0);
+  Assert.equal(assistant.length, conversation ? 1 : 0);
+  const reply = assistant[0];
+  if (conversation) {
+    Assert.equal(reply?.text, text);
+    Assert.equal(reply?.runId, user?.runId);
+    Assert.notEqual(reply?.id, messageId);
+    Assert.ok(reply?.id);
   }
-  Assert.ok(witness.differing.every((key: unknown) => typeof key === "string"));
-  FS.copyFileSync(witnessFile, Path.join(proof, "options-refused.json"));
+
+  // The witness distinguishes an intentional refusal from an earlier startup failure.
+  report.phase = "runner-outcome";
+  let witness: unknown;
+  if (!conversation) {
+    const refusal = JSON.parse(FS.readFileSync(witnessFile, "utf8"));
+    Assert.equal(refusal.version, 1);
+    Assert.equal(refusal.type, "options-refused");
+    Assert.ok(Array.isArray(refusal.differing));
+    if (noMcp) {
+      Assert.ok(!refusal.differing.includes("mcpServers"));
+      Assert.ok(!refusal.differing.includes("hooks"));
+      Assert.ok(refusal.differing.includes("model"));
+    } else {
+      Assert.ok(refusal.differing.includes("mcpServers"));
+    }
+    Assert.ok(refusal.differing.every((key: unknown) => typeof key === "string"));
+    witness = refusal;
+  }
+  if (FS.existsSync(witnessFile)) {
+    FS.copyFileSync(witnessFile, Path.join(proof, "options-refused.json"));
+  }
+  Assert.equal(FS.existsSync(witnessFile), !conversation);
   Assert.ok(await first.stop());
   active = undefined;
   const database = Path.join(userdata, "statev2.omdb");
   Assert.ok(FS.lstatSync(database).isFile());
   Assert.ok(!FS.existsSync(Path.join(userdata, "statev2.sqlite")));
-  const snapshot = () => {
+  const snapshot = (table = "orchestration_events") => {
     const transaction_id = "claude-packaged-refusal";
     const requests = [{ operation: "application_begin", transaction_id, mode: "read" },
-      { operation: "application_scan", transaction_id, table: "orchestration_events", limit: 256 },
+      { operation: "application_scan", transaction_id, table, limit: 256 },
       { operation: "application_rollback", transaction_id }];
     const replies = ChildProcess.execFileSync(databaseHelper, ["read-only-local", database], { env: {}, encoding: "utf8",
       timeout: 30_000, maxBuffer: 4 * 1024 * 1024, input: requests.map((value) => JSON.stringify(value)).join("\n") + "\n" })
@@ -171,9 +209,18 @@ try {
   const before = snapshot();
   const events = before.filter(({ row }) => cellValue(row.stream_id) === threadId)
     .map(({ row }) => ({ type: cellValue(row.event_type), payload: JSON.parse(String(cellValue(row.payload_json))) }));
-  const terminals = events.filter((event) => event.type === "run.updated" && event.payload.id === settled.runs[0]?.id && event.payload.status === "failed");
+  const terminals = events.filter((event) => event.type === "run.updated" && event.payload.id === settled.runs[0]?.id && event.payload.status === terminalStatus);
   Assert.equal(terminals.length, 1);
   Assert.ok(events.some((event) => event.type === "message.updated" && event.payload.id === messageId && event.payload.text === text));
+  if (reply) {
+    Assert.ok(events.some((event) => event.type === "message.updated" &&
+      event.payload.id === reply.id && event.payload.text === text));
+  }
+  const receipts = snapshot("orchestration_command_receipts");
+  const receipt = receipts.filter(({ row }) => cellValue(row.command_id) === commandId);
+  Assert.equal(receipt.length, 1);
+  Assert.equal(cellValue(receipt[0]!.row.command_type), "message.dispatch");
+  Assert.equal(cellValue(receipt[0]!.row.status), "accepted");
   report.phase = "reopen";
   const reopened = await start("reopened");
   Assert.notEqual(first.pid, reopened.pid);
@@ -184,20 +231,33 @@ try {
   Assert.ok(await reopened.stop());
   active = undefined;
   Assert.deepEqual(snapshot(), before);
-  Assert.deepEqual(JSON.parse(FS.readFileSync(witnessFile, "utf8")), witness);
+  Assert.deepEqual(snapshot("orchestration_command_receipts"), receipts);
+  if (!conversation) Assert.deepEqual(JSON.parse(FS.readFileSync(witnessFile, "utf8")), witness);
   for (const marker of ["adapter-child-started", "conversation-child-started", "conversation-prompt.json"]) {
-    Assert.ok(!FS.existsSync(Path.join(workspace, marker)), "Refusal must precede synthetic child and prompt");
+    Assert.equal(FS.existsSync(Path.join(workspace, marker)), conversation);
   }
-  // Reject even a failed vendor/fixture exec attempt, and any helper execution.
-  // Manifest validation is the only helper selection work admitted by this gate.
-  const traceText = traces.map((file) => FS.readFileSync(file, "utf8")).join("\n");
-  Assert.ok(!traceText.includes(`execve(${JSON.stringify(fixture)}`));
-  Assert.ok(!traceText.includes(`execve(${JSON.stringify(helper)}`));
-  Assert.ok(!/execve\("[^"\n]*\/(?:claude|claude-code)"/u.test(traceText));
+  if (conversation) {
+    const prompt = JSON.parse(FS.readFileSync(Path.join(workspace, "conversation-prompt.json"), "utf8"));
+    Assert.equal(prompt.type, "user");
+    Assert.ok(typeof prompt.uuid === "string" && prompt.uuid.length === 36);
+    Assert.ok(JSON.stringify(prompt.message).includes(JSON.stringify(text)));
+  }
+  // Count exec attempts by configured exact paths in each isolated process.
+  const [initialTrace, reopenedTrace] = traces.map((file) => FS.readFileSync(file, "utf8"));
+  Assert.ok(initialTrace !== undefined && reopenedTrace !== undefined);
+  for (const executable of [fixture, helper]) {
+    const prefix = `execve(${JSON.stringify(executable)}`;
+    Assert.equal(initialTrace.split("\n").filter((line) => line.includes(prefix)).length, conversation ? 1 : 0);
+    Assert.ok(!reopenedTrace.includes(prefix));
+  }
+  Assert.ok(!/execve\("[^"\n]*\/(?:claude|claude-code)"/u.test(initialTrace + reopenedTrace));
   report.observed = { instanceId, commandId, messageId, runId: settled.runs[0]?.id, text,
-    dispatchCount: 1, failedTerminalEvents: 1, assistantMessages: 0, nativeStore: "omdb", reopened: true,
+    dispatchCount: 1, terminalStatus, terminalEvents: 1, assistantMessages: assistant.length,
+    assistantMessageId: reply?.id, nativeStore: "omdb", reopened: true, receiptRetained: true,
     helperManifestVerified: true, controlledOpenRefusedMcpOptions: !noMcp,
-    controlledNoMcpRefusedUnrelatedModel: noMcp, helperOrProviderExecuted: false };
+    controlledNoMcpRefusedUnrelatedModel: noMcp && !conversation,
+    helperOrProviderExecuted: conversation };
+  report.conversationQualified = conversation;
   report.phase = "complete";
   report.status = "passed";
 } catch (error) {
