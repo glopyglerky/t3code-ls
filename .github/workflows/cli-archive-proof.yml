@@ -70,7 +70,9 @@ jobs:
           export CARGO_HOME="$RUNNER_TEMP/cli-cargo-home"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/cli-target"
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
-            -p t3-code-ls-storage --lib service_trial_executable_hash_has_an_independent_bound
+            -p t3-code-ls-storage --lib service_trial_executable_hash_has_an_independent_bound | tee "$RUNNER_TEMP/cli-proof/executable-limit.log"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-storage --lib isolated_trial | tee "$RUNNER_TEMP/cli-proof/native-trial.log"
           T3_TEST_PREPARE_ENTRY="$entry" \
           T3_TEST_SEALED_TRIAL_HELPER="$(dirname "$entry")/native-bin/t3-code-ls-db" \
             node --test --test-name-pattern 'compiled Rust helper restores' \
