@@ -16,8 +16,8 @@ type EventRow = { sequence: number; event_id: string; event_type: string; payloa
 type Stats = { event_count: number; has_create_event: boolean; raw_payload_bytes: number };
 type Thread = { id: string; projectId: string; historyOrigin: string };
 type ProviderThread = { appThreadId: string; nativeThreadRef: { nativeId: string } };
-type Message = { role: string; text: string; runId: string | null };
-type TurnItem = { type: string; text: string; runId: string | null };
+type Message = { id: string; role: string; text: string; runId: string | null };
+type TurnItem = { ordinal: number; type: string; text: string; runId: string | null };
 
 function text(row: Row, column: string) {
   const cell = row[column];
