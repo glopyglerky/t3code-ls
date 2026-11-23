@@ -48,6 +48,8 @@ The workflow now starts two batches on one measured runner. Each batch contains 
 
 For the candidate comparison, retain the same paired order, browser version and empty homes. Compare equivalent acknowledgement guarantees separately from stricter durability. Retain failed trials alongside successful ones.
 
+The first paired stock run completed all 28 trials on one Linux x86-64 runner with an AMD EPYC 9V45 CPU, image `ubuntu24/20261116.376.1`, Node `26.13.1` and Chrome `157.0.8103.78`. The later-trial medians were 3.912506 s and 4.094799 s. The larger median within-pair difference was 146.4105 ms. For that profile the absolute median budget is 4.2412095 s, the allowed median regression is 146.4105 ms, and a practical gain must exceed 146.4105 ms. Re-establish the control under the same conditions if the runner profile changes. [Paired stock receipts](https://github.com/glopyglerky/t3code-ls/actions/runs/45087909955)
+
 Correctness gates admit no loss outside the declared durability/failure contract, authority escalation, accidental duplicate uncertain mutation, broken promised capability or unsafe restoration of an older authoritative generation. Non-idempotent external protocols may leave an explicitly unknown outcome. Reconcile or expose that uncertainty; never turn it into an unqualified automatic retry.
 
 ### Durability and compatibility are independent dimensions

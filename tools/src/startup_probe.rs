@@ -19,10 +19,15 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
     let args: Vec<_> = args.collect();
-    let (node, bundle, trial, browsers) = match args.as_slice() {
-        [node, bundle, trial] => (node, bundle, trial, None),
-        [node, bundle, trial, driver, chrome] => (node, bundle, trial, Some((driver, chrome))),
-        _ => return Err("usage: t3code-ls-tools probe-startup NODE BUNDLE NEW_TRIAL_DIRECTORY [CHROMEDRIVER CHROME]".into()),
+    let (node, bundle, trial, browsers, fork_sqlite) = match args.as_slice() {
+        [node, bundle, trial] => (node, bundle, trial, None, false),
+        [node, bundle, trial, driver, chrome] => {
+            (node, bundle, trial, Some((driver, chrome)), false)
+        }
+        [node, bundle, trial, driver, chrome, mode] if mode.as_os_str() == "fork-sqlite" => {
+            (node, bundle, trial, Some((driver, chrome)), true)
+        }
+        _ => return Err("usage: t3code-ls-tools probe-startup NODE BUNDLE NEW_TRIAL_DIRECTORY [CHROMEDRIVER CHROME [fork-sqlite]]".into()),
     };
     let node = fs::canonicalize(node)?;
     let bundle = fs::canonicalize(bundle)?;
@@ -53,12 +58,18 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
             Stdio::null()
         })
         .stderr(Stdio::null());
+    if fork_sqlite {
+        command.env("T3_CODE_LS_IMPLEMENTATION", "upstream");
+    }
 
     let start = Instant::now();
     let mut child = OwnedChild(command.spawn()?);
     let pairing = child.0.stdout.take().map(pairing_link);
     let (origin, descriptor_micros, html_micros, database_migration) =
         sample(&mut child.0, &state, start)?;
+    if !state.join("statev2.sqlite").is_file() || state.join("statev2.omdb").exists() {
+        return Err("fresh profile did not use the selected SQLite database".into());
+    }
     let browser = if let Some(browser) = browser {
         let pairing = pairing.ok_or("missing server pairing output pipe")?;
         let link = pairing.recv_timeout(STARTUP_TIMEOUT.saturating_sub(start.elapsed()))?;
@@ -78,11 +89,16 @@ pub fn run(args: impl Iterator<Item = OsString>) -> Result<()> {
         None
     };
     child.stop()?;
+    let profile = match (fork_sqlite, browser.is_some()) {
+        (true, _) => "new-fork-linux-browser-profile",
+        (false, true) => "new-stock-linux-browser-profile",
+        (false, false) => "new-stock-linux-server-home",
+    };
     println!(
         "{}",
         json!({
             "schema_version": 1,
-            "profile": if browser.is_some() {"new-stock-linux-browser-profile"} else {"new-stock-linux-server-home"},
+            "profile": profile,
             "poll_interval_micros": POLL_INTERVAL.as_micros(),
             "descriptor_micros": descriptor_micros,
             "html_micros": html_micros,
