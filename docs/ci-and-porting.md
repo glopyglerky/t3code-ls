@@ -22,6 +22,14 @@ Full fork qualification covers the Rust workspace, production adapters, and the 
 
 Mapped component acceptance scripts have explicit executable requirements. CI builds those targets with the pinned compiler and runs changed scripts; a full qualification runs all mapped component checks. Unknown test mappings fail planning. Builds retain the verified compiler package and locked Cargo and pnpm dependency gates. Expensive jobs run only when selected.
 
+The CLI archive checks cover retained implementations on their target
+architectures. The Apple Silicon handoff builds and signs the archive on the
+Intel runner and retains the exact archive and smoke harness. The artifact
+from commit `ba8fdff9d` passed the retained smoke on arm64 macOS 27.0.
+It exercised session output, bundled HTTP and descriptor readiness, a Unicode
+prompt waiting for input with exit 2, and a failed turn with exit 1.
+[Apple Silicon archive build](https://github.com/glopyglerky/t3code-ls/actions/runs/45222227888)
+
 The `redb-persistence` port selects the native client flow when its mapped runtime changes. Its mapped storage checks still run in the native job. A platform acceptance receipt for an `omdb` route must record `"implementation": "omdb"` and satisfy the existing source, target, compiler and required-check rules.
 
 ## Reusing qualification

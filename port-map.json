@@ -2090,7 +2090,7 @@
         "packages/client-runtime/src/state/threadDetail.test.ts": ".github/workflows/composer-offsets.yml"
       },
       "retired_paths": [],
-      "notes": "T02/T11 C02 and J36 continuation. VITE_T3_CODE_LS_ASSISTANT_TEXT_RENDERER=dioxus selects a conservative Rust-owned plain paragraph child on the normal selected-thread timeline. The selected-thread state owner supplies exact text, updatedAt and applied thread sequence together; this is not an item revision. Rust declines richer formats to the retained Markdown renderer. Citation wrappers, row metadata, other kinds, commands and persistence retain their owners. No application execution or acceptance is claimed by this patch. Real Wasm stream/replacement/remount, focus continuity, running-thread reopen and interrupted persistence checks are selected by the opt-in timeline workflow prefix. Broader Markdown, attachments, accessibility, hosted/guest/platform and performance qualification remain open.",
+      "notes": "T02/T11 C02 and J36. VITE_T3_CODE_LS_ASSISTANT_TEXT_RENDERER=dioxus selects a Rust-owned plain paragraph in the selected-thread timeline. The state owner supplies exact text, updatedAt and the applied thread sequence together. Richer formats use the existing Markdown renderer. Run 45223520534 at 3651e573695bb2fbc387d845f2a97f121a0bfc42 exercised real Wasm text updates and remount. The packaged application opened the same running thread, preserved composer focus and reopened the same interrupted message. A separate run with blocked Wasm rendered the retained paragraph. Richer text, attachments, accessibility, hosted and guest flows, other platforms and performance remain open.",
       "rust_crates": [
         "apps/web/rust/pairing"
       ]
