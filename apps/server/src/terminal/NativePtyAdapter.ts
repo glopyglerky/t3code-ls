@@ -7,6 +7,7 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
 import * as NodePtyAdapter from "./NodePtyAdapter.ts";
 
@@ -279,6 +280,15 @@ export const layer = (executable: string) => Layer.succeed(PtyAdapter.PtyAdapter
   })),
 });
 
+class BundledPtyVerificationError extends Schema.TaggedError<BundledPtyVerificationError>()(
+  "BundledPtyVerificationError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Could not verify the bundled native PTY host.";
+  }
+}
+
 async function verifyBundledHost(executable: string): Promise<void> {
   const flags = NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW | NodeFS.constants.O_NONBLOCK;
   const manifestFile = await NodeFS.open(NodePath.join(NodePath.dirname(executable), "manifest.json"), flags);
@@ -336,7 +346,7 @@ const select = Effect.fn("NativePtyAdapter.select")(function* () {
   if (bundled === "1") {
     yield* Effect.tryPromise({
       try: () => verifyBundledHost(executable),
-      catch: (cause) => new Error("Could not verify the bundled native PTY host.", { cause }),
+      catch: (cause) => new BundledPtyVerificationError({ cause }),
     }).pipe(Effect.orDie);
   }
   return layer(executable);
