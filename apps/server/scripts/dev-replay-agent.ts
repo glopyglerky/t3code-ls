@@ -10,11 +10,18 @@ import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeReadline from "node:readline";
 
+interface ReplayError {
+  readonly code: number;
+  readonly message: string;
+  readonly data?: unknown;
+}
+
 interface LogicalFrame {
   readonly kind: "notification" | "request" | "response";
   readonly method: string;
   readonly params?: unknown;
   readonly result?: unknown;
+  readonly error?: ReplayError;
 }
 
 interface ReplayEntry {
@@ -36,6 +43,7 @@ export interface ReplayTurn {
   /** Frames the agent sends: session updates and agent-to-client requests. */
   readonly frames: ReadonlyArray<{ readonly frame: LogicalFrame; readonly afterMs?: number }>;
   readonly stopReason: string;
+  readonly error?: ReplayError;
 }
 
 const FIXTURES = "../src/orchestration-v2/testkit/fixtures";
@@ -65,6 +73,11 @@ export const SCENARIOS = [
     id: "multi-turn",
     name: "Multi turn",
     file: `${FIXTURES}/multi_turn/registry_transcript.ndjson`,
+  },
+  {
+    id: "failed-turn",
+    name: "Failed turn",
+    file: `${FIXTURES}/stop_background_work_after_failed_turn/registry_transcript.ndjson`,
   },
 ] as const;
 
@@ -99,7 +112,11 @@ function isReplayedFrame(frame: LogicalFrame): boolean {
 
 /** Splits a recorded transcript into the turns that follow each `session/prompt`. */
 export function parseReplayTurns(ndjson: string): ReadonlyArray<ReplayTurn> {
-  const turns: Array<{ frames: Array<ReplayTurn["frames"][number]>; stopReason: string }> = [];
+  const turns: Array<{
+    frames: Array<ReplayTurn["frames"][number]>;
+    stopReason: string;
+    error?: ReplayError;
+  }> = [];
   // Frames after a prompt's response belong to background work, not to that turn.
   let turn: (typeof turns)[number] | undefined;
   for (const line of ndjson.split("\n")) {
@@ -120,6 +137,7 @@ export function parseReplayTurns(ndjson: string): ReadonlyArray<ReplayTurn> {
     if (frame.kind === "response" && frame.method === "session/prompt") {
       const stopReason = (frame.result as { stopReason?: unknown } | undefined)?.stopReason;
       if (typeof stopReason === "string") turn.stopReason = stopReason;
+      if (frame.error !== undefined) turn.error = frame.error;
       turn = undefined;
       continue;
     }
@@ -334,12 +352,9 @@ function runAgent(): void {
         } finally {
           session.cancel = undefined;
         }
-        return {
-          stopReason:
-            controller.signal.aborted || ended === "cancelled"
-              ? "cancelled"
-              : (turn?.stopReason ?? "end_turn"),
-        };
+        if (controller.signal.aborted || ended === "cancelled") return { stopReason: "cancelled" };
+        if (turn?.error !== undefined) throw Object.assign(new Error(turn.error.message), turn.error);
+        return { stopReason: turn?.stopReason ?? "end_turn" };
       }
       case "session/close":
         sessions.get(String(params.sessionId))?.cancel?.();
@@ -378,8 +393,8 @@ function runAgent(): void {
     const id = message.id;
     handleRequest(message).then(
       (result) => send({ id, result }),
-      (error: Error & { code?: number }) =>
-        send({ id, error: { code: error.code ?? -32603, message: error.message } }),
+      (error: Error & { code?: number; data?: unknown }) =>
+        send({ id, error: { code: error.code ?? -32603, message: error.message, data: error.data } }),
     );
   });
 }

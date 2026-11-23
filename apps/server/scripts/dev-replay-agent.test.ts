@@ -89,18 +89,44 @@ describe("dev replay agent", () => {
     expect(new Set(toolCallIds).size).toBe(6);
   });
 
-  it.each(SCENARIOS)("$id plays a turn without session setup frames", ({ file }) => {
-    const turns = parseReplayTurns(NodeFS.readFileSync(new URL(file, import.meta.url), "utf8"));
-    expect(turns.length).toBeGreaterThan(0);
-    const updates = turns.flatMap((turn) =>
-      turn.frames.flatMap(({ frame }) =>
-        frame.method === "session/update"
-          ? [(frame.params as { update: { sessionUpdate: string } }).update.sessionUpdate]
-          : [],
-      ),
-    );
-    expect(updates).toContain("agent_message_chunk");
-    expect(updates).not.toContain("available_commands_update");
+  it.each(SCENARIOS.filter(({ id }) => id !== "failed-turn"))(
+    "$id plays a turn without session setup frames",
+    ({ file }) => {
+      const turns = parseReplayTurns(NodeFS.readFileSync(new URL(file, import.meta.url), "utf8"));
+      expect(turns.length).toBeGreaterThan(0);
+      const updates = turns.flatMap((turn) =>
+        turn.frames.flatMap(({ frame }) =>
+          frame.method === "session/update"
+            ? [(frame.params as { update: { sessionUpdate: string } }).update.sessionUpdate]
+            : [],
+        ),
+      );
+      expect(updates).toContain("agent_message_chunk");
+      expect(updates).not.toContain("available_commands_update");
+    },
+  );
+
+  it("replays the recorded prompt failure with its error data", async () => {
+    const { received } = await talkToAgent([
+      () => ({ method: "session/new", params: { cwd: "/tmp" } }),
+      (sessionId) => ({
+        method: "session/set_model",
+        params: { sessionId, modelId: "failed-turn" },
+      }),
+      (sessionId) => ({ method: "session/prompt", params: { sessionId } }),
+    ]);
+    expect(received.at(-1)).toMatchObject({
+      id: 3,
+      error: {
+        code: -32603,
+        message: "Internal error",
+        data: {
+          message: expect.stringContaining("grok prompt error fixture"),
+          http_status: 400,
+        },
+      },
+    });
+    expect(received.at(-1)?.result).toBeUndefined();
   });
 
   it("keeps permission requests and the recorded stop reason in order", () => {
