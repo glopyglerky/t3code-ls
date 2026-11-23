@@ -142,7 +142,7 @@ try {
       { role: "assistant", text: "GPUI server reply café 🦀" },
     ]);
   }
-  console.log("GPUI direct A/B bounded reads retained exact imported identities and messages.");
+  process.stdout.write("GPUI direct A/B bounded reads retained exact imported identities and messages.\n");
   Assert.ok(FS.existsSync(Path.join(userdata, "statev2.omdb")));
   Assert.ok(!FS.existsSync(Path.join(userdata, "statev2.sqlite")));
   await new Promise<void>((resolve, reject) => {

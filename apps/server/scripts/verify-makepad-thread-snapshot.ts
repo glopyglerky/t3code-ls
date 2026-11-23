@@ -7,14 +7,16 @@ import * as Net from "node:net";
 import * as OS from "node:os";
 import * as Path from "node:path";
 import { WS_METHODS, ProjectId } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import { RpcClient, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
 import { makeWsRpcProtocolClient } from "../../../packages/client-runtime/src/rpc/protocol.ts";
 
 if (process.argv.length === 3 && process.argv[2] === "--help") {
-  console.log("Usage: node verify-makepad-thread-snapshot.ts /absolute/makepad [--history] [--server-executable /absolute/packaged/t3]");
+  process.stdout.write("Usage: node verify-makepad-thread-snapshot.ts /absolute/makepad [--history] [--server-executable /absolute/packaged/t3]\n");
   process.exit(0);
 }
 const executable = process.argv[2];
@@ -68,8 +70,8 @@ try {
         config: { setupMode: "existing", homePath: codexHome, binaryPath: Path.join(scratch, "absent-codex") } },
     },
   }));
-  const stamp = new Date(Date.now() - (historyMode ? 120_000 : 60_000));
-  const day = stamp.toISOString().slice(0, 10);
+  const stamp = DateTime.toEpochMillis(Effect.runSync(DateTime.now)) - (historyMode ? 120_000 : 60_000);
+  const day = DateTime.formatIso(DateTime.makeUnsafe(stamp)).slice(0, 10);
   const sessions = Path.join(codexHome, "sessions", ...day.split("-"));
   FS.mkdirSync(sessions, { recursive: true });
   const conversation = historyMode ? Array.from({ length: historyFixture.turnCount }, (_, turn) => [
@@ -84,7 +86,7 @@ try {
   const records = [{ type: "session_meta", payload: { id: sessionId, cwd: workspace, source: "cli" } }, ...conversation];
   FS.writeFileSync(Path.join(sessions, `rollout-${day}T00-00-00-${sessionId}.jsonl`),
     records.map((record, index) => JSON.stringify({
-      timestamp: new Date(stamp.getTime() + index * 1000).toISOString(), ...record,
+      timestamp: DateTime.formatIso(DateTime.makeUnsafe(stamp + index * 1000)), ...record,
     })).join("\n") + "\n");
   const reservation = Net.createServer();
   await new Promise<void>((resolve, reject) => { reservation.once("error", reject); reservation.listen(0, "127.0.0.1", resolve); });
@@ -117,7 +119,12 @@ try {
     Assert.equal(server.exitCode, null, "Synthetic server exited before readiness");
     try {
       const response = await fetch(origin + "/.well-known/t3/environment", { signal: AbortSignal.timeout(1000) });
-      if (response.ok) { descriptor = await response.json(); break; }
+      if (response.ok) {
+        descriptor = Schema.decodeUnknownSync(Schema.Struct({ environmentId: Schema.String }))(
+          await response.json(),
+        );
+        break;
+      }
     } catch {}
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
@@ -224,7 +231,7 @@ try {
     });
   }
   const digest = (file: string) => Crypto.createHash("sha256").update(FS.readFileSync(file)).digest("hex");
-  console.log(JSON.stringify({
+  process.stdout.write(JSON.stringify({
     toolkit: "makepad", platform: "darwin-arm64", serverImplementation: "upstream", storage: "sqlite",
     serverPackaging: serverExecutable === undefined ? "development" : "cli-archive",
     serverSha256: digest(serverExecutable ?? Path.join(root, "apps/server/dist/bin.mjs")), executableSha256: digest(executable),
@@ -232,7 +239,7 @@ try {
     workload: historyMode ? "shared-saved-history/40-turns/80-records" : "gpui-snapshot-project/codex-three-records", positiveWindows: 1, refusalWindows: 3,
     scope: historyMode ? "production bounded snapshot plus opaque history pages and native load-older command" : "authenticated production bounded snapshot route and Makepad widget text after native window draw",
     unqualified: ["native macOS storage", "accessibility", "physical input", "live subscription", "provider submission"],
-  }));
+  }) + "\n");
 } finally {
   if (server && server.exitCode === null) server.kill("SIGTERM");
   const terminate = setTimeout(() => { if (server && server.exitCode === null) server.kill("SIGKILL"); }, 8_000);
