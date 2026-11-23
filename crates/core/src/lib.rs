@@ -7,6 +7,8 @@ pub mod claude_stdio_control;
 pub mod claude_stdio_host;
 pub mod codex_generation;
 pub mod codex_generation_wire;
+#[path = "../../../apps/server/src/project/codex_import.rs"]
+pub mod codex_import;
 pub mod command_policy;
 pub mod connection;
 pub mod dispatch;
