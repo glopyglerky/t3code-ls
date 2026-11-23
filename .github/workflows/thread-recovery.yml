@@ -160,6 +160,24 @@ jobs:
         run: |
           pnpm --filter @t3tools/task-cache test src/Cleanup.test.ts src/Cache.test.ts \
             src/NativeClients.test.ts src/Savings.test.ts
+      - name: Exercise cache publication and reads through Workerd
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-task-cache-http-')
+        run: |
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/cache-http-source.txt"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- "$2" infra/task-cache/scripts/verify-cache-http-workerd.mjs "$3"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/cache-http-proof"
+      - name: Retain the cache HTTP proof
+        if: always() && startsWith(github.ref_name, 'candidate/t3code-ls-t15-task-cache-http-')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: cache-http-proof
+          path: |
+            ${{ runner.temp }}/cache-http-source.txt
+            ${{ runner.temp }}/cache-http-proof/
+          if-no-files-found: error
+          retention-days: 7
       - name: Install the pinned compiler for native savings
         if: env.SAVINGS_PROOF == 'true'
         run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/savings-toolchain"
