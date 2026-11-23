@@ -5,6 +5,7 @@ on:
     branches:
       - "candidate/t3code-ls-t14-cli-contract-*"
       - "candidate/t3code-ls-t14-windows-cli-*"
+      - "candidate/t3code-ls-t14-windows-shim-oracle-*"
       - "candidate/t3code-ls-t05-packaged-preparation-*"
       - "candidate/t3code-ls-t06-gix-packaged-*"
       - "candidate/t3code-ls-t02-bundled-native-integrated-*"
@@ -15,7 +16,9 @@ permissions:
 
 jobs:
   archive:
-    if: ${{ !startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-cli-') }}
+    if: >-
+      !startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-cli-') &&
+      !startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-shim-oracle-')
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
     timeout-minutes: 25
     env:
@@ -120,7 +123,10 @@ jobs:
           retention-days: 14
 
   windows-shim-oracle:
-    if: startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-cli-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
+    if: >-
+      startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-cli-') ||
+      startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-shim-oracle-') ||
+      startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['windows-2025'] || 'windows-2025' }}
     timeout-minutes: 5
     steps:
@@ -130,18 +136,29 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "26.12.1"
-      - name: Prove cmd exit preservation before building the archive
+      - name: Check cmd argument and exit preservation
         shell: pwsh
+        env:
+          ORACLE_MATRIX: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t14-windows-shim-oracle-') }}
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          node scripts/windows-shim-oracle.mjs | Tee-Object "$env:RUNNER_TEMP/windows-shim-oracle.log"
-          if ($LASTEXITCODE -ne 0) { throw 'Windows shim oracle failed.' }
+          $proof = New-Item -ItemType Directory "$env:RUNNER_TEMP/windows-shim-oracle"
+          git rev-parse HEAD 'HEAD^{tree}' | Set-Content -Encoding ascii (Join-Path $proof.FullName 'source.txt')
+          $oracleArgs = @('scripts/windows-shim-oracle.mjs')
+          if ($env:ORACLE_MATRIX -eq 'true') { $oracleArgs += '--matrix' }
+          $log = Join-Path $proof.FullName 'oracle.log'
+          $PSNativeCommandUseErrorActionPreference = $false
+          node @oracleArgs > $log
+          $oracleExit = $LASTEXITCODE
+          Get-Content -LiteralPath $log
+          if ($oracleExit -ne 0) { throw "Windows shim oracle failed with exit $oracleExit." }
       - if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: windows-shim-oracle
-          path: ${{ runner.temp }}/windows-shim-oracle.log
+          path: ${{ runner.temp }}/windows-shim-oracle/
+          if-no-files-found: error
           retention-days: 14
 
   windows-amd64-monitor:
