@@ -881,7 +881,12 @@ async function verifyComposerSubmitRefusal(
   return submit;
 }
 
-async function assertNativeAssistantText(page: Page, threadId: string, messageId: string) {
+async function assertNativeAssistantText(
+  page: Page,
+  threadId: string,
+  messageId: string,
+  minimumSequence?: number,
+) {
   const snapshot = await readThreadSnapshot(page, threadId);
   const item = snapshot.projection.turnItems.find((item) =>
     item.type === "assistant_message" && item.messageId === messageId);
@@ -899,7 +904,9 @@ async function assertNativeAssistantText(page: Page, threadId: string, messageId
   Assert.equal(await row.getAttribute("data-message-updated-at"), DateTime.formatIso(item.updatedAt));
   Assert.equal(await row.getAttribute("data-streaming"), String(item.streaming));
   const sequence = Number(await row.getAttribute("data-snapshot-sequence"));
-  Assert.ok(sequence >= snapshot.snapshotSequence, "Rendered text must reflect the observed committed snapshot");
+  const expectedSequence = minimumSequence ?? snapshot.snapshotSequence;
+  Assert.ok(expectedSequence <= snapshot.snapshotSequence, "The server must retain the observed committed snapshot");
+  Assert.ok(sequence >= expectedSequence, "Rendered text must reflect the observed committed snapshot");
   return { messageId, text: item.text, updatedAt: DateTime.formatIso(item.updatedAt), sequence,
     streaming: item.streaming };
 }
@@ -3107,7 +3114,14 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       Assert.equal(stopped.projection.runs[0]?.status, "interrupted");
       Assert.equal(stopped.projection.messages.find((message) => message.id === stopSend.messageId)?.text, capturedStop.prompt);
       if (compositionProof === "dioxus") {
-        await assertNativeAssistantText(page, stoppedId, stopped.projection.messages.find((message) => message.role === "assistant")!.id);
+        // A background visit can advance the server cursor without changing this row.
+        // Compare the restarted row with the previously verified terminal presentation.
+        const previous = proof.composerStop.timeline?.reopenedRow;
+        Assert.ok(previous);
+        const reopened = await assertNativeAssistantText(page, stoppedId, previous.messageId, previous.sequence);
+        Assert.equal(reopened.text, previous.text);
+        Assert.equal(reopened.updatedAt, previous.updatedAt);
+        Assert.equal(reopened.streaming, false);
       }
       Assert.equal(stopRequests.length, 1, "Later mounts and restart must not repeat Stop");
       Assert.equal(composerSubmit.requests.length, 3, "Only Stop, navigation and approval turns may launch");
