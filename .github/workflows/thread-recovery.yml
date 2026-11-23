@@ -418,11 +418,16 @@ jobs:
   mobile-outbox-android-runtime:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-')
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-normal-pair-') && 70 || 55 }}
+    permissions:
+      contents: read
+      actions: read
     env:
       APP_VARIANT: development
       T3_ANDROID_OUTBOX_RUNTIME_PROOF: "1"
       NORMAL_APP_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-normal-') }}
+      PAIR_RECONNECT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-normal-pair-') }}
+      RETAINED_APK_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-normal-pair-dispatch-retained-') }}
       NODE_OPTIONS: --max-old-space-size=3072
       EXPO_NO_DOTENV: "1"
       EXPO_NO_GIT_STATUS: "1"
@@ -489,6 +494,7 @@ jobs:
           ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$RUNNER_TEMP/outbox-runtime-sdk" "$JAVA_HOME" "$(id -gn)"
       - name: Build matching JNI and embedded-JS Android packages
         id: build-runtime-packages
+        if: env.RETAINED_APK_PROOF != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -524,6 +530,16 @@ jobs:
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
           pnpm --dir apps/mobile exec vp test run --project unit --maxWorkers 2 src/native/outboxDelivery.test.ts
+          if [[ "$PAIR_RECONNECT_PROOF" == true ]]; then
+            sha256sum apps/mobile/outbox-dispatch-proof.ts scripts/android-pairing-fixture.ts \
+              >> "$RUNNER_TEMP/outbox-runtime-proof/inputs.sha256"
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t12-outbox-runtime-normal-pair-dispatch-* ]]; then
+              pnpm --dir apps/mobile run typecheck
+              pnpm --dir apps/mobile exec vp test run --project unit --maxWorkers 2 \
+                src/state/thread-outbox.test.ts src/state/threadOutboxDelivery.test.ts \
+                src/state/threadOutboxDelivery.permissions.test.ts
+            fi
+          fi
           pnpm --dir apps/mobile exec expo prebuild --platform android --no-install
           apps/mobile/android/gradlew -p apps/mobile/android --no-daemon --max-workers=2 :app:assembleRelease
           apk=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
@@ -553,6 +569,91 @@ jobs:
           fi
           (cd "$RUNNER_TEMP" && sha256sum "${packages[@]}") \
             > "$RUNNER_TEMP/outbox-runtime-proof/packages.sha256"
+      - name: Stage the retained Android packages from the same application source
+        id: retained-runtime-packages
+        if: env.RETAINED_APK_PROOF == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          producer=066c2c68118a45d0dfd7737981752d0a75dfbca3
+          producer_tree=6b4f7fea3dcb3a870b4710c0a98473f2205226e4
+          producer_run=45237394555
+          git fetch --no-tags --depth=1 origin "$producer"
+          test "$(git rev-parse 'FETCH_HEAD^{tree}')" = "$producer_tree"
+          git diff --exit-code "$producer" HEAD -- . \
+            ':(exclude).github/workflows/thread-recovery.yml' ':(exclude)scripts/android-pairing-fixture.ts' \
+            ':(exclude)scripts/verify-android-outbox-runtime.ts'
+          sha256sum scripts/android-pairing-fixture.ts scripts/verify-android-outbox-runtime.ts \
+            > "$RUNNER_TEMP/outbox-runtime-proof/host-verifier.sha256"
+          scratch=$(mktemp -d "$RUNNER_TEMP/retained-outbox.XXXXXXXX")
+          trap 'rm -rf -- "$scratch"' EXIT
+          proof="$RUNNER_TEMP/outbox-runtime-proof"
+          download() {
+            local id="$1" digest="$2" destination="$3"
+            local endpoint="repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
+            gh api "$endpoint" | jq -e --arg sha "$producer" --arg digest "sha256:$digest" \
+              --argjson run "$producer_run" --argjson id "$id" '
+              .id == $id and .expired == false and .digest == $digest and
+              .workflow_run.id == $run and .workflow_run.head_sha == $sha' >/dev/null
+            gh api "$endpoint/zip" > "$destination"
+            printf '%s  %s\n' "$digest" "$destination" | sha256sum --check
+          }
+          download 14854360571 8f864b267caa02142868f51a3b2c40b247fffb9b5852784a2a9997993e0615b7 "$scratch/apks.zip"
+          download 14854375458 ca48dd7ee9d8c1a395fac1f37d9279c0b252d5cf08015219ba8cda3d89b557da "$scratch/receipt.zip"
+          unzip -p "$scratch/receipt.zip" source.txt > "$proof/apk-source.txt"
+          grep -Fx "$producer $producer_tree" "$proof/apk-source.txt"
+          unzip -p "$scratch/receipt.zip" packages.sha256 > "$proof/packages.sha256"
+          packages=(outbox-runtime-missing-library.apk outbox-runtime-normal.apk outbox-runtime-positive.apk)
+          cmp <(unzip -Z1 "$scratch/apks.zip" | LC_ALL=C sort) <(printf '%s\n' "${packages[@]}")
+          cmp <(awk '{print $2}' "$proof/packages.sha256" | LC_ALL=C sort) <(printf '%s\n' "${packages[@]}")
+          for package in "${packages[@]}"; do
+            test ! -e "$RUNNER_TEMP/$package"
+            unzip -p "$scratch/apks.zip" "$package" > "$RUNNER_TEMP/$package"
+          done
+          (cd "$RUNNER_TEMP" && sha256sum --strict --check "$proof/packages.sha256")
+          git show -s --format='%H %T' > "$proof/source.txt"
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+      - name: Stage the isolated native server for Android pairing
+        if: env.PAIR_RECONNECT_PROOF == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CARGO_HOME="$RUNNER_TEMP/outbox-server-cargo"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-server-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 T3_CODE_LS_IMPLEMENTATION=native
+          toolchain_root="$RUNNER_TEMP/outbox-server-toolchain"
+          cleanup() {
+            if [[ -d "$toolchain_root" ]]; then
+              find "$toolchain_root" -type d ! -perm -u+w -exec chmod u+w '{}' +
+            fi
+            rm -rf -- "$CARGO_HOME" "$CARGO_TARGET_DIR" "$RUNNER_TEMP/outbox-server-components" "$toolchain_root"
+          }
+          trap cleanup EXIT
+          T3_CODE_LS_TOOLCHAIN=$(node tools/install-toolchain.mjs --destination "$toolchain_root")
+          export T3_CODE_LS_TOOLCHAIN
+          test -x "$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+          test -d "$T3_CODE_LS_TOOLCHAIN/lib/rustlib/x86_64-unknown-linux-gnu/lib"
+          test -s "$toolchain_root/installation-proof.json"
+          pnpm --dir apps/web run build
+          node tools/build-native.mjs "$RUNNER_TEMP/outbox-server-components"
+          # Keep filesystem-loaded externals reachable through the server package's node_modules.
+          server="$GITHUB_WORKSPACE/apps/server/dist"
+          test ! -e "$server"
+          touch "$RUNNER_TEMP/outbox-runtime-server-owned"
+          T3_CODE_LS_NATIVE_DIR="$RUNNER_TEMP/outbox-server-components" pnpm --dir apps/server run build:bundle
+          test -f "$server/bin.mjs" && test -f "$server/client/index.html" && test -x "$server/native-bin/t3-code-ls-db"
+          node --input-type=module - "$server/bin.mjs" <<'JS'
+          import { createRequire } from "node:module";
+          const resolve = createRequire(process.argv[2]).resolve;
+          for (const dependency of ["playwright-core", "undici"]) resolve(dependency);
+          JS
+          proof="$RUNNER_TEMP/outbox-runtime-proof"
+          cp "$toolchain_root/installation-proof.json" "$proof/server-toolchain.json"
+          git rev-parse HEAD HEAD^{tree} > "$proof/server-source.txt"
+          (cd "$server" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$proof/server-package.sha256"
       - name: Reject absent JNI and verify outbox persistence across process restarts
         shell: bash
         run: |
@@ -562,9 +663,10 @@ jobs:
             ip link set dev lo up
             proof_args=(run "$3/outbox-runtime-proof")
             if [[ "$7" == true ]]; then proof_args+=(--normal-app); fi
+            if [[ "$8" == true ]]; then proof_args+=(--pair-reconnect); fi
             exec runuser -u "$1" -g "$6" -G kvm -- env GITHUB_ACTIONS=true RUNNER_TEMP="$3" ANDROID_HOME="$4" ANDROID_SDK_ROOT="$4" JAVA_HOME="$5" \
               "$2" scripts/verify-android-outbox-runtime.ts "${proof_args[@]}"
-          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$RUNNER_TEMP/outbox-runtime-sdk" "$JAVA_HOME" "$(id -gn)" "$NORMAL_APP_PROOF"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$RUNNER_TEMP/outbox-runtime-sdk" "$JAVA_HOME" "$(id -gn)" "$NORMAL_APP_PROOF" "$PAIR_RECONNECT_PROOF"
       - name: Retain Android execution or the first admission blocker
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -583,7 +685,7 @@ jobs:
             ${{ runner.temp }}/outbox-runtime-normal.apk
           retention-days: 3
       - name: Retain built fixtures for runtime failure diagnosis
-        if: failure() && steps.build-runtime-packages.outcome == 'success'
+        if: failure() && (steps.build-runtime-packages.outcome == 'success' || steps.retained-runtime-packages.outcome == 'success')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: outbox-android-runtime-failed-install-apks
@@ -600,6 +702,10 @@ jobs:
           rm -f -- "$RUNNER_TEMP/outbox-runtime-positive.apk" "$RUNNER_TEMP/outbox-runtime-missing-library.apk" \
             "$RUNNER_TEMP/outbox-runtime-normal.apk"
           rm -rf -- "$RUNNER_TEMP/outbox-runtime-sdk" "$RUNNER_TEMP/outbox-runtime-sdk-user"
+          if [[ -f "$RUNNER_TEMP/outbox-runtime-server-owned" ]]; then
+            rm -rf -- "$GITHUB_WORKSPACE/apps/server/dist"
+            rm -f -- "$RUNNER_TEMP/outbox-runtime-server-owned"
+          fi
 
   maintenance-snapshot:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-maintenance-snapshot-')
