@@ -10,6 +10,8 @@ Build a static library with each admitted SDK target. This example packages arm6
 
 ```sh
 mobile_controls=apps/mobile/modules/t3-native-controls
+export CARGO_PROFILE_RELEASE_LTO=false
+export RUSTFLAGS="-Cembed-bitcode=no"
 for rust_target in aarch64-apple-ios aarch64-apple-ios-sim; do
   cargo rustc --locked --release -p t3-code-ls-mobile-outbox \
     --target "$rust_target" --crate-type staticlib
