@@ -2020,6 +2020,10 @@
         "apps/mobile/src/App.tsx",
         "apps/mobile/src/state/threadOutboxDelivery.ts",
         "apps/mobile/src/native/outboxDelivery.ts",
+        "apps/mobile/app.config.ts",
+        "apps/mobile/outbox-runtime-proof.ts",
+        "apps/mobile/plugins/withAndroidOutboxProof.cjs",
+        "apps/mobile/modules/t3-native-controls/android/build.gradle",
         "apps/mobile/src/connection/platform.ts",
         "apps/mobile/src/connection/environment-owned-data-cleanup.ts",
         "packages/client-runtime/src/connection/registry.ts",
@@ -2041,16 +2045,18 @@
       "acceptance_tests": [
         "packages/client-runtime/rust/tests/outbox.rs",
         "apps/mobile/src/native/outboxDelivery.test.ts",
+        "scripts/verify-android-outbox-runtime.ts",
         "apps/mobile/src/connection/environment-owned-data-cleanup.test.ts",
         "packages/client-runtime/src/connection/registry.test.ts"
       ],
       "hosted_acceptance": {
         "apps/mobile/src/native/outboxDelivery.test.ts": ".github/workflows/thread-recovery.yml",
+        "scripts/verify-android-outbox-runtime.ts": ".github/workflows/thread-recovery.yml",
         "apps/mobile/src/connection/environment-owned-data-cleanup.test.ts": ".github/workflows/thread-recovery.yml",
         "packages/client-runtime/src/connection/registry.test.ts": ".github/workflows/thread-recovery.yml"
       },
       "retired_paths": [],
-      "notes": "T12. The Expo adapter can select a versioned scalar binding for the portable outbox decision. Actual packaged iOS and Android restart, persistence and permission checks remain required.",
+      "notes": "T12. The Expo adapter can select a versioned scalar binding for the portable outbox decision. Run 45191901494 at 2f74ddd07956f4b2321f2418164a9f81375b8ebd installed two dedicated Android x86_64 release APKs on an isolated API 36 emulator. The positive APK passed all 64 JS-to-JNI decision cases. The APK built without the native library refused strict selection before running any case. Actual normal-app iOS and Android restart, persistence and permission checks remain required.",
       "rust_crates": ["packages/client-runtime/rust", "apps/mobile/modules/t3-native-controls/rust"]
     },
     {

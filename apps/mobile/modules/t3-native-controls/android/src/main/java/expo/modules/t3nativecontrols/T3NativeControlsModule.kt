@@ -25,6 +25,16 @@ class T3NativeControlsModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("T3NativeControls")
     Function("resolveOutboxDeliveryV1") { facts: Int -> T3OutboxDelivery.resolve(facts) }
+    if (BuildConfig.T3_OUTBOX_RUNTIME_PROOF) {
+      Function("recordOutboxRuntimeProof") { result: String ->
+        require(result.toByteArray(Charsets.UTF_8).size <= 16_384)
+        val directory = requireNotNull(appContext.reactContext).filesDir
+        val temporary = File(directory, "t3-outbox-runtime-proof.tmp")
+        temporary.writeText(result)
+        check(temporary.renameTo(File(directory, "t3-outbox-runtime-proof.json")))
+        android.util.Log.i("T3OutboxRuntimeProof", result)
+      }
+    }
 
     // React Native sets this once, at launch, from the system theme rather than the app's.
     AsyncFunction("setNavigationBarStyle") { light: Boolean ->

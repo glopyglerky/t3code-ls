@@ -15,6 +15,18 @@ describe("native outbox delivery", () => {
     expect(selectOutboxDeliveryResolver()).toBe(resolveThreadOutboxDeliveryAction);
   });
 
+  it("rejects absent native policy when an installed-package proof requires it", () => {
+    nativeResolve.mockReturnValue(-1);
+    expect(() => selectOutboxDeliveryResolver({ requireNative: true })).toThrow("Native outbox policy is unavailable");
+  });
+
+  it("does not hide an invalid native action in strict proof selection", () => {
+    nativeResolve.mockReturnValueOnce(0).mockReturnValue(-1);
+    const resolve = selectOutboxDeliveryResolver({ requireNative: true });
+    expect(() => resolve({ isCreation: false, threadExists: true, shellStatus: "live",
+      environmentConnected: true })).toThrow("Native outbox policy returned an invalid action");
+  });
+
   it("sends current evidence to the native policy and reads the returned action", () => {
     nativeResolve.mockReturnValueOnce(0).mockReturnValueOnce(2);
     const resolve = selectOutboxDeliveryResolver();

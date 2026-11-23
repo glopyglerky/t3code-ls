@@ -10,6 +10,7 @@ on:
       - "candidate/t3code-ls-t12-outbox-identity-*"
       - "candidate/t3code-ls-t12-outbox-native-*"
       - "candidate/t3code-ls-t12-outbox-package-*"
+      - "candidate/t3code-ls-t12-outbox-runtime-*"
       - "candidate/t3code-ls-t15-task-cache-*"
       - "candidate/t3code-ls-t15-maintenance-snapshot-*"
       - "candidate/t3code-ls-t02-bundled-native-integrated-*"
@@ -360,6 +361,160 @@ jobs:
           path: ${{ runner.temp }}/outbox-android-proof/
           if-no-files-found: warn
           retention-days: 14
+
+  mobile-outbox-android-runtime:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      APP_VARIANT: development
+      T3_ANDROID_OUTBOX_RUNTIME_PROOF: "1"
+      NODE_OPTIONS: --max-old-space-size=3072
+      EXPO_NO_DOTENV: "1"
+      EXPO_NO_GIT_STATUS: "1"
+      T3CODE_MOBILE_UPDATES_ENABLED: "0"
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+      ORG_GRADLE_PROJECT_reactNativeArchitectures: x86_64
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Stage the pinned Android emulator and system image
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          mkdir "$RUNNER_TEMP/outbox-runtime-proof"
+          sdk="$RUNNER_TEMP/outbox-runtime-sdk"
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$ANDROID_HOME/platform-tools/adb"
+          mkdir -p "$sdk/cmdline-tools/latest" "$RUNNER_TEMP/outbox-runtime-sdk-user"
+          cp -R "$ANDROID_HOME/licenses" "$sdk/licenses"
+          cp -a "$ANDROID_HOME/cmdline-tools/latest/." "$sdk/cmdline-tools/latest/"
+          ln -s "$ANDROID_HOME/platform-tools" "$sdk/platform-tools"
+          ANDROID_HOME="$sdk" ANDROID_SDK_ROOT="$sdk" ANDROID_USER_HOME="$RUNNER_TEMP/outbox-runtime-sdk-user" \
+            "$sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk" --channel=0 --install \
+              emulator 'system-images;android-36;google_apis;x86_64' </dev/null
+          img="$sdk/system-images/android-36/google_apis/x86_64"
+          sed -nE 's/^Pkg\.Revision[[:space:]]*=[[:space:]]*//p' "$sdk/emulator/source.properties" \
+            > "$RUNNER_TEMP/outbox-runtime-proof/emulator-revision.txt"
+          sed -nE 's/^Pkg\.Revision[[:space:]]*=[[:space:]]*//p' "$img/source.properties" \
+            > "$RUNNER_TEMP/outbox-runtime-proof/image-revision.txt"
+          grep -Fx '37.3.10' "$RUNNER_TEMP/outbox-runtime-proof/emulator-revision.txt"
+          grep -Fx '7' "$RUNNER_TEMP/outbox-runtime-proof/image-revision.txt"
+          # The emulator binary links PulseAudio even when launched with -no-audio.
+          sudo -n apt-get -o Acquire::Retries=2 update
+          sudo -n apt-get -o Acquire::Retries=2 install --yes --no-install-recommends libpulse0
+          dpkg-query -W -f='${Package} ${Version}\n' libpulse0 \
+            > "$RUNNER_TEMP/outbox-runtime-proof/emulator-host-packages.txt"
+          (
+            cd "$sdk"
+            sha256sum emulator/emulator emulator/package.xml platform-tools/adb \
+              system-images/android-36/google_apis/x86_64/{package.xml,system.img}
+          ) > "$RUNNER_TEMP/outbox-runtime-proof/sdk.sha256"
+      - name: Admit and boot an isolated x64 Android emulator before compiling
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -c /dev/kvm
+          stat -c 'type=%F mode=%a group=%G' /dev/kvm > "$RUNNER_TEMP/outbox-runtime-proof/kvm-node.txt"
+          test "$(stat -c %G /dev/kvm)" = kvm
+          getent group kvm >/dev/null
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -g "$6" -G kvm -- env GITHUB_ACTIONS=true RUNNER_TEMP="$3" ANDROID_HOME="$4" ANDROID_SDK_ROOT="$4" JAVA_HOME="$5" \
+              "$2" scripts/verify-android-outbox-runtime.ts admit "$3/outbox-runtime-proof"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$RUNNER_TEMP/outbox-runtime-sdk" "$JAVA_HOME" "$(id -gn)"
+      - name: Build matching JNI and two embedded-JS proof packages
+        id: build-runtime-packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          export CARGO_HOME="$RUNNER_TEMP/outbox-runtime-cargo"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-runtime-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          export GRADLE_USER_HOME="$RUNNER_TEMP/outbox-runtime-gradle"
+          test ! -e apps/mobile/android
+          test ! -e .env && test ! -e .env.local
+          staging=apps/mobile/modules/t3-native-controls/android/src/main/jniLibs/x86_64/libt3_outbox.so
+          test ! -e "$staging"
+          trap 'rm -f -- "$staging"; rm -rf -- apps/mobile/android "$CARGO_TARGET_DIR" "$CARGO_HOME" "$GRADLE_USER_HOME"' EXIT
+          rustup toolchain install 1.99.1 --profile minimal --target x86_64-linux-android
+          ndk="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:?Android NDK unavailable}}"
+          export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android24-clang"
+          cargo +1.99.1 rustc --locked --release --target x86_64-linux-android \
+            -p t3-code-ls-mobile-outbox --crate-type cdylib
+          library="$CARGO_TARGET_DIR/x86_64-linux-android/release/libt3_outbox.so"
+          install -Dm644 "$library" "$staging"
+          readelf --wide --dyn-syms "$library" > "$RUNNER_TEMP/outbox-runtime-proof/jni-symbols.txt"
+          grep -F 'Java_expo_modules_t3nativecontrols_T3OutboxDelivery_resolveV1' "$RUNNER_TEMP/outbox-runtime-proof/jni-symbols.txt"
+          git show -s --format='%H %T' > "$RUNNER_TEMP/outbox-runtime-proof/source.txt"
+          sha256sum "$library" Cargo.lock apps/mobile/modules/t3-native-controls/rust/src/lib.rs \
+            apps/mobile/src/native/outboxDelivery.ts apps/mobile/src/state/thread-outbox-model.ts \
+            apps/mobile/outbox-runtime-proof.ts > "$RUNNER_TEMP/outbox-runtime-proof/inputs.sha256"
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          pnpm --dir apps/mobile exec vp test run --project unit --maxWorkers 2 src/native/outboxDelivery.test.ts
+          pnpm --dir apps/mobile exec expo prebuild --platform android --no-install
+          apps/mobile/android/gradlew -p apps/mobile/android --no-daemon --max-workers=2 :app:assembleRelease
+          apk=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          cp "$apk" "$RUNNER_TEMP/outbox-runtime-positive.apk"
+          rm "$staging"
+          apps/mobile/android/gradlew -p apps/mobile/android --no-daemon --max-workers=2 :app:assembleRelease
+          cp "$apk" "$RUNNER_TEMP/outbox-runtime-missing-library.apk"
+          (cd "$RUNNER_TEMP" && sha256sum outbox-runtime-positive.apk outbox-runtime-missing-library.apk) \
+            > "$RUNNER_TEMP/outbox-runtime-proof/packages.sha256"
+      - name: Execute JNI matrix and reject absent-library fallback without Metro or a server
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -g "$6" -G kvm -- env GITHUB_ACTIONS=true RUNNER_TEMP="$3" ANDROID_HOME="$4" ANDROID_SDK_ROOT="$4" JAVA_HOME="$5" \
+              "$2" scripts/verify-android-outbox-runtime.ts run "$3/outbox-runtime-proof"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$RUNNER_TEMP/outbox-runtime-sdk" "$JAVA_HOME" "$(id -gn)"
+      - name: Retain Android execution or the first admission blocker
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: outbox-android-runtime-proof
+          path: ${{ runner.temp }}/outbox-runtime-proof/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain the exact executed positive package
+        if: success()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: outbox-android-runtime-apk
+          path: ${{ runner.temp }}/outbox-runtime-positive.apk
+          retention-days: 3
+      - name: Retain built fixtures for runtime failure diagnosis
+        if: failure() && steps.build-runtime-packages.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: outbox-android-runtime-failed-install-apks
+          path: |
+            ${{ runner.temp }}/outbox-runtime-positive.apk
+            ${{ runner.temp }}/outbox-runtime-missing-library.apk
+          if-no-files-found: error
+          retention-days: 3
+      - name: Remove owned packages and SDK staging
+        if: always()
+        shell: bash
+        run: |
+          rm -f -- "$RUNNER_TEMP/outbox-runtime-positive.apk" "$RUNNER_TEMP/outbox-runtime-missing-library.apk"
+          rm -rf -- "$RUNNER_TEMP/outbox-runtime-sdk" "$RUNNER_TEMP/outbox-runtime-sdk-user"
 
   maintenance-snapshot:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-maintenance-snapshot-')

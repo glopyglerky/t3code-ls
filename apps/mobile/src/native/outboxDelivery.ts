@@ -9,9 +9,14 @@ const nativeControls = requireOptionalNativeModule<{
   resolveOutboxDeliveryV1?: (facts: number) => number;
 }>("T3NativeControls");
 
-export function selectOutboxDeliveryResolver(): typeof resolveThreadOutboxDeliveryAction {
+export function selectOutboxDeliveryResolver(
+  options?: { readonly requireNative?: boolean },
+): typeof resolveThreadOutboxDeliveryAction {
   const resolve = nativeControls?.resolveOutboxDeliveryV1;
-  if (resolve === undefined || resolve(0) !== 0) return resolveThreadOutboxDeliveryAction;
+  if (resolve === undefined || resolve(0) !== 0) {
+    if (options?.requireNative) throw new Error("Native outbox policy is unavailable");
+    return resolveThreadOutboxDeliveryAction;
+  }
 
   const familyCodes = { pending: 16, failed: 32, settled: 48 } as const;
   const actions: ReadonlyArray<ThreadOutboxDeliveryAction> = ["wait", "remove", "send"];
@@ -22,6 +27,9 @@ export function selectOutboxDeliveryResolver(): typeof resolveThreadOutboxDelive
       4 * Number(facts.shellStatus === "live") +
       8 * Number(facts.environmentConnected) +
       (facts.familyRead === undefined ? 0 : familyCodes[facts.familyRead]);
-    return actions[resolve(code)] ?? resolveThreadOutboxDeliveryAction(facts);
+    const action = actions[resolve(code)];
+    if (action !== undefined) return action;
+    if (options?.requireNative) throw new Error("Native outbox policy returned an invalid action");
+    return resolveThreadOutboxDeliveryAction(facts);
   };
 }
