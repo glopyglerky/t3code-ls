@@ -105,11 +105,11 @@ const config :Workerd.Config = (
     });
     Assert.equal(response.status, expected, (await response.clone().text()).slice(0, 8192));
     const value = await response.json();
-    Assert.equal(value.protocol, "t3-relay-inbox-workerd-v1");
+    Assert.equal(value.protocol, "t3-cache-http-workerd-v1");
     if (value.alarmRuns !== undefined) Assert.equal(value.alarmRuns, 0);
     return value;
   };
-  const start = async () => {
+  const start = () => {
     cancellation.signal.throwIfAborted();
     child = spawn(binary, ["serve", "--experimental", config], { env: {}, stdio: ["ignore", "pipe", "pipe"] });
     child.stdout.on("data", capture);
@@ -117,17 +117,8 @@ const config :Workerd.Config = (
     childExit = new Promise((resolve, reject) => { child.once("error", reject); child.once("exit", resolve); });
     // Observe early child failure while the bounded readiness loop is running.
     childExit.catch(() => {});
-    const deadline = Date.now() + 15_000;
-    for (let attempt = 0; attempt < 100; attempt++) {
-      if (child.exitCode !== null || child.signalCode !== null) throw new Error("Workerd exited before readiness");
-      try { return; } catch (error) {
-        if (!(error instanceof TypeError) && error?.name !== "TimeoutError") throw error;
-        if (attempt === 99 || Date.now() >= deadline) throw error;
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-    }
   };
-  await start();
+  start();
   const call = async (path, options = {}) => fetch(base + path, {
     ...options, signal: AbortSignal.any([AbortSignal.timeout(5_000), cancellation.signal]),
   });
@@ -196,21 +187,57 @@ const config :Workerd.Config = (
   Assert.equal(before.entries.length, 1);
   Assert.equal(before.entries[0].generation_id, before.generations[1].generation_id);
   Assert.equal(before.objects, 4);
-  Assert.equal((await call("/fixture/refuse", { method: "POST" })).status, 204);
+  const expectWinner = async (value, bytes, id) => {
+    const winner = await fetchValue(key);
+    Assert.equal(winner.status, 200);
+    Assert.deepEqual(Buffer.from(await winner.arrayBuffer()),
+      envelope([["kind", "exact"], ["value", value], ["blob_id", id]]));
+    const winnerBlob = await call(route(`blob/${id}`), { headers: { authorization } });
+    Assert.equal(winnerBlob.status, 200);
+    Assert.deepEqual(Buffer.from(await winnerBlob.arrayBuffer()), bytes);
+  };
+  await expectWinner(values[1], blobs[1], ids[1]);
+  checkpoint("http-same-key-winner-exact-value-and-blob");
+
+  const control = name => call(`/fixture/${name}`, { method: "POST" });
+  Assert.equal((await control("fail-next-put")).status, 204);
+  const blocked = upload(Buffer.from([6, 0, 6]), Buffer.from([8]));
+  blocked.catch(() => {});
+  let pending = false;
+  for (let count = 0; count < 50 && !pending; count++) {
+    pending = (await (await call("/fixture/pending-put")).json()).pending;
+    if (!pending) await new Promise(resolve => setTimeout(resolve, 30));
+  }
+  Assert.equal(pending, true, "The older upload must have reserved before the competing store");
+  const value = Buffer.from([9, 0, 255]);
+  const bytes = Buffer.from([0, 2, 9, 244]);
+  const replacement = await upload(value, bytes);
+  Assert.equal(replacement.status, 200);
+  const during = await inspect();
+  const current = during.generations.find(row => row.state === "ready");
+  Assert.ok(current);
+  Assert.equal(during.generations.filter(row => row.state === "uploading").length, 1);
+  Assert.deepEqual(Buffer.from(await replacement.arrayBuffer()), envelope([["blob_id", current.blob_id]]));
+  await expectWinner(value, bytes, current.blob_id);
+  Assert.equal((await control("release-put")).status, 204);
+  const refusedUpload = await blocked;
+  Assert.equal(refusedUpload.status, 503);
+  Assert.equal(refusedUpload.headers.get("retry-after"), "60");
+  await refusedUpload.body?.cancel();
+  await expectWinner(value, bytes, current.blob_id);
+  checkpoint("failed-older-upload-preserves-acknowledged-competitor");
+
+  const settled = await inspect();
+  Assert.equal(settled.entries.length, 1);
+  Assert.equal(settled.entries[0].generation_id, current.generation_id);
+  Assert.equal((await control("refuse")).status, 204);
   Assert.equal((await upload(Buffer.from([9]), Buffer.from([9]))).status, 403);
   Assert.equal((await upload(Buffer.from([9]), Buffer.from([9]), Buffer.from([77]))).status, 403);
-  Assert.deepEqual(await inspect(), before);
-  const winner = await fetchValue(key);
-  Assert.equal(winner.status, 200);
-  Assert.deepEqual(Buffer.from(await winner.arrayBuffer()),
-    envelope([["kind", "exact"], ["value", values[1]], ["blob_id", ids[1]]]));
-  const winnerBlob = await call(route(`blob/${ids[1]}`), { headers: { authorization } });
-  Assert.equal(winnerBlob.status, 200);
-  Assert.deepEqual(Buffer.from(await winnerBlob.arrayBuffer()), blobs[1]);
+  Assert.deepEqual(await inspect(), settled);
+  await expectWinner(value, bytes, current.blob_id);
   Assert.equal((await fetchValue(Buffer.from([77]))).status, 404);
   Assert.equal((await call(route("blob/00000000-0000-0000-0000-000000000000"),
     { headers: { authorization } })).status, 404);
-  checkpoint("http-same-key-winner-exact-value-and-blob");
   checkpoint("policy-refused-replacement-preserves-winner-and-missing-key");
   state.bindingScope = "Workerd SQLite D1 interface fixture; synthetic in-memory R2 fixture";
   state.productionSemanticsQualified = false;
