@@ -32,7 +32,7 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
             node, bundle, trial, Some((driver, chrome)),
             match mode.to_str() {
                 Some("stock") => None,
-                Some("native" | "native-single-reads" | "native-independent-reads") => Some("native"),
+                Some("native" | "native-single-reads" | "native-independent-reads" | "native-independent-lookups") => Some("native"),
                 Some("fork-sqlite") => Some("upstream"),
                 _ => return Err("unknown conversation profile".into()),
             },
@@ -41,12 +41,22 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
                 Ok::<_, std::io::Error>((fs::canonicalize(wrapper)?, trace.len() == 2))
             }).transpose()?,
         ),
-        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|native|native-single-reads|native-independent-reads|fork-sqlite [TRACE_WRAPPER [server-spans]]".into()),
+        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|native|native-single-reads|native-independent-reads|native-independent-lookups|fork-sqlite [TRACE_WRAPPER [server-spans]]".into()),
         _ => return Err("usage: t3code-ls-tools probe-startup NODE BUNDLE NEW_TRIAL_DIRECTORY [CHROMEDRIVER CHROME [fork-sqlite]]".into()),
     };
     let node = fs::canonicalize(node)?;
-    let single_projection_reads = conversation && args[6] == "native-single-reads";
-    let independent_reads = conversation && args[6] == "native-independent-reads";
+    let profile = args
+        .get(6)
+        .and_then(|mode| mode.to_str())
+        .filter(|_| conversation);
+    let single_projection_reads = matches!(
+        profile,
+        Some("native-single-reads" | "native-independent-lookups")
+    );
+    let independent_reads = matches!(
+        profile,
+        Some("native-independent-reads" | "native-independent-lookups")
+    );
     let bundle = fs::canonicalize(bundle)?;
     let trial = Path::new(trial);
     fs::create_dir(trial)?;
