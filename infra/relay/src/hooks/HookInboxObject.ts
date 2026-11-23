@@ -8,6 +8,7 @@ import * as Result from "effect/Result";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 
 import * as HookInboxStore from "./HookInboxStore.ts";
+import * as HookInboxTransaction from "./HookInboxTransaction.ts";
 import { sendUpstream, TUNNEL_OFFLINE_STATUS } from "./upstream.ts";
 
 const UNREACHABLE_STATUSES = new Set([502, 503, 504, TUNNEL_OFFLINE_STATUS]);
@@ -82,34 +83,24 @@ export const layer = HookInboxObject.make(
         effect.pipe(Effect.provide(layerSql), Effect.orDie);
       yield* run(HookInboxStore.migrate);
 
-      // SQLite-backed Durable Objects include direct SQL and alarm operations in
-      // this storage transaction. Keep external delivery outside this boundary.
-      const commitStorage = Effect.fn("HookInboxObject.commitStorage")(function* <A>(
-        effect: Call<A>,
-      ) {
-        const runPromise = Effect.runPromiseWith(yield* Effect.context<Alchemy.RuntimeContext>());
-        return yield* Effect.promise((signal) =>
-          state.raw.storage.transaction(() => runPromise(effect, { signal })),
-        );
-      });
+      // External delivery remains outside the storage transaction.
+      const commitStorage = <A>(effect: Call<A>) =>
+        HookInboxTransaction.commitStorage(state.raw.storage, effect);
 
-      const scheduleBy = Effect.fn("HookInboxObject.scheduleBy")(function* (at: number) {
-        const current = yield* state.storage.getAlarm();
-        if (current === null || current > at) yield* state.storage.setAlarm(at);
-      });
+      const alarm = {
+        get: () => state.storage.getAlarm(),
+        set: (at: number) => state.storage.setAlarm(at),
+      };
+      const scheduleBy = (at: number) => HookInboxTransaction.scheduleBy(alarm, at);
 
       // withInboxSpan supplies each method's root span; avoid a second wrapper span.
       return {
         hold: Effect.fnUntraced(
           function* (hook: HookInboxStore.HeldHook, baseUrl: string) {
-            return yield* commitStorage(
-              Effect.gen(function* () {
-                const dueAt = yield* run(HookInboxStore.hold(hook, baseUrl));
-                yield* Effect.annotateCurrentSpan({ "relay.inbox.stored": dueAt !== null });
-                if (dueAt === null) return false;
-                yield* scheduleBy(dueAt);
-                return true;
-              }),
+            return yield* HookInboxTransaction.commitHold(
+              state.raw.storage,
+              run(HookInboxStore.hold(hook, baseUrl)),
+              alarm,
             );
           },
           withInboxSpan("relay.inbox.hold", inboxId),

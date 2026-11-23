@@ -29,3 +29,19 @@ jobs:
         run: pnpm --dir infra/relay test src/hooks/HookInboxStore.test.ts
       - name: Check the Durable Object transaction types
         run: pnpm --dir infra/relay run typecheck
+      - name: Verify production hold and alarm rollback in local Workerd
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- "$2" infra/relay/scripts/verify-hook-inbox-workerd.mjs "$3"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/relay-inbox-workerd-proof"
+      - name: Retain the synthetic Workerd proof
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: relay-inbox-workerd-proof
+          path: ${{ runner.temp }}/relay-inbox-workerd-proof
+          if-no-files-found: ignore
+          retention-days: 7
