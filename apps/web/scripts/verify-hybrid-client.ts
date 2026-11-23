@@ -19,7 +19,7 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
-import { chromium, type Browser, type Locator, type Page } from "playwright";
+import { chromium, type Browser, type Locator, type Page, type Response as BrowserResponse } from "playwright";
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
 import { verifyBundledVoiceDraft } from "./hybrid-client-voice.ts";
 import { inspectNativeMessageUpdates, inspectNativeReplay } from "./hybrid-client-database.ts";
@@ -65,6 +65,8 @@ const initialTasks = "- [ ] First milestone\n- [ ] Second milestone\n- [ ] Keep 
 const durableTextProof = process.env.T3_CODE_LS_DURABLE_TEXT_PROOF === "true";
 const voiceDraftProof = process.env.T3_CODE_LS_VOICE_DRAFT_PROOF === "true";
 const pdfLinkProof = process.env.T3_CODE_LS_PDF_LINK_PROOF === "true";
+const htmlInteractionProof = process.env.T3_CODE_LS_HTML_INTERACTION_PROOF === "true";
+Assert.ok(!htmlInteractionProof || bundledClient, "Interactive HTML must exercise the packaged browser route");
 const expectsRustComposer = process.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS === "rust";
 const capturedApproval = {
   path: "apps/server/src/orchestration-v2/testkit/fixtures/tool_call_read_only_on_request/registry_transcript.ndjson",
@@ -1496,6 +1498,117 @@ async function verifyLinkedPdf(page: Page) {
   return { signedAssetStatus: response.status(), pointerDestination: 2, keyboardDestination: 2 };
 }
 
+const interactiveHtmlTitle = "Controlled interactive document";
+
+async function verifyInteractiveHtml(page: Page, resumeThreadId: string) {
+  const resumeUrl = page.url();
+  const statuses: number[] = [];
+  const contentTypes: string[] = [];
+  const observeAsset = (response: BrowserResponse) => {
+    const url = new URL(response.url());
+    if (url.origin !== new URL(page.url()).origin || !url.pathname.startsWith("/api/assets/") ||
+        decodeURIComponent(url.pathname.split("/").at(-1) ?? "") !== `${interactiveHtmlTitle}.html`) return;
+    if (statuses.length < 8) {
+      statuses.push(response.status());
+      contentTypes.push(response.headers()["content-type"] ?? "");
+    }
+  };
+  page.on("response", observeAsset);
+  try {
+    const threadId = await submitReplay(page, "Interactive HTML", "Render the controlled interactive document");
+    await page.getByText(/Interactive HTML fixture published\. MCP initialized=1 tool=1 teardown=(terminated|stateless)\./u).waitFor({ state: "visible", timeout: timeoutMs });
+    await page.getByRole("button", { name: "Stop generation", exact: true }).waitFor({ state: "hidden" });
+    const snapshot = await readThreadSnapshot(page, threadId);
+    Assert.equal(snapshot.projection.runs.length, 1);
+    Assert.equal(snapshot.projection.runs[0]?.status, "completed");
+    const rendered = snapshot.projection.turnItems.filter((item) => item.type === "dynamic_tool" && item.toolName === "t3-code.html_render");
+    Assert.equal(rendered.length, 1, "The controlled provider must project one real html_render result");
+    const inlineElement = page.locator(`iframe[title="${interactiveHtmlTitle}"]`).first();
+    await inlineElement.waitFor({ state: "visible" });
+    const inline = await (await inlineElement.elementHandle())?.contentFrame();
+    Assert.ok(inline);
+    await inline.getByRole("button", { name: "Add one", exact: true }).waitFor({ state: "visible" });
+    const sandbox = (await inlineElement.getAttribute("sandbox"))?.split(/\s+/u) ?? [];
+    Assert.ok(sandbox.includes("allow-scripts") && sandbox.includes("allow-forms"));
+    Assert.ok(!sandbox.includes("allow-same-origin"));
+    Assert.equal(await inline.evaluate(() => self.origin), "null");
+    Assert.equal(await inline.locator("#t3-theme").count(), 1, "The real publisher must inject its bootstrap");
+    await inline.getByText(/^Host theme: (light|dark)$/u).waitFor({ state: "visible" });
+    Assert.equal(await inline.getByLabel("Count", { exact: true }).inputValue(), "0");
+    await inline.getByRole("button", { name: "Add one", exact: true }).click();
+    Assert.equal(await inline.getByLabel("Count", { exact: true }).inputValue(), "1");
+    await inline.getByLabel("Value", { exact: true }).fill("7");
+    await inline.getByRole("button", { name: "Double value", exact: true }).click();
+    await inline.getByText("Result: 14", { exact: true }).waitFor({ state: "visible" });
+    const initialHeight = (await inlineElement.boundingBox())?.height;
+    Assert.ok(initialHeight !== undefined);
+    await inline.getByRole("button", { name: "Expand content", exact: true }).click();
+    await page.waitForFunction(({ title, before }) => {
+      const frame = document.querySelector<HTMLIFrameElement>(`iframe[title="${title}"]`);
+      return frame !== null && frame.getBoundingClientRect().height > before + 200;
+    }, { title: interactiveHtmlTitle, before: initialHeight });
+    const inlineHeight = (await inlineElement.boundingBox())!.height;
+    const container = inlineElement.locator("..");
+    await container.hover();
+    await container.getByRole("button", { name: "Open full screen", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: `Expanded ${interactiveHtmlTitle} preview`, exact: true });
+    await dialog.waitFor({ state: "visible" });
+    const modalElement = dialog.locator(`iframe[title="${interactiveHtmlTitle}"]`);
+    await modalElement.waitFor({ state: "visible" });
+    const modal = await (await modalElement.elementHandle())?.contentFrame();
+    Assert.ok(modal && modal !== inline);
+    await modal.getByRole("button", { name: "Add one", exact: true }).waitFor({ state: "visible" });
+    Assert.equal(await modal.evaluate(() => self.origin), "null");
+    Assert.equal(await modal.getByLabel("Count", { exact: true }).inputValue(), "0");
+    await modal.getByRole("button", { name: "Add one", exact: true }).click();
+    await modal.getByRole("button", { name: "Add one", exact: true }).click();
+    Assert.equal(await modal.getByLabel("Count", { exact: true }).inputValue(), "2");
+    Assert.equal(await inline.getByLabel("Count", { exact: true }).inputValue(), "1");
+    const modalHeight = (await modalElement.boundingBox())!.height;
+    await modal.getByRole("button", { name: "Expand content", exact: true }).click();
+    await page.waitForFunction(({ title, before }) => {
+      const frames = document.querySelectorAll<HTMLIFrameElement>(`iframe[title="${title}"]`);
+      return frames.length === 2 && frames[1]!.getBoundingClientRect().height > before + 200;
+    }, { title: interactiveHtmlTitle, before: modalHeight });
+    Assert.ok(Math.abs((await inlineElement.boundingBox())!.height - inlineHeight) < 40,
+      "A dialog page's size message must not resize the inline page");
+    await Promise.all([
+      page.waitForEvent("framedetached", { predicate: (frame) => frame === modal }),
+      dialog.getByRole("button", { name: "Close", exact: true }).click(),
+    ]);
+    await dialog.waitFor({ state: "hidden" });
+    Assert.equal(modal.isDetached(), true);
+    Assert.equal(await inline.getByLabel("Count", { exact: true }).inputValue(), "1");
+    await container.hover();
+    await container.getByRole("button", { name: "Open full screen", exact: true }).click();
+    await dialog.waitFor({ state: "visible" });
+    const reopenedElement = dialog.locator(`iframe[title="${interactiveHtmlTitle}"]`);
+    await reopenedElement.waitFor({ state: "visible" });
+    const reopened = await (await reopenedElement.elementHandle())?.contentFrame();
+    Assert.ok(reopened && reopened !== modal);
+    await reopened.getByRole("button", { name: "Add one", exact: true }).waitFor({ state: "visible" });
+    Assert.equal(await reopened.getByLabel("Count", { exact: true }).inputValue(), "0");
+    await Promise.all([
+      page.waitForEvent("framedetached", { predicate: (frame) => frame === reopened }),
+      dialog.getByRole("button", { name: "Close", exact: true }).click(),
+    ]);
+    await dialog.waitFor({ state: "hidden" });
+    Assert.equal(reopened.isDetached(), true);
+    await inline.getByRole("button", { name: "Add one", exact: true }).click();
+    Assert.equal(await inline.getByLabel("Count", { exact: true }).inputValue(), "2");
+    Assert.equal(statuses[0], 200);
+    Assert.ok(contentTypes[0]?.startsWith("text/html"));
+    const audit = snapshot.projection.messages.find((message) => message.role === "assistant" && message.text.includes("MCP initialized=1 tool=1"))?.text;
+    Assert.ok(audit);
+    await page.goto(resumeUrl, { waitUntil: "domcontentloaded" });
+    await readThreadSnapshot(page, resumeThreadId);
+    return { signedAssetStatus: statuses[0], toolCalls: 1, opaqueOrigin: true, ownFrameResize: true,
+      unrelatedFrameUnchanged: true, modalDetached: true, reopenedFresh: true, mcpAudit: audit };
+  } finally {
+    page.off("response", observeAsset);
+  }
+}
+
 async function exercise(implementation: Implementation): Promise<void> {
   const directory = NodePath.join(proofRoot, implementation);
   NodeFS.mkdirSync(directory, { recursive: true });
@@ -1562,6 +1675,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     composer: "unverified",
     textRevisionProfile: null as ReturnType<typeof textRevisionIdentity> | null,
     pdfLinks: null as Awaited<ReturnType<typeof verifyLinkedPdf>> | null,
+    htmlInteraction: null as Awaited<ReturnType<typeof verifyInteractiveHtml>> | null,
     scope:
       "Linux original web client; local project; composer submission; free ACP showcase approval and interruption; reload; same-state server restart",
     startedAt: new Date().toISOString(),
@@ -1851,6 +1965,11 @@ async function exercise(implementation: Implementation): Promise<void> {
       proof.pdfLinks = await verifyLinkedPdf(page);
       completed("Followed a link in the signed PDF with pointer and keyboard input");
       await page.getByRole("button", { name: "Toggle right panel", exact: true }).click();
+    }
+    if (htmlInteractionProof) {
+      starting("interact with a real signed HTML reply and its scoped bridge");
+      proof.htmlInteraction = await verifyInteractiveHtml(page, threadId);
+      completed("Interacted with the real HTML publisher's page and scoped frame lifecycle");
     }
     starting("stop with a streamed reply and pending approval");
     proof.interrupted = await interruptShowcase(page);
