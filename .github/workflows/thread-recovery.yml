@@ -154,7 +154,7 @@ jobs:
   mobile-outbox-ios:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
     runs-on: macos-15
-    timeout-minutes: 10
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -189,3 +189,63 @@ jobs:
             -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" -I "$headers" "$swift_probe" \
             "$CARGO_TARGET_DIR/aarch64-apple-ios-sim/release/libt3_outbox.a" \
             -o "$RUNNER_TEMP/libOutboxProbe.dylib"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install locked Expo development dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+          VP_REMOTE_CACHE: "off"
+          VP_REMOTE_CACHE_URL: ""
+        run: |
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+      - name: Link the Rust outbox library into the generated iOS app
+        env:
+          APP_VARIANT: development
+          EXPO_NO_GIT_STATUS: "1"
+          EXPO_NO_DOTENV: "1"
+          CI: "1"
+        run: |
+          evidence="$RUNNER_TEMP/ios-outbox-evidence"
+          mkdir "$evidence"
+          git show -s --format='%H %T' > "$evidence/source.txt"
+          xcodebuild -version > "$evidence/xcode.txt"
+          pod --version > "$evidence/cocoapods.txt"
+          outbox=apps/mobile/modules/t3-native-controls/ios/T3Outbox.xcframework
+          cp -R "$RUNNER_TEMP/T3Outbox.xcframework" "$outbox"
+          pnpm --dir apps/mobile exec expo prebuild --platform ios --no-install
+          (cd apps/mobile/ios && pod install)
+          workspaces=(apps/mobile/ios/*.xcworkspace)
+          test "${#workspaces[@]}" -eq 1
+          test -d "${workspaces[0]}"
+          workspace="${workspaces[0]}"
+          scheme="$(basename "$workspace" .xcworkspace)"
+          derived="$RUNNER_TEMP/outbox-ios-derived"
+          xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$derived" \
+            CODE_SIGNING_ALLOWED=NO ENABLE_DEBUG_DYLIB=NO ARCHS=arm64 -jobs 2 build \
+            > "$RUNNER_TEMP/outbox-xcodebuild.log" 2>&1 || {
+              tail -120 "$RUNNER_TEMP/outbox-xcodebuild.log"
+              exit 1
+            }
+          applications=("$derived"/Build/Products/Debug-iphonesimulator/*.app)
+          test "${#applications[@]}" -eq 1
+          test -d "${applications[0]}"
+          executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${applications[0]}/Info.plist")"
+          binary="${applications[0]}/$executable"
+          file "$binary" > "$evidence/application-type.txt"
+          grep -F 'arm64' "$evidence/application-type.txt"
+          xcrun nm -gU "$binary" > "$RUNNER_TEMP/outbox-ios-symbols.txt"
+          grep -F ' _t3_outbox_delivery_v1' "$RUNNER_TEMP/outbox-ios-symbols.txt" > "$evidence/outbox-symbol.txt"
+          shasum -a 256 "$binary" apps/mobile/ios/Podfile.lock \
+            "$RUNNER_TEMP/outbox-target/aarch64-apple-ios-sim/release/libt3_outbox.a" \
+            > "$evidence/artifacts.sha256"
+      - name: Retain iOS app linkage receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ios-outbox-evidence
+          path: ${{ runner.temp }}/ios-outbox-evidence/
+          if-no-files-found: warn
+          retention-days: 14
