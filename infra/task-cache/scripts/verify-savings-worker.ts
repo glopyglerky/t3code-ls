@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalProcess:off globalDate:off - synthetic packaging and HTTP fixture.
+// @effect-diagnostics nodeBuiltinImport:off globalProcess:off - synthetic packaging and HTTP fixture.
 import * as Assert from "node:assert/strict";
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
@@ -6,11 +6,12 @@ import * as NodeModule from "node:module";
 import * as NodePath from "node:path";
 import * as NodeSqlite from "node:sqlite";
 import * as NodeURL from "node:url";
-import * as NodeContext from "@effect/platform-node/NodeContext";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { WorkerBundle } from "@alchemy.run/cloudflare/Workers/Sources/Rolldown";
 import type { BundleOutput } from "alchemy/Bundle/Bundle";
 import type * as Cloudflare from "@cloudflare/workers-types";
 import * as ConfigProvider from "effect/ConfigProvider";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Admission from "../src/Admission.ts";
@@ -49,7 +50,7 @@ const bundles = await Effect.runPromise(Effect.gen(function* () {
     entry: { kind: "external" }, extraOptions: { ...build, preserveEntrySignatures: "strict" },
   });
   return { retained, native, runtime };
-}).pipe(Effect.provide(NodeContext.layer)));
+}).pipe(Effect.provide(NodeServices.layer)));
 
 const wasmFiles = (bundle: BundleOutput) => bundle.files.filter((file) => file.path.endsWith(".wasm"));
 Assert.equal(wasmFiles(bundles.retained).length, 0);
@@ -136,7 +137,8 @@ async function verifyRoute(savingsLayer: Layer.Layer<Savings.Savings, never, Sav
       executed, restore_failures, unspecified_ms, unspecified_hits FROM savings`).all().map((row) => ({ ...row }));
     await Effect.runPromise(Effect.gen(function* () {
       const cache = yield* Cache.Cache;
-      const summary = { recordedAt: Date.now(), host: "fixture", platform: "linux", arch: "x64",
+      const recordedAt = yield* Clock.currentTimeMillis;
+      const summary = { recordedAt, host: "fixture", platform: "linux", arch: "x64",
         ci: false, runId: "fixture", tasks: ["local", "remote", "unspecified", "executed", "failed"]
           .map((source, index) => ({ package: "fixture", task: "check", source, savedMs: index + 1 })) };
       const send = (id: string) => cache.handle(new Request("https://cache.example/projects/t3code/telemetry", {

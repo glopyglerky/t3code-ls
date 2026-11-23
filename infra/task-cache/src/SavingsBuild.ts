@@ -4,6 +4,7 @@ import * as NodeFS from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import * as Config from "effect/Config";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 
@@ -52,10 +53,15 @@ export const savingsBuild = Effect.gen(function* () {
   const expected = yield* Config.String("TASK_CACHE_NATIVE_SAVINGS_SHA256");
   const artifacts = yield* Effect.tryPromise({
     try: () => inspectNativeSavings(directory.value),
-    catch: (cause) => new Error("Could not verify the selected native savings artifacts", { cause }),
+    catch: (cause) => new Config.ConfigError(new ConfigProvider.SourceError({
+      message: "Could not verify the selected native savings artifacts",
+      cause,
+    })),
   });
   if (!/^[a-f0-9]{64}$/.test(expected) || artifacts.fingerprint !== expected) {
-    return yield* Effect.fail(new Error("The native savings artifacts do not match their expected fingerprint"));
+    return yield* Config.fail(new ConfigProvider.SourceError({
+      message: "The native savings artifacts do not match their expected fingerprint",
+    }));
   }
   return {
     input: {
