@@ -6,6 +6,7 @@ on:
       - "candidate/t3code-ls-t06-file-revisions-*"
       - "candidate/t3code-ls-t06-repository-paths-*"
       - "candidate/t3code-ls-t06-gix-*"
+      - "candidate/t3code-ls-t08-compressed-rollouts-*"
 
 permissions:
   contents: read
@@ -42,6 +43,11 @@ jobs:
         run: |
           pnpm --dir apps/server exec vp test run --maxWorkers 2 \
             src/vcs/GitVcsDriver.test.ts src/vcs/GitVcsDriverCore.test.ts
+      - name: Exercise bounded provider rollout discovery and import
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t08-compressed-rollouts-')
+        run: |
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 \
+            src/project/AgentSessionScanner.test.ts src/project/AgentSessionImporter.test.ts
       - name: Install the pinned compiler for native repository discovery
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t06-gix-')
         run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/git-workspace-toolchain"
