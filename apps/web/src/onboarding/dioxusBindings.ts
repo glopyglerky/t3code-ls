@@ -6,6 +6,10 @@ export interface WelcomeMount extends DioxusMount {
   update(agentReady: boolean, isImporting: boolean, selectedCount: number, newCount: number): void;
 }
 
+export interface GuestNameMount extends DioxusMount {
+  update(pending: boolean, error: string): void;
+}
+
 export type ThreadFindAction = "query" | "next" | "previous" | "retry" | "close";
 
 export interface ThreadFindMount extends DioxusMount {
@@ -32,6 +36,10 @@ interface OnboardingBindings {
     newCount: number,
     onStart: () => void,
   ): WelcomeMount;
+  mount_guest_name(
+    root: HTMLDivElement, name: string, pending: boolean, error: string,
+    submit: (name: string) => void,
+  ): GuestNameMount;
   mount_thread_find(
     root: HTMLDivElement,
     action: (action: ThreadFindAction, query?: string) => void,

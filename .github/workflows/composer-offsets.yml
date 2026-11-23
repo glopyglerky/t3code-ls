@@ -6,6 +6,7 @@ on:
       - "candidate/t3code-ls-t01-offsets-*"
       - "candidate/t3code-ls-t01-built-composer-*"
       - "candidate/t3code-ls-t01-dioxus-pairing-*"
+      - "candidate/t3code-ls-t11-dioxus-guest-*"
       - "candidate/t3code-ls-t02-bundled-native-*"
       - "candidate/t3code-ls-t06-file-revisions-*"
 
@@ -30,6 +31,7 @@ jobs:
       INTEGRATED_NATIVE: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') }}
       NATIVE_PTY_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-') }}
       PAIRING_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t01-dioxus-pairing-') }}
+      GUEST_NAME_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t11-dioxus-guest-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -62,7 +64,7 @@ jobs:
             build_binding t3-code-ls-client-text-web t3_code_ls_client_text_web \
               composer_offsets apps/web/public/client-text-wasm
           fi
-          if [[ "$PAIRING_PROOF" == true || "$INTEGRATED_NATIVE" == true ]]; then
+          if [[ "$PAIRING_PROOF" == true || "$INTEGRATED_NATIVE" == true || "$GUEST_NAME_PROOF" == true ]]; then
             build_binding t3-code-ls-web-pairing t3_code_ls_web_pairing \
               local_pairing "$RUNNER_TEMP/pairing-wasm"
           fi
@@ -121,6 +123,30 @@ jobs:
           mkdir "$proof/dioxus-fallback"
           T3_CODE_LS_PAIRING_PROOF=dioxus-fallback \
             node apps/web/scripts/verify-hybrid-client.ts "$proof/dioxus-fallback" upstream
+      - name: Exercise guest name controls and packaged guest entry without live invites
+        if: env.GUEST_NAME_PROOF == 'true'
+        env:
+          T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          proof="$RUNNER_TEMP/built-composer-proof"
+          mkdir "$proof"
+          test ! -e apps/web/public/pairing-wasm
+          cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
+          trap 'rm -rf -- apps/web/public/pairing-wasm' EXIT
+          for renderer in retained dioxus; do
+            if [[ "$renderer" == dioxus ]]; then export VITE_T3_CODE_LS_GUEST_NAME_RENDERER=dioxus; fi
+            pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
+              src/components/guest/GuestPage.browser.test.tsx src/components/guest/GuestNameForm.browser.test.tsx
+            pnpm --dir apps/web run build
+            env -u T3_CODE_LS_TOOLCHAIN -u T3_CODE_LS_SYSROOT T3_CODE_LS_IMPLEMENTATION=upstream \
+              pnpm --dir apps/server run build:bundle
+            mkdir "$proof/guest-$renderer"
+            T3_CODE_LS_GUEST_NAME_PROOF="$renderer" node apps/web/scripts/verify-hybrid-client.ts "$proof/guest-$renderer" upstream
+          done
+          mkdir "$proof/guest-dioxus-fallback"
+          T3_CODE_LS_GUEST_NAME_PROOF=dioxus-fallback node apps/web/scripts/verify-hybrid-client.ts "$proof/guest-dioxus-fallback" upstream
       - name: Exercise the composer with the retained offset mapper
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-offsets-')
         working-directory: apps/web

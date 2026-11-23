@@ -1,5 +1,6 @@
 #![cfg(target_arch = "wasm32")]
 
+mod guest_name;
 mod thread_find;
 
 use std::{cell::Cell, rc::Rc};

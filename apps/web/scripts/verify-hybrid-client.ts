@@ -21,6 +21,7 @@ import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
 import { chromium, type Browser, type Locator, type Page, type Response as BrowserResponse } from "playwright";
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
+import { verifyGuestNameForm } from "./hybrid-client-guest-name.ts";
 import { verifyBundledVoiceDraft } from "./hybrid-client-voice.ts";
 import { inspectNativeMessageUpdates, inspectNativeReplay } from "./hybrid-client-database.ts";
 import {
@@ -55,6 +56,8 @@ const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
 const spliceNegotiationProof = process.env.T3_CODE_LS_SPLICE_NEGOTIATION_PROOF === "true";
 const splitPtyProof = process.env.T3_CODE_LS_SPLIT_PTY_PROOF === "true";
 const pairingProof = process.env.T3_CODE_LS_PAIRING_PROOF;
+const guestNameProof = process.env.T3_CODE_LS_GUEST_NAME_PROOF;
+Assert.ok(guestNameProof === undefined || (bundledClient && ["retained", "dioxus", "dioxus-fallback"].includes(guestNameProof)), "Guest name proof requires an explicit packaged renderer");
 const dioxusFindProof = process.env.T3_CODE_LS_DIOXUS_FIND_PROOF;
 const expectsDioxusFind = process.env.VITE_T3_CODE_LS_THREAD_FIND_RENDERER === "dioxus";
 const bundledPtyProof = process.env.T3_CODE_LS_BUNDLED_PTY_PROOF === "true";
@@ -350,6 +353,26 @@ async function startApplication(
     throw error;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+async function verifyGuestName(implementation: Implementation, renderer: PairingRenderer) {
+  const directory = NodePath.join(proofRoot, `${implementation}-guest-name-${renderer}`);
+  NodeFS.mkdirSync(directory, { recursive: true });
+  const stateDirectory = NodeFS.mkdtempSync(NodePath.join(runRoot, "guest-name-"));
+  const [serverPort, webPort] = await availablePorts();
+  Assert.ok(serverPort && webPort);
+  const context = await browser!.newContext();
+  const page = await context.newPage();
+  page.setDefaultTimeout(15_000);
+  try {
+    const application = await startApplication(implementation, stateDirectory, serverPort, webPort, NodePath.join(directory, "startup.log"));
+    const hash = renderer === "dioxus" ? NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(NodePath.join(repoRoot, "apps/web/dist/pairing-wasm/local_pairing_bg.wasm"))).digest("hex") : undefined;
+    const result = await verifyGuestNameForm(page, new URL(application.pairingUrl).origin, renderer, hash);
+    writeJson(NodePath.join(directory, "proof.json"), { source, implementation, chromium: browser!.version(), ...result });
+  } finally {
+    await activeApplication?.stop(); activeApplication = undefined;
+    await context.close(); NodeFS.rmSync(stateDirectory, { recursive: true, force: true });
   }
 }
 
@@ -2398,6 +2421,7 @@ const run = {
   passed: [] as Implementation[],
   source,
   pairingRenderer: pairingProof,
+  guestNameRenderer: guestNameProof,
   runRoot,
   error: null as string | null,
 };
@@ -2411,7 +2435,9 @@ try {
   });
   console.log(`Original client acceptance: ${requested.join(", ")}; Chromium ${browser.version()}`);
   for (const implementation of requested) {
-    if (pairingProof && isPairingRenderer(pairingProof)) {
+    if (guestNameProof && isPairingRenderer(guestNameProof)) {
+      await verifyGuestName(implementation, guestNameProof);
+    } else if (pairingProof && isPairingRenderer(pairingProof)) {
       await verifyPairing(implementation, pairingProof);
     } else {
       await exercise(implementation);

@@ -1929,6 +1929,31 @@
       "rust_crates": ["apps/web/rust/pairing"]
     },
     {
+      "id": "browser-guest-name-dioxus",
+      "state": "candidate",
+      "domain_owner": "apps/web/src/components/guest",
+      "reviewed_upstream_commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+      "upstream_sources": [{ "path": "apps/web/src/components/guest/GuestPage.tsx", "blob": "9cc690491d3290c5dfbc0f927a1f633cdfec6837" }],
+      "rust_paths": ["apps/web/rust/pairing/src/guest_name.rs"],
+      "adapter_paths": [
+        ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/guest/GuestPage.tsx",
+        "apps/web/src/components/guest/DioxusGuestNameForm.tsx",
+        "apps/web/src/onboarding/dioxusBindings.ts",
+        "apps/web/src/vite-env.d.ts",
+        "apps/web/scripts/hybrid-client-guest-name.ts"
+      ],
+      "platform_routes": [{ "targets": ["browser"], "state": "candidate", "implementation": "dioxus-wasm", "compiler_route": "lustr-bluefe-compatibility", "acceptance_evidence": {} }],
+      "acceptance_tests": ["apps/web/scripts/verify-hybrid-client.ts", "apps/web/src/components/guest/GuestNameForm.browser.test.tsx"],
+      "hosted_acceptance": {
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/guest/GuestNameForm.browser.test.tsx": ".github/workflows/composer-offsets.yml"
+      },
+      "retired_paths": [],
+      "notes": "T11/T10 guest entry UI. Selectable semantic name form reuses the existing pinned Dioxus asset. GuestPage retains credential, HTTP and session ownership. Packaged UI proof uses synthetic Guest HTTP and does not qualify server authorization. Runtime evidence remains required.",
+      "rust_crates": ["apps/web/rust/pairing"]
+    },
+    {
       "id": "browser-thread-find-dioxus",
       "state": "candidate",
       "domain_owner": "apps/web",
