@@ -22,7 +22,8 @@ fn request(input: &mut impl BufRead) -> Result<Value, String> {
 }
 
 fn emit(output: &mut impl Write, frame: Value) -> io::Result<()> {
-    serde_json::to_writer(&mut *output, &frame)?;
+    let bytes = serde_json::to_vec(&frame).map_err(io::Error::other)?;
+    output.write_all(&bytes)?;
     output.write_all(b"\n")?;
     output.flush()
 }
