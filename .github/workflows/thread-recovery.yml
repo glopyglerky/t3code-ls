@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   thread-recovery:
-    if: "!startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-macos26-')"
+    if: "!startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-macos26-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-')"
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
@@ -76,7 +76,7 @@ jobs:
             src/state/threadOutboxDelivery.permissions.test.ts
 
   mobile-outbox-android:
-    if: "(startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-') || startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')) && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-macos26-')"
+    if: "(startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-') || startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')) && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-macos26-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-')"
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-') && 35 || 10 }}
     steps:
@@ -153,7 +153,7 @@ jobs:
 
   mobile-outbox-ios:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
-    runs-on: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-macos26-') && 'macos-26' || 'macos-15' }}
+    runs-on: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-') && 'macos-15-intel' || startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-macos26-') && 'macos-26' || 'macos-15' }}
     timeout-minutes: 75
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
@@ -163,7 +163,10 @@ jobs:
           persist-credentials: false
       - name: Build device and simulator libraries and link a Swift caller
         run: |
-          test "$(uname -m)" = arm64
+          case "$GITHUB_REF_NAME" in
+            candidate/t3code-ls-t12-outbox-native-ios-app-intel-*) test "$(uname -m)" = x86_64 ;;
+            *) test "$(uname -m)" = arm64 ;;
+          esac
           xcodebuild -version | grep -Fx "Build version 17C529"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-target"
           export IPHONEOS_DEPLOYMENT_TARGET=18.0
@@ -172,7 +175,8 @@ jobs:
           rustup toolchain install 1.99.1 --profile minimal \
             --target aarch64-apple-ios,aarch64-apple-ios-sim --component llvm-tools-preview
           rust_sysroot=$(rustc +1.99.1 --print sysroot)
-          llvm_nm="$rust_sysroot/lib/rustlib/aarch64-apple-darwin/bin/llvm-nm"
+          rust_host=$(rustc +1.99.1 -vV | sed -n 's/^host: //p')
+          llvm_nm="$rust_sysroot/lib/rustlib/$rust_host/bin/llvm-nm"
           headers=apps/mobile/modules/t3-native-controls/rust/include
           for target in aarch64-apple-ios aarch64-apple-ios-sim; do
             cargo +1.99.1 rustc --locked --release --target "$target" \
@@ -214,6 +218,7 @@ jobs:
           evidence="$RUNNER_TEMP/ios-outbox-evidence"
           mkdir "$evidence"
           git show -s --format='%H %T' > "$evidence/source.txt"
+          uname -m > "$evidence/build-host-arch.txt"
           xcodebuild -version > "$evidence/xcode.txt"
           pod --version > "$evidence/cocoapods.txt"
           outbox=apps/mobile/modules/t3-native-controls/ios/T3Outbox.xcframework
@@ -259,6 +264,18 @@ jobs:
           shasum -a 256 "$binary" apps/mobile/ios/Podfile.lock \
             "$RUNNER_TEMP/outbox-target/aarch64-apple-ios-sim/release/libt3_outbox.a" \
             > "$evidence/artifacts.sha256"
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t12-outbox-native-ios-app-intel-* ]]; then
+            archive="$RUNNER_TEMP/ios-outbox-simulator.tar.gz"
+            tar -czf "$archive" -C "$(dirname "${applications[0]}")" "$(basename "${applications[0]}")"
+            (cd "$RUNNER_TEMP" && shasum -a 256 ios-outbox-simulator.tar.gz) > "$evidence/archive.sha256"
+          fi
+      - name: Clean generated iOS intermediates
+        if: always()
+        shell: bash
+        run: |
+          rm -rf -- "$RUNNER_TEMP/outbox-target" "$RUNNER_TEMP/outbox-ios-derived" \
+            "$RUNNER_TEMP/T3Outbox.xcframework" apps/mobile/ios \
+            apps/mobile/modules/t3-native-controls/ios/T3Outbox.xcframework
       - name: Retain iOS app linkage receipts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -267,3 +284,11 @@ jobs:
           path: ${{ runner.temp }}/ios-outbox-evidence/
           if-no-files-found: warn
           retention-days: 14
+      - name: Retain the verified arm64 simulator application
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ios-outbox-simulator-arm64
+          path: ${{ runner.temp }}/ios-outbox-simulator.tar.gz
+          if-no-files-found: error
+          retention-days: 3
