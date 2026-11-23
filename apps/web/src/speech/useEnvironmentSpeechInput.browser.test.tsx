@@ -28,6 +28,7 @@ import {
   pendingCloudAudioChoice,
 } from "./voiceConsent";
 import { writeBrowserClientSettings } from "../clientPersistenceStorage";
+import { initializeComposerOffsets } from "../composer-native-offsets";
 
 const mocks = vi.hoisted(() => ({
   voice: undefined as unknown as ReturnType<typeof useEnvironmentSpeechInput>,
@@ -326,6 +327,29 @@ it.each([true, false])(
     // Cleanup is a separate opt-in and stays off by default.
     expect(mocks.cleanupCalls).toEqual([]);
     expect(mocks.committed).toHaveBeenCalledExactlyOnceWith("dictated", expect.anything());
+  },
+);
+
+it.skipIf(import.meta.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS !== "rust")(
+  "uses the Rust draft selection to keep edits made while recording",
+  async () => {
+    await initializeComposerOffsets();
+    setup({ destination: "env-a" });
+    mocks.draft = "Review 🐟";
+    mocks.transcripts = ["revised"];
+    await using _screen = await render(<Probe />);
+    await act(() => mocks.voice.start());
+    expect(mocks.voice.state.phase).toBe("recording");
+
+    mocks.draft = "Review 🦀 論文";
+    await act(() => mocks.voice.stop());
+    const expected = "Review 🦀 論文 revised";
+    expect(mocks.committed).toHaveBeenCalledExactlyOnceWith(expected, {
+      start: expected.length,
+      end: expected.length,
+    });
+    expect(mocks.transcribeCalls).toEqual(["env-a"]);
+    expect(performance.getEntriesByName("t3-voice-rust-draft-selection")).toHaveLength(1);
   },
 );
 

@@ -1,4 +1,5 @@
 import { installThreadMessageText } from "@t3tools/client-runtime/rpc";
+import type { VoiceDraftSelectionMapper } from "@t3tools/client-runtime/voice-input";
 import type { RichDocMap, RichRun } from "./composer-rich-text-doc";
 
 interface NativeMap {
@@ -23,6 +24,12 @@ interface NativeMessageText {
 interface OffsetModule {
   default(): Promise<unknown>;
   ComposerOffsetMap: { from_words(words: Uint32Array, length: number): NativeMap | undefined };
+  map_voice_draft_selection?: (
+    captured: string,
+    current: string,
+    start: number,
+    end: number,
+  ) => Uint32Array;
   ThreadMessageText?: {
     readonly prototype?: NativeMessageText;
     from_message(sequence: number, text: string, maxBytes: number): NativeMessageText | undefined;
@@ -35,6 +42,7 @@ let offsetModule: OffsetModule | undefined;
 let recordedUse = false;
 let recordedTextAppend = false;
 let recordedTextSplice = false;
+let recordedVoiceDraftSelection = false;
 
 export async function initializeComposerOffsets(): Promise<void> {
   if (import.meta.env.VITE_T3_CODE_LS_COMPOSER_OFFSETS !== "rust") return;
@@ -75,6 +83,22 @@ export async function initializeComposerOffsets(): Promise<void> {
       supportsSplices ? 2 : 1,
     );
   }
+}
+
+export function nativeVoiceDraftSelection(): VoiceDraftSelectionMapper | undefined {
+  const map = offsetModule?.map_voice_draft_selection;
+  if (!map) return undefined;
+  return (captured, current) => {
+    if (!captured.text.isWellFormed() || !current.isWellFormed()) return undefined;
+    const range = map(captured.text, current, captured.selection.start, captured.selection.end);
+    const [start, end] = range;
+    if (start === undefined || end === undefined) return undefined;
+    if (!recordedVoiceDraftSelection) {
+      performance.mark("t3-voice-rust-draft-selection");
+      recordedVoiceDraftSelection = true;
+    }
+    return { start, end };
+  };
 }
 
 export function nativeComposerOffsetMap(map: RichDocMap): NativeMap | undefined {

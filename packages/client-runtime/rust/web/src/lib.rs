@@ -1,5 +1,5 @@
 use t3_code_ls_client_text::text_revision::{
-    Applied, TextChange, TextEdit, TextRevision, Utf16Offset,
+    Applied, TextChange, TextEdit, TextRevision, Utf16Offset, voice_draft_selection,
 };
 use t3_code_ls_client_text::{
     FlatOffset, MarkdownOffset, OffsetMap, ProseMirrorPosition, Run, RunKind,
@@ -113,6 +113,19 @@ impl ThreadMessageText {
 fn sequence_number(sequence: f64) -> Option<u64> {
     (sequence >= 0.0 && sequence <= 9_007_199_254_740_991.0 && sequence.fract() == 0.0)
         .then_some(sequence as u64)
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen)]
+pub fn map_voice_draft_selection(
+    captured: &str,
+    current: &str,
+    start: u32,
+    end: u32,
+) -> Box<[u32]> {
+    match voice_draft_selection(captured, current, Utf16Offset(start), Utf16Offset(end)) {
+        Some((start, end)) => Box::new([start.0, end.0]),
+        None => Box::new([]),
+    }
 }
 
 #[cfg(test)]
