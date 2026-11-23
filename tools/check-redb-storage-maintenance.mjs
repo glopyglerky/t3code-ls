@@ -316,8 +316,10 @@ try {
       }
       const backup = yield* database.request(
         { operation: "storage_backup", destination: manualBackup },
-        Schema.Struct({ bytes: Schema.Number }),
+        Schema.Struct({ rows: Schema.Number, bytes: Schema.Number, checksum: Schema.String }),
       );
+      Assert.ok(backup.rows > 0);
+      Assert.match(backup.checksum, /^[a-f0-9]{64}$/u);
       const backupBytes = yield* Effect.promise(() => FS.readFile(manualBackup));
       Assert.equal(backup.bytes, backupBytes.byteLength);
       const backupHash = hash(backupBytes);
