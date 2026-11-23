@@ -1,4 +1,5 @@
 mod migration;
+mod startup_probe;
 
 use serde_json::Value;
 use std::{
@@ -196,7 +197,11 @@ fn run() -> Result<()> {
         Some("check-source") => check_source(),
         Some("check-upstream-readme") => upstream_readme(),
         Some("build") => build(),
-        _ => Err("usage: t3code-ls-tools <check-source|check-upstream-readme|build>".into()),
+        Some("probe-startup") => startup_probe::run(env::args_os().skip(2)),
+        _ => Err(
+            "usage: t3code-ls-tools <check-source|check-upstream-readme|build|probe-startup>"
+                .into(),
+        ),
     }
 }
 fn main() {
