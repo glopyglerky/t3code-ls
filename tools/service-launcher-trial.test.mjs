@@ -244,29 +244,42 @@ const launcherPublicationProof = process.env.T3_TEST_LAUNCHER_SEALED_PUBLICATION
 const launcherCancelProof = process.env.T3_TEST_LAUNCHER_CANCEL_BEFORE_PUBLICATION === "1";
 const launcherSealedServingProof = process.env.T3_TEST_LAUNCHER_SEALED_SERVING === "1";
 const launchesPackagedPrevious = launcherCancelProof || launcherSealedServingProof;
+const preparationEntry = process.env.T3_TEST_PREPARE_ENTRY;
 
 test(launcherPromotionProof
   ? "compiled Rust helper records an installed launcher's native promotion intent"
   : "compiled Rust helper restores a sealed native trial before launcher startup", {
   skip: process.env.T3_TEST_SEALED_TRIAL_HELPER === undefined,
   timeout: launcherPublicationProof || launcherCancelProof ? 180_000 : 120_000,
-}, async (t) => {
+}, (t) => exerciseSealedTrial(t, false));
+
+test("compiled Rust helper rejects a mislabeled installed package before recording preparation", {
+  skip: preparationEntry === undefined,
+  timeout: 120_000,
+}, (t) => exerciseSealedTrial(t, true));
+
+async function exerciseSealedTrial(t, mislabeled) {
   const executable = process.env.T3_TEST_SEALED_TRIAL_HELPER;
   assert.ok(!launcherCancelProof || (launcherPromotionProof && !launcherPublicationProof));
   assert.ok(!launcherSealedServingProof || (launcherPromotionProof && launcherPublicationProof));
   assert.ok(isQualifiedNativeHost(), "The compiled-helper proof requires qualified Linux x64");
-  assert.ok(path.isAbsolute(executable), "Pass the exact compiled helper by absolute path");
+  assert.ok(executable && path.isAbsolute(executable), "Pass the exact compiled helper by absolute path");
   const helperBytes = (await fs.stat(executable)).size;
   t.diagnostic(JSON.stringify({ helperBytes, installedArtifactLimitBytes: 128 * 1024 * 1024 }));
   assert.ok(helperBytes <= 128 * 1024 * 1024,
     "The installed helper must fit the native trial's 128 MiB artifact hash limit");
-  const previousVersion = launchesPackagedPrevious ? process.env.T3_TEST_PREVIOUS_RUNTIME_VERSION : activeVersion;
+  const previousEntry = process.env.T3_TEST_PREVIOUS_RUNTIME_ENTRY;
+  const packageVersion = preparationEntry === undefined ? targetVersion : process.env.T3_TEST_PREPARE_VERSION;
+  assert.ok(packageVersion !== undefined && isExactServiceVersion(packageVersion),
+    "Use the exact packaged version for the candidate executable");
+  const previousVersion = launchesPackagedPrevious ? process.env.T3_TEST_PREVIOUS_RUNTIME_VERSION
+    : preparationEntry === undefined ? activeVersion : "0.0.0-0";
   assert.ok(previousVersion !== undefined && isExactServiceVersion(previousVersion),
     "Use the exact installed package version when launching the previous runtime");
-  const candidateVersion = launchesPackagedPrevious
-    ? `${BigInt(previousVersion.split(".", 1)[0]) + 1n}.0.0`
-    : targetVersion;
+  const labelSeparator = packageVersion.includes("+") ? "." : "+";
+  const candidateVersion = mislabeled ? `${packageVersion}${labelSeparator}mislabeled` : packageVersion;
   assert.ok(isExactServiceVersion(candidateVersion) && compareExactServiceVersions(previousVersion, candidateVersion) < 0);
+  if (mislabeled) assert.equal(compareExactServiceVersions(candidateVersion, packageVersion), 0);
   const selected = { ...initial, activeVersion: previousVersion };
   const f = await fixture(t, selected);
   const home = path.dirname(f.userdata);
@@ -313,8 +326,7 @@ test(launcherPromotionProof
     setInterval(() => {}, 1000);
   `);
   const target = await f.install(candidateVersion, "process.exit(7);");
-  const preparationEntry = process.env.T3_TEST_PREPARE_ENTRY;
-  if (launcherPromotionProof) assert.ok(preparationEntry, "Pass the packaged runtime for both roles");
+  if (launcherPromotionProof) assert.ok(preparationEntry, "Pass the packaged candidate runtime");
   if (preparationEntry !== undefined) {
     assert.ok(path.isAbsolute(preparationEntry));
     const runtimeEntryBytes = (await fs.stat(preparationEntry)).size;
@@ -322,8 +334,10 @@ test(launcherPromotionProof
     assert.ok(runtimeEntryBytes <= 256 * 1024 * 1024,
       "The installed runtime must fit its independent 256 MiB artifact hash limit");
     if (launchesPackagedPrevious) {
+      assert.ok(previousEntry && path.isAbsolute(previousEntry), "Pass the separately built previous runtime");
+      assert.notEqual(digest(await fs.readFile(previousEntry)), digest(await fs.readFile(preparationEntry)));
       await fs.cp(path.dirname(preparationEntry), target, { recursive: true });
-      await fs.cp(path.dirname(preparationEntry), previous, { recursive: true });
+      await fs.cp(path.dirname(previousEntry), previous, { recursive: true });
     } else {
       await fs.copyFile(preparationEntry, path.join(target, "t3"));
       await fs.chmod(path.join(target, "t3"), 0o700);
@@ -382,6 +396,46 @@ test(launcherPromotionProof
     let observationBytes;
     const observationPath = path.join(f.userdata, `.statev2-trial-${id}.receipt-v1.json`);
     const beforeObservation = await fs.readFile(observationPath);
+    if (mislabeled) {
+      // Staging binds the actual candidate bytes and the selected label in a valid receipt.
+      const files = [dbPath, trial, f.statePath, checkpoint, backupReceipt, observationPath];
+      const before = await Promise.all(files.map(async (file) => ({
+        bytes: await fs.readFile(file), identity: await fs.stat(file, { bigint: true }),
+      })));
+      const directoryContents = async () => Promise.all(
+        [f.runtime, f.userdata].map(async (directory) => (await fs.readdir(directory)).sort()),
+      );
+      const beforeContents = await directoryContents();
+      const input = { request, preparation: prepared };
+      const diagnostic = "The installed candidate package version does not match the preparation.\n";
+      const outcome = spawnSync(candidate, ["__service-prepare-isolated", home, id], {
+        env: {}, input: JSON.stringify(input) + "\n", encoding: "utf8",
+        timeout: 65_000, maxBuffer: 8192, killSignal: "SIGKILL",
+      });
+      assert.equal(outcome.error, undefined);
+      assert.equal(outcome.status, 1);
+      assert.equal(outcome.stdout, "");
+      assert.equal(outcome.stderr, diagnostic);
+      await assert.rejects(
+        preparationLauncher.prepareIsolatedCandidate(
+          input, { recordPromotionIntent: launcherPromotionProof },
+        ),
+        (error) => {
+          assert.equal(error.code, 1);
+          assert.equal(error.signal, null);
+          assert.ok(error.message.endsWith("\n" + diagnostic));
+          return true;
+        },
+      );
+      for (const [index, file] of files.entries()) {
+        const after = await fs.stat(file, { bigint: true });
+        assert.equal(after.ino, before[index].identity.ino);
+        assert.equal(after.mtimeNs, before[index].identity.mtimeNs);
+        assert.deepEqual(await fs.readFile(file), before[index].bytes);
+      }
+      assert.deepEqual(await directoryContents(), beforeContents);
+      return;
+    }
     for (const attempt of ["mismatched-update", "corrupt-receipt", "first", "retry"]) {
       const input = { request: attempt === "mismatched-update" ? {
         ...request, activation: { ...activation, target_version: "1.2.0" },
@@ -430,6 +484,7 @@ test(launcherPromotionProof
     assert.deepEqual(await f.launcher(pending, { T3_CODE_LS_SEALED_TRIAL_RECOVERY: "1" })
       .prepareIsolatedCandidate({ request, preparation: prepared }), witness);
     assert.deepEqual(await fs.readFile(observationPath), observationBytes);
+    t.diagnostic("Packaged preparation accepted the matching embedded package version.");
     if (launcherPromotionProof) {
       const input = { request, preparation: prepared };
       const expectedIntent = {
@@ -517,6 +572,7 @@ test(launcherPromotionProof
           });
           const runtime = JSON.parse(await fs.readFile(path.join(f.userdata, "server-runtime.json"), "utf8"));
           assert.ok(Number.isSafeInteger(runtime.pid) && runtime.pid > 1);
+          assert.equal(runtime.serverVersion, previousVersion);
           assert.equal(await fs.realpath(`/proc/${runtime.pid}/exe`), path.join(previous, "t3"));
           assert.equal((await fs.stat(dbPath, { bigint: true })).ino, sourceIdentity.ino);
           const [restored] = runHelper(["read-only-local", dbPath], [
@@ -666,8 +722,8 @@ test(launcherPromotionProof
   assert.notEqual(sealedIdentity.ino, sourceIdentity.ino);
   const physicalReceipt = path.join(f.userdata, `.statev2-trial-${id}.receipt-v1.json`);
   const receiptBytes = await fs.readFile(physicalReceipt);
-  const expectedState = { ...initial, update: {
-    id, fromVersion: activeVersion, targetVersion, status: "rolled-back", reason: "sealed-trial-recovery",
+  const expectedState = { ...selected, update: {
+    id, fromVersion: previousVersion, targetVersion: candidateVersion, status: "rolled-back", reason: "sealed-trial-recovery",
   } };
   let committedStateIdentity;
   for (const restart of [false, true]) {
@@ -679,7 +735,7 @@ test(launcherPromotionProof
     try {
       const context = await readReply(ready, running, 6000);
       assert.equal(context.protocol, SERVICE_LAUNCHER_PROTOCOL);
-      assert.equal(context.childVersion, activeVersion);
+      assert.equal(context.childVersion, previousVersion);
       assert.deepEqual(await readServiceState(f.statePath), expectedState);
       const restored = await fs.stat(dbPath, { bigint: true });
       assert.equal(restored.dev, sourceIdentity.dev);
@@ -701,7 +757,7 @@ test(launcherPromotionProof
   assert.deepEqual(await fs.readFile(checkpoint), checkpointBytes);
   assert.deepEqual(await fs.readFile(backupReceipt), backupReceiptBytes);
   assert.deepEqual(await fs.readFile(physicalReceipt), receiptBytes);
-  assert.equal(await fs.readFile(f.starts, "utf8"), `${activeVersion}\n${activeVersion}\n`);
+  assert.equal(await fs.readFile(f.starts, "utf8"), `${previousVersion}\n${previousVersion}\n`);
   const [restoredReceipt] = runHelper(["read-only-local", dbPath], [
     { operation: "receipt", command_id: commandId }, { operation: "shutdown" },
   ]);
@@ -710,7 +766,7 @@ test(launcherPromotionProof
     sealedSha256: digest(sealedBytes), checkpointSha256: digest(checkpointBytes),
     preparedCandidateProcess: preparationEntry !== undefined,
     restoredOriginalInode: true, selectedPreviousRuntime: true, restartPreservedSelection: true }));
-});
+}
 
 for (const source of ["native", "unknown"]) {
   processTest(`refuses a live ${source} update before stopping the active child`, async (t) => {

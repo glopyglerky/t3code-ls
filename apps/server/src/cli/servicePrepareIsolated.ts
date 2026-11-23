@@ -7,6 +7,7 @@ import * as FS from "node:fs/promises";
 import * as Path from "node:path";
 import * as Sea from "node:sea";
 import { installedApplicationDatabase } from "@t3tools/shared/applicationDatabase";
+import packageJson from "../../package.json" with { type: "json" };
 import { readBundledNativeTrialHelper } from "../serviceLauncher.ts";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -51,6 +52,9 @@ export async function runServicePrepareIsolated(args: readonly string[]): Promis
     const entry = await FS.realpath(process.execPath);
     if (entry !== Path.join(home, "runtime", "versions", activation.target_version, "t3")) {
       throw new Error("The preparation process is not the installed candidate.");
+    }
+    if (packageJson.version !== activation.target_version) {
+      throw new Error("The installed candidate package version does not match the preparation.");
     }
     const selection = installedApplicationDatabase(entry, {});
     if (selection.kind !== "omdb") throw new Error("The installed candidate does not select native storage.");

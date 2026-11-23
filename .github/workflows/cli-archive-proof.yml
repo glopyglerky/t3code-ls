@@ -29,20 +29,43 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "26.12.1"
-      - name: Install the locked dependencies and compiler
+      - name: Select owned build and fixture directories
+        id: scratch
+        shell: bash
         run: |
-          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          set -euo pipefail
+          scratch=$(mktemp -d "$RUNNER_TEMP/t3-cli-archive.XXXXXX")
+          {
+            echo "CLI_ARCHIVE_SCRATCH=$scratch"
+            echo "CARGO_HOME=$scratch/cargo-home"
+            echo "CARGO_TARGET_DIR=$scratch/target"
+            echo "npm_config_store_dir=$scratch/pnpm-store"
+          } >> "$GITHUB_ENV"
+          echo "proof=$scratch/proof" >> "$GITHUB_OUTPUT"
+          mkdir "$scratch/home" "$scratch/tmp" "$scratch/proof"
+          git clone --shared --no-checkout -- "$GITHUB_WORKSPACE" "$scratch/source"
+          git -C "$scratch/source" checkout --detach "$GITHUB_SHA"
+          git -C "$scratch/source" rev-parse HEAD 'HEAD^{tree}' > "$scratch/proof/source-identity.txt"
+      - name: Install the locked dependencies and compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HOME="$CLI_ARCHIVE_SCRATCH/home" TMPDIR="$CLI_ARCHIVE_SCRATCH/tmp"
+          cd "$CLI_ARCHIVE_SCRATCH/source"
+          npm install --prefix "$CLI_ARCHIVE_SCRATCH/pnpm" pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm_bin="$CLI_ARCHIVE_SCRATCH/pnpm/node_modules/.bin"
+          export PATH="$pnpm_bin:$PATH"
+          echo "$pnpm_bin" >> "$GITHUB_PATH"
           pnpm install --frozen-lockfile
-          node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/cli-toolchain"
+          node tools/install-toolchain.mjs --destination "$CLI_ARCHIVE_SCRATCH/toolchain"
       - name: Build and run the native archive
         shell: bash
         run: |
           set -euo pipefail
-          export CARGO_HOME="$RUNNER_TEMP/cli-cargo-home"
-          export CARGO_TARGET_DIR="$RUNNER_TEMP/cli-target"
+          export HOME="$CLI_ARCHIVE_SCRATCH/home" TMPDIR="$CLI_ARCHIVE_SCRATCH/tmp"
+          cd "$CLI_ARCHIVE_SCRATCH/source"
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
             build --locked --release --manifest-path native/resource-monitor/Cargo.toml
-          mkdir -p "$RUNNER_TEMP/cli-proof"
           pnpm --dir apps/web run build
           pnpm exec node apps/server/scripts/cli.ts build --verbose
           pnpm exec node apps/server/scripts/cli.ts build-exe --verbose
@@ -50,76 +73,125 @@ jobs:
           install -m 0755 "$CARGO_TARGET_DIR/release/t3-resource-monitor" apps/server/dist/resource-monitor/
           version=$(node -p 'require("./apps/server/package.json").version')
           pnpm exec node scripts/build-cli-archive.ts --platform linux --arch x64 \
-            --version "$version" --output-dir "$RUNNER_TEMP/cli-archive"
-          archive="$RUNNER_TEMP/cli-archive/t3-$version-linux-x64.tar.gz"
-          sha256sum "$archive" > "$RUNNER_TEMP/cli-proof/archive.sha256"
+            --version "$version" --output-dir "$CLI_ARCHIVE_SCRATCH/archives"
+          archive="$CLI_ARCHIVE_SCRATCH/archives/t3-$version-linux-x64.tar.gz"
+          (cd "$(dirname "$archive")" && sha256sum "$(basename "$archive")") > "$CLI_ARCHIVE_SCRATCH/proof/archive.sha256"
           node scripts/smoke-cli-archive.ts --archive "$archive" --expect-version "$version" \
-            --expect-native | tee "$RUNNER_TEMP/cli-proof/smoke.log"
+            --expect-native | tee "$CLI_ARCHIVE_SCRATCH/proof/smoke.log"
       - name: Verify the isolated candidate through the packaged executable
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-packaged-preparation-') || startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-')
         env:
-          LAUNCHER_PROMOTION_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-') }}
+          LAUNCHER_PROMOTION_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-') && '1' || '0' }}
           T3_TEST_LAUNCHER_SEALED_PUBLICATION: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-sealed-') && '1' || '0' }}
-          LAUNCHER_CANCEL_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-cancel-') }}
-          LAUNCHER_SEALED_SERVING_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-sealed-serving-') }}
+          LAUNCHER_CANCEL_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-cancel-') && '1' || '0' }}
+          LAUNCHER_SEALED_SERVING_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-sealed-serving-') && '1' || '0' }}
         shell: bash
         run: |
           set -euo pipefail
-          extracted="$RUNNER_TEMP/preparation-archive"
+          export HOME="$CLI_ARCHIVE_SCRATCH/home" TMPDIR="$CLI_ARCHIVE_SCRATCH/tmp"
+          cd "$CLI_ARCHIVE_SCRATCH/source"
+          proof="$CLI_ARCHIVE_SCRATCH/proof"
+          archives="$CLI_ARCHIVE_SCRATCH/archives"
+          extracted="$CLI_ARCHIVE_SCRATCH/preparation-archive"
           mkdir "$extracted"
           version=$(node -p 'require("./apps/server/package.json").version')
-          tar -xzf "$RUNNER_TEMP/cli-archive/t3-$version-linux-x64.tar.gz" -C "$extracted"
-          entry="$extracted/t3-$version-linux-x64/t3"
+          candidate_version="$version"
+          previous_entry=
+          if [[ "$LAUNCHER_CANCEL_PROOF" == 1 || "$LAUNCHER_SEALED_SERVING_PROOF" == 1 ]]; then
+            # Keep the original archive for the previous process and stamp a distinct candidate SEA.
+            tar -xzf "$archives/t3-$version-linux-x64.tar.gz" -C "$extracted"
+            previous_entry="$extracted/t3-$version-linux-x64/t3"
+            test -x "$previous_entry"
+            candidate_version=$(node -p '(BigInt(process.argv[1].split(".", 1)[0]) + 1n) + ".0.0"' "$version")
+            manifest=apps/server/package.json
+            saved_manifest="$CLI_ARCHIVE_SCRATCH/server-package.json"
+            cp -p "$manifest" "$saved_manifest"
+            restore_manifest() { cp -p "$saved_manifest" "$manifest"; }
+            trap restore_manifest EXIT
+            node -e '
+              const fs = require("node:fs");
+              const [file, version] = process.argv.slice(1);
+              const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+              fs.writeFileSync(file, JSON.stringify({ ...manifest, version }, null, 2) + "\n");
+            ' "$manifest" "$candidate_version"
+            pnpm exec node apps/server/scripts/cli.ts build-exe --verbose
+            pnpm exec node scripts/build-cli-archive.ts --platform linux --arch x64 \
+              --version "$candidate_version" --output-dir "$archives"
+            restore_manifest
+            trap - EXIT
+            git diff --exit-code HEAD -- "$manifest"
+            (cd "$archives" && sha256sum "t3-$candidate_version-linux-x64.tar.gz") > "$proof/candidate-archive.sha256"
+          fi
+          tar -xzf "$archives/t3-$candidate_version-linux-x64.tar.gz" -C "$extracted"
+          entry="$extracted/t3-$candidate_version-linux-x64/t3"
           test -x "$entry"
-          stat --printf='{"runtimeEntryBytes":%s}\n' "$entry" | tee "$RUNNER_TEMP/cli-proof/preparation-artifact.json"
-          export CARGO_HOME="$RUNNER_TEMP/cli-cargo-home"
-          export CARGO_TARGET_DIR="$RUNNER_TEMP/cli-target"
+          stat --printf='{"runtimeEntryBytes":%s}\n' "$entry" | tee "$proof/preparation-artifact.json"
+          (
+            cd "$extracted"
+            sha256sum "t3-$candidate_version-linux-x64/t3"
+            if [[ -n "$previous_entry" ]]; then sha256sum "t3-$version-linux-x64/t3"; fi
+          ) > "$proof/preparation-entries.sha256"
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
-            -p t3-code-ls-storage --lib service_trial_executable_hash_has_an_independent_bound | tee "$RUNNER_TEMP/cli-proof/executable-limit.log"
+            -p t3-code-ls-storage --lib service_trial_executable_hash_has_an_independent_bound | tee "$proof/executable-limit.log"
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
-            -p t3-code-ls-storage --lib isolated_trial | tee "$RUNNER_TEMP/cli-proof/native-trial.log"
-          if [[ "$LAUNCHER_PROMOTION_PROOF" == true ]]; then export T3_TEST_LAUNCHER_PROMOTION_INTENT=1; fi
+            -p t3-code-ls-storage --lib isolated_trial | tee "$proof/native-trial.log"
           helper="$(dirname "$entry")/native-bin/t3-code-ls-db"
-          if [[ "$LAUNCHER_CANCEL_PROOF" == true ]]; then
+          proof_command=(
+            env "HOME=$HOME" "TMPDIR=$TMPDIR"
+            "T3_TEST_PREPARE_ENTRY=$entry" "T3_TEST_PREPARE_VERSION=$candidate_version"
+            "T3_TEST_SEALED_TRIAL_HELPER=$helper"
+            "T3_TEST_PREVIOUS_RUNTIME_ENTRY=$previous_entry" "T3_TEST_PREVIOUS_RUNTIME_VERSION=$version"
+            "T3_TEST_LAUNCHER_PROMOTION_INTENT=$LAUNCHER_PROMOTION_PROOF"
+            "T3_TEST_LAUNCHER_CANCEL_BEFORE_PUBLICATION=$LAUNCHER_CANCEL_PROOF"
+            "T3_TEST_LAUNCHER_SEALED_PUBLICATION=$T3_TEST_LAUNCHER_SEALED_PUBLICATION"
+            "T3_TEST_LAUNCHER_SEALED_SERVING=$LAUNCHER_SEALED_SERVING_PROOF"
+            "$(command -v node)" --test --test-reporter tap
+            --test-name-pattern "compiled Rust helper (restores|records|rejects)" tools/service-launcher-trial.test.mjs
+          )
+          if [[ -n "$previous_entry" ]]; then
             sudo -n unshare --net -- bash -euc '
               ip link set dev lo up
-              exec runuser -u "$1" -- env T3_TEST_LAUNCHER_PROMOTION_INTENT=1 \
-                T3_TEST_LAUNCHER_CANCEL_BEFORE_PUBLICATION=1 T3_TEST_PREPARE_ENTRY="$3" \
-                T3_TEST_SEALED_TRIAL_HELPER="$4" T3_TEST_PREVIOUS_RUNTIME_VERSION="$5" \
-                "$2" --test --test-reporter tap \
-                --test-name-pattern "compiled Rust helper records" tools/service-launcher-trial.test.mjs
-            ' _ "$(id -un)" "$(command -v node)" "$entry" "$helper" "$version" | tee "$RUNNER_TEMP/cli-proof/preparation.log"
-            grep -F 'Cancelled the unstarted promotion and reopened the exact previous packaged server.' \
-              "$RUNNER_TEMP/cli-proof/preparation.log"
-          elif [[ "$LAUNCHER_SEALED_SERVING_PROOF" == true ]]; then
-            sudo -n unshare --net -- bash -euc '
-              ip link set dev lo up
-              exec runuser -u "$1" -- env T3_TEST_LAUNCHER_PROMOTION_INTENT=1 \
-                T3_TEST_LAUNCHER_SEALED_PUBLICATION=1 T3_TEST_LAUNCHER_SEALED_SERVING=1 \
-                T3_TEST_PREPARE_ENTRY="$3" T3_TEST_SEALED_TRIAL_HELPER="$4" T3_TEST_PREVIOUS_RUNTIME_VERSION="$5" \
-                "$2" --test --test-reporter tap \
-                --test-name-pattern "compiled Rust helper records" tools/service-launcher-trial.test.mjs
-            ' _ "$(id -un)" "$(command -v node)" "$entry" "$helper" "$version" | tee "$RUNNER_TEMP/cli-proof/preparation.log"
-            grep -F 'Packaged serve refused the sealed catalog without publishing runtime state or modifying the database.' \
-              "$RUNNER_TEMP/cli-proof/preparation.log"
-            grep -F 'The packaged launcher rolled back the published sealed trial and reopened the previous runtime.' \
-              "$RUNNER_TEMP/cli-proof/preparation.log"
+              runner=$1
+              shift
+              exec runuser -u "$runner" -- "$@"
+            ' _ "$(id -un)" "${proof_command[@]}" | tee "$proof/preparation.log"
           else
-            T3_TEST_PREPARE_ENTRY="$entry" T3_TEST_SEALED_TRIAL_HELPER="$helper" \
-              node --test --test-reporter tap --test-name-pattern 'compiled Rust helper (restores|records)' \
-                tools/service-launcher-trial.test.mjs | tee "$RUNNER_TEMP/cli-proof/preparation.log"
+            "${proof_command[@]}" | tee "$proof/preparation.log"
           fi
-          if [[ "$LAUNCHER_PROMOTION_PROOF" == true ]]; then
-            grep -E '^ok [1-9][0-9]* - compiled Rust helper records ' "$RUNNER_TEMP/cli-proof/preparation.log"
+          grep -E '^ok [1-9][0-9]* - compiled Rust helper rejects a mislabeled installed package before recording preparation$' \
+            "$proof/preparation.log"
+          grep -F 'Packaged preparation accepted the matching embedded package version.' "$proof/preparation.log"
+          if [[ "$LAUNCHER_CANCEL_PROOF" == 1 ]]; then
+            grep -F 'Cancelled the unstarted promotion and reopened the exact previous packaged server.' \
+              "$proof/preparation.log"
+          elif [[ "$LAUNCHER_SEALED_SERVING_PROOF" == 1 ]]; then
+            grep -F 'Packaged serve refused the sealed catalog without publishing runtime state or modifying the database.' \
+              "$proof/preparation.log"
+            grep -F 'The packaged launcher rolled back the published sealed trial and reopened the previous runtime.' \
+              "$proof/preparation.log"
           fi
-          if [[ "$T3_TEST_LAUNCHER_SEALED_PUBLICATION" == 1 && "$LAUNCHER_SEALED_SERVING_PROOF" != true ]]; then
+          if [[ "$LAUNCHER_PROMOTION_PROOF" == 1 ]]; then
+            grep -E '^ok [1-9][0-9]* - compiled Rust helper records ' "$proof/preparation.log"
+          fi
+          if [[ "$T3_TEST_LAUNCHER_SEALED_PUBLICATION" == 1 && "$LAUNCHER_SEALED_SERVING_PROOF" != 1 ]]; then
             grep -F 'Packaged native helper published, verified the serving fence, and restored the original sealed-trial source.' \
-              "$RUNNER_TEMP/cli-proof/preparation.log"
+              "$proof/preparation.log"
           fi
       - name: Retain the archive identity and smoke results
-        if: always()
+        if: always() && steps.scratch.outputs.proof != ''
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: cli-archive-proof
-          path: ${{ runner.temp }}/cli-proof/
+          path: ${{ steps.scratch.outputs.proof }}/
           retention-days: 14
+      - name: Remove owned build and fixture output
+        if: always() && steps.scratch.outputs.proof != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -k "$RUNNER_TEMP"
+          if [[ -d "$CLI_ARCHIVE_SCRATCH/toolchain" ]]; then
+            find "$CLI_ARCHIVE_SCRATCH/toolchain" -type d -exec chmod u+w {} +
+          fi
+          rm -rf -- "$CLI_ARCHIVE_SCRATCH"
+          df -k "$RUNNER_TEMP"
