@@ -540,7 +540,7 @@ mod navigation_tests {
             assert_eq!(selected.environment_id(), "env");
             assert!(
                 selected
-                    .snapshot()
+                    .snapshot(SnapshotFormat::WithMessageIds)
                     .unwrap()
                     .text
                     .contains(&format!("Thread {}", row.id))
