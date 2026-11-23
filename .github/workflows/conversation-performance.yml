@@ -10,22 +10,26 @@ permissions:
 jobs:
   conversation:
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
-    timeout-minutes: 25
+    timeout-minutes: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-inspection-') && 35 || 25 }}
     env:
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
       STOCK_TREE: af9112ce82be93109079ca7b7a89f7182455eca5
       CANDIDATE_COMMIT: >-
-        ${{ (startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-backend-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-trace-')) && 'b30ae209e98f1e2b98360c3f284d43be918e4107'
+        ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-inspection-') && '7868131d90ec9af62edec03c03be694a645d65a6'
+        || (startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-backend-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-trace-')) && 'b30ae209e98f1e2b98360c3f284d43be918e4107'
         || startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-lookups-') && '7216183e0c013c7f5d7e9975d8aee7beda42b880'
         || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') && '9201e4b80c5b13503ce4763a296a7294c0bada7d'
         || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
       CANDIDATE_TREE: >-
-        ${{ (startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-backend-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-trace-')) && '3e80e454307c4189cde56d6caaab8cfc83ce4214'
+        ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-inspection-') && 'becc5d21a3fb0b117b770b447661ad97adf23479'
+        || (startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-backend-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-trace-')) && '3e80e454307c4189cde56d6caaab8cfc83ce4214'
         || startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-lookups-') && '675636c7feb22a55179fa726af94e5cfa49212b8'
         || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') && '78647c8e507b6b677fa6f1585839bd8bdc12bc55'
         || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
       CATALOG_COMMIT: 2bb6ae9e57559bde6cff0feeddcff8ddf02de009
       CATALOG_TREE: 55e2c8aba6fc06642b06a8d60861c7bdaf3c67f9
+      PRE_INSPECTION_COMMIT: e1c19305b20d8bfa1ef98ddc90fddd2b3cd090ae
+      PRE_INSPECTION_TREE: 7687c2a8c90a08c5dd20c6a110de2ce40cf71eac
       WASM_BINDGEN_VERSION: "0.2.130"
       WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
       VP_REMOTE_CACHE: "off"
@@ -43,6 +47,7 @@ jobs:
       REOPEN_LOOKUPS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-lookups-') }}
       REOPEN_BACKEND: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-backend-') }}
       REOPEN_SPANS: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-trace-') }}
+      REOPEN_INSPECTION: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-reopen-inspection-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -75,6 +80,17 @@ jobs:
             git -C candidate worktree add --detach "$GITHUB_WORKSPACE/catalog" "$CATALOG_COMMIT"
             git -C candidate diff --name-only "$CANDIDATE_COMMIT" "$CATALOG_COMMIT" > "$RUNNER_TEMP/catalog-source-diff"
             printf '%s\n' apps/server/src/persistence/redb_transactions{,_tests}.rs | diff - "$RUNNER_TEMP/catalog-source-diff"
+          fi
+          if [[ "$REOPEN_INSPECTION" == true ]]; then
+            git -C candidate fetch --no-tags --depth=1 https://github.com/glopyglerky/t3code-ls.git "$PRE_INSPECTION_COMMIT"
+            test "$(git -C candidate rev-parse 'FETCH_HEAD^{tree}')" = "$PRE_INSPECTION_TREE"
+            git -C candidate worktree add --detach "$GITHUB_WORKSPACE/pre-inspection" "$PRE_INSPECTION_COMMIT"
+            git -C candidate diff --name-only "$PRE_INSPECTION_COMMIT" "$CANDIDATE_COMMIT" \
+              > "$RUNNER_TEMP/inspection-source-diff"
+            printf '%s\n' .github/workflows/thread-recovery.yml apps/server/src/persistence/Omdb.ts \
+              apps/server/src/persistence/redb_bootstrap.rs apps/server/src/persistence/redb_schema_upgrade_tests.rs \
+              crates/storage/src/bin/t3-code-ls-db.rs tools/check-omdb-startup.mjs tools/database-fixture.mjs \
+              tools/omdb-schema-upgrade-fixture.mjs | diff - "$RUNNER_TEMP/inspection-source-diff"
           fi
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
       - name: Build the optimized stock bundle
@@ -109,6 +125,21 @@ jobs:
           node tools/check-hybrid.mjs --verify-binaries
           T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$PWD/bin" \
             pnpm --dir apps/server run build:bundle
+      - name: Build the frozen pre-change native server with the same web client
+        if: env.REOPEN_INSPECTION == 'true'
+        working-directory: pre-inspection
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/conversation-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/conversation-target"
+          pnpm install --frozen-lockfile
+          cp -a ../candidate/apps/web/dist apps/web/dist
+          T3_CODE_LS_IMPLEMENTATION=native node tools/build-native.mjs
+          node tools/check-hybrid.mjs --verify-binaries
+          T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$PWD/bin" \
+            pnpm --dir apps/server run build:bundle
+          diff -qr ../candidate/apps/web/dist apps/web/dist
+          cmp ../candidate/pnpm-lock.yaml pnpm-lock.yaml
+          cmp ../candidate/database.lock.json database.lock.json
       - name: Build the catalog variant with the same packaged client and server
         if: env.COMPARE_CATALOG == 'true'
         working-directory: catalog
@@ -245,7 +276,9 @@ jobs:
           evidence="$RUNNER_TEMP/conversation-evidence"
           mkdir "$evidence"
           sha256sum "$probe" > "$evidence/probe.sha256"
-          for profile in stock candidate; do
+          bundles=(stock candidate)
+          if [[ "$REOPEN_INSPECTION" == true ]]; then bundles+=(pre-inspection); fi
+          for profile in "${bundles[@]}"; do
             (
               cd "$profile"
               sha256sum pnpm-lock.yaml
@@ -256,6 +289,10 @@ jobs:
           trace_args=()
           if [[ "$REOPEN_LOOKUPS" == true ]]; then extra_profile=candidate-lookups; fi
           if [[ "$REOPEN_BACKEND" == true || "$REOPEN_SPANS" == true ]]; then extra_profile=fork-sqlite; fi
+          if [[ "$REOPEN_INSPECTION" == true ]]; then
+            extra_profile=pre-inspection
+            cp "$RUNNER_TEMP/inspection-source-diff" "$evidence/"
+          fi
           if [[ "$REOPEN_SPANS" == true ]]; then trace_args=(server-spans); fi
           jq -n --arg stock "$STOCK_COMMIT" --arg stockTree "$STOCK_TREE" \
             --arg candidate "$CANDIDATE_COMMIT" --arg candidateTree "$CANDIDATE_TREE" \
@@ -264,7 +301,8 @@ jobs:
             --arg image "${ImageOS:-unknown}/${ImageVersion:-unknown}" --arg kernel "$(uname -r)" \
             --arg cpu "$(LC_ALL=C lscpu | sed -n 's/^Model name:[[:space:]]*//p')" \
             --arg systemLoad "$(uptime)" --argjson cpus "$(nproc)" --arg extra "$extra_profile" --argjson traced "$REOPEN_SPANS" \
-            '{journey:"J02",stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},extra:(if $extra == "fork-sqlite" then {profile:$extra,servingSelection:"upstream",artifact:"candidate.sha256",durability:"SQLite WAL/NORMAL"} elif $extra != "" then {profile:$extra,artifact:"candidate.sha256",durability:"omdb Immediate"} else null end),probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,workload:{threads:32,messagesPerThread:200},cache:"same browser and saved profile per trial, unmanaged filesystem cache after import",serverTraceIsDiagnostic:$traced}' \
+            --arg previous "$PRE_INSPECTION_COMMIT" --arg previousTree "$PRE_INSPECTION_TREE" \
+            '{journey:"J02",stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},extra:(if $extra == "pre-inspection" then {profile:$extra,commit:$previous,tree:$previousTree,artifact:"pre-inspection.sha256",durability:"omdb Immediate"} elif $extra == "fork-sqlite" then {profile:$extra,servingSelection:"upstream",artifact:"candidate.sha256",durability:"SQLite WAL/NORMAL"} elif $extra != "" then {profile:$extra,artifact:"candidate.sha256",durability:"omdb Immediate"} else null end),probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,workload:{threads:32,messagesPerThread:200},cache:"same browser and saved profile per trial, unmanaged filesystem cache after import",serverTraceIsDiagnostic:$traced}' \
             > "$evidence/inputs.json"
           printf 'pair\tposition\tprofile\tdescriptor_us\tshell_visible_ms\tselected_visible_ms\tauthoritative_shell_ms\tauthoritative_thread_ms\n' > "$evidence/reopen.tsv"
           printf 'pair\tprofile\tserver_cpu_ms\tbrowser_cpu_ms\tserver_peak_rss_bytes\tbrowser_peak_rss_bytes\tsampler_scan_wall_ms\tmax_sample_gap_ms\tobserved_db_helper_cpu_ms\n' > "$evidence/reopen-resources.tsv"
@@ -291,7 +329,7 @@ jobs:
               bundle_profile="$profile"
               case "$profile" in
                 stock) mode=stock ;;
-                candidate) mode=native ;;
+                candidate|pre-inspection) mode=native ;;
                 candidate-lookups) bundle_profile=candidate; mode=native-lookups ;;
                 fork-sqlite) bundle_profile=candidate; mode=fork-sqlite ;;
               esac
