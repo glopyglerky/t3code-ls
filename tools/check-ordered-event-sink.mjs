@@ -47,17 +47,19 @@ const command = {
 const snapshotTables = ["orchestration_events", "orchestration_command_receipts",
   "orchestration_v2_effect_outbox", "orchestration_v2_projection_threads"];
 const transcript = [];
+const prepared = new Map();
 async function run(use) {
-  return withNative(executable, fixture, (unused, source) => Effect.gen(function* () {
+  return withNative(executable, fixture, () => Effect.gen(function* () {
     const ordered = yield* NativeDatabase.make({
       executable, databasePath: fixture.databasePath, mode: "ordered-fixture-local",
     });
     const transport = NativeDatabase.NativeDatabase.of({
-      // Repository preparation validates only the empty seed. All domain
-      // sessions select the candidate before application_begin is sent.
+      // The helper has already prepared the empty seed. Reuse those exact
+      // preparation receipts so layering the client never reopens its writer.
+      // Every domain session still opens the candidate before application_begin.
       request: (input, response) => {
-        Assert.match(input.operation, /^application_(events|receipts|positions|projects|projections|outbox)_prepare$/);
-        return source.request(input, response);
+        Assert.ok(prepared.has(input.operation), input.operation);
+        return Schema.decodeUnknownEffect(response)(prepared.get(input.operation));
       },
       withSession: (useSession) => ordered.withSession((session) =>
         Effect.gen(function* () {
@@ -97,9 +99,12 @@ async function run(use) {
 try {
   nativeRequest(executable, fixture, "initialize", { operation: "application_bootstrap" });
   for (const name of ["events", "receipts", "positions", "projects", "projections", "outbox"]) {
+    const operation = `application_${name}_prepare`;
     let result;
-    do { result = nativeRequest(executable, fixture, "connect", { operation: `application_${name}_prepare` }); }
-    while (!result.prepared);
+    do {
+      result = nativeRequest(executable, fixture, "connect", { operation });
+    } while (!result.prepared);
+    prepared.set(operation, result);
   }
   const seedHash = hash(await FS.readFile(fixture.databasePath));
   // Refuse unknown profiles before creating any candidate or admitting a writer.
