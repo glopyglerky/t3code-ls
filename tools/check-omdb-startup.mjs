@@ -273,6 +273,30 @@ try {
 } finally {
   await unwitnessed.close();
 }
+const otherHome = await createFixture();
+const linkedHome = await createFixture();
+try {
+  nativeRequest(executable, otherHome, "initialize", { operation: "application_bootstrap" });
+  const before = hash(await NodeFSP.readFile(otherHome.databasePath));
+  await NodeFSP.symlink(otherHome.databasePath, linkedHome.databasePath, "file");
+  await NodeAssert.rejects(
+    Effect.runPromise(isolated(
+      linkedHome,
+      Omdb.make({ executable, databasePath: linkedHome.databasePath }),
+    )),
+    (error) => error._tag === "OmdbStartupError",
+  );
+  NodeAssert.equal(hash(await NodeFSP.readFile(otherHome.databasePath)), before);
+  NodeAssert.equal(await NodeFSP.readlink(linkedHome.databasePath), otherHome.databasePath);
+  await NodeAssert.rejects(
+    NodeFSP.access(NodePath.join(linkedHome.root, "server-owner.sqlite")),
+    { code: "ENOENT" },
+  );
+  checks.push("Native startup rejects a symlinked database before activating its ownership fence");
+} finally {
+  await linkedHome.close();
+  await otherHome.close();
+}
 checks.push(await verifyNativeSchema88Upgrade(executable));
 console.log(JSON.stringify({ checks }, null, 2));
 if (proofPath)
