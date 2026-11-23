@@ -647,6 +647,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     const settingsDirectory = NodePath.join(stateDirectory, "userdata");
     NodeFS.mkdirSync(settingsDirectory, { recursive: true });
     writeJson(NodePath.join(settingsDirectory, "settings.json"), {
+      responseStreamingMode: "paragraph",
       providerInstances: {
         devReplay: {
           displayName: "Replay (dev)",
@@ -1007,7 +1008,7 @@ async function exercise(implementation: Implementation): Promise<void> {
       const appended = await readThreadSnapshot(page, appendThread);
       await assertCompleted(page, appendThread, replayTurnIdentity(appended, "text-appends"), reply);
       const rustDecoder = await page.evaluate(
-        () => performance.getEntriesByName("t3-thread-rust-text-append").length === 1,
+        () => performance.getEntriesByName("t3-thread-rust-text-append").length > 0,
       );
       proof.messageAppends = {
         requests: messageAppendRequests - requestsBefore,
@@ -1023,6 +1024,10 @@ async function exercise(implementation: Implementation): Promise<void> {
       saveProof();
       Assert.ok(proof.messageAppends.requests > 0, "The client must negotiate text appends");
       Assert.ok(proof.messageAppends.frames > 0, "The thread subscription must receive an append");
+      Assert.ok(
+        proof.messageAppends.storedUpdates.filter((update) => update.streaming).length >= 2,
+        "The fixture must persist both streaming revisions before completing",
+      );
       Assert.ok(rustDecoder, "The Rust binding must apply a received append");
       completed("Applied negotiated WebSocket text appends in the Rust browser reducer");
     }
