@@ -3590,6 +3590,44 @@ try {
         Assert.deepEqual(full.artifacts, compact.artifacts);
         Assert.deepEqual(full.dialogue, compact.dialogue);
         Assert.deepEqual(full.updates, compact.updates);
+        // exercise() has stopped each application and closed its context. End the
+        // browser process before the separate test-only raw persisted-byte reader.
+        await browser!.close();
+        browser = undefined;
+        const inspector = process.env.T3_CODE_LS_PACKAGED_EVENT_ACCOUNTING;
+        Assert.ok(inspector && NodePath.isAbsolute(inspector), "A separately built test inspector is required");
+        const inspectorSha256 = NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(inspector)).digest("hex");
+        const persisted = byteSamples.map(({ profile }) => {
+          const path = NodePath.join(runRoot, `native-${profile}`, "state/userdata/statev2.omdb");
+          const fixtureSha256 = NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(path)).digest("hex");
+          const inspected = ChildProcess.spawnSync(inspector, [NodeFS.realpathSync(runRoot), profile, fixtureSha256], {
+            env: {}, encoding: "utf8", timeout: 30_000, maxBuffer: 65_536,
+          });
+          Assert.ifError(inspected.error);
+          Assert.equal(inspected.status, 0, inspected.stderr);
+          const receipt = JSON.parse(inspected.stdout);
+          Assert.equal(receipt.schemaVersion, 1);
+          Assert.equal(receipt.profile, profile);
+          Assert.equal(receipt.fixtureSha256, fixtureSha256);
+          Assert.equal(receipt.gainClaim, null);
+          Assert.equal(receipt.isolatedResultPooled, false);
+          Assert.equal(receipt.identity.catalog_sha256,
+            textRevisionIdentity(NodePath.join(runRoot, `native-${profile}`, "state"), false, profile).catalogSha256);
+          const names = ["eventRows", "revisionHeads", "revisionWitnesses", "eventIndexesAndMetadata", "otherStoreRows"];
+          Assert.deepEqual(Object.keys(receipt.groups).sort(), names.sort());
+          for (const field of ["keys", "keyBytes", "valueBytes"]) {
+            let sum = 0;
+            for (const name of names) {
+              const count = receipt.groups[name][field];
+              Assert.ok(Number.isSafeInteger(count) && count >= 0);
+              sum += count;
+            }
+            Assert.equal(sum, receipt.wholeStore[field]);
+          }
+          Assert.ok(receipt.groups.eventRows.keys > 0);
+          Assert.equal(NodeCrypto.createHash("sha256").update(NodeFS.readFileSync(path)).digest("hex"), fixtureSha256);
+          return { ...receipt, inspectorSha256 };
+        });
         writeJson(NodePath.join(proofRoot, "durable-wire-predecessor.json"), {
           schemaVersion: 1, status: "receipt-predecessor", source,
           stockProductDenominator: "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
@@ -3597,11 +3635,11 @@ try {
           equality: "exact role/text/streaming dialogue and ordered reconstructed assistant updates; per-profile identities and timestamps excluded",
           wireBoundary: "Playwright WebSocket sent/received payloads on the owned page, from before submitReplay through the completed authoritative snapshot; includes control and snapshot traffic on all page sockets",
           wireExcludes: "WebSocket headers, masks, compression, TCP/TLS, HTTP and provider traffic; no per-turn transport or allocation claim",
-          physicalEventKeyValueBytes: null,
-          physicalGap: "Bundled read-only-local application events API expands stored revisions; raw event K/V plus indexes and witnesses are not exposed",
+          physicalEventKeyValueBytes: persisted,
+          physicalGap: "Raw persisted lengths exclude engine allocation and WAL equivalence; no pooled isolated result",
           gainClaim: null, walEquivalence: false, stockEquivalence: false,
           isolatedResultPooled: false,
-          remaining: "Root must qualify packaged execution, add bounded raw persisted K/V inspection and repeat matched trials before comparing bytes",
+          remaining: "Root must qualify the test inspector and packaged execution, then repeat matched trials before any gain claim",
         });
       } else {
         await exercise(implementation);

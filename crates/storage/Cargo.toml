@@ -6,7 +6,13 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[[bin]]
+name = "t3-code-ls-packaged-event-accounting"
+path = "src/bin/packaged-event-accounting.rs"
+required-features = ["packaged-event-accounting-fixture"]
+
 [features]
+packaged-event-accounting-fixture = []
 ordered-engine-fixture = ["dep:redb-bench-compare"]
 
 [dependencies]

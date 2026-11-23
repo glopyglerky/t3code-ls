@@ -385,13 +385,24 @@ jobs:
             done
           elif [[ "$DURABLE_BYTE_PROOF" == true ]]; then
             node --test apps/web/scripts/hybrid-client-database.test.ts
+            export CARGO_TARGET_DIR="$RUNNER_TEMP/packaged-event-accounting-target"
+            trap 'rm -rf -- "$RUNNER_TEMP/packaged-event-accounting-target"' EXIT
+            export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+            "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+              -p t3-code-ls-storage --features packaged-event-accounting-fixture --lib \
+              packaged_event_accounting::tests
+            "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --locked \
+              -p t3-code-ls-storage --features packaged-event-accounting-fixture \
+              --bin t3-code-ls-packaged-event-accounting
             sudo -n unshare --net -- bash -euc '
               ip link set dev lo up
               exec runuser -u "$1" -- env T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 \
-                T3_CODE_LS_DURABLE_BYTE_PROOF=true VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
+                T3_CODE_LS_DURABLE_BYTE_PROOF=true T3_CODE_LS_PACKAGED_EVENT_ACCOUNTING="$4" \
+                VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
                 "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
-            ' _ "$(id -un)" "$(command -v node)" "$proof"
+            ' _ "$(id -un)" "$(command -v node)" "$proof" "$CARGO_TARGET_DIR/debug/t3-code-ls-packaged-event-accounting"
             test -s "$proof/durable-wire-predecessor.json"
+            rm -rf "$CARGO_TARGET_DIR"
           elif [[ "$GITHUB_REF_NAME" != candidate/t3code-ls-t02-bundled-native-t13-pdf-external-* && "$FORK_HISTORY_PROOF" != true ]]; then
             node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
           fi

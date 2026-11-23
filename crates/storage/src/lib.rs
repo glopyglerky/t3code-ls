@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod backend;
+#[cfg(feature = "packaged-event-accounting-fixture")]
+pub mod packaged_event_accounting;
 #[cfg(all(test, feature = "ordered-engine-fixture"))]
 mod ordered_engine_fixture;
 
