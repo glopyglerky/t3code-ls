@@ -104,7 +104,7 @@ import {
   composerDraftHasUserContent,
   composerTargetKey,
   retryComposerDraftSave,
-  useComposerDraftStorageUnavailable,
+  useComposerDraftStorageStatus,
   useComposerDraftStore,
   useComposerThreadDraft,
 } from "../../composerDraftStore";
@@ -2502,16 +2502,19 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         },
       ]
     : [];
-  const draftStorageUnavailable = useComposerDraftStorageUnavailable();
+  const draftStorageStatus = useComposerDraftStorageStatus();
   const baseBannerItems = [...props.bannerItems, ...replyBannerItems];
-  if (draftStorageUnavailable) {
+  if (draftStorageStatus !== "available") {
+    const conflict = draftStorageStatus === "conflict";
     baseBannerItems.push({
       id: "draft-storage-unavailable",
       group: "environment",
       variant: "warning",
       icon: <TriangleAlertIcon />,
-      title: "Draft changes could not be saved",
-      description: "Keep this tab open to retain your unsaved changes.",
+      title: conflict ? "Draft changed in another tab" : "Draft changes could not be saved",
+      description: conflict
+        ? "Copy your unsaved changes before reopening this draft."
+        : "Keep this tab open to retain your unsaved changes.",
       actions: (
         <Button type="button" size="xs" variant="ghost" onClick={retryComposerDraftSave}>
           Retry saving
