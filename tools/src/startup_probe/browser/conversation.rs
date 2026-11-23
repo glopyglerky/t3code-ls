@@ -7,23 +7,31 @@ const PROMPT: &str = "Replay the plan and reads fixture.";
 
 impl Browser {
     pub(in crate::startup_probe) fn conversation(&self, workspace: &Path) -> Result<Value> {
-        self.click_when(
-            "Add project",
-            "return [...document.querySelectorAll('button')].find(e => e.textContent.trim() === 'Add project' && !e.disabled && e.getClientRects().length);",
+        let status = self.command(
+            "POST",
+            "/execute/async",
+            Some(json!({
+                "script": r#"
+                    const [workspaceRoot, done] = arguments;
+                    fetch('/api/projects/mutate', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json', 'x-t3-orchestration-protocol': '2'},
+                        body: JSON.stringify({
+                            type: 'project.create', projectId: 'conversation-fixture',
+                            commandId: 'conversation-fixture-create', title: 'conversation-fixture',
+                            workspaceRoot
+                        })
+                    }).then(response => done(response.status), () => done(0));
+                "#,
+                "args": [workspace],
+            })),
         )?;
-        self.click_when(
-            "Local folder",
-            "return [...document.querySelectorAll('[role=dialog] *')].find(e => e.childElementCount === 0 && e.textContent.trim() === 'Local folder' && e.getClientRects().length);",
-        )?;
-        self.type_when(
-            "the local folder path",
-            "return document.querySelector('[role=dialog] input[role=combobox]');",
-            workspace.to_str().ok_or("fixture path must be UTF-8")?,
-        )?;
-        self.click_when(
-            "the enabled Add folder button",
-            r#"return [...document.querySelectorAll('[role=dialog] button')].find(e => /^Add \(/.test(e.getAttribute('aria-label') ?? '') && !e.disabled && e.getClientRects().length);"#,
-        )?;
+        if !status
+            .as_u64()
+            .is_some_and(|status| (200..300).contains(&status))
+        {
+            return Err(format!("fixture project creation returned HTTP {status}").into());
+        }
         self.click_when(
             "the fixture project's New thread control",
             r#"return document.querySelector('button[aria-label="New thread in conversation-fixture"]');"#,
