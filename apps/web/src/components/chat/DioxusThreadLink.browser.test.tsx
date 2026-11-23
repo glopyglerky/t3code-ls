@@ -49,3 +49,25 @@ it("keeps native href, focus, prevented/modifier activation, history and remount
   await vi.waitFor(() => expect(native()?.textContent).toBe("Read synthetic thread"));
   expect(native()).not.toBe(anchor);
 });
+
+it("routes normal activation through the sidebar owner exactly once", async () => {
+  const onNavigate = vi.fn();
+  await using screen = await render(<DioxusThreadLink environmentId={EnvironmentId.make("synthetic")}
+    threadId={ThreadId.make("owner-target")} label="Owned navigation" className="underline" onNavigate={onNavigate} />);
+  await vi.waitFor(() => expect(screen.container.querySelector('[data-thread-link-renderer="dioxus-wasm"]')).not.toBeNull());
+  const anchor = screen.container.querySelector("a")!;
+  for (const modifiers of [{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }]) {
+    let candidatePrevented = true;
+    const cancel = (event: MouseEvent) => { candidatePrevented = event.defaultPrevented; event.preventDefault(); };
+    document.addEventListener("click", cancel, { once: true });
+    await act(() => anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ...modifiers })));
+    expect(candidatePrevented).toBe(false);
+  }
+  const prevented = new MouseEvent("click", { bubbles: true, cancelable: true });
+  prevented.preventDefault();
+  await act(() => anchor.dispatchEvent(prevented));
+  expect(onNavigate).not.toHaveBeenCalled();
+  await screen.getByRole("link", { name: "Owned navigation" }).click();
+  expect(onNavigate).toHaveBeenCalledTimes(1);
+  expect(screen.router?.state.location.pathname).toBe("/");
+});

@@ -104,9 +104,13 @@ const guestNameProof = process.env.T3_CODE_LS_GUEST_NAME_PROOF;
 Assert.ok(guestNameProof === undefined || (bundledClient && ["retained", "dioxus", "dioxus-fallback"].includes(guestNameProof)), "Guest name proof requires an explicit packaged renderer");
 const dioxusFindProof = process.env.T3_CODE_LS_DIOXUS_FIND_PROOF;
 const composerSubmitRenderer = process.env.T3_CODE_LS_COMPOSER_SUBMIT_PROOF;
+const sidebarThreadLinkProof = process.env.T3_CODE_LS_SIDEBAR_THREAD_LINK_PROOF || undefined;
 const threadLinkProof = process.env.T3_CODE_LS_THREAD_LINK_PROOF;
 Assert.ok(threadLinkProof === undefined || (bundledClient && ["dioxus", "dioxus-fallback"].includes(threadLinkProof)), "Thread navigation requires an explicit packaged renderer");
 // Explicit combined subset only. Individual lanes keep their own control flow.
+Assert.ok(sidebarThreadLinkProof === undefined || sidebarThreadLinkProof === threadLinkProof,
+  "Sidebar navigation reuses the explicit packaged thread-link proof route");
+if (sidebarThreadLinkProof) Assert.equal(process.env.VITE_T3_CODE_LS_SIDEBAR_THREAD_LINK_RENDERER, "dioxus");
 const compositionProof = process.env.T3_CODE_LS_BROWSER_COMPOSITION_PROOF;
 Assert.ok(compositionProof === undefined || ["dioxus", "dioxus-fallback"].includes(compositionProof));
 const composerStopProof = process.env.T3_CODE_LS_COMPOSER_STOP_PROOF === "true";
@@ -2622,6 +2626,7 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       refusedWasmRequests: number;
       localRefusalPreservedDraft: true;
     }) | null,
+    sidebarThreadNavigation: null as Awaited<ReturnType<typeof verifyThreadNavigation>> | null,
     threadNavigation: null as Awaited<ReturnType<typeof verifyThreadNavigation>> | null,
     threadNavigationWasmRefusals: 0,
     composerStop: null as Awaited<ReturnType<typeof verifyComposerStop>> | null,
@@ -3066,7 +3071,7 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       const navigationId = await submitReplay(page, "Thread navigation", `Navigation target: ${targetId}`);
       await page.getByText("Synthetic navigation ready.", { exact: true }).waitFor({ state: "visible" });
       proof.threadNavigation = await verifyThreadNavigation(page,
-        page.locator(`a[href=${JSON.stringify(new URL(targetUrl).pathname)}]:visible`),
+        page.locator(`a[href=${JSON.stringify(new URL(targetUrl).pathname)}]:visible:not([data-sidebar-row] a)`),
         targetUrl, formattedAssistantDisplay, composerSubmit.renderer);
       proof.capturedApproval = await acceptCapturedApproval(page);
       const approval = proof.capturedApproval;
@@ -3162,11 +3167,16 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
         await page.waitForURL(sourceUrl);
       }
       const targetPath = new URL(targetUrl).pathname;
-      const link = page.locator(`a[href=${JSON.stringify(targetPath)}]:visible`);
+      const link = page.locator(`a[href=${JSON.stringify(targetPath)}]:visible:not([data-sidebar-row] a)`);
       proof.threadNavigation = await verifyThreadNavigation(
         page, link, targetUrl, formattedAssistantDisplay,
         threadLinkProof as "dioxus" | "dioxus-fallback",
       );
+      if (sidebarThreadLinkProof) {
+        proof.sidebarThreadNavigation = await verifyThreadNavigation(page,
+          page.locator(`[data-testid="sidebar-row-card"] a[href=${JSON.stringify(targetPath)}]:visible`),
+          targetUrl, formattedAssistantDisplay, sidebarThreadLinkProof as "dioxus" | "dioxus-fallback", "sidebar");
+      }
       if (readRefusals) proof.threadNavigationWasmRefusals = readRefusals();
       proof.status = "passed";
       return;

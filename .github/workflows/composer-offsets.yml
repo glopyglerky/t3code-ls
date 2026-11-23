@@ -34,7 +34,8 @@ jobs:
       NATIVE_PTY_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-') }}
       PAIRING_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t01-dioxus-pairing-') }}
       GUEST_NAME_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t11-dioxus-guest-') }}
-      DIOXUS_NAVIGATION_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-navigation-') }}
+      DIOXUS_SIDEBAR_NAVIGATION_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-sidebar-navigation-') }}
+      DIOXUS_NAVIGATION_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-navigation-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-sidebar-navigation-') }}
       DIOXUS_TIMELINE_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-timeline-') }}
       DIOXUS_STOP_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-stop-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-timeline-') }}
       DIOXUS_SUBMIT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-send-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-stop-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-timeline-') }}
@@ -303,6 +304,9 @@ jobs:
           if [[ "$DIOXUS_NAVIGATION_PROOF" == true ]]; then
             cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
             export VITE_T3_CODE_LS_THREAD_LINK_RENDERER=dioxus
+            if [[ "$DIOXUS_SIDEBAR_NAVIGATION_PROOF" == true ]]; then
+              export VITE_T3_CODE_LS_SIDEBAR_THREAD_LINK_RENDERER=dioxus
+            fi
             # apps/web/src/components/chat/DioxusThreadLink.browser.test.tsx
             # apps/web/src/components/chat/DioxusThreadLink.fallback.browser.test.tsx
             pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
@@ -379,6 +383,9 @@ jobs:
               apps/web/dist/pairing-wasm/local_pairing_bg.wasm >> "$proof/application.sha256"
             for renderer in dioxus dioxus-fallback; do
               mkdir "$proof/navigation-$renderer"
+              sidebar_renderer=""
+              if [[ "$DIOXUS_SIDEBAR_NAVIGATION_PROOF" == true ]]; then sidebar_renderer="$renderer"; fi
+              T3_CODE_LS_SIDEBAR_THREAD_LINK_PROOF="$sidebar_renderer" \
               T3_CODE_LS_THREAD_LINK_PROOF="$renderer" \
                 node apps/web/scripts/verify-hybrid-client.ts "$proof/navigation-$renderer" "$implementation"
               jq -e --arg renderer "$renderer" '
@@ -387,6 +394,14 @@ jobs:
                 .threadNavigation.back and .threadNavigation.draftPreserved and
                 (if $renderer == "dioxus-fallback" then .threadNavigationWasmRefusals > 0 else true end)
               ' "$proof/navigation-$renderer/$implementation/proof.json"
+              if [[ "$DIOXUS_SIDEBAR_NAVIGATION_PROOF" == true ]]; then
+                jq -e --arg renderer "$renderer" '
+                  .sidebarThreadNavigation.renderer == $renderer and
+                  .sidebarThreadNavigation.entry == "sidebar" and
+                  .sidebarThreadNavigation.keyboard and .sidebarThreadNavigation.pointer and
+                  .sidebarThreadNavigation.selectedThread and .sidebarThreadNavigation.draftPreserved
+                ' "$proof/navigation-$renderer/$implementation/proof.json"
+              fi
             done
           elif [[ "$DIOXUS_SUBMIT_PROOF" == true ]]; then
             sha256sum apps/web/dist/pairing-wasm/local_pairing.js \
