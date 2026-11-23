@@ -123,6 +123,7 @@ export async function verifySavedHistory(page: Page, seed: Awaited<ReturnType<ty
     await input.fill(query);
     await bar.getByText("1/1", { exact: true }).waitFor({ state: "visible" });
     await page.waitForFunction((query) => Array.from(CSS.highlights.get("t3-thread-find-active") ?? []).some((range) => {
+      if (!(range instanceof Range)) return false;
       const element = range.startContainer.parentElement?.closest<HTMLElement>("[data-message-id]");
       const bounds = range.getBoundingClientRect();
       return range.toString() === query && element?.dataset.messageId && bounds.height > 0 &&
