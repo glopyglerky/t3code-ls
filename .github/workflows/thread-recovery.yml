@@ -44,10 +44,12 @@ jobs:
       - name: Check installed helper identity before starting native trials
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-')
         run: node --test tools/service-launcher-trial.test.mjs
+      - name: Install the pinned compiler for the trial helper
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-')
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/trial-toolchain"
       - name: Build and run the actual trial helper contract
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-')
         run: |
-          node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/trial-toolchain"
           export CARGO_HOME="$RUNNER_TEMP/trial-cargo-home"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/trial-target"
           export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
