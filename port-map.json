@@ -2037,7 +2037,7 @@
         "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
       },
       "retired_paths": [],
-      "notes": "T01/T02/T11. VITE_T3_CODE_LS_COMPOSER_SUBMIT_RENDERER=dioxus selects the ordinary Send button. The browser submits the existing ChatComposer form, which retains draft, validation and command ownership. Specialized actions use their existing renderer. The bundled native replay proof includes local refusal and an explicit standard control after a blocked Wasm load.",
+      "notes": "T01/T02/T11. VITE_T3_CODE_LS_COMPOSER_SUBMIT_RENDERER=dioxus selects the ordinary Send button. The browser submits the existing ChatComposer form, which retains draft, validation and command ownership. Specialized actions use their existing renderer. Run 45205232266 at 6742110c8042b03dad894d65c95d0a6daa5d7ca7 verified keyboard submission over the packaged native route, refusal with the draft retained, and the explicit standard control after a blocked Wasm load.",
       "rust_crates": ["apps/web/rust/pairing"]
     },
     {
@@ -2100,7 +2100,7 @@
         "packages/client-runtime/src/connection/registry.test.ts": ".github/workflows/thread-recovery.yml"
       },
       "retired_paths": [],
-      "notes": "T12. The Expo adapter can select a versioned scalar binding for the portable outbox decision. Run 45191901494 at 2f74ddd07956f4b2321f2418164a9f81375b8ebd installed two dedicated Android x86_64 release APKs on an isolated API 36 emulator. The positive APK passed all 64 JS-to-JNI decision cases. The APK built without the native library refused strict selection before running any case. Actual normal-app iOS and Android restart, persistence and permission checks remain required.",
+      "notes": "T12. The Expo adapter can select a versioned scalar binding for the portable outbox decision. Run 45191901494 at 2f74ddd07956f4b2321f2418164a9f81375b8ebd installed two dedicated Android x86_64 release APKs on an isolated API 36 emulator. The positive APK passed all 64 JS-to-JNI decision cases. The APK built without the native library refused strict selection before running any case. Run 45199103016 attempt 2 at a4acb56fd33378c377bb56d9800f6732be6b65bf verified the same strict refusal and matrix and exercised Expo outbox storage across two force-stops. The dedicated APK reopened the same draft identities and attachment bytes, removed them, and reopened empty. Normal-app iOS and Android permission and lifecycle coverage remains required.",
       "rust_crates": ["packages/client-runtime/rust", "apps/mobile/modules/t3-native-controls/rust"]
     },
     {
