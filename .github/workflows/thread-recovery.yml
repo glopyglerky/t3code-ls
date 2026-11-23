@@ -67,6 +67,25 @@ jobs:
             -p t3-code-ls-storage --lib isolated_trial_upgrades_88_without_changing_the_stopped_source
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
             -p t3-code-ls-storage --lib native_selection_lock
+      - name: Exercise the sealed catalog with the retained helper
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-activation-')
+        run: |
+          retained="$RUNNER_TEMP/retained-trial-source"
+          git init --quiet "$retained"
+          git -C "$retained" fetch --quiet --depth=1 --no-tags \
+            https://github.com/glopyglerky/t3code-ls.git eb315803a299c9af0a63be4a44ae14099c146b7e
+          git -C "$retained" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$retained" rev-parse 'HEAD^{tree}')" = 0108ed98fabfc296b8a8a611238989d9ed744301
+          export CARGO_HOME="$RUNNER_TEMP/trial-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/retained-trial-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --locked \
+            --manifest-path "$retained/Cargo.toml" -p t3-code-ls-storage --bin t3-code-ls-db
+          export T3_TEST_RETAINED_TRIAL_HELPER="$CARGO_TARGET_DIR/debug/t3-code-ls-db"
+          sha256sum "$T3_TEST_RETAINED_TRIAL_HELPER"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/trial-target"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-storage --lib isolated_trial_upgrades_88_without_changing_the_stopped_source
       - name: Measure retained storage for the matched text event layouts
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t03-layout-')
         run: |
