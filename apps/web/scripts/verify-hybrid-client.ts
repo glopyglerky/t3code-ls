@@ -1430,6 +1430,8 @@ async function verifyTerminalContention(
     "  done",
     "}",
     'printf "%s %s\\n" "$1" "$$" > "$0.started"',
+    // Bash may emit invisible bracketed-paste controls as the foreground job starts.
+    "printf '\\n'",
     `burst 1 ${rowsPerBurst}`,
     `printf 'j45-ready:%s\\n' "$1"`,
     `IFS= read -r -t 60 input && [[ $input == '${token}' ]] || exit 1`,
@@ -1505,8 +1507,8 @@ async function verifyTerminalContention(
     await waitForSelectedTerminalText(page, input, new RegExp(`^j45-ready:${shell}\\r?$`, "mu"));
     await paste(input, token);
     const firstScreen = await waitForSelectedTerminalText(page, input, echoLine);
-    Assert.deepEqual(rows(firstScreen), firstRows);
-    Assert.deepEqual(rows(before.output), firstRows);
+    Assert.deepEqual(rows(firstScreen), firstRows, "The initial burst must render in order");
+    Assert.deepEqual(rows(before.output), firstRows, "The initial wire burst must be complete and ordered");
     const inputEcho = before.output.match(echoLine)?.[0]?.trimEnd();
     Assert.equal(inputEcho, token);
     Assert.ok(!before.output.includes("j45-accepted:"), "Echo must precede Enter and the script reply");
