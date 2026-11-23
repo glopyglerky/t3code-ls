@@ -277,11 +277,15 @@ async function click(label: string) {
 }
 
 async function mountWelcome() {
-  return render(
+  const screen = await render(
     <RegistryContext.Provider value={appAtomRegistry}>
       <WelcomePage environmentId={primaryId} onDone={state.onDone} />
     </RegistryContext.Provider>,
   );
+  if (import.meta.env.VITE_T3_CODE_LS_PAIRING_RENDERER === "dioxus") {
+    await vi.waitFor(() => expect(document.querySelector('[data-welcome-renderer="dioxus-wasm"] button')).not.toBeNull());
+  }
+  return screen;
 }
 
 // The mocked modules read `state`, so every test starts by replacing all of it.
