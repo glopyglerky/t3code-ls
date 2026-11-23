@@ -150,6 +150,14 @@ export type ScheduledWrite =
   | { readonly kind: "release_replay"; readonly delivery_id: string }
   | { readonly kind: "insert_pending"; readonly row: Row }
   | {
+      readonly kind: "insert_ready_relay";
+      readonly delivery_id: string;
+      readonly task_id: string;
+      readonly due_at: number;
+      readonly task_json: string;
+      readonly prompt_json: string;
+    }
+  | {
       readonly kind: "patch_pending";
       readonly delivery_id: string;
       readonly states?: ReadonlyArray<string>;
@@ -177,6 +185,7 @@ export const toRowsError = (operation: "read" | "write") => (cause: unknown) =>
   new ScheduledRowsError({ operation, cause });
 
 export interface ScheduledRowsShape {
+  readonly durableRelayWebhooks?: boolean;
   readonly read: <A>(
     query: ScheduledRead,
     response: Schema.Decoder<A>,

@@ -24,6 +24,11 @@ const REPLAYS: &str = "scheduled_task_webhook_replay_keys";
 const PENDING: &str = "scheduled_task_webhook_pending";
 const TABLES: [&str; 5] = [TASKS, DELIVERIES, RELAYS, REPLAYS, PENDING];
 const MARKER: &str = "scheduled-rows-v1";
+const DURABLE_RELAY_VERSION: u32 = 2;
+const RELAY_READY: &str = "relay_ready";
+const RELAY_RUNNING: &str = "relay_running";
+const RELAY_UNRESOLVED: &str = "relay_unresolved";
+const RELAY_DELIVERY_PREFIX: &str = "delivery:relay:";
 const PAGE: usize = 128;
 
 const TASK_COLUMNS: &[&str] = &[
@@ -177,6 +182,13 @@ pub enum ScheduledWrite {
     },
     InsertPending {
         row: Row,
+    },
+    InsertReadyRelay {
+        delivery_id: String,
+        task_id: String,
+        due_at: i64,
+        task_json: String,
+        prompt_json: String,
     },
     PatchPending {
         delivery_id: String,
@@ -725,7 +737,7 @@ fn returning(field: &str, value: Value) -> Value {
 fn rows(values: Vec<Row>) -> Value {
     Value::Array(values.into_iter().map(Value::Object).collect())
 }
-async fn ready(session: &mut Session) -> Result<()> {
+async fn ready(session: &mut Session) -> Result<Preparation> {
     let state: Preparation = session
         .transaction
         .get(&key(&session.catalog, "preparation"))
@@ -734,7 +746,7 @@ async fn ready(session: &mut Session) -> Result<()> {
         .map(decode)
         .transpose()?
         .ok_or_else(|| invalid("application scheduled rows are not prepared"))?;
-    if state.version != 1 {
+    if !matches!(state.version, 1 | DURABLE_RELAY_VERSION) {
         return Err(Error::IncompatibleStore);
     }
     if state.table != TABLES.len() {
@@ -754,20 +766,30 @@ async fn ready(session: &mut Session) -> Result<()> {
             return Err(Error::IncompatibleStore);
         }
     }
-    Ok(())
+    Ok(state)
 }
 
 impl Store {
-    pub async fn prepare_application_scheduled(&self) -> Result<PreparationResult> {
+    pub async fn prepare_application_scheduled(
+        &self,
+        durable_relay: bool,
+    ) -> Result<PreparationResult> {
         let mut limit = 32;
         loop {
-            match self.prepare_application_scheduled_batch(limit).await {
+            match self
+                .prepare_application_scheduled_batch(limit, durable_relay)
+                .await
+            {
                 Err(Error::ResourceLimit(_)) if limit > 1 => limit = (limit / 2).max(1),
                 result => return result,
             }
         }
     }
-    async fn prepare_application_scheduled_batch(&self, limit: usize) -> Result<PreparationResult> {
+    async fn prepare_application_scheduled_batch(
+        &self,
+        limit: usize,
+        durable_relay: bool,
+    ) -> Result<PreparationResult> {
         let mut tx = self
             .db
             .begin_reserved(Duration::from_secs(5), Duration::from_secs(300))
@@ -784,7 +806,10 @@ impl Store {
         let mut state = match tx.get(&state_key).await? {
             Some(bytes) => {
                 let state: Preparation = decode(&bytes)?;
-                if state.version != 1 || state.table > TABLES.len() {
+                if (state.version != 1
+                    && !(durable_relay && state.version == DURABLE_RELAY_VERSION))
+                    || state.table > TABLES.len()
+                {
                     return Err(Error::IncompatibleStore);
                 }
                 for name in TABLES {
@@ -885,7 +910,16 @@ impl ApplicationTransactions {
         let mut session = self.take(id)?;
         let result = async {
             session.transaction.require_write()?;
-            ready(&mut session).await?;
+            let mut state = ready(&mut session).await?;
+            // Older helpers reject this preparation version on open. Stage the
+            // fence with the first ready row so rollback leaves version 1 usable.
+            if state.version == 1 && matches!(&mutation, ScheduledWrite::InsertReadyRelay { .. }) {
+                state.version = DURABLE_RELAY_VERSION;
+                session
+                    .transaction
+                    .put(key(&session.catalog, "preparation"), encode(&state)?)
+                    .await?;
+            }
             write(&mut session.transaction, &session.catalog, mutation).await
         }
         .await;
@@ -1069,14 +1103,21 @@ async fn read(tx: &mut Transaction, c: &ApplicationCatalog, query: ScheduledRead
         }
         ScheduledRead::PendingCount { task_id } => {
             json!([{"count":scan_indexes(tx,c,PENDING,&format!("pending/task/{}/",hash(&task_id)),None,None).await?.iter()
-            .filter(|r|r.summary["task_id"]==task_id&&matches!(r.summary["state"].as_str(),Some("pending"|"dispatching"|"running"))).count()}])
+            .filter(|r|r.summary["task_id"]==task_id&&matches!(r.summary["state"].as_str(),Some("pending"|"dispatching"|"running"|RELAY_READY|RELAY_RUNNING))).count()}])
         }
         ScheduledRead::NextPending {} => {
             json!([{"due_at":scan_indexes(tx,c,PENDING,&format!("pending/state/{}/",hex("pending")),Some(1),None).await?.first().map(|r|r.summary["due_at"].clone()).unwrap_or(Value::Null)}])
         }
         ScheduledRead::ActivePendingTasks {} => {
             let mut ids = BTreeSet::new();
-            for state in ["dispatching", "running", "completed", "failed"] {
+            for state in [
+                "dispatching",
+                "running",
+                "completed",
+                "failed",
+                RELAY_READY,
+                RELAY_RUNNING,
+            ] {
                 for row in scan_indexes(
                     tx,
                     c,
@@ -1259,7 +1300,8 @@ async fn write(
                 None
             };
             if !pending.is_some_and(|p| {
-                p["state"] == "running" && (!match_pending_task || p["task_id"] == task_id)
+                matches!(p["state"].as_str(), Some("running" | RELAY_RUNNING))
+                    && (!match_pending_task || p["task_id"] == task_id)
             }) {
                 increment(&mut row)?;
             }
@@ -1338,6 +1380,14 @@ async fn write(
                     continue;
                 }
                 if retained >= limit {
+                    if load(tx, c, PENDING, &[row["delivery_id"].clone()])
+                        .await?
+                        .is_some_and(|pending| {
+                            matches!(pending["state"].as_str(), Some(RELAY_READY | RELAY_RUNNING))
+                        })
+                    {
+                        continue;
+                    }
                     remove(tx, c, DELIVERIES, &primary(DELIVERIES, &row)?).await?;
                 }
                 retained += 1;
@@ -1384,6 +1434,21 @@ async fn write(
             {
                 if string(&index.summary, "seen_at")? >= before.as_str() {
                     break;
+                }
+                let delivery_id = format!(
+                    "{RELAY_DELIVERY_PREFIX}{}",
+                    string(&index.summary, "relay_delivery_id")?
+                );
+                if load(tx, c, PENDING, &[json!(delivery_id)])
+                    .await?
+                    .is_some_and(|pending| {
+                        matches!(
+                            pending["state"].as_str(),
+                            Some(RELAY_READY | RELAY_RUNNING | RELAY_UNRESOLVED)
+                        )
+                    })
+                {
+                    continue;
                 }
                 remove(tx, c, RELAYS, &index.primary).await?;
             }
@@ -1436,6 +1501,12 @@ async fn write(
         }
         ScheduledWrite::InsertPending { mut row } => {
             row.entry("state").or_insert(json!("pending"));
+            if matches!(
+                row["state"].as_str(),
+                Some(RELAY_READY | RELAY_RUNNING | RELAY_UNRESOLVED)
+            ) {
+                return Err(invalid("durable relay rows require a relay admission"));
+            }
             validate_plain(PENDING, &row)?;
             if load(tx, c, PENDING, &primary(PENDING, &row)?)
                 .await?
@@ -1443,6 +1514,36 @@ async fn write(
             {
                 return Err(Error::DuplicateRecord);
             }
+            put(tx, c, PENDING, row).await?;
+            Ok(json!([]))
+        }
+        ScheduledWrite::InsertReadyRelay {
+            delivery_id,
+            task_id,
+            due_at,
+            task_json,
+            prompt_json,
+        } => {
+            let relay_id = delivery_id
+                .strip_prefix(RELAY_DELIVERY_PREFIX)
+                .ok_or_else(|| invalid("invalid relay delivery identity"))?;
+            let claim = load(tx, c, RELAYS, &[json!(relay_id)]).await?;
+            if !claim.is_some_and(|row| row["task_id"] == task_id) {
+                return Err(invalid("ready relay delivery requires its reservation"));
+            }
+            if load(tx, c, PENDING, &[json!(delivery_id)]).await?.is_some() {
+                return Err(Error::DuplicateRecord);
+            }
+            let row = Map::from_iter([
+                ("delivery_id".into(), json!(delivery_id)),
+                ("task_id".into(), json!(task_id)),
+                ("due_at".into(), json!(due_at)),
+                ("state".into(), json!(RELAY_READY)),
+                ("coalesce_key".into(), json!("")),
+                ("task_json".into(), json!(task_json)),
+                ("request_json".into(), json!(prompt_json)),
+                ("delivery_ids_json".into(), json!("[]")),
+            ]);
             put(tx, c, PENDING, row).await?;
             Ok(json!([]))
         }
@@ -1465,6 +1566,28 @@ async fn write(
                     .is_some_and(|ss| ss.iter().any(|s| s == state))
             {
                 return Ok(json!([]));
+            }
+            let next_state = changes.get("state").and_then(Value::as_str);
+            if matches!(state, RELAY_READY | RELAY_RUNNING | RELAY_UNRESOLVED)
+                || matches!(
+                    next_state,
+                    Some(RELAY_READY | RELAY_RUNNING | RELAY_UNRESOLVED)
+                )
+            {
+                let valid = match (state, next_state) {
+                    (RELAY_READY, Some(RELAY_RUNNING)) => {
+                        changes.len() == 2 && changes.contains_key("task_json")
+                    }
+                    (RELAY_RUNNING, Some(RELAY_UNRESOLVED)) => {
+                        changes.len() == 3
+                            && changes.get("task_json").and_then(Value::as_str) == Some("")
+                            && changes.get("request_json").and_then(Value::as_str) == Some("")
+                    }
+                    _ => false,
+                };
+                if !valid || append_delivery_id.is_some() {
+                    return Err(invalid("invalid durable relay transition"));
+                }
             }
             patch(PENDING, &mut row, &changes)?;
             if let Some(id) = append_delivery_id {
