@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   thread-recovery:
-    if: "!startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-macos26-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-')"
+    if: "!startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-macos26-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-installed-')"
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
@@ -76,7 +76,7 @@ jobs:
             src/state/threadOutboxDelivery.permissions.test.ts
 
   mobile-outbox-android:
-    if: "(startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-') || startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')) && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-macos26-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-')"
+    if: "(startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-') || startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')) && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-macos26-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-') && !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-installed-')"
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-') && 35 || 10 }}
     steps:
@@ -153,11 +153,11 @@ jobs:
 
   mobile-outbox-ios:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
-    runs-on: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-') && 'macos-26-intel' || 'macos-26' }}
+    runs-on: ${{ (startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-') || startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-installed-')) && 'macos-26-intel' || 'macos-26' }}
     timeout-minutes: 75
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
-      BUILD_HOST_ARCH: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-') && 'x86_64' || 'arm64' }}
+      BUILD_HOST_ARCH: ${{ (startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-app-intel-') || startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-installed-')) && 'x86_64' || 'arm64' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -219,6 +219,13 @@ jobs:
           uname -m > "$evidence/build-host-arch.txt"
           xcodebuild -version > "$evidence/xcode.txt"
           pod --version > "$evidence/cocoapods.txt"
+          configuration=Debug
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t12-outbox-native-ios-installed-* ]]; then
+            configuration=Release
+            export ENTRY_FILE="$GITHUB_WORKSPACE/apps/mobile/proof/outbox-installed.tsx"
+            export T3CODE_MOBILE_UPDATES_ENABLED=0
+            printf '%s\n' apps/mobile/proof/outbox-installed.tsx > "$evidence/fixture-entry.txt"
+          fi
           outbox=apps/mobile/modules/t3-native-controls/ios/T3Outbox.xcframework
           cp -R "$RUNNER_TEMP/T3Outbox.xcframework" "$outbox"
           pnpm --dir apps/mobile exec expo prebuild --platform ios --no-install
@@ -238,7 +245,7 @@ jobs:
           ) &
           progress_pid=$!
           trap 'kill "$progress_pid" 2>/dev/null || true; wait "$progress_pid" 2>/dev/null || true' EXIT
-          xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration Debug \
+          xcodebuild -workspace "$workspace" -scheme "$scheme" -configuration "$configuration" \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath "$derived" \
             CODE_SIGNING_ALLOWED=NO ENABLE_DEBUG_DYLIB=NO ONLY_ACTIVE_ARCH=NO ARCHS=arm64 -jobs 2 build \
             > "$evidence/xcodebuild.log" 2>&1 || {
@@ -250,7 +257,7 @@ jobs:
           kill "$progress_pid" 2>/dev/null || true
           wait "$progress_pid" 2>/dev/null || true
           trap - EXIT
-          applications=("$derived"/Build/Products/Debug-iphonesimulator/*.app)
+          applications=("$derived"/Build/Products/"$configuration"-iphonesimulator/*.app)
           test "${#applications[@]}" -eq 1
           test -d "${applications[0]}"
           executable="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "${applications[0]}/Info.plist")"
@@ -289,3 +296,42 @@ jobs:
           path: ${{ runner.temp }}/ios-outbox-simulator.tar.gz
           if-no-files-found: error
           retention-days: 3
+
+
+  mobile-outbox-ios-installed:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-ios-installed-')
+    needs: mobile-outbox-ios
+    runs-on: macos-26
+    timeout-minutes: 15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ios-outbox-evidence
+          path: ${{ runner.temp }}/ios-outbox-evidence
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: ios-outbox-simulator-arm64
+          path: ${{ runner.temp }}
+      - name: Exercise the installed Expo and Swift Rust boundary
+        run: |
+          node --test tools/run-ios-outbox-installed.test.mjs
+          node tools/run-ios-outbox-installed.mjs \
+            "$RUNNER_TEMP/ios-outbox-simulator.tar.gz" "$RUNNER_TEMP/ios-outbox-evidence" \
+            "$(git rev-parse HEAD)" "$(git rev-parse 'HEAD^{tree}')" \
+            "$RUNNER_TEMP/ios-outbox-installed" --admit-disposable-simulator
+      - name: Retain installed behavior receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ios-outbox-installed
+          path: ${{ runner.temp }}/ios-outbox-installed/
+          if-no-files-found: warn
+          retention-days: 14
