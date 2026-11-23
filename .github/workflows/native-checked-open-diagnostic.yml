@@ -1,0 +1,184 @@
+name: Native checked-open diagnostic
+
+on:
+  push:
+    branches: ["measure/t3code-ls-t16-checked-open-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  reopen:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 35
+    env:
+      NATIVE_COMMIT: 98726c9640a0c45f58310ce4180ac3e2d125f11c
+      NATIVE_TREE: 8c92451b40f5f7266596d446ab8e306541f4390e
+      PROBE_COMMIT: 126ee67adb8a0042d79c8bbc4ba600faa28026f8
+      PROBE_TREE: c38176b1d15a863f4b4c3829b90fcc98b5b032c0
+      OMDB_COMMIT: b2ff031398b1f0a793a352db7a699575b5d4d3d4
+      OMDB_TREE: 8297dd226d54782c5940f6b95cef3c8f59e92281
+      STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
+      WASM_BINDGEN_VERSION: "0.2.130"
+      WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      GIT_TERMINAL_PROMPT: "0"
+      NODE_OPTIONS: --max-old-space-size=6144
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Verify source and stage the disposable checkouts
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD^)" = "$NATIVE_COMMIT"
+          test "$(git rev-parse "${NATIVE_COMMIT}^{tree}")" = "$NATIVE_TREE"
+          test "$(uname -m)" = x86_64
+          scratch="$(mktemp -d "$RUNNER_TEMP/t16-checked-open.XXXXXX")"
+          printf '%s\n' "DIAGNOSTIC_WORK=$scratch" "CARGO_HOME=$scratch/cargo-home" \
+            "CARGO_TARGET_DIR=$scratch/target" >> "$GITHUB_ENV"
+          mkdir "$RUNNER_TEMP/checked-open-evidence" "$scratch/trials" "$scratch/bin"
+          evidence="$RUNNER_TEMP/checked-open-evidence"
+          printf 'before\t%s\n' "$(df -Pk "$RUNNER_TEMP" | awk 'END {print $4}')" > "$evidence/available-kib.tsv"
+          git worktree add --detach "$scratch/native" "$NATIVE_COMMIT"
+          git init --quiet "$scratch/probe"
+          git -C "$scratch/probe" fetch --no-tags --depth=1 https://github.com/glopyglerky/t3code-ls.git "$PROBE_COMMIT"
+          git -C "$scratch/probe" checkout --detach FETCH_HEAD
+          test "$(git -C "$scratch/probe" rev-parse HEAD)" = "$PROBE_COMMIT"
+          test "$(git -C "$scratch/probe" rev-parse 'HEAD^{tree}')" = "$PROBE_TREE"
+          cmp "$scratch/native/toolchain.lock.json" "$scratch/probe/toolchain.lock.json"
+          grep -Fx "source = \"git+https://github.com/glopyglerky/omdb?rev=$OMDB_COMMIT#$OMDB_COMMIT\"" "$scratch/native/Cargo.lock"
+          git -C "$scratch/probe" apply --unidiff-zero "$GITHUB_WORKSPACE/tools/diagnostics/t16-reopen-probe.patch"
+          mkdir -p "$scratch/probe/tools/src/bin"
+          cp tools/diagnostics/t16-checked-open.rs "$scratch/probe/tools/src/bin/t16-checked-open.rs"
+          sha256sum tools/diagnostics/t16-* > "$evidence/diagnostic-source.sha256"
+          test -x /usr/bin/strace || (sudo -n apt-get update && sudo -n apt-get install -y --no-install-recommends strace)
+          npm install --global --prefix "$scratch/npm" --cache "$scratch/npm-cache" pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          echo "$scratch/npm/bin" >> "$GITHUB_PATH"
+          (cd "$scratch/native" && node tools/install-toolchain.mjs --destination "$scratch/toolchain")
+      - name: Build the pinned packaged route and diagnostic
+        shell: bash
+        run: |
+          cd "$DIAGNOSTIC_WORK/native"
+          lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+          pnpm install --frozen-lockfile --store-dir "$DIAGNOSTIC_WORK/pnpm-store"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
+            --release --locked --target wasm32-unknown-unknown -p t3-code-ls-client-text-web
+          archive="wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl"
+          curl --fail --silent --show-error --location --max-time 120 --output "$DIAGNOSTIC_WORK/$archive.tar.gz" \
+            "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$WASM_BINDGEN_VERSION/$archive.tar.gz"
+          printf '%s  %s\n' "$WASM_BINDGEN_SHA256" "$DIAGNOSTIC_WORK/$archive.tar.gz" | sha256sum --check
+          tar -xzf "$DIAGNOSTIC_WORK/$archive.tar.gz" -O "$archive/wasm-bindgen" > "$DIAGNOSTIC_WORK/bin/wasm-bindgen"
+          chmod u+x "$DIAGNOSTIC_WORK/bin/wasm-bindgen"
+          "$DIAGNOSTIC_WORK/bin/wasm-bindgen" --target web --out-name composer_offsets \
+            --out-dir apps/web/public/client-text-wasm \
+            "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/t3_code_ls_client_text_web.wasm"
+          VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust pnpm --dir apps/web run build
+          T3_CODE_LS_IMPLEMENTATION=native node tools/build-native.mjs
+          node tools/check-hybrid.mjs --verify-binaries
+          T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$PWD/bin" \
+            pnpm --dir apps/server run build:bundle
+          evidence="$RUNNER_TEMP/checked-open-evidence"
+          (cd apps/server/dist && sha256sum bin.mjs native-bin/t3-code-ls-db native-bin/manifest.json) \
+            > "$evidence/packaged-artifacts.sha256"
+          omdb=("$CARGO_HOME"/git/checkouts/omdb-*/*)
+          test "${#omdb[@]}" -eq 1
+          test "$(git -C "${omdb[0]}" rev-parse HEAD)" = "$OMDB_COMMIT"
+          test "$(git -C "${omdb[0]}" rev-parse 'HEAD^{tree}')" = "$OMDB_TREE"
+          ln -s "$PWD/apps/server/dist/native-bin/t3-code-ls-db" "$DIAGNOSTIC_WORK/bin/packaged-db"
+          cd "$DIAGNOSTIC_WORK/probe"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked -p t3code-ls-tools --bin t16-checked-open
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --release --locked -p t3code-ls-tools \
+            --bin t3code-ls-tools --bin t16-checked-open
+          install -m 755 "$CARGO_TARGET_DIR/release/t16-checked-open" "$DIAGNOSTIC_WORK/bin/t16-checked-open"
+          (cd "$CARGO_TARGET_DIR/release" && sha256sum t3code-ls-tools t16-checked-open) > "$evidence/probes.sha256"
+          jq '{release,compiler_revision,coordinator_revision,archive_sha256,checked_members}' \
+            "$DIAGNOSTIC_WORK/toolchain/installation-proof.json" > "$evidence/toolchain.json"
+      - name: Pair an untraced reopen with a helper-only trace
+        shell: bash
+        run: |
+          umask 077
+          scratch="$DIAGNOSTIC_WORK"
+          evidence="$RUNNER_TEMP/checked-open-evidence"
+          probe="$CARGO_TARGET_DIR/release/t3code-ls-tools"
+          launcher="$scratch/bin/t16-checked-open"
+          bundle="$scratch/native/apps/server/dist/bin.mjs"
+          chrome="$(command -v google-chrome)"
+          driver="$(command -v chromedriver || printf '%s/chromedriver' "$CHROMEWEBDRIVER")"
+          test -x "$driver"
+          jq -n --arg diagnostic "$GITHUB_SHA" --arg native "$NATIVE_COMMIT" --arg nativeTree "$NATIVE_TREE" \
+            --arg probe "$PROBE_COMMIT" --arg probeTree "$PROBE_TREE" --arg omdb "$OMDB_COMMIT" \
+            --arg omdbTree "$OMDB_TREE" --arg stock "$STOCK_COMMIT" --arg kernel "$(uname -r)" \
+            --arg strace "$(/usr/bin/strace --version | sed -n '1p')" --arg node "$(node --version)" \
+            --arg chrome "$("$chrome" --version)" --arg driver "$("$driver" --version)" \
+            --arg runner "${ImageOS:-unknown}/${ImageVersion:-unknown}" --arg load "$(uptime)" --argjson cpus "$(nproc)" \
+            '{journey:"J02",diagnostic:$diagnostic,native:$native,nativeTree:$nativeTree,probe:$probe,probeTree:$probeTree,
+              omdb:$omdb,omdbTree:$omdbTree,stockDenominatorReference:$stock,durability:"omdb Immediate",
+              kernel:$kernel,strace:$strace,node:$node,chrome:$chrome,driver:$driver,runner:$runner,load:$load,cpus:$cpus,
+              cache:"same browser per seed and reopen, unmanaged filesystem cache"}' > "$evidence/inputs.json"
+          printf 'round\tposition\tmode\tdescriptor_us\tpre_reopen_db_bytes\n' > "$evidence/reopen.tsv"
+          printf 'round\tplain_descriptor_us\ttraced_descriptor_us\ttraced_minus_plain_us\n' > "$evidence/overhead.tsv"
+          for round in 1 2 3 4; do
+            modes=(plain trace)
+            if (( round % 2 == 0 )); then modes=(trace plain); fi
+            for position in 0 1; do
+              mode="${modes[$position]}"
+              trial="$scratch/trials/$round-$mode"
+              sample="$evidence/reopen-$round-$mode.json"
+              override=()
+              if [[ "$mode" == trace ]]; then override=("T3_CODE_LS_DIAGNOSTIC_DB=$launcher"); fi
+              sudo -n unshare --net --pid --fork --mount-proc --kill-child -- bash -euc '
+                ip link set dev lo up
+                user="$1"; shift
+                exec runuser -u "$user" -- "$@"
+              ' _ "$(id -un)" env -u T3_CODE_LS_DIAGNOSTIC_DB "${override[@]}" \
+                "$probe" probe-reopen "$(command -v node)" "$bundle" "$trial" "$driver" "$chrome" native \
+                | tee "$sample" > /dev/null
+              jq -er --argjson round "$round" --argjson position "$((position + 1))" --arg mode "$mode" '
+                select(.journey == "J02" and .profile == "native" and .native_lookups == false and .persistence_spans == null
+                  and .snapshot.valid and .snapshot.threadCount == 32 and .snapshot.messageCount == 200
+                  and .fixture.total_messages == 6400 and .database_migration > 0 and .database_bytes_at_reopen > 0
+                  and .migration_evidence.source == "stopped-native-catalog"
+                  and any(.resources.server.processes[]; .role == "native-database-helper"))
+                | [$round,$position,$mode,.descriptor_micros,.database_bytes_at_reopen] | @tsv' "$sample" >> "$evidence/reopen.tsv"
+              if [[ "$mode" == trace ]]; then
+                "$launcher" summarize "$trial" > "$evidence/checked-open-$round.tsv"
+              else
+                test ! -e "$trial/checked-open-trace"
+              fi
+              rm -r -- "$trial"
+            done
+            match='{fixture,database_migration,saved_thread_sequence,snapshot:(.snapshot | {valid,threadCount,messageCount,selectedThreadId})}'
+            plain="$evidence/reopen-$round-plain.json"
+            trace="$evidence/reopen-$round-trace.json"
+            diff -u <(jq -c "$match" "$plain") <(jq -c "$match" "$trace")
+            jq -sr --argjson round "$round" '
+              map(.descriptor_micros) as [$plain,$traced] | [$round,$plain,$traced,$traced - $plain] | @tsv' \
+              "$plain" "$trace" >> "$evidence/overhead.tsv"
+          done
+      - name: Remove task-owned generated files and record available space
+        if: always() && env.DIAGNOSTIC_WORK != ''
+        shell: bash
+        run: |
+          case "$DIAGNOSTIC_WORK" in "$RUNNER_TEMP"/t16-checked-open.??????) ;; *) exit 1 ;; esac
+          if [[ -f "$DIAGNOSTIC_WORK/native/.git" ]]; then
+            git worktree remove --force "$DIAGNOSTIC_WORK/native"
+          fi
+          rm -r -- "$DIAGNOSTIC_WORK"
+          printf 'after\t%s\n' "$(df -Pk "$RUNNER_TEMP" | awk 'END {print $4}')" >> "$RUNNER_TEMP/checked-open-evidence/available-kib.tsv"
+      - name: Retain receipts and aggregate syscall observations
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: checked-open-evidence
+          path: ${{ runner.temp }}/checked-open-evidence/
+          if-no-files-found: error
+          retention-days: 14

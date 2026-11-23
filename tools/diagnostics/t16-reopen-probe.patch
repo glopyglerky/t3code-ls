@@ -1,0 +1,15 @@
+--- a/tools/src/startup_probe/reopen.rs
++++ b/tools/src/startup_probe/reopen.rs
+@@ -139,0 +140,3 @@
++    let database_bytes_at_reopen = native
++        .then(|| fs::metadata(state.join("statev2.omdb")).map(|metadata| metadata.len()))
++        .transpose()?;
+@@ -142,0 +146,6 @@
++    if let Some(helper) = env::var_os("T3_CODE_LS_DIAGNOSTIC_DB") {
++        if mode_label != "native" || trace_spans {
++            return Err("the checked-open diagnostic requires native reopen without server spans".into());
++        }
++        command.env("T3_CODE_LS_DB_EXECUTABLE", Path::new(&helper).canonicalize()?);
++    }
+@@ -240,0 +250 @@
++            "database_bytes_at_reopen": database_bytes_at_reopen,
