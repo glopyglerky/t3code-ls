@@ -53,7 +53,10 @@ Assert.ok(
   outputPath && Path.isAbsolute(outputPath) && archiveEntry && Path.isAbsolute(archiveEntry),
 );
 Assert.equal(extra.length, 0);
-Assert.ok(browserFlag === undefined || browserFlag === "--browser");
+Assert.ok(browserFlag === undefined || browserFlag === "--browser" ||
+  browserFlag === "--browser-dioxus" || browserFlag === "--browser-dioxus-fallback");
+const renderer = browserFlag === "--browser-dioxus" ? "dioxus" :
+  browserFlag === "--browser-dioxus-fallback" ? "dioxus-fallback" : undefined;
 Assert.equal(process.platform, "linux");
 Assert.equal(process.arch, "x64");
 Assert.deepEqual(
@@ -183,6 +186,9 @@ try {
     cargoLock: hashFile(Path.join(root, "Cargo.lock")),
     pnpmLock: hashFile(Path.join(root, "pnpm-lock.yaml")),
   };
+  const expectedWasmHash = renderer === undefined ? undefined :
+    hashFile(Path.join(Path.dirname(entry), "client/pairing-wasm/local_pairing_bg.wasm"));
+  if (renderer !== undefined) report.guestNameSelection = { renderer, expectedWasmHash };
 
   checkpoint("start isolated relay");
   const home = Path.join(scratch, "home");
@@ -585,7 +591,7 @@ try {
   const afterRevocation = read();
   await refuse(await session(reopened, cookie), 403, "inactive");
   Assert.deepEqual(read(), afterRevocation);
-  if (browserFlag === "--browser") {
+  if (browserFlag !== undefined) {
     checkpoint("redeem in Chromium and validate the secure browser cookie");
     const { openPackagedGuestBrowser } = await import("../../web/scripts/packaged-guest-browser.ts");
     const browser = await openPackagedGuestBrowser({
@@ -596,6 +602,8 @@ try {
       cert: FS.readFileSync(certificate),
       key: FS.readFileSync(key),
       targetPort: reopenPort,
+      renderer,
+      expectedWasmHash,
     });
     try {
       const browserCommitted = read();
@@ -625,7 +633,10 @@ try {
       active = undefined;
       Assert.deepEqual(read(), browserRevoked);
       report.browser = { chromium: browser.chromium, secureScopedCookie: true, keyboardJoined: true,
-        recoveredWithoutCredential: true, revokedAfterProcessReopen: true };
+        recoveredWithoutCredential: true, revokedAfterProcessReopen: true,
+        renderer: browser.renderer, selected: browser.selected, wasmSha256: browser.wasmSha256,
+        wasmRequests: browser.wasmRequests, blockedWasmRequests: browser.blockedWasmRequests,
+        exactUnicodeName: true, singleRedemptionRequest: true, credentialBoundaryPreserved: true };
     } finally {
       await browser.close();
     }

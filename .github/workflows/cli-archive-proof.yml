@@ -38,6 +38,7 @@ jobs:
       NODE_OPTIONS: --max-old-space-size=6144
       VP_REMOTE_CACHE: "off"
       T3_CODE_LS_IMPLEMENTATION: native
+      DIOXUS_GUEST_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t10-packaged-guest-browser-dioxus-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -55,6 +56,28 @@ jobs:
         run: |
           node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/packaged-peer-links-tsconfig.json
           pnpm exec vp test run --maxWorkers 2 apps/server/src/peer/PeerLinks.test.ts
+      - name: Prepare the pinned optional guest form binding
+        if: env.DIOXUS_GUEST_PROOF == 'true'
+        env:
+          WASM_BINDGEN_VERSION: "0.2.130"
+          WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CARGO_HOME="$RUNNER_TEMP/cli-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/cli-target"
+          archive="wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive.tar.gz" \
+            "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$WASM_BINDGEN_VERSION/$archive.tar.gz"
+          printf '%s  %s\n' "$WASM_BINDGEN_SHA256" "$RUNNER_TEMP/$archive.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$archive.tar.gz" -O "$archive/wasm-bindgen" > "$RUNNER_TEMP/guest-wasm-bindgen"
+          chmod u+x "$RUNNER_TEMP/guest-wasm-bindgen"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
+            --release --locked --target wasm32-unknown-unknown -p t3-code-ls-web-pairing
+          test ! -e apps/web/public/pairing-wasm
+          "$RUNNER_TEMP/guest-wasm-bindgen" --target web --out-name local_pairing \
+            --out-dir apps/web/public/pairing-wasm \
+            "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/t3_code_ls_web_pairing.wasm"
       - name: Build and run the native archive
         shell: bash
         run: |
@@ -72,6 +95,9 @@ jobs:
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
             build --locked --release --manifest-path native/resource-monitor/Cargo.toml
           mkdir -p "$RUNNER_TEMP/cli-proof"
+          if [[ "$DIOXUS_GUEST_PROOF" == true ]]; then
+            export VITE_T3_CODE_LS_GUEST_NAME_RENDERER=dioxus
+          fi
           pnpm --dir apps/web run build
           pnpm exec node apps/server/scripts/cli.ts build --verbose
           pnpm exec node apps/server/scripts/cli.ts build-exe --verbose
@@ -255,6 +281,7 @@ jobs:
           test -x "$entry"
           args=()
           case "$GITHUB_REF_NAME" in
+            candidate/t3code-ls-t10-packaged-guest-browser-dioxus-*) args=(--browser-dioxus) ;;
             candidate/t3code-ls-t10-packaged-guest-browser-*|candidate/t3code-ls-t02-bundled-native-integrated-*) args=(--browser) ;;
           esac
           sudo -n unshare --net -- bash -euc '
@@ -268,6 +295,20 @@ jobs:
             jq -e '.status == "passed" and .browser.secureScopedCookie and .browser.keyboardJoined and
               .browser.recoveredWithoutCredential and .browser.revokedAfterProcessReopen' \
               "$RUNNER_TEMP/cli-proof/guest-authorization/proof.json"
+          fi
+          if [[ "$DIOXUS_GUEST_PROOF" == true ]]; then
+            jq -e '.browser.renderer == "dioxus" and .browser.selected == "dioxus-wasm" and
+              .browser.wasmSha256 == .guestNameSelection.expectedWasmHash and
+              .browser.exactUnicodeName and .browser.singleRedemptionRequest and .browser.credentialBoundaryPreserved' \
+              "$RUNNER_TEMP/cli-proof/guest-authorization/proof.json"
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- "$2" apps/server/scripts/verify-packaged-guest-authorization.ts "$3" "$4" --browser-dioxus-fallback
+            ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/cli-proof/guest-dioxus-fallback" "$entry"
+            jq -e '.status == "passed" and .browser.renderer == "dioxus-fallback" and .browser.selected == "retained" and
+              .browser.secureScopedCookie and .browser.keyboardJoined and .browser.recoveredWithoutCredential and
+              .browser.revokedAfterProcessReopen and .browser.exactUnicodeName and .browser.singleRedemptionRequest and
+              .browser.credentialBoundaryPreserved' "$RUNNER_TEMP/cli-proof/guest-dioxus-fallback/proof.json"
           fi
       - name: Verify linked trust across two packaged server reopens
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t10-packaged-peer-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
@@ -297,6 +338,13 @@ jobs:
           name: cli-archive-proof
           path: ${{ runner.temp }}/cli-proof/
           retention-days: 14
+      - name: Remove the optional guest binding staging
+        if: always() && env.DIOXUS_GUEST_PROOF == 'true'
+        shell: bash
+        run: |
+          rm -rf -- apps/web/public/pairing-wasm
+          rm -f -- "$RUNNER_TEMP/guest-wasm-bindgen" \
+            "$RUNNER_TEMP/wasm-bindgen-0.2.130-x86_64-unknown-linux-musl.tar.gz"
 
   linux-arm64-archive:
     if: startsWith(github.ref_name, 'candidate/t3code-ls-t14-linux-arm64-cli-')
