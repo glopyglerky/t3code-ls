@@ -19,24 +19,26 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<()> {
     let args: Vec<_> = args.collect();
-    let (node, bundle, trial, browsers, implementation, replay) = match args.as_slice() {
-        [node, bundle, trial] if !conversation => (node, bundle, trial, None, None, None),
+    let (node, bundle, trial, browsers, implementation, replay, trace) = match args.as_slice() {
+        [node, bundle, trial] if !conversation => (node, bundle, trial, None, None, None, None),
         [node, bundle, trial, driver, chrome] if !conversation => {
-            (node, bundle, trial, Some((driver, chrome)), None, None)
+            (node, bundle, trial, Some((driver, chrome)), None, None, None)
         }
         [node, bundle, trial, driver, chrome, mode] if !conversation && mode == "fork-sqlite" => {
-            (node, bundle, trial, Some((driver, chrome)), Some("upstream"), None)
+            (node, bundle, trial, Some((driver, chrome)), Some("upstream"), None, None)
         }
-        [node, bundle, trial, driver, chrome, replay, mode] if conversation => (
+        [node, bundle, trial, driver, chrome, replay, mode, trace @ ..] if conversation && trace.len() <= 1 => (
             node, bundle, trial, Some((driver, chrome)),
             match mode.to_str() {
                 Some("stock") => None,
                 Some("native") => Some("native"),
-                _ => return Err("conversation implementation must be stock or native".into()),
+                Some("fork-sqlite") => Some("upstream"),
+                _ => return Err("conversation implementation must be stock, native or fork-sqlite".into()),
             },
             Some(fs::canonicalize(replay)?),
+            trace.first().map(fs::canonicalize).transpose()?,
         ),
-        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|native".into()),
+        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|native|fork-sqlite [TRACE_WRAPPER]".into()),
         _ => return Err("usage: t3code-ls-tools probe-startup NODE BUNDLE NEW_TRIAL_DIRECTORY [CHROMEDRIVER CHROME [fork-sqlite]]".into()),
     };
     let node = fs::canonicalize(node)?;
@@ -47,6 +49,7 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
     let base = trial.join("profile");
     let state = base.join("userdata");
     let workspace = trial.join("conversation-fixture");
+    let trace_log = trial.join("provider-trace.ndjson");
     if let Some(replay) = &replay {
         fs::create_dir_all(&state)?;
         fs::create_dir(&workspace)?;
@@ -65,7 +68,10 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
                         "config": {
                             "source": "local",
                             "commandPath": node,
-                            "commandArgs": [replay],
+                            "commandArgs": match &trace {
+                                Some(trace) => vec![trace, replay, &trace_log],
+                                None => vec![replay],
+                            },
                         }
                     }
                 }
@@ -135,6 +141,25 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
         None
     };
     child.stop()?;
+    let provider_trace = if trace.is_some() {
+        let entries = fs::read_to_string(trace_log)?
+            .lines()
+            .map(serde_json::from_str::<Value>)
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for phase in ["prompt", "first_chunk", "prompt_result"] {
+            if entries
+                .iter()
+                .filter(|entry| entry["phase"] == phase)
+                .count()
+                != 1
+            {
+                return Err(format!("expected one {phase} in the provider trace").into());
+            }
+        }
+        Some(entries)
+    } else {
+        None
+    };
     let profile = match (implementation, browser.is_some()) {
         (Some("native"), _) => "new-native-linux-browser-profile",
         (Some("upstream"), _) => "new-fork-linux-browser-profile",
@@ -151,6 +176,7 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
             "html_micros": html_micros,
             "database_migration": database_migration,
             "browser": browser,
+            "provider_trace": provider_trace,
         })
     );
     Ok(())

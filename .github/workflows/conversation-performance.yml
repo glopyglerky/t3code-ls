@@ -25,6 +25,7 @@ jobs:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
       GIT_TERMINAL_PROMPT: "0"
+      TRACE_CONVERSATION: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-diagnose-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -105,6 +106,13 @@ jobs:
           printf '%s  %s\n' 560623d69777188138a1d9a7fbc0cc994f4067eb2a7d30ae113b0667456ec45e \
             "stock/$transcript" | sha256sum --check
           sha256sum "$probe" "$replay" "stock/$transcript" > "$evidence/fixture.sha256"
+          trace=()
+          pairs=8
+          if [[ "$TRACE_CONVERSATION" == true ]]; then
+            trace=("$PWD/measurement/tools/src/startup_probe/browser/conversation-provider-trace.mjs")
+            sha256sum "${trace[0]}" >> "$evidence/fixture.sha256"
+            pairs=6
+          fi
           for profile in stock candidate; do
             (
               cd "$profile"
@@ -117,35 +125,44 @@ jobs:
             --arg probe "$(git -C measurement rev-parse HEAD)" --arg node "$(node --version)" \
             --arg chrome "$("$chrome" --version)" --arg driver "$("$driver" --version)" \
             --arg image "${ImageOS:-unknown}/${ImageVersion:-unknown}" --arg kernel "$(uname -r)" \
-            --arg cpu "$(LC_ALL=C lscpu | sed -n 's/^Model name:[[:space:]]*//p')" \
+            --arg cpu "$(LC_ALL=C lscpu | sed -n 's/^Model name:[[:space:]]*//p')" --argjson trace "$TRACE_CONVERSATION" \
             --arg systemLoad "$(uptime)" --argjson cpus "$(nproc)" \
-            '{stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
+            '{stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},forkSqliteControl:$trace,providerTrace:$trace,probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
             > "$evidence/inputs.json"
           printf 'pair\tposition\tprofile\tfirst_visible_ms\tterminal_ms\tmax_frame_gap_ms\n' > "$evidence/trials.tsv"
-          for pair in 1 2 3 4 5 6 7 8; do
+          for ((pair=1; pair<=pairs; pair++)); do
             profiles=(stock candidate)
             if (( pair % 2 == 0 )); then profiles=(candidate stock); fi
-            for position in 0 1; do
-              profile="${profiles[$position]}"
+            if [[ "$TRACE_CONVERSATION" == true ]]; then profiles=(stock candidate fork-sqlite); fi
+            for ((position=0; position<${#profiles[@]}; position++)); do
+              index="$position"
+              if [[ "$TRACE_CONVERSATION" == true ]]; then index="$(((position + pair - 1) % 3))"; fi
+              profile="${profiles[$index]}"
               trial="$pair-$profile"
               result="$evidence/sample-$trial.json"
               mode=stock
+              bundle_profile="$profile"
               if [[ "$profile" == candidate ]]; then mode=native; fi
+              if [[ "$profile" == fork-sqlite ]]; then mode=fork-sqlite; bundle_profile=candidate; fi
               sudo -n unshare --net -- bash -euc '
                 ip link set dev lo up
                 user="$1"
                 shift
                 exec runuser -u "$user" -- "$@"
               ' _ "$(id -un)" "$probe" probe-conversation "$node_path" \
-                "$PWD/$profile/apps/server/dist/bin.mjs" "$RUNNER_TEMP/conversation-trial-$trial" \
-                "$driver" "$chrome" "$replay" "$mode" | tee "$result" > /dev/null
+                "$PWD/$bundle_profile/apps/server/dist/bin.mjs" "$RUNNER_TEMP/conversation-trial-$trial" \
+                "$driver" "$chrome" "$replay" "$mode" "${trace[@]}" | tee "$result" > /dev/null
               jq -er --argjson pair "$pair" --argjson position "$((position + 1))" --arg profile "$profile" \
-                'select(.browser.loaded_rust_composer == ($profile == "candidate") and .browser.conversation.snapshot.valid) | .browser.conversation.timing | [$pair,$position,$profile,.firstVisibleMillis,.terminalMillis,.maxFrameGapMillis] | @tsv' \
+                'select(.browser.loaded_rust_composer == ($profile != "stock") and .browser.conversation.snapshot.valid) | .browser.conversation.timing | [$pair,$position,$profile,.firstVisibleMillis,.terminalMillis,.maxFrameGapMillis] | @tsv' \
                 "$result" >> "$evidence/trials.tsv"
               rm -r "$RUNNER_TEMP/conversation-trial-$trial"
             done
             diff <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-stock.json") \
               <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-candidate.json")
+            if [[ "$TRACE_CONVERSATION" == true ]]; then
+              diff <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-stock.json") \
+                <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-fork-sqlite.json")
+            fi
           done
       - name: Retain exact artifacts and matched observations
         if: always()
