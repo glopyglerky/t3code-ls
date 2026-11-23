@@ -33,7 +33,9 @@ import {
 
 const root = FS.realpathSync(Path.resolve(import.meta.dirname, "../../.."));
 const outputPath = process.argv[2];
-Assert.ok(outputPath && Path.isAbsolute(outputPath) && process.argv.length === 3);
+const boundary = process.argv[3] ?? "before-claim";
+Assert.ok(outputPath && Path.isAbsolute(outputPath) && process.argv.length <= 4);
+Assert.ok(boundary === "before-claim" || boundary === "after-claim");
 const proof = Path.join(FS.realpathSync(Path.dirname(outputPath)), Path.basename(outputPath));
 Assert.ok(Path.relative(root, proof).startsWith(`..${Path.sep}`));
 Assert.equal(process.platform, "linux");
@@ -46,7 +48,7 @@ const helper = Path.join(root, "apps/server/dist/native-bin/t3-code-ls-db");
 const hash = (data: string | Uint8Array) => Crypto.createHash("sha256").update(data).digest("hex");
 const write = (path: string, data: unknown) =>
   FS.writeFileSync(path, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
-const report: Record<string, unknown> = { status: "running" };
+const report: Record<string, unknown> = { status: "running", boundary };
 const checkpoint = (phase: string) => {
   report.phase = phase;
   write(Path.join(proof, "proof.json"), report);
@@ -124,7 +126,7 @@ try {
   FS.writeFileSync(Path.join(secrets, `${CLOUD_MINT_PUBLIC_KEY}.bin`), publicKey, { mode: 0o600 });
   FS.writeFileSync(Path.join(secrets, `${RELAY_ISSUER_SECRET}.bin`), issuer, { mode: 0o600 });
 
-  const relayId = "fixture-relay-admission-restart";
+  const relayId = `fixture-relay-${boundary}-restart`;
   const deliveryId = ScheduledTaskWebhookDeliveryId.make(`delivery:relay:${relayId}`);
   const gate = Path.join(scratch, "relay-crash-gate.mjs");
   const witnessPath = Path.join(proof, "ready.json");
@@ -133,7 +135,9 @@ try {
   FS.writeFileSync(gate, `#!${process.execPath}\n` + FS.readFileSync(
     new URL("./scheduled-relay-crash-gate.mjs", import.meta.url), "utf8",
   ), { mode: 0o700 });
-  write(Path.join(scratch, "relay-crash-gate.json"), { executable: helper, database, deliveryId, witness: witnessPath });
+  write(Path.join(scratch, "relay-crash-gate.json"), {
+    executable: helper, database, deliveryId, witness: witnessPath, boundary,
+  });
 
   const start = async (name: string, executable?: string) => {
     owned = startPackagedServer({
@@ -195,7 +199,7 @@ try {
     },
   }).pipe(Effect.provide(NodeCrypto.layerSignature)));
   const marker = "preserved café 🦀";
-  const post = async (origin: string, outcome: "accepted" | "duplicate") => {
+  const post = async (origin: string, outcome: "accepted" | "duplicate" | "unresolved") => {
     const response = await fetch(new URL(webhookPath!, origin), {
       method: "POST",
       headers: {
@@ -208,9 +212,11 @@ try {
       redirect: "error",
       signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]),
     });
-    Assert.equal(response.status, 202);
+    Assert.equal(response.status, outcome === "unresolved" ? 500 : 202);
     Assert.equal(response.headers.get("x-t3-hook-outcome"), outcome);
-    Assert.deepEqual(await response.json(), { deliveryId });
+    Assert.deepEqual(await response.json(), outcome === "unresolved"
+      ? { error: "delivery_unresolved", deliveryId }
+      : { deliveryId });
     return response.status;
   };
 
@@ -220,50 +226,66 @@ try {
   const witness = JSON.parse(FS.readFileSync(witnessPath, "utf8"));
   Assert.equal(witness.deliveryId, deliveryId);
   Assert.equal(witness.admissionCommitted, true);
-  Assert.equal(witness.workerTransitionForwarded, false);
+  Assert.equal(witness.workerClaimCommitted, boundary === "after-claim");
+  Assert.equal(witness.workerClaimAcknowledged, false);
   Assert.match(witness.promptSha256, /^[0-9a-f]{64}$/u);
   const exit = await initial.stop("SIGKILL");
   owned = undefined;
   Assert.deepEqual(exit, { code: null, signal: "SIGKILL" });
   report.processExit = exit;
 
-  checkpoint("reopen without the gate and recover ready work");
+  const expectedTaskStatus = boundary === "before-claim" ? "succeeded" : "failed";
+  checkpoint("reopen without the gate and settle the durable delivery");
   const reopened = await start("reopened");
   const resumed = await authenticatePackagedServer(reopened, abort.signal);
   const settled = await resumed.rpc((rpc) => rpc[WS_METHODS.scheduledTasksSubscribe]({}).pipe(
     Stream.map(({ tasks }) => tasks.find(({ id }) => id === task.id)),
-    Stream.filter((candidate) => candidate !== undefined && candidate.lastRunStatus === "succeeded"),
+    Stream.filter((candidate) => candidate !== undefined && candidate.lastRunStatus === expectedTaskStatus),
     Stream.runHead,
   ));
   Assert.ok(Option.isSome(settled) && settled.value);
-  Assert.equal(settled.value.runCount, 1);
-  report.duplicateStatuses = await Promise.all([post(reopened.origin, "duplicate"), post(reopened.origin, "duplicate")]);
+  const expectedRunCount = boundary === "before-claim" ? 1 : 0;
+  Assert.equal(settled.value.runCount, expectedRunCount);
+  const retryOutcome = boundary === "before-claim" ? "duplicate" : "unresolved";
+  report.retryStatuses = await Promise.all([post(reopened.origin, retryOutcome), post(reopened.origin, retryOutcome)]);
   const { delivery } = await resumed.rpc((rpc) => rpc[WS_METHODS.scheduledTasksGetWebhookDelivery]({
     id: task.id, deliveryId, acceptAnyOutcome: true,
   }));
-  Assert.equal(delivery.outcome, "accepted");
-  Assert.equal(delivery.error, null);
+  if (boundary === "before-claim") {
+    Assert.equal(delivery.outcome, "accepted");
+    Assert.equal(delivery.error, null);
+  } else {
+    Assert.equal(delivery.outcome, "dispatch_failed");
+    Assert.equal(delivery.error, "Dispatch could not be confirmed. This delivery will not run again automatically.");
+    Assert.equal(settled.value.lastRunError, delivery.error);
+  }
   Assert.ok(delivery.renderedPrompt?.includes(marker));
   Assert.equal(hash(delivery.renderedPrompt), witness.promptSha256);
 
-  checkpoint("verify one completed replay with the admitted prompt");
+  checkpoint("verify the thread matches the durable delivery disposition");
   const readProjection = () => resumed.rpc((rpc) => rpc[ORCHESTRATION_V2_WS_METHODS.getThreadProjection]({ threadId }));
   let final = await readProjection();
-  for (let i = 0; final.runs[0]?.status !== "completed" && i < 40; i++) {
-    await delay(250, undefined, { signal: abort.signal });
-    final = await readProjection();
+  if (boundary === "before-claim") {
+    for (let i = 0; final.runs[0]?.status !== "completed" && i < 40; i++) {
+      await delay(250, undefined, { signal: abort.signal });
+      final = await readProjection();
+    }
+    Assert.equal(final.runs[0]?.status, "completed");
+    const user = final.messages.filter((message) => message.role === "user");
+    Assert.equal(user.length, 1);
+    Assert.equal(user[0]!.id, `scheduled-task-message:${task.id}:webhook:${deliveryId}`);
+    Assert.equal(user[0]!.scheduledTaskId, task.id);
+    Assert.equal(user[0]!.text, delivery.renderedPrompt);
+    Assert.ok(final.messages.some((message) => message.role === "assistant" && message.text.includes("todo list fixture complete")));
+  } else {
+    Assert.deepEqual(final.messages, []);
   }
-  Assert.equal(final.runs.length, 1);
-  Assert.equal(final.runs[0]?.status, "completed");
-  const user = final.messages.filter((message) => message.role === "user");
-  Assert.equal(user.length, 1);
-  Assert.equal(user[0]!.id, `scheduled-task-message:${task.id}:webhook:${deliveryId}`);
-  Assert.equal(user[0]!.scheduledTaskId, task.id);
-  Assert.equal(user[0]!.text, delivery.renderedPrompt);
-  Assert.ok(final.messages.some((message) => message.role === "assistant" && message.text.includes("todo list fixture complete")));
+  Assert.equal(final.runs.length, expectedRunCount);
   Assert.ok(FS.lstatSync(database).isFile());
   assertNoApplicationSqlite(baseDir);
-  report.durableDelivery = { deliveryId, outcome: delivery.outcome, runCount: 1, promptSha256: witness.promptSha256 };
+  report.durableDelivery = {
+    deliveryId, outcome: delivery.outcome, runCount: expectedRunCount, promptSha256: witness.promptSha256,
+  };
   report.status = "passed";
 } catch (error) {
   const details = error instanceof Error ? (error.stack ?? error.message) : String(error);

@@ -199,14 +199,16 @@ jobs:
             exec runuser -u "$1" -- "$2" \
               apps/server/scripts/verify-provider-import-recovery.ts "$3"
           ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/built-composer-proof/provider-import"
-      - name: Recover an acknowledged relay delivery after packaged server termination
+      - name: Verify recovery before and after the durable relay worker claim
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t09-relay-')
         run: |
-          sudo -n unshare --net -- bash -euc '
-            ip link set dev lo up
-            exec runuser -u "$1" -- "$2" \
-              apps/server/scripts/verify-scheduled-relay-recovery.ts "$3"
-          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/built-composer-proof/scheduled-relay"
+          for boundary in before-claim after-claim; do
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- "$2" \
+                apps/server/scripts/verify-scheduled-relay-recovery.ts "$3" "$4"
+            ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/built-composer-proof/scheduled-relay-$boundary" "$boundary"
+          done
       - name: Retain the bundled browser evidence
         if: always() && (env.PAIRING_PROOF == 'true' || env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-'))
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
