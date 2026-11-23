@@ -287,6 +287,7 @@ impl Render for ServerThreadView {
             .gap_4()
             .child(
                 div()
+                    .id("server-thread-heading")
                     .role(Role::Heading)
                     .aria_level(1)
                     .aria_label("Server conversation")
@@ -308,6 +309,7 @@ impl Render for ServerThreadView {
         } else {
             view = view.child(
                 div()
+                    .id("server-thread-status")
                     .role(Role::Status)
                     .aria_label(server_snapshot::FAILED)
                     .child(server_snapshot::FAILED),
