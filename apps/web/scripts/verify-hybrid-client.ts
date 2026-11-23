@@ -35,6 +35,7 @@ type OwnedApplication = { pid: number; pairingUrl: string; stop: () => Promise<v
 type InterruptedShowcase = ReplayTurnIdentity & {
   threadId: string;
   threadUrl: string;
+  projectId: string;
   requestId: string;
   partialMessageId: string;
   partialText: string;
@@ -44,6 +45,7 @@ const repoRoot = NodeFS.realpathSync(NodeURL.fileURLToPath(new URL("../../../", 
 const timeoutMs = 90_000;
 const startupTimeoutMs = 180_000;
 const replayPrompt = "Replay: showcase";
+const parallelTurnsProof = process.env.T3_CODE_LS_PARALLEL_TURNS_PROOF === "true";
 const replayMarker = "This turn is a replay.";
 const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
 const spliceNegotiationProof = process.env.T3_CODE_LS_SPLICE_NEGOTIATION_PROOF === "true";
@@ -621,8 +623,22 @@ async function submitReplay(
   page: Page,
   modelLabel = "Showcase",
   prompt = replayPrompt,
+  projectName?: string,
 ): Promise<string> {
-  await page.getByRole("button", { name: "New thread in hybrid-fixture", exact: true }).click();
+  await page.getByRole("button", {
+    name: projectName === undefined ? "New thread in hybrid-fixture" : "New thread",
+    exact: true,
+  }).click();
+  if (projectName !== undefined) {
+    const picker = page.getByRole("dialog");
+    await picker.getByPlaceholder("Search...", { exact: true }).fill(projectName);
+    await picker.getByRole("option").filter({
+      has: page.getByText(projectName, { exact: true }),
+    }).click();
+    await picker.waitFor({ state: "hidden" });
+    await page.locator("[data-draft-project-trigger]")
+      .getByText(projectName, { exact: true }).waitFor({ state: "visible" });
+  }
   await page.waitForURL((url) => url.pathname.startsWith("/draft/"));
   const picker = page.locator('[data-chat-provider-model-picker="true"]:visible');
   const search = page.getByPlaceholder("Search models...");
@@ -645,8 +661,10 @@ async function submitReplay(
   return decodeURIComponent(thread);
 }
 
-async function interruptShowcase(page: Page): Promise<InterruptedShowcase> {
-  const threadId = await submitReplay(page);
+async function pendingShowcase(
+  page: Page,
+  threadId: string,
+): Promise<InterruptedShowcase> {
   await page.getByRole("button", { name: /^(Yes|Approve)$/u }).first().waitFor({ state: "visible" });
   const pending = await readThreadSnapshot(page, threadId);
   const identity = replayTurnIdentity(pending);
@@ -658,17 +676,94 @@ async function interruptShowcase(page: Page): Promise<InterruptedShowcase> {
   );
   Assert.ok(request, "The interrupted turn must have a pending approval");
   Assert.ok(partialMessage, "The fixture must stream assistant text before the approval");
-  const evidence = {
+  return {
     ...identity,
     threadId,
     threadUrl: page.url(),
+    projectId: pending.projection.thread.projectId,
     requestId: request.id,
     partialMessageId: partialMessage.id,
     partialText: partialMessage.text,
   };
+}
+
+async function interruptShowcase(page: Page): Promise<InterruptedShowcase> {
+  const evidence = await pendingShowcase(page, await submitReplay(page));
   await page.getByRole("button", { name: "Stop generation", exact: true }).click();
   await verifyInterruptedShowcase(page, evidence);
   return evidence;
+}
+
+async function addFixtureProject(page: Page, workspace: string, name: string) {
+  await page.getByRole("button", { name: "Add project", exact: true }).first().click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByText("Local folder", { exact: true }).click();
+  await dialog.getByRole("combobox").fill(workspace);
+  await dialog.getByRole("button", { name: /^Add \(/u }).click();
+  await dialog.waitFor({ state: "hidden" });
+  await page.getByText(name, { exact: true }).first().waitFor({ state: "visible" });
+}
+
+async function verifyParallelShowcases(page: Page, workspace: string) {
+  const projectNames = ["parallel-completion", "parallel-interrupt"] as const;
+  for (const name of projectNames) {
+    const target = NodePath.join(NodePath.dirname(workspace), name);
+    NodeFS.mkdirSync(NodePath.join(target, "src"), { recursive: true });
+    NodeFS.copyFileSync(NodePath.join(workspace, "src", "math.ts"), NodePath.join(target, "src", "math.ts"));
+    await addFixtureProject(page, target, name);
+  }
+
+  const completing = await page.context().newPage();
+  const interrupting = await page.context().newPage();
+  try {
+    const origin = new URL(page.url()).origin;
+    const open = async (tab: Page, projectName: string) => {
+      await tab.goto(origin, { waitUntil: "domcontentloaded" });
+      const threadId = await submitReplay(tab, "Showcase", replayPrompt, projectName);
+      return pendingShowcase(tab, threadId);
+    };
+    const [complete, interrupt] = await Promise.all([
+      open(completing, projectNames[0]),
+      open(interrupting, projectNames[1]),
+    ]);
+    for (const tab of [completing, interrupting]) {
+      Assert.equal(await tab.evaluate(() => performance.getEntriesByName("t3-composer-rust-offsets").length), 1);
+    }
+    Assert.notEqual(complete.threadId, interrupt.threadId);
+    Assert.notEqual(complete.projectId, interrupt.projectId);
+    Assert.notEqual(complete.providerTurnId, interrupt.providerTurnId);
+    Assert.notEqual(complete.requestId, interrupt.requestId);
+
+    await completing.getByRole("button", { name: /^(Yes|Approve)$/u }).first().click();
+    const accepted = await assertCompleted(completing, complete.threadId, complete);
+    const other = await readThreadSnapshot(interrupting, interrupt.threadId);
+    Assert.equal(other.projection.runs.length, 1);
+    Assert.equal(
+      other.projection.runtimeRequests.find((request) => request.id === interrupt.requestId)?.status,
+      "pending",
+      "Approval must leave the concurrent request in the other thread pending",
+    );
+    await interrupting.getByRole("button", { name: "Stop generation", exact: true }).click();
+    await verifyInterruptedShowcase(interrupting, interrupt);
+
+    await Promise.all([
+      completing.reload({ waitUntil: "domcontentloaded" }),
+      interrupting.reload({ waitUntil: "domcontentloaded" }),
+    ]);
+    const reopened = await assertCompleted(completing, complete.threadId, complete);
+    Assert.equal(reopened.assistantMessageId, accepted.assistantMessageId);
+    await verifyInterruptedShowcase(interrupting, interrupt);
+    return {
+      separateRequests: true,
+      stillPendingAfterOtherApproval: true,
+      completedReopened: true,
+      interruptedReopened: true,
+      completedThread: complete.threadId,
+      interruptedThread: interrupt.threadId,
+    };
+  } finally {
+    await Promise.all([completing.close(), interrupting.close()]);
+  }
 }
 
 async function verifyDraftMerge(page: Page) {
@@ -1489,6 +1584,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     cancelledQuestion: null as Awaited<ReturnType<typeof cancelCapturedQuestion>> | null,
     historyFind: null as { query: string; count: string; draftPreserved: boolean } | null,
     voiceDraft: null as Awaited<ReturnType<typeof verifyBundledVoiceDraft>> | null,
+    parallelTurns: null as Awaited<ReturnType<typeof verifyParallelShowcases>> | null,
     draftMerge: null as Awaited<ReturnType<typeof verifyDraftMerge>> | null,
     draftStorage: null as Awaited<ReturnType<typeof verifyDraftStorageRecovery>> | null,
     messageAppends: null as {
@@ -1686,19 +1782,22 @@ async function exercise(implementation: Implementation): Promise<void> {
       "Completed initial setup through the normal UI without agent sign-in or project import",
     );
     starting("local project creation");
-    await page.getByRole("button", { name: "Add project", exact: true }).first().click();
-    const dialog = page.getByRole("dialog");
-    await dialog.getByText("Local folder", { exact: true }).click();
-    await dialog.getByRole("combobox").fill(workspace);
-    await dialog.getByRole("button", { name: /^Add \(/u }).click();
-    await dialog.waitFor({ state: "hidden" });
-    await page.getByText("hybrid-fixture", { exact: true }).first().waitFor({ state: "visible" });
+    await addFixtureProject(page, workspace, "hybrid-fixture");
     completed("Created local project through the normal client");
     if (voiceDraftProof) {
       Assert.ok(bundledClient && implementation === "native" && expectsRustComposer);
       starting("capture synthetic microphone audio into an unsent draft");
       proof.voiceDraft = await verifyBundledVoiceDraft(page);
       completed("Preserved the unsent Unicode draft through dictated insertion and cancellation");
+      proof.status = "passed";
+      return;
+    }
+    if (parallelTurnsProof) {
+      Assert.ok(bundledClient && implementation === "native" && expectsRustComposer);
+      starting("run independently controlled replay turns in two projects");
+      proof.parallelTurns = await verifyParallelShowcases(page, workspace);
+      completed("Reopened distinct completed and interrupted turns after concurrent approvals");
+      proof.composer = "rust-wasm";
       proof.status = "passed";
       return;
     }

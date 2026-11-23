@@ -271,6 +271,17 @@ jobs:
             jq -e '.status == "passed" and .voiceDraft.rustSelection and .voiceDraft.draftPreserved and .voiceDraft.transcriptionRequests == 1 and .voiceDraft.cancellationPreservedDraft and .voiceDraft.remainedUnsent' \
               "$proof/voice/native/proof.json"
           fi
+          if [[ "$INTEGRATED_NATIVE" == true || "$GITHUB_REF_NAME" == candidate/t3code-ls-t02-bundled-native-t16-parallel-* ]]; then
+            mkdir "$proof/parallel"
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- env T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 \
+                VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust T3_CODE_LS_PARALLEL_TURNS_PROOF=true \
+                "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
+            ' _ "$(id -un)" "$(command -v node)" "$proof/parallel"
+            jq -e '.status == "passed" and .composer == "rust-wasm" and .parallelTurns.stillPendingAfterOtherApproval and .parallelTurns.completedReopened and .parallelTurns.interruptedReopened' \
+              "$proof/parallel/native/proof.json"
+          fi
       - name: Exercise PDF link handling in the browser
         if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-')
         working-directory: apps/web
