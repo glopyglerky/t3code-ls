@@ -178,8 +178,10 @@ export async function checkConcurrentPublication() {
     const objects = new Map<string, string>();
     const key = new Uint8Array([0, 255]);
     const secondary = new Uint8Array([128]);
+    const tokenExpiresAt = sqlite.prepare("SELECT unixepoch() + 3600 AS expiry").get()?.expiry;
+    Assert.ok(typeof tokenExpiresAt === "number");
     const create = async (value: string) => {
-      const generation = await reserve(database, scope, Math.floor(Date.now() / 1000) + 3600, 10);
+      const generation = await reserve(database, scope, tokenExpiresAt, 10);
       generation.value_size = 2;
       generation.blob_size = 3;
       generation.blob_id = generation.generation_id;
