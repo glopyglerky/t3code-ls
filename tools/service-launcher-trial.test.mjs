@@ -8,7 +8,11 @@ import * as path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { SERVICE_LAUNCHER_PROTOCOL } from "../apps/server/src/cloud/serviceProtocol.ts";
+import {
+  compareExactServiceVersions,
+  isExactServiceVersion,
+  SERVICE_LAUNCHER_PROTOCOL,
+} from "../apps/server/src/cloud/serviceProtocol.ts";
 import { isQualifiedNativeHost } from "../packages/shared/src/nativeExecutable.ts";
 
 // Run the launcher source without building the product or installing workspace dependencies.
@@ -31,7 +35,7 @@ const activeVersion = "1.0.0";
 const targetVersion = "1.1.0";
 const initial = { protocol: SERVICE_LAUNCHER_PROTOCOL, activeVersion };
 
-async function fixture(t) {
+async function fixture(t, selection = initial) {
   const home = await fs.mkdtemp(path.join(tmpdir(), "t3-launcher-trial-"));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const runtime = path.join(home, "runtime");
@@ -39,7 +43,7 @@ async function fixture(t) {
   const statePath = path.join(runtime, "service-state.json");
   const starts = path.join(runtime, "starts.log");
   await fs.mkdir(userdata);
-  await writeServiceState(statePath, initial);
+  await writeServiceState(statePath, selection);
   async function install(version, source) {
     const directory = path.join(runtime, "versions", version);
     await fs.mkdir(directory, { recursive: true });
@@ -253,7 +257,15 @@ test(launcherPromotionProof
   t.diagnostic(JSON.stringify({ helperBytes, installedArtifactLimitBytes: 128 * 1024 * 1024 }));
   assert.ok(helperBytes <= 128 * 1024 * 1024,
     "The installed helper must fit the native trial's 128 MiB artifact hash limit");
-  const f = await fixture(t);
+  const previousVersion = launcherCancelProof ? process.env.T3_TEST_PREVIOUS_RUNTIME_VERSION : activeVersion;
+  assert.ok(previousVersion !== undefined && isExactServiceVersion(previousVersion),
+    "Use the exact installed package version when launching the previous runtime");
+  const candidateVersion = launcherCancelProof
+    ? `${BigInt(previousVersion.split(".", 1)[0]) + 1n}.0.0`
+    : targetVersion;
+  assert.ok(isExactServiceVersion(candidateVersion) && compareExactServiceVersions(previousVersion, candidateVersion) < 0);
+  const selected = { ...initial, activeVersion: previousVersion };
+  const f = await fixture(t, selected);
   const home = path.dirname(f.userdata);
   const id = "63b13571-13c5-411b-ad39-35db4071a854";
   const dbPath = path.join(f.userdata, "statev2.omdb");
@@ -290,14 +302,14 @@ test(launcherPromotionProof
   ]);
   const sourceBytes = await fs.readFile(dbPath);
   const sourceIdentity = await fs.stat(dbPath, { bigint: true });
-  const previous = await f.install(activeVersion, `
+  const previous = await f.install(previousVersion, `
     const selection = JSON.parse(fs.readFileSync(${JSON.stringify(f.statePath)}, "utf8"));
-    if (selection.activeVersion !== ${JSON.stringify(activeVersion)} ||
+    if (selection.activeVersion !== ${JSON.stringify(previousVersion)} ||
         selection.update.status !== "rolled-back" || context.update.status !== "rolled-back") process.exit(9);
     fs.writeFileSync(${JSON.stringify(ready)}, JSON.stringify(context));
     setInterval(() => {}, 1000);
   `);
-  const target = await f.install(targetVersion, "process.exit(7);");
+  const target = await f.install(candidateVersion, "process.exit(7);");
   const preparationEntry = process.env.T3_TEST_PREPARE_ENTRY;
   if (launcherPromotionProof) assert.ok(preparationEntry, "Pass the packaged runtime for both roles");
   if (preparationEntry !== undefined) {
@@ -339,12 +351,12 @@ test(launcherPromotionProof
   const checkpointBytes = await fs.readFile(checkpoint);
   const backupReceipt = path.join(f.runtime, "native-db-backup", `${id}.backup-receipt-v1.json`);
   const backupReceiptBytes = await fs.readFile(backupReceipt);
-  const pending = { protocol: 5, activeVersion, update: {
-    id, fromVersion: activeVersion, targetVersion, dbPath, status: "pending",
+  const pending = { protocol: 5, activeVersion: previousVersion, update: {
+    id, fromVersion: previousVersion, targetVersion: candidateVersion, dbPath, status: "pending",
   } };
   await fs.writeFile(f.statePath, JSON.stringify(pending));
   const activation = {
-    update_id: id, from_version: activeVersion, target_version: targetVersion,
+    update_id: id, from_version: previousVersion, target_version: candidateVersion,
     target_entry_sha256: digest(await fs.readFile(path.join(target, "t3"))),
     target_helper_sha256: helperSha256, target_schema_sha256: capabilities.targetSchemaSha256,
   };
@@ -379,7 +391,7 @@ test(launcherPromotionProof
       } else {
         const actual = await preparationLauncher.prepareIsolatedCandidate(input);
         assert.deepEqual(actual, {
-          protocol: 1, status: "prepared-isolated", updateId: id, targetVersion,
+          protocol: 1, status: "prepared-isolated", updateId: id, targetVersion: candidateVersion,
           entrySha256: activation.target_entry_sha256, helperSha256,
           verificationSha256: digest(JSON.stringify(input)),
         });
@@ -505,7 +517,7 @@ test(launcherPromotionProof
       }
       if (launcherCancelProof) {
         assert.equal(JSON.parse(await fs.readFile(observationPath, "utf8")).sealed_publication, undefined);
-        const output = await fs.open(path.join(f.runtime, "cancel-recovery.log"), "a", 0o600);
+        const output = await fs.open(path.join(f.runtime, "cancel-recovery.log"), "a+", 0o600);
         const port = 48123;
         const launcher = f.launcher(pending, {
           HOME: home,
@@ -524,6 +536,17 @@ test(launcherPromotionProof
           let descriptor;
           while (Date.now() < deadline) {
             const outcome = await Promise.race([delay(50), running]);
+            if (outcome !== undefined) {
+              const log = Buffer.alloc(64 * 1024);
+              const { bytesRead } = await output.read(log, 0, log.length, 0);
+              const text = log.toString("utf8", 0, bytesRead);
+              t.diagnostic(JSON.stringify({
+                childReportedVersionMismatch: text.includes("The service launcher started a different t3 version."),
+                childReportedInvalidContext: text.includes("The service launcher supplied invalid startup context."),
+                childReportedStorageError: /OmdbStartupError|ServerOwnershipError|NativeDatabaseError/u.test(text),
+                childReportedBindError: /EADDRINUSE|EACCES/u.test(text),
+              }));
+            }
             assert.equal(outcome, undefined, "The selected launcher must remain active");
             const response = await fetch(origin + "/.well-known/t3/environment", {
               redirect: "error", signal: AbortSignal.timeout(400),
@@ -536,7 +559,7 @@ test(launcherPromotionProof
           assert.ok(descriptor, "The previous packaged runtime must become ready after cancellation");
           assert.equal(descriptor.databaseMigration, Number(seeded[0].migrations.at(-1).id));
           assert.deepEqual(await readServiceState(f.statePath), {
-            ...initial, update: { id, fromVersion: activeVersion, targetVersion,
+            ...selected, update: { id, fromVersion: previousVersion, targetVersion: candidateVersion,
               status: "rolled-back", reason: "sealed-trial-recovery" },
           });
           const runtime = JSON.parse(await fs.readFile(path.join(f.userdata, "server-runtime.json"), "utf8"));

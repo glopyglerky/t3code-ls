@@ -84,9 +84,10 @@ jobs:
               ip link set dev lo up
               exec runuser -u "$1" -- env T3_TEST_LAUNCHER_PROMOTION_INTENT=1 \
                 T3_TEST_LAUNCHER_CANCEL_BEFORE_PUBLICATION=1 T3_TEST_PREPARE_ENTRY="$3" \
-                T3_TEST_SEALED_TRIAL_HELPER="$4" "$2" --test --test-reporter tap \
+                T3_TEST_SEALED_TRIAL_HELPER="$4" T3_TEST_PREVIOUS_RUNTIME_VERSION="$5" \
+                "$2" --test --test-reporter tap \
                 --test-name-pattern "compiled Rust helper records" tools/service-launcher-trial.test.mjs
-            ' _ "$(id -un)" "$(command -v node)" "$entry" "$helper" | tee "$RUNNER_TEMP/cli-proof/preparation.log"
+            ' _ "$(id -un)" "$(command -v node)" "$entry" "$helper" "$version" | tee "$RUNNER_TEMP/cli-proof/preparation.log"
             grep -F 'Cancelled the unstarted promotion and reopened the exact previous packaged server.' \
               "$RUNNER_TEMP/cli-proof/preparation.log"
           else
