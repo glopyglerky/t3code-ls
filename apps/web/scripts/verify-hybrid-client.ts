@@ -615,9 +615,11 @@ async function verifyFileEditor(page: Page, workspace: string, writes: EventEmit
   const revision = (contents: string) =>
     NodeCrypto.createHash("sha256").update(contents).digest("hex");
   const checkboxes = page.locator(".task-list-item").getByRole("checkbox");
-  await page.keyboard.press("Control+p");
-  await page.getByPlaceholder("Search files…").fill(tasksFile);
-  await page.getByRole("option", { name: /fixture-tasks\.md/u }).click();
+  const panel = page.getByRole("button", { name: "Toggle right panel", exact: true });
+  if ((await panel.getAttribute("aria-pressed")) !== "true") await panel.click();
+  const files = page.locator('[aria-label="Open a surface"]').getByRole("button", { name: /^Files/u });
+  await files.click();
+  await page.locator(`[role="treeitem"][data-item-path="${tasksFile}"]`).click();
   const rendered = page.getByRole("button", { name: "Show rendered markdown", exact: true });
   await checkboxes.first().or(rendered).first().waitFor({ state: "visible" });
   if (await rendered.isVisible()) await rendered.click();
