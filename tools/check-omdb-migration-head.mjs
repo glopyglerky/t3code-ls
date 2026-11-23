@@ -160,6 +160,10 @@ try {
     lines.close();
   }
   const crashedHash = hash(await FS.readFile(crashed));
+  Assert.equal(
+    inspectNative(crashed, { operation: "application_migrations" }).error?.kind,
+    "recovery_required",
+  );
   Assert.equal(recordedMigrations(crashed), null);
   Assert.equal(preflight(crashed).status, "blocked");
   Assert.equal(hash(await FS.readFile(crashed)), crashedHash);

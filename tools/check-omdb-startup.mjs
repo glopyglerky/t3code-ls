@@ -192,16 +192,37 @@ try {
     NodeAssert.equal(signal, "SIGKILL");
     lines.close();
   }
+  const dirtyHash = hash(await NodeFSP.readFile(crashed.databasePath));
+  await NodeAssert.rejects(
+    Effect.runPromise(
+      isolated(
+        crashed,
+        Effect.gen(function* () {
+          const owner = yield* NativeOwnership.make(executable);
+          yield* owner.acquire(NodePath.join(crashed.root, "server-owner.sqlite"));
+          yield* Omdb.make({ executable, databasePath: crashed.databasePath });
+        }),
+      ),
+    ),
+    (error) => error._tag === "OmdbStartupError" && error.cause?._tag === "ServerAlreadyRunningError",
+  );
+  NodeAssert.equal(hash(await NodeFSP.readFile(crashed.databasePath)), dirtyHash);
   await reopen(({ client }) =>
     Effect.gen(function* () {
       const readGuide = (number) =>
-        client.request("application_guide_get", { key: guideKey(number) }, Schema.NullOr(Schema.String));
+        client.request(
+          "application_guide_get",
+          { key: guideKey(number) },
+          Schema.NullOr(Schema.String),
+        );
       NodeAssert.equal(yield* readGuide(1), guideJson);
       NodeAssert.equal(yield* readGuide(2), null);
     }),
   );
   NodeAssert.deepEqual(readIdentity(crashed), beforeCrash);
-  checks.push("Selected startup reopens the acknowledged generation after a killed native writer and discards its uncommitted rows");
+  checks.push(
+    "Startup requires exclusive recovery ownership, then reopens the acknowledged generation after SIGKILL and discards uncommitted rows",
+  );
 } finally {
   await crashed.close();
 }

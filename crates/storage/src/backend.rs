@@ -483,7 +483,10 @@ impl Backend {
             let file = redb::backends::FileBackend::new(file).map_err(storage_error)?;
             let reader = builder()
                 .open_read_only_with_backend(file)
-                .map_err(storage_error)?;
+                .map_err(|error| match error {
+                    redb::DatabaseError::RepairAborted => Error::RecoveryRequired,
+                    other => storage_error(other),
+                })?;
             if path_identity(&path)? != identity {
                 return Err(Error::IncompatibleStore);
             }

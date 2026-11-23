@@ -193,6 +193,7 @@ pub enum Error {
     Invalid(String),
     ResourceLimit(ResourceLimit),
     IncompatibleStore,
+    RecoveryRequired,
     StaleRevision { expected: u64, actual: u64 },
     CommandConflict,
     DuplicateRecord,
@@ -209,6 +210,9 @@ impl fmt::Display for Error {
             Self::ResourceLimit(limit) => write!(f, "Invalid database request: {limit}"),
             Self::IncompatibleStore => {
                 write!(f, "The database is not a supported t3 code ls store")
+            }
+            Self::RecoveryRequired => {
+                write!(f, "The native database requires recovery after an unclean shutdown")
             }
             Self::StaleRevision { expected, actual } => write!(
                 f,
