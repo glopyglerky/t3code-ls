@@ -68,8 +68,12 @@ jobs:
           sudo -n unshare --net -- bash -euc '
             ip link set dev lo up
             exec runuser -u "$1" -- env PATH="$2" VP_REMOTE_CACHE=off VP_REMOTE_CACHE_URL= "$3" \
-              exec vp test run --maxWorkers 1 apps/server/src/device/DeviceHubProxy.stream.test.ts
+              exec vp test run --maxWorkers 1 \
+              apps/server/src/device/DeviceHubProxy.stream.test.ts apps/server/src/device/DeviceHubProxy.test.ts
           ' _ "$(id -un)" "$PATH" "$(command -v pnpm)"
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t13-device-viewer-* ]]; then
+            pnpm --filter t3 typecheck
+          fi
       - name: Exercise an active child stream during an ancestor commit
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-live-')
         env:

@@ -4,9 +4,11 @@ import * as NodeWS from "@effect/platform-node/NodeWS";
 import * as NodeHttp from "node:http";
 import * as NodeNet from "node:net";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import {
   FetchHttpClient,
   HttpClient,
@@ -26,6 +28,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
+import * as SessionStore from "../auth/SessionStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as DeviceHost from "./DeviceHost.ts";
 import { makeDeviceHubOperations } from "./DeviceHubOperations.ts";
@@ -35,10 +38,96 @@ import * as DeviceHubProxy from "./DeviceHubProxy.ts";
 const loopbackServer = () =>
   NodeHttpServer.layer(NodeHttp.createServer, { host: "127.0.0.1", port: 0 });
 
-it.effect("preserves binary input and admission frames through the real socket proxy", () =>
+const layerMediaPeer = (
+  origin: string,
+  session: EnvironmentAuth.AuthenticatedSession,
+  invalidated: Deferred.Deferred<void>,
+) =>
+  Layer.mergeAll(
+    FetchHttpClient.layer,
+    Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+      authenticateWebSocketUpgrade: (request, audience) =>
+        audience === "media" &&
+        new URL(request.url, "http://127.0.0.1").searchParams.get("wsTicket") === "fixture-media"
+          ? Effect.succeed(session)
+          : Effect.fail(new EnvironmentAuth.ServerAuthMissingCredentialError({})),
+    }),
+    Layer.mock(SessionStore.SessionStore)({
+      awaitInvalidation: (sessionId, proofKeyThumbprint) =>
+        sessionId === session.sessionId && proofKeyThumbprint === session.proofKeyThumbprint
+          ? Deferred.await(invalidated)
+          : Effect.never,
+    }),
+    Layer.succeed(DeviceService.DeviceService, {
+      currentReadiness: () =>
+        Effect.succeed({
+          hostId: LOCAL_DEVICE_HOST_ID,
+          hub: { origin },
+        }),
+    } as DeviceService.DeviceService["Service"]),
+  );
+
+const mediaPeer = {
+  sessionId: AuthSessionId.make("fixture-media-peer"),
+  subject: "fixture-media-peer",
+  method: "bearer-access-token",
+  proofKeyThumbprint: "fixture-proof-key",
+} as const;
+
+it.live("forwards a media chunk and releases the HTTP stream on session invalidation", () =>
+  Effect.gen(function* () {
+    const invalidated = yield* Deferred.make<void>();
+    const upstreamReleased = yield* Deferred.make<void>();
+    const frame = Uint8Array.of(0x2a);
+    const hubServices = yield* Layer.build(loopbackServer());
+    const hub = Context.get(hubServices, HttpServer.HttpServer);
+    yield* hub.serve(
+      Effect.succeed(
+        HttpServerResponse.stream(
+          Stream.concat(Stream.succeed(frame), Stream.never).pipe(
+            Stream.ensuring(Deferred.succeed(upstreamReleased, undefined)),
+          ),
+          { contentType: "application/octet-stream" },
+        ),
+      ),
+    );
+    const services = yield* Layer.build(
+      HttpRouter.serve(DeviceHubProxy.layer, { disableListenLog: true }).pipe(
+        Layer.provideMerge(loopbackServer()),
+        Layer.provide(
+          layerMediaPeer(
+            HttpServer.formatAddress(hub.address),
+            { ...mediaPeer, scopes: [AuthOrchestrationReadScope] },
+            invalidated,
+          ),
+        ),
+      ),
+    );
+    const origin = HttpServer.formatAddress(Context.get(services, HttpServer.HttpServer).address);
+    const abort = yield* Effect.acquireRelease(
+      Effect.sync(() => new AbortController()),
+      (controller) => Effect.sync(() => controller.abort()),
+    );
+    const path = "/api/device-hub/vendor/serve-sim/helper/test/stream.avcc?wsTicket=fixture-media";
+    const response = yield* Effect.promise(() => fetch(`${origin}${path}`, { signal: abort.signal }));
+    expect(response.status).toBe(200);
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error("Missing media response body");
+    expect(yield* Effect.promise(() => reader.read())).toEqual({ done: false, value: frame });
+    expect(yield* Deferred.isDone(upstreamReleased)).toBe(false);
+
+    yield* Deferred.succeed(invalidated, undefined);
+
+    const end = yield* Effect.promise(() => reader.read()).pipe(Effect.timeout("5 seconds"));
+    expect(end.done).toBe(true);
+    yield* Deferred.await(upstreamReleased).pipe(Effect.timeout("5 seconds"));
+  }),
+);
+
+it.live("preserves binary socket frames until session invalidation closes both ends", () =>
   Effect.gen(function* () {
     const hub = yield* Effect.acquireRelease(
-      Effect.sync(() => new NodeWS.WebSocketServer({ port: 0 })),
+      Effect.sync(() => new NodeWS.WebSocketServer({ host: "127.0.0.1", port: 0 })),
       (server) =>
         Effect.promise(
           () =>
@@ -52,45 +141,31 @@ it.effect("preserves binary input and admission frames through the real socket p
       yield* Effect.promise(() => new Promise<void>((resolve) => hub.once("listening", resolve)));
     const address = hub.address();
     if (typeof address !== "object" || !address) throw new Error("Missing hub port");
+    const upstreamClosed = Promise.withResolvers<void>();
     hub.on("connection", (socket) => {
+      socket.once("close", upstreamClosed.resolve);
       socket.send(Uint8Array.of(0x83));
       socket.on("message", (data, binary) => socket.send(data, { binary }));
     });
+    const invalidated = yield* Deferred.make<void>();
     const services = yield* Layer.build(
       HttpRouter.serve(DeviceHubProxy.layer, { disableListenLog: true }).pipe(
-        Layer.provideMerge(NodeHttpServer.layerTest),
+        Layer.provideMerge(loopbackServer()),
         Layer.provide(
-          Layer.succeed(EnvironmentAuth.EnvironmentAuth, {
-            authenticateWebSocketUpgrade: () =>
-              Effect.succeed({
-                sessionId: AuthSessionId.make("test"),
-                subject: "test",
-                method: "bearer-access-token",
-                scopes: [AuthOrchestrationOperateScope],
-              }),
-          } as unknown as EnvironmentAuth.EnvironmentAuth["Service"]),
-        ),
-        Layer.provide(
-          Layer.succeed(DeviceService.DeviceService, {
-            currentReadiness: () =>
-              Effect.succeed({
-                hostId: LOCAL_DEVICE_HOST_ID,
-                hub: { origin: `http://127.0.0.1:${address.port}` },
-              }),
-          } as DeviceService.DeviceService["Service"]),
+          layerMediaPeer(
+            `http://127.0.0.1:${address.port}`,
+            { ...mediaPeer, scopes: [AuthOrchestrationOperateScope] },
+            invalidated,
+          ),
         ),
       ),
     );
     const origin = HttpServer.formatAddress(
       Context.get(services, HttpServer.HttpServer).address,
     ).replace(/^http/, "ws");
+    const path = "/api/device-hub/vendor/serve-sim/helper/ws?device=test&wsTicket=fixture-media";
     const client = yield* Effect.acquireRelease(
-      Effect.sync(
-        () =>
-          new WebSocket(
-            `${origin}/api/device-hub/vendor/serve-sim/helper/ws?device=test&wsTicket=test`,
-          ),
-      ),
+      Effect.sync(() => new WebSocket(`${origin}${path}`)),
       (socket) => Effect.sync(() => socket.close()),
     );
     client.binaryType = "arraybuffer";
@@ -106,6 +181,15 @@ it.effect("preserves binary input and admission frames through the real socket p
     });
     yield* Effect.promise(() => received.promise);
     expect(frames).toEqual([[0x83], [0x03, 1], [0x03, 2]]);
+    expect(client.readyState).toBe(WebSocket.OPEN);
+
+    const closed = new Promise<void>((resolve) =>
+      client.addEventListener("close", () => resolve(), { once: true }),
+    );
+    yield* Deferred.succeed(invalidated, undefined);
+    yield* Effect.promise(() => Promise.all([closed, upstreamClosed.promise])).pipe(
+      Effect.timeout("5 seconds"),
+    );
   }),
 );
 
@@ -232,6 +316,7 @@ it.live("closes the WebRTC viewer while keeping the simulator and thread session
           Layer.mergeAll(
             Layer.succeed(HttpClient.HttpClient, http),
             Layer.succeed(DeviceService.DeviceService, devices),
+            Layer.mock(SessionStore.SessionStore)({ awaitInvalidation: () => Effect.never }),
             Layer.mock(EnvironmentAuth.EnvironmentAuth)({
               authenticateWebSocketUpgrade: (request, audience) =>
                 Effect.sync(() => {
