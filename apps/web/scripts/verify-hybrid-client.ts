@@ -329,6 +329,8 @@ async function submitShowcase(page: Page): Promise<string> {
   if (!(await search.isVisible())) await picker.click();
   await page.locator("[data-composer-permissions-trigger]:visible").click();
   await page.getByRole("menuitemradio", { name: "Supervised", exact: true }).click();
+  if (await search.isVisible()) await search.press("Escape");
+  await search.waitFor({ state: "hidden" });
 
   const editor = page.getByTestId("composer-editor");
   await editor.click();
