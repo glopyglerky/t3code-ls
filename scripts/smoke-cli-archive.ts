@@ -53,13 +53,19 @@ const executableEnvironment = (cwd: string) => ({
 });
 
 const runExecutable = Effect.fn("runExecutable")(
-  function* (executable: string, args: ReadonlyArray<string>, cwd: string, input?: string) {
+  function* (
+    executable: string,
+    args: ReadonlyArray<string>,
+    cwd: string,
+    input?: string,
+    environment: Readonly<NodeJS.ProcessEnv> = {},
+  ) {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const child = yield* spawner.spawn(
       ChildProcess.make(executable, args, {
         cwd,
         // Isolate system Node and inherited launcher context from the archive smoke check.
-        env: executableEnvironment(cwd),
+        env: { ...executableEnvironment(cwd), ...environment },
         extendEnv: false,
         ...(input === undefined ? {} : { stdin: { stream: Stream.encodeText(Stream.make(input)) } }),
       }),
@@ -201,6 +207,119 @@ const smokeNativeSessionOutput = Effect.fn("smokeNativeSessionOutput")(function*
   yield* Effect.log(
     `[cli-smoke] Native session token and JSON output passed. Rust helper SHA-256 ${nativeHash(db)}.`,
   );
+});
+
+const smokeInstalledLifecycle = Effect.fn("smokeInstalledLifecycle")(function* (
+  contentDir: string,
+  home: string,
+  expectedVersion: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const versionDir = path.join(home, "runtime", "versions", expectedVersion);
+  const executable = path.join(versionDir, "t3");
+  const binDir = path.join(home, "fixture-bin");
+  const launcher = path.join(binDir, "t3");
+  const unrelated = path.join(binDir, "keep.txt");
+  const preservedState = path.join(home, "userdata", "lifecycle.keep");
+  const stateContents = "Synthetic retained user state.\n";
+  const unrelatedContents = "Synthetic unrelated command directory entry.\n";
+  const foreignLauncher = "Synthetic launcher owned by another application.\n";
+  const environment = {
+    T3CODE_HOME: home,
+    T3CODE_INSTALL_BIN_DIR: binDir,
+    XDG_CONFIG_HOME: path.join(home, ".config"),
+    XDG_RUNTIME_DIR: path.join(home, ".runtime"),
+  };
+  const unitFile = path.join(environment.XDG_CONFIG_HOME, "systemd", "user", "t3code.service");
+  const run = (args: ReadonlyArray<string>, entry = executable) =>
+    runExecutable(entry, args, home, undefined, environment);
+  const require = (condition: boolean, step: string, detail: string) =>
+    condition ? Effect.void : new CliArchiveSmokeError({ step, detail });
+
+  yield* fs.makeDirectory(path.dirname(versionDir), { recursive: true });
+  yield* fs.copy(contentDir, versionDir);
+  yield* fs.writeFileString(path.join(versionDir, ".install-complete"), `${expectedVersion}\n`);
+  yield* fs.makeDirectory(binDir);
+  yield* fs.makeDirectory(environment.XDG_CONFIG_HOME);
+  yield* fs.makeDirectory(environment.XDG_RUNTIME_DIR);
+  yield* fs.makeDirectory(path.dirname(preservedState), { recursive: true });
+  yield* fs.writeFileString(preservedState, stateContents);
+  yield* fs.writeFileString(unrelated, unrelatedContents);
+  yield* fs.writeFileString(launcher, foreignLauncher);
+
+  const refused = yield* run(["install"]);
+  yield* require(
+    refused.exitCode === 1 && refused.stdout === "" &&
+      refused.stderr.includes("Another t3 is already at") &&
+      (yield* fs.readFileString(launcher)) === foreignLauncher &&
+      !(yield* fs.exists(path.join(home, "runtime", "launchers"))),
+    "refusing an unrelated installed launcher",
+    `exit ${String(refused.exitCode)}. Expected refusal with the foreign file intact and no launcher receipt.`,
+  );
+  yield* fs.remove(launcher);
+
+  const installed = yield* run(["install"]);
+  yield* require(
+    installed.exitCode === 0 && installed.stderr === "" &&
+      installed.stdout.includes(`Installed t3 ${expectedVersion} at ${launcher}.`) &&
+      (yield* fs.readLink(launcher)) === executable &&
+      (yield* fs.readFileString(path.join(home, "runtime", "launchers"))).trim() === launcher,
+    "installing the archive's standalone launcher",
+    `exit ${String(installed.exitCode)}. Expected the exact runtime link and recorded launcher.`,
+  );
+  const version = yield* run(["--version"], launcher);
+  const extractedVersion = yield* runExecutable(path.join(contentDir, "t3"), ["--version"], home);
+  yield* require(
+    version.exitCode === 0 && version.stderr === "" &&
+      extractedVersion.exitCode === 0 && version.stdout === extractedVersion.stdout &&
+      version.stdout.includes(expectedVersion),
+    "running the installed launcher",
+    `exit ${String(version.exitCode)}. Expected the archive version through its installed launcher.`,
+  );
+
+  const service = yield* run(["service", "status", "--base-dir", home]);
+  yield* require(
+    service.exitCode === 0 && service.stdout.includes("Status: not installed") &&
+      !(yield* fs.exists(unitFile)),
+    "checking the disposable home's service state",
+    `exit ${String(service.exitCode)}. Expected an uninstalled service before removing this fixture runtime.`,
+  );
+  yield* smokeNativeSessionOutput(executable, versionDir, home);
+  const database = path.join(home, "userdata", "statev2.omdb");
+  const before = yield* Effect.sync(() => nativeHash(database));
+  const uninstalled = yield* run(["uninstall", "--base-dir", home, "--yes"], launcher);
+  yield* require(
+    uninstalled.exitCode === 0 && uninstalled.stderr === "" &&
+      uninstalled.stdout.includes(`Removed ${launcher}.`) &&
+      !(yield* fs.exists(path.join(home, "runtime"))) &&
+      Option.isNone(yield* fs.readLink(launcher).pipe(Effect.option)) &&
+      !(yield* fs.exists(launcher)) &&
+      !(yield* fs.exists(unitFile)) &&
+      (yield* fs.readFileString(preservedState)) === stateContents &&
+      (yield* fs.readFileString(unrelated)) === unrelatedContents &&
+      (yield* Effect.sync(() => nativeHash(database))) === before,
+    "uninstalling only the fixture launcher and runtime",
+    `exit ${String(uninstalled.exitCode)}. Expected removal of the runtime and recorded launcher with user state and unrelated bytes intact.`,
+  );
+  const inspected = yield* runExecutable(
+    path.join(contentDir, "native-bin", nativeFile("db", "linux-x64")),
+    ["read-only-local", database],
+    home,
+    `${JSON.stringify({ operation: "application_migrations" })}\n`,
+  );
+  const migrations = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Struct({
+    ok: Schema.Literal(true),
+    result: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  })))(inspected.stdout);
+  yield* require(
+    inspected.exitCode === 0 && inspected.stderr === "" && Option.isSome(migrations) &&
+      migrations.value.result.length > 0 &&
+      (yield* Effect.sync(() => nativeHash(database))) === before,
+    "reopening the preserved native state after uninstall",
+    `exit ${String(inspected.exitCode)}. Expected a readable, byte-identical native application database.`,
+  );
+  yield* Effect.log("[cli-smoke] Installed launcher ran, foreign launcher was refused, and uninstall preserved reopenable native state and unrelated files.");
 });
 
 const smokePipedThread = Effect.fn("smokePipedThread")(function* (
@@ -663,6 +782,9 @@ const smokeCliArchive = Effect.fn("smokeCliArchive")(function* (input: {
       step: "serving from the extracted archive",
       detail: `no 200 from / within 30s\n${stdout}${stderr}`,
     });
+  }
+  if (input.expectNative && platform === "linux") {
+    yield* smokeInstalledLifecycle(contentDir, path.join(scratch, "lifecycle-home"), input.expectVersion);
   }
   yield* Effect.log(
     `[cli-smoke] ${root}: --version and __service-launcher passed, and serve answered on ${String(port)}.`,
