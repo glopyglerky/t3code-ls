@@ -423,6 +423,8 @@ async function verifyPairing(implementation: Implementation, renderer: PairingRe
     const unauthenticated = await context.request.get(sessionUrl.href);
     Assert.equal((await unauthenticated.json()).authenticated, false);
 
+    const pairingWasmRequests = wasmRequests;
+    Assert.equal(pairingWasmRequests, renderer === "retained" ? 0 : 1);
     await input.fill(token);
     const [validExchange] = await Promise.all([waitForExchange(), input.press("Enter")]);
     Assert.equal(validExchange.status(), 200);
@@ -470,7 +472,8 @@ async function verifyPairing(implementation: Implementation, renderer: PairingRe
     await page.getByRole("button", { name: "New thread in welcome-fixture", exact: true }).click();
     await page.waitForURL((url) => url.pathname.startsWith("/draft/"));
     await page.getByTestId("composer-editor").waitFor({ state: "visible" });
-    Assert.equal(wasmRequests, renderer === "retained" ? 0 : 1);
+    // Authentication reloads the document and the welcome page has a new module instance.
+    Assert.equal(wasmRequests - pairingWasmRequests, renderer === "retained" ? 0 : 1);
 
     writeJson(NodePath.join(directory, "proof.json"), {
       source,
@@ -478,6 +481,8 @@ async function verifyPairing(implementation: Implementation, renderer: PairingRe
       implementation,
       chromium: browser!.version(),
       wasmSha256,
+      pairingWasmRequests,
+      welcomeWasmRequests: wasmRequests - pairingWasmRequests,
       invalidExchange: invalidExchange.status(),
       validExchange: validExchange.status(),
       sessionEstablished: true,
