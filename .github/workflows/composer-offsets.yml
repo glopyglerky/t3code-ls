@@ -73,14 +73,24 @@ jobs:
         working-directory: apps/web
         run: pnpm exec vp test run --project unit --maxWorkers 2 src/composerDraftStore.test.ts
       - name: Exercise terminal attachment and parser continuity
-        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-split-')
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-')
         working-directory: apps/server
         run: pnpm exec vp test run --maxWorkers 2 src/terminal/Manager.test.ts
+      - name: Build the selected Rust PTY host
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-')
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/pty-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/pty-target"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            build --release --locked --manifest-path apps/server/rust/pty-host/Cargo.toml
+          sha256sum "$CARGO_TARGET_DIR/release/t3-code-ls-pty-host"
+          printf 'T3_CODE_LS_PTY_PROOF_EXECUTABLE=%s\n' \
+            "$CARGO_TARGET_DIR/release/t3-code-ls-pty-host" >> "$GITHUB_ENV"
       - name: Build and open the application with the Rust composer binding
         if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
         env:
           T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
-          T3_CODE_LS_SPLIT_PTY_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-split-') }}
+          T3_CODE_LS_SPLIT_PTY_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-') }}
           T3_CODE_LS_MULTI_TAB_DRAFT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-') }}
           T3_CODE_LS_FILE_EDITOR_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
           T3_CODE_LS_DURABLE_TEXT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-durable-') }}
@@ -90,6 +100,9 @@ jobs:
           proof="$RUNNER_TEMP/built-composer-proof"
           mkdir "$proof"
           node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/hybrid-client-persistence-tsconfig.json
+          if [[ -n "${T3_CODE_LS_PTY_PROOF_EXECUTABLE:-}" ]]; then
+            node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/omdb-production-tsconfig.json
+          fi
           pnpm --dir apps/web run build
           implementation=upstream
           if [[ "$BUNDLED_NATIVE" == true ]]; then

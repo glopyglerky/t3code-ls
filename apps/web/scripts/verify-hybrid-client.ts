@@ -45,6 +45,7 @@ const replayPrompt = "Replay: showcase";
 const replayMarker = "This turn is a replay.";
 const bundledClient = process.env.T3_CODE_LS_BUNDLED_CLIENT_PROOF === "1";
 const splitPtyProof = process.env.T3_CODE_LS_SPLIT_PTY_PROOF === "true";
+const nativePtyHost = process.env.T3_CODE_LS_PTY_PROOF_EXECUTABLE;
 const multiTabDraftProof = process.env.T3_CODE_LS_MULTI_TAB_DRAFT_PROOF === "true";
 const fileEditorProof = process.env.T3_CODE_LS_FILE_EDITOR_PROOF === "true";
 const tasksFile = "fixture-tasks.md";
@@ -185,6 +186,9 @@ async function startApplication(
     FORCE_COLOR: "0",
     NO_COLOR: "1",
   });
+  if (nativePtyHost !== undefined && implementation === "native") {
+    env.T3_CODE_LS_PTY_HOST_EXECUTABLE = nativePtyHost;
+  }
   if (bundledClient) Object.assign(env, { HOME: stateDirectory });
   NodeFS.writeFileSync(logPath, "");
   const args = bundledClient
@@ -557,6 +561,23 @@ async function terminalMarker(page: Page, prefix: "fixture-pty" | "fixture-reatt
   const [, pid] = await waitForTerminalCopy(page, input, new RegExp(`${prefix}:(\\d+) 世界`, "u"));
   Assert.ok(pid);
   return pid;
+}
+
+function assertNativePtyOwner(shell: string, executable: string, serverPid: number): void {
+  const expected = NodeFS.realpathSync(executable);
+  let pid = Number(shell);
+  for (let depth = 0; depth < 8 && pid > 1; depth += 1) {
+    const processDirectory = `/proc/${pid}`;
+    const status = NodeFS.readFileSync(`${processDirectory}/status`, "utf8");
+    const parent = Number(status.match(/^PPid:\s+(\d+)$/mu)?.[1]);
+    if (NodeFS.readlinkSync(`${processDirectory}/exe`) === expected) {
+      Assert.equal(parent, serverPid, "The bundled server must own the selected PTY helper");
+      return;
+    }
+    if (parent === serverPid) break;
+    pid = parent;
+  }
+  Assert.fail("The interactive shell must descend from the selected Rust PTY host");
 }
 
 async function verifySplitTerminalReconnect(page: Page, workspace: string, shell: string) {
@@ -1102,6 +1123,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     terminalSplit: null as Awaited<ReturnType<typeof verifySplitTerminalReconnect>> | null,
     terminalFailure: null as string | null,
     terminalInitialOutput: false,
+    nativePtyOwner: false,
     fileEditor: null as Awaited<ReturnType<typeof verifyFileEditor>> | null,
     completedSnapshots: [] as Array<
       Awaited<ReturnType<typeof assertCompleted>> & { checkpoint: string }
@@ -1387,6 +1409,10 @@ async function exercise(implementation: Implementation): Promise<void> {
           origin: new URL(page.url()).origin,
         });
         const shell = await terminalMarker(page, "fixture-pty");
+        if (nativePtyHost !== undefined) {
+          assertNativePtyOwner(shell, nativePtyHost, application.pid);
+          proof.nativePtyOwner = true;
+        }
         proof.terminalInitialOutput = true;
         saveProof();
         await page.reload({ waitUntil: "domcontentloaded" });

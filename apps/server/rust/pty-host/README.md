@@ -1,10 +1,12 @@
 # Linux PTY host candidate
 
 This isolated T07 package exposes a Linux PTY owner through a public Rust API and
-`--stdio-v1`. The application still selects `NodePtyAdapter`. Its existing caller
-owns shell selection, workspace and environment authorization. This helper accepts
-an explicit absolute executable and directory, arguments and environment. It clears
-the inherited environment before spawning.
+`--stdio-v1`. Set `T3_CODE_LS_PTY_HOST_EXECUTABLE` to the absolute binary path to
+select it in the Linux x64 server. The server defaults to `NodePtyAdapter` and
+uses that adapter in explicit upstream mode. The terminal manager owns shell
+selection, workspace and environment authorization. The helper accepts an
+explicit absolute executable and directory, arguments and environment. It
+clears the inherited environment before spawning.
 
 The binary accepts one JSON object per line. Its first request is `spawn` with
 `executable`, `args`, `cwd`, `env`, `cols` and `rows`. A successful response has
@@ -14,7 +16,8 @@ The operation name goes in `operation`.
 
 A write returns `accepted`, the exact prefix accepted by the PTY kernel. A caller
 may send only the remaining suffix after partial acceptance. This receipt does not
-prove that a shell command executed. A read returns `start`, `end`, byte-array
+prove that a shell command executed. The terminal manager reports a partial or
+lost receipt without replaying input. A read returns `start`, `end`, byte-array
 `bytes` and `ended`. The same nonempty chunk is offered until an exact
 acknowledgement returns `acknowledged`. Resize returns `resized: true`. Close
 returns `exitCode` and `success`, then the transport exits.
@@ -25,7 +28,8 @@ A rejected request, a broken output pipe and normal helper return drop the owner
 signal its unreaped process-group leader and reap the direct child. There is no
 replay across helper restart. Linux SIGKILL of the helper, interactive foreground
 job groups, descendants that create another session, and OS restart still require
-containment qualification before application selection.
+containment qualification before default selection. The explicit candidate closes
+the initial process group with SIGKILL on both ordinary and forced terminal close.
 
 The host bounds frames at 128 KiB and chunks at 8 KiB. It keeps one output chunk
 until acknowledgement and advances a byte cursor within the exact JSON integer
