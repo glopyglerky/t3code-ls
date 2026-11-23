@@ -220,6 +220,25 @@ Use compact hot headers, separate large payload/chunk storage, query-specific or
 
 Snapshot, migration, backup and update recovery are part of engine selection. The selected store must support a demonstrably consistent backup/restore protocol, activation fencing and bounded recovery. A live directory copy or retaining an old SQLite file after native writes is not a valid current rollback strategy. Equal comparisons must match acknowledged durability, background sync/checkpoint work, crash boundaries and storage hardware.
 
+## Transaction contract for the engine comparison
+
+The application owns a profile's typed records, keys, visibility rules, and receipts. Each engine adapter implements the same ordered byte-key transaction operations under that owner. Tests use the same initial records, callers, key ranges, limits, and expected results. An engine or layout change publishes a new generation and records the engine source revision, layout, and application catalog.
+
+| Boundary | Required behavior |
+|---|---|
+| Open | Verify the engine, layout, and catalog together. An inspection handle never repairs or initializes the store. The exclusive owner performs recovery when the engine reports an unclean shutdown. |
+| Read | Pin one committed snapshot for point lookups and ordered range reads. A history response and its revision use that snapshot. A writer can commit while a reader retains its earlier snapshot. |
+| Write | Admit one writer for the profiled store. Merge staged changes into point and range reads. Roll back a nested scope by restoring its staged changes, without publishing them. Bound the staged bytes, ranges, rows, and scopes. |
+| Commit | Publish events, projections, derived indexes, receipts, and outbox intent in one root commit. Acknowledge the command and release its effect only after the declared durability barrier succeeds. |
+| Failed commit | Report whether the transaction definitely aborted or its outcome is uncertain. Resolve an uncertain command from its original receipt in the same store before submitting it again. |
+| Backup and conversion | Take a coherent snapshot and record its generation and sequence. Validate the restored typed records, indexes, receipts, pending effects, and referenced assets. Publish the new manifest under exclusive ownership once verification and the durability barrier succeed. |
+
+The T3-side reference is the existing [application transaction owner](../../../apps/server/src/persistence/redb_transactions.rs) and [storage adapter](../../../crates/storage/src/backend.rs). The application keeps its bounded nested staging above the engine. For Fjall or direct redb, an owning process can serve snapshot reads and a serialized write entry point. Helper processes join through that owner when the engine requires a single process. The current omdb fork uses its multi-process writer and reader locks. [Pinned omdb source](https://github.com/glopyglerky/omdb/tree/b2ff031398b1f0a793a352db7a699575b5d4d3d4).
+
+The strict comparison uses omdb and direct redb with `Immediate`, Fjall `SingleWriterTxDatabase` with an explicit `SyncAll` on each comparison transaction, and SQLite WAL with `synchronous=FULL`. Include any file and directory syncs needed to publish a generation. Record the filesystem, OS, and device behavior under a process kill, OS restart, and power loss as separate observations. [Direct redb transactions](https://github.com/cberner/redb/blob/2fc790d14fb62f39137b13f7943df433bec082c2/src/transactions.rs), [Fjall write transactions](https://github.com/fjall-rs/fjall/blob/87006048139bfe1b072bbc29a5a92bf1f97628e3/src/tx/single_writer/write_tx.rs), [Fjall journal sync](https://github.com/fjall-rs/fjall/blob/87006048139bfe1b072bbc29a5a92bf1f97628e3/src/journal/writer.rs), [SQLite synchronous settings](https://www.sqlite.org/pragma.html#pragma_synchronous).
+
+Keep the stock product result under its WAL/NORMAL profile. A candidate in that profile must at least reach OS buffers before acknowledgement and show its actual sync and checkpoint policy. Match the stricter settings when attributing a difference to the engine. The test sequence covers a pinned read across a concurrent commit, nested abandonment, a lost commit reply, a killed writer, and backup and reopen at the declared boundary. Test fresh, aged, and mixed workloads on each selected platform before selecting an engine.
+
 # What successful implementations actually demonstrate
 
 | Primary evidence | Observed result and mechanism | Transfer to T3 |
