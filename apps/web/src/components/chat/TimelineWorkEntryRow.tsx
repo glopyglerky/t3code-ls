@@ -12,7 +12,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { Link } from "@tanstack/react-router";
+import { SemanticThreadLink } from "./DioxusThreadLink";
 import { notificationChildThreadId } from "@t3tools/client-runtime/state/thread-execution";
 import {
   resolveViewedImageAsset,
@@ -96,15 +96,14 @@ export function ThreadReadLabel({
     <span className="flex min-w-0">
       <span className="shrink-0">{label.prefix} “</span>
       {linked ? (
-        <Link
-          to="/$environmentId/$threadId"
-          params={{ environmentId, threadId: label.threadId }}
-          className="min-w-0 truncate rounded-sm text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
-          onClick={stopRowToggle}
-          onKeyDown={stopRowToggle}
-        >
-          {label.title}
-        </Link>
+        <span className="contents" onClick={stopRowToggle} onKeyDown={stopRowToggle}>
+          <SemanticThreadLink
+            environmentId={environmentId}
+            threadId={label.threadId}
+            label={label.title}
+            className="min-w-0 truncate rounded-sm text-foreground underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-ring"
+          />
+        </span>
       ) : (
         <span className="min-w-0 truncate">{label.title}</span>
       )}

@@ -33,6 +33,7 @@ jobs:
       NATIVE_PTY_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-') }}
       PAIRING_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t01-dioxus-pairing-') }}
       GUEST_NAME_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t11-dioxus-guest-') }}
+      DIOXUS_NAVIGATION_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-navigation-') }}
       DIOXUS_TIMELINE_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-timeline-') }}
       DIOXUS_STOP_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-stop-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-timeline-') }}
       DIOXUS_SUBMIT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-send-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-stop-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-timeline-') }}
@@ -69,7 +70,7 @@ jobs:
             build_binding t3-code-ls-client-text-web t3_code_ls_client_text_web \
               composer_offsets apps/web/public/client-text-wasm
           fi
-          if [[ "$PAIRING_PROOF" == true || "$INTEGRATED_NATIVE" == true || "$GUEST_NAME_PROOF" == true || "$DIOXUS_SUBMIT_PROOF" == true || "$DIOXUS_APPROVAL_PROOF" == true ]]; then
+          if [[ "$PAIRING_PROOF" == true || "$INTEGRATED_NATIVE" == true || "$GUEST_NAME_PROOF" == true || "$DIOXUS_SUBMIT_PROOF" == true || "$DIOXUS_APPROVAL_PROOF" == true || "$DIOXUS_NAVIGATION_PROOF" == true ]]; then
             build_binding t3-code-ls-web-pairing t3_code_ls_web_pairing \
               local_pairing "$RUNNER_TEMP/pairing-wasm"
           fi
@@ -274,6 +275,13 @@ jobs:
             cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
             export VITE_T3_CODE_LS_APPROVAL_RENDERER=dioxus
           fi
+          if [[ "$DIOXUS_NAVIGATION_PROOF" == true ]]; then
+            cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
+            export VITE_T3_CODE_LS_THREAD_LINK_RENDERER=dioxus
+            pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
+              src/components/chat/DioxusThreadLink.browser.test.tsx \
+              src/components/chat/DioxusThreadLink.fallback.browser.test.tsx
+          fi
           if [[ "$DIOXUS_TIMELINE_PROOF" == true ]]; then
             export VITE_T3_CODE_LS_ASSISTANT_TEXT_RENDERER=dioxus
             # packages/client-runtime/src/state/threadDetail.test.ts
@@ -314,7 +322,21 @@ jobs:
                 node apps/web/scripts/verify-hybrid-client.ts "$proof/$renderer" "$implementation"
             done
           fi
-          if [[ "$DIOXUS_SUBMIT_PROOF" == true ]]; then
+          if [[ "$DIOXUS_NAVIGATION_PROOF" == true ]]; then
+            sha256sum apps/web/dist/pairing-wasm/local_pairing.js \
+              apps/web/dist/pairing-wasm/local_pairing_bg.wasm >> "$proof/application.sha256"
+            for renderer in dioxus dioxus-fallback; do
+              mkdir "$proof/navigation-$renderer"
+              T3_CODE_LS_THREAD_LINK_PROOF="$renderer" \
+                node apps/web/scripts/verify-hybrid-client.ts "$proof/navigation-$renderer" "$implementation"
+              jq -e --arg renderer "$renderer" '
+                .status == "passed" and .threadNavigation.renderer == $renderer and
+                .threadNavigation.keyboard and .threadNavigation.reopened and
+                .threadNavigation.back and .threadNavigation.draftPreserved and
+                (if $renderer == "dioxus-fallback" then .threadNavigationWasmRefusals > 0 else true end)
+              ' "$proof/navigation-$renderer/$implementation/proof.json"
+            done
+          elif [[ "$DIOXUS_SUBMIT_PROOF" == true ]]; then
             sha256sum apps/web/dist/pairing-wasm/local_pairing.js \
               apps/web/dist/pairing-wasm/local_pairing_bg.wasm >> "$proof/application.sha256"
             if [[ "$DIOXUS_STOP_PROOF" == true ]]; then

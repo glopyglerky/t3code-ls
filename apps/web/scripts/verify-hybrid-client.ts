@@ -34,6 +34,7 @@ import {
 } from "playwright";
 import { nativeExecutable } from "@t3tools/shared/nativeExecutable";
 import { SOCKET_FRAME_PARTS_QUERY_PARAM } from "@t3tools/shared/socketFrameParts";
+import { denyThreadLinkWasm, verifyThreadNavigation } from "./hybrid-client-thread-navigation.ts";
 import { verifyApprovalAction } from "./hybrid-client-approval-action.ts";
 import { verifyGuestNameForm } from "./hybrid-client-guest-name.ts";
 import { verifyBundledVoiceDraft } from "./hybrid-client-voice.ts";
@@ -102,6 +103,8 @@ const guestNameProof = process.env.T3_CODE_LS_GUEST_NAME_PROOF;
 Assert.ok(guestNameProof === undefined || (bundledClient && ["retained", "dioxus", "dioxus-fallback"].includes(guestNameProof)), "Guest name proof requires an explicit packaged renderer");
 const dioxusFindProof = process.env.T3_CODE_LS_DIOXUS_FIND_PROOF;
 const composerSubmitRenderer = process.env.T3_CODE_LS_COMPOSER_SUBMIT_PROOF;
+const threadLinkProof = process.env.T3_CODE_LS_THREAD_LINK_PROOF;
+Assert.ok(threadLinkProof === undefined || (bundledClient && ["dioxus", "dioxus-fallback"].includes(threadLinkProof)), "Thread navigation requires an explicit packaged renderer");
 const composerStopProof = process.env.T3_CODE_LS_COMPOSER_STOP_PROOF === "true";
 const formattedAssistantProof = process.env.T3_CODE_LS_ASSISTANT_INLINE_PROOF === "true";
 const formattedAssistantText = "**Bold** *calm* 雪.";
@@ -211,7 +214,7 @@ Assert.ok(
 Assert.ok(!durableByteProof || (bundledClient && mode === "native" && expectsRustComposer && [
   durableTextProof, parallelTurnsProof, spliceNegotiationProof, splitPtyProof, bundledPtyProof,
   ptyRestartProof, ptyContentionProof, multiTabDraftProof, draftStorageProof, fileEditorProof,
-  voiceDraftProof, pdfLinkProof, htmlInteractionProof, previewLifetimeProof,
+  voiceDraftProof, pdfLinkProof, htmlInteractionProof, previewLifetimeProof, threadLinkProof,
   pairingProof !== undefined, guestNameProof !== undefined, dioxusFindProof !== undefined,
   composerSubmitRenderer !== undefined, composerStopProof,
 ].every((enabled) => !enabled)), "Byte receipt requires its own packaged native Rust-composer run");
@@ -2527,6 +2530,8 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       refusedWasmRequests: number;
       localRefusalPreservedDraft: true;
     }) | null,
+    threadNavigation: null as Awaited<ReturnType<typeof verifyThreadNavigation>> | null,
+    threadNavigationWasmRefusals: 0,
     composerStop: null as Awaited<ReturnType<typeof verifyComposerStop>> | null,
     byteAccounting: null as (typeof byteSamples)[number] | null,
     textRevisionProfile: null as ReturnType<typeof textRevisionIdentity> | null,
@@ -2900,6 +2905,34 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       proof.byteAccounting = { profile: byteProfile, artifacts, updates, dialogue, wire };
       byteSamples.push(proof.byteAccounting);
       completed("Compared the completed Unicode dialogue and ordered durable updates after reload");
+      proof.status = "passed";
+      return;
+    }
+    if (threadLinkProof) {
+      Assert.equal(implementation, "native");
+      // Both threads are created by the normal composer and controlled free ACP
+      // replay. No DOM injection, real provider or installed profile is used.
+      const targetId = await submitReplay(page, "Formatted text", "Synthetic navigation target");
+      await page.getByText(formattedAssistantDisplay, { exact: true }).waitFor({ state: "visible" });
+      const targetUrl = page.url();
+      const sourceId = await submitReplay(page, "Thread navigation", `Navigation target: ${targetId}`);
+      await page.getByText("Synthetic navigation ready.", { exact: true }).waitFor({ state: "visible" });
+      const sourceUrl = page.url();
+      const source = await readThreadSnapshot(page, sourceId);
+      Assert.ok(source.projection.thread.id === sourceId);
+      let readRefusals: (() => number) | undefined;
+      if (threadLinkProof === "dioxus-fallback") {
+        readRefusals = await denyThreadLinkWasm(page);
+        await page.reload({ waitUntil: "domcontentloaded" });
+        await page.waitForURL(sourceUrl);
+      }
+      const targetPath = new URL(targetUrl).pathname;
+      const link = page.locator(`a[href=${JSON.stringify(targetPath)}]:visible`);
+      proof.threadNavigation = await verifyThreadNavigation(
+        page, link, targetUrl, formattedAssistantDisplay,
+        threadLinkProof as "dioxus" | "dioxus-fallback",
+      );
+      if (readRefusals) proof.threadNavigationWasmRefusals = readRefusals();
       proof.status = "passed";
       return;
     }

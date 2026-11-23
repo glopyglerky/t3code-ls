@@ -5,6 +5,7 @@ mod assistant_text;
 mod composer_submit;
 mod guest_name;
 mod thread_find;
+mod thread_link;
 
 use std::{cell::Cell, rc::Rc};
 

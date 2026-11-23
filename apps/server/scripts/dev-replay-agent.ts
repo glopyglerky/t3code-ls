@@ -54,6 +54,7 @@ const FIXTURES = "../src/orchestration-v2/testkit/fixtures";
 export const SCENARIOS = [
   { id: "showcase", name: "Showcase", file: "./dev-replay/showcase_transcript.ndjson" },
   { id: "html-interaction", name: "Interactive HTML", file: null },
+  { id: "thread-navigation", name: "Thread navigation", file: null },
   { id: "text-appends", name: "Text appends", file: "./dev-replay/text_appends_transcript.ndjson" },
   { id: "text-splices", name: "Text splices", file: "./dev-replay/text_splices_transcript.ndjson" },
   {
@@ -358,14 +359,26 @@ function runAgent(): void {
         const sessionId = String(params.sessionId);
         const session = sessions.get(sessionId);
         if (session === undefined) throw new Error(`Unknown session ${sessionId}`);
-        const turns = session.model === "html-interaction" ? [] : loadTurns(session.model);
+        const turns = ["html-interaction", "thread-navigation"].includes(session.model) ? [] : loadTurns(session.model);
         const turn = turns[session.promptCount % Math.max(turns.length, 1)];
         session.promptCount += 1;
         const controller = new AbortController();
         session.cancel = () => controller.abort();
         let ended: "cancelled" | undefined;
         try {
-          if (session.model === "html-interaction") {
+          if (session.model === "thread-navigation") {
+            // Synthetic wire input only, never an actual MCP call. The packaged
+            // verifier supplies a thread it just created in its isolated profile.
+            const target = JSON.stringify(params.prompt).match(/Navigation target: ([A-Za-z0-9-]+)/u)?.[1];
+            if (!target) throw new Error("Thread navigation replay requires a synthetic target");
+            const toolCallId = NodeCrypto.randomUUID();
+            const update = (value: Record<string, unknown>) => send({ method: "session/update", params: { sessionId, update: value } });
+            update({ sessionUpdate: "tool_call", toolCallId, kind: "other", title: "Read a T3 thread", status: "in_progress",
+              rawInput: { threadId: target },
+              _meta: { toolName: "mcp::t3-code::t3_thread_read", serverId: "t3-code", provenance: "mcp" } });
+            update({ sessionUpdate: "tool_call_update", toolCallId, status: "completed", rawOutput: { threadId: target } });
+            update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Synthetic navigation ready." } });
+          } else if (session.model === "html-interaction") {
             const { publishInteractiveHtml } = await import("./dev-replay-html.ts");
             try {
               await publishInteractiveHtml({ signal: controller.signal,

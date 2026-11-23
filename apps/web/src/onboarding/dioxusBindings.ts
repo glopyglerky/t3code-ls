@@ -27,7 +27,12 @@ export interface AssistantTextMount extends DioxusMount {
   update(text: string, sequence: string, updatedAt: string, streaming: boolean): void;
 }
 
+export interface ThreadLinkMount extends DioxusMount {
+  update(href: string, label: string, className: string): void;
+}
+
 interface OnboardingBindings {
+  mount_thread_link(root: HTMLSpanElement, href: string, label: string, className: string): ThreadLinkMount;
   mount_assistant_text(
     root: HTMLDivElement, text: string, sequence: string, updatedAt: string, streaming: boolean,
   ): AssistantTextMount;
