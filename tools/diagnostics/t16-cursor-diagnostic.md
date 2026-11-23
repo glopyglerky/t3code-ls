@@ -76,7 +76,9 @@ is a hosted prerequisite failure; it is not installed by this patch.
 Native uses the existing packaged helper without product edits or a new backend.
 Its API returns full event rows internally. Those bytes stay in bounded process
 memory and are never logged or saved. Only the bounded sequence window's event types from the
-base schema literal allowlist and stream categories survive the projection.
+pinned stock and candidate schema allowlist and stream categories survive the
+projection. Stock declares `thread.visit-recorded`, `thread.issue-synced` and
+`run.output-submitted` in addition to the names already admitted here.
 Payloads, raw IDs, commands, timestamps and actor guesses are omitted. Missing,
 duplicate, unknown-schema or foreign-owner rows reject the diagnostic. Child
 stdout is capped at 16 MiB, stderr discarded and runtime bounded by timeout.

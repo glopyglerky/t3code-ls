@@ -163,11 +163,14 @@ fn categories(rows: &Value, through: u64) -> Result<Value> {
     let mut output = Vec::new();
     for (index, row) in rows.iter().enumerate() {
         let kind = row["event_type"].as_str().ok_or("missing event type")?;
-        if row["sequence"] != FIRST_SEQUENCE + index as u64
-            || row["application_event_version"] != 2
-            || !KNOWN_TYPES.contains(&kind)
-        {
-            return Err("unexpected coordinate event schema".into());
+        if row["sequence"] != FIRST_SEQUENCE + index as u64 {
+            return Err("unexpected coordinate event sequence".into());
+        }
+        if row["application_event_version"] != 2 {
+            return Err("unexpected coordinate event version".into());
+        }
+        if !KNOWN_TYPES.contains(&kind) {
+            return Err("coordinate event type absent from pinned contracts".into());
         }
         let owner = match row["aggregate_kind"].as_str() {
             Some("thread") if row["stream_id"] == SELECTED => "selected-thread",
@@ -248,8 +251,11 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-// Populated from dotted schema literals at the exact implementation base.
+// Event names from the shipped candidate and the pinned stock contracts.
 const KNOWN_TYPES: &[&str] = &[
+    "run.output-submitted",
+    "thread.issue-synced",
+    "thread.visit-recorded",
     "checkpoint-scope.created",
     "checkpoint.captured",
     "checkpoint.rollback",
@@ -434,6 +440,12 @@ mod tests {
         assert_eq!(result[0]["owner"], "selected-thread");
         assert!(!result.to_string().contains("PRIVATE_SENTINEL"));
         assert!(!result.to_string().contains(SELECTED));
+        let mut stock = rows();
+        stock[1]["event_type"] = json!("thread.visit-recorded");
+        assert_eq!(
+            categories(&stock, 12867).unwrap()[1]["event_type"],
+            "thread.visit-recorded"
+        );
         for field in [
             "sequence",
             "application_event_version",
