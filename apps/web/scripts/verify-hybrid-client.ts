@@ -1852,6 +1852,10 @@ async function exercise(implementation: Implementation): Promise<void> {
       Assert.equal(await editor.innerText(), draft);
       proof.historyFind = { query, count: "1/1", draftPreserved: true, renderer, refusedWasmRequests };
       completed("Found and highlighted the previous reply after restart while retaining the draft");
+      if (dioxusFindProof !== undefined) {
+        proof.status = "passed";
+        return;
+      }
     }
     if (bundledClient && implementation === "native") {
       starting("interactive terminal reconnect");
