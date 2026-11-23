@@ -385,6 +385,7 @@ export const makeRuntimeLayers = <
         layerManagedProjectFoldersProvided,
         layerSecretRequestsProvided,
         layerCommandReceiptStoreProvided,
+        persistence.outbox,
       ),
     ),
   );
