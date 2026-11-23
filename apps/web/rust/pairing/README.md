@@ -35,10 +35,13 @@ handler with controlled dependencies; its listener exists only for MCP registry
 identity. It is not a packaged guest provisioner. No production permissions or
 credential checks are changed to make this UI test possible.
 
-The retained NameForm oracle comes from stock T3
+The stock product comparison remains T3
 `28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`, GuestPage blob
-`9cc690491d3290c5dfbc0f927a1f633cdfec6837`. MIT provenance is preserved. The mandatory
-method SHA-256 is
+`9cc690491d3290c5dfbc0f927a1f633cdfec6837`. The port map tracks the integrated
+source `c7a3f02e3851923ced8ebd000db79f641e11b038`, blob
+`7ac90687b227c41b8e77f7707eaf95199b81cac6`. The newer stock form localizes the
+labels. The hosted English fixture leaves that localization unqualified. MIT
+provenance is preserved. The mandatory method SHA-256 is
 `5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
 
 The hosted browser check passed the retained form, the Dioxus form, and the

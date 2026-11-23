@@ -1932,8 +1932,8 @@
       "id": "browser-guest-name-dioxus",
       "state": "candidate",
       "domain_owner": "apps/web/src/components/guest",
-      "reviewed_upstream_commit": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
-      "upstream_sources": [{ "path": "apps/web/src/components/guest/GuestPage.tsx", "blob": "9cc690491d3290c5dfbc0f927a1f633cdfec6837" }],
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [{ "path": "apps/web/src/components/guest/GuestPage.tsx", "blob": "7ac90687b227c41b8e77f7707eaf95199b81cac6" }],
       "rust_paths": ["apps/web/rust/pairing/src/guest_name.rs"],
       "adapter_paths": [
         ".github/workflows/composer-offsets.yml",
