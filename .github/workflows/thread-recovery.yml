@@ -36,6 +36,12 @@ jobs:
             packages/client-runtime/src/state/threads-sync.test.ts \
             packages/contracts/src/orchestrationV2.test.ts \
             apps/server/src/orchestration-v2/WireProjection.test.ts
+      - name: Qualify removal when a mobile cleanup owner fails
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-cleanup-')
+        run: |
+          pnpm exec vp test run --maxWorkers 2 packages/client-runtime/src/connection/registry.test.ts
+          pnpm --filter @t3tools/mobile exec vp test run --project unit --maxWorkers 2 \
+            src/connection/environment-owned-data-cleanup.test.ts
       - name: Exercise mobile outbox recovery
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-')
         working-directory: apps/mobile
