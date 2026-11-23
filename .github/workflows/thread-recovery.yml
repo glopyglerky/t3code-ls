@@ -490,6 +490,16 @@ jobs:
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
           pnpm --dir apps/mobile exec vp test run --project unit --maxWorkers 2 src/native/outboxDelivery.test.ts
+          if [[ "$PAIR_RECONNECT_PROOF" == true ]]; then
+            sha256sum apps/mobile/outbox-dispatch-proof.ts scripts/android-pairing-fixture.ts \
+              >> "$RUNNER_TEMP/outbox-runtime-proof/inputs.sha256"
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t12-outbox-runtime-normal-pair-dispatch-* ]]; then
+              pnpm --dir apps/mobile run typecheck
+              pnpm --dir apps/mobile exec vp test run --project unit --maxWorkers 2 \
+                src/state/thread-outbox.test.ts src/state/threadOutboxDelivery.test.ts \
+                src/state/threadOutboxDelivery.permissions.test.ts
+            fi
+          fi
           pnpm --dir apps/mobile exec expo prebuild --platform android --no-install
           apps/mobile/android/gradlew -p apps/mobile/android --no-daemon --max-workers=2 :app:assembleRelease
           apk=apps/mobile/android/app/build/outputs/apk/release/app-release.apk

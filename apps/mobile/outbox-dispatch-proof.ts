@@ -12,7 +12,9 @@ const threadId = ThreadId.make("t12-dispatch-thread");
 const messageId = MessageId.make("t12-dispatch-message");
 const commandId = CommandId.make("t12-dispatch-command");
 const text = "T12 synthetic Android persisted task";
-const assert = (condition: unknown): void => { if (!condition) throw new Error("Installed dispatch invariant failed"); };
+function assert(condition: unknown): asserts condition {
+  if (!condition) throw new Error("Installed dispatch invariant failed");
+}
 
 export async function proveInstalledTaskDispatch(
   environmentId: EnvironmentId,
