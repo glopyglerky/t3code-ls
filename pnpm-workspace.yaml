@@ -263,6 +263,8 @@ patchedDependencies:
   # Android: a Compose host that requests layout in a mount (a new screen's app bar) is laid out
   # before that frame is drawn, instead of a frame later.
   expo-modules-core@58.0.30: patches/expo-modules-core@58.0.30.patch
+  # Reuse Expo's synchronous pointer capture wrapper for Swift 6.2.
+  expo-modules-jsi@58.0.22: patches/expo-modules-jsi@58.0.22.patch
   # Observe the owned host exit independently of descendants retaining its stdio.
   "@muse-code/sdk@1.4.6": patches/@muse-code__sdk@1.4.6.patch
   app-builder-lib@26.16.1: patches/app-builder-lib@26.16.1.patch
