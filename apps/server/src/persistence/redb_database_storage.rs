@@ -92,7 +92,7 @@ pub struct IsolatedTrialRequest {
     pub target_schema_sha256: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IsolatedTrialPreparation {
     pub update_id: String,
@@ -102,11 +102,41 @@ pub struct IsolatedTrialPreparation {
     pub target_schema_sha256: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IsolatedTrialVerification {
     pub request: IsolatedTrialRequest,
     pub preparation: IsolatedTrialPreparation,
+}
+
+#[derive(Debug, Serialize)]
+pub struct IsolatedTrialSelection {
+    pub update_id: String,
+    pub from_version: String,
+    pub target_version: String,
+    pub source_database: TrialFileIdentity,
+    pub prepared_database: TrialFileIdentity,
+}
+
+/// Inspect a pending selection together with its durable native trial.
+/// The observation grants no authority after the ownership leases are dropped.
+pub async fn inspect_isolated_service_trial_selection(
+    home: PathBuf,
+    update_id: String,
+    from_version: String,
+    target_version: String,
+) -> Result<IsolatedTrialSelection> {
+    if !home.is_absolute() || !valid_update_id(&update_id) {
+        return Err(Error::Invalid("invalid isolated trial selection".into()));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        isolated::inspect_selection(home, update_id, from_version, target_version).await
+    }
+    #[cfg(not(target_os = "linux"))]
+    Err(Error::Invalid(
+        "isolated trial selection inspection is unsupported on this platform".into(),
+    ))
 }
 
 /// The launcher reads this before stopping an active runtime for a native trial.
@@ -737,6 +767,7 @@ pub async fn publish_service_trial_restore(
 #[cfg(target_os = "linux")]
 struct TrialRestoreDirectories {
     state: fs::File,
+    runtime: fs::File,
     backups: fs::File,
 }
 
@@ -756,7 +787,11 @@ impl TrialRestoreDirectories {
         let state = Self::open_directory(&home.join("userdata"))?;
         let runtime = Self::open_directory(&home.join("runtime"))?;
         let backups = Self::open_directory(&Self::pinned(&runtime).join("native-db-backup"))?;
-        Ok(Self { state, backups })
+        Ok(Self {
+            state,
+            runtime,
+            backups,
+        })
     }
 
     fn open_directory(path: &Path) -> Result<fs::File> {
@@ -780,6 +815,7 @@ impl TrialRestoreDirectories {
         let current = Self::open(home)?;
         for (pinned, current) in [
             (&self.state, &current.state),
+            (&self.runtime, &current.runtime),
             (&self.backups, &current.backups),
         ] {
             let before = pinned.metadata().map_err(io_error)?;

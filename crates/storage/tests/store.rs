@@ -778,6 +778,81 @@ async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
 
     let old_result = fs::read(&trial).unwrap();
     let old_receipt = fs::read(&receipt_path).unwrap();
+    let selection_path = runtime.join("service-state.json");
+    let inspect_selection = || {
+        let output = Command::new(executable)
+            .arg("trial-inspect-selection")
+            .arg(&home)
+            .args([UPDATE, "1.0.0", "1.1.0"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    assert_eq!(inspect_selection()["error"]["kind"], "incompatible_store");
+    let selection = json!({
+        "protocol": 4,
+        "activeVersion": "1.0.0",
+        "update": {
+            "id": UPDATE,
+            "fromVersion": "1.0.0",
+            "targetVersion": "1.1.0",
+            "dbPath": live,
+            "status": "pending",
+        },
+    });
+    fs::write(&selection_path, serde_json::to_vec(&selection).unwrap()).unwrap();
+    let observed = inspect_selection();
+    assert_eq!(observed["ok"], true, "{observed}");
+    assert_eq!(observed["result"]["update_id"], UPDATE);
+    assert_eq!(observed["result"]["source_database"], request["database"]);
+    assert_eq!(
+        observed["result"]["prepared_database"],
+        previous_preparation.as_ref().unwrap()["database"]
+    );
+    let saved_selection = fs::read(&selection_path).unwrap();
+    for (field, value) in [
+        ("activeVersion", json!("1.1.0")),
+        ("protocol", json!(2)),
+        ("update", json!({"status": "committed"})),
+    ] {
+        let mut changed = selection.clone();
+        changed[field] = value;
+        fs::write(&selection_path, serde_json::to_vec(&changed).unwrap()).unwrap();
+        assert_eq!(inspect_selection()["error"]["kind"], "incompatible_store");
+    }
+    for (field, value) in [
+        ("id", json!("aa212c2b-63d4-4b28-97e4-1c1d6dc6d282")),
+        ("fromVersion", json!("0.9.0")),
+        ("targetVersion", json!("1.2.0")),
+        ("status", json!("committed")),
+        ("dbPath", json!(trial)),
+    ] {
+        let mut changed = selection.clone();
+        changed["update"][field] = value;
+        fs::write(&selection_path, serde_json::to_vec(&changed).unwrap()).unwrap();
+        assert_eq!(inspect_selection()["error"]["kind"], "incompatible_store");
+    }
+    fs::write(&selection_path, &saved_selection).unwrap();
+    let held_selection = runtime.join("selection-held.json");
+    fs::rename(&selection_path, &held_selection).unwrap();
+    std::os::unix::fs::symlink(&held_selection, &selection_path).unwrap();
+    assert_eq!(inspect_selection()["error"]["kind"], "incompatible_store");
+    fs::remove_file(&selection_path).unwrap();
+    fs::rename(&held_selection, &selection_path).unwrap();
+    let owner = OwnerLock::acquire(&owner_path).unwrap();
+    assert_eq!(inspect_selection()["error"]["kind"], "writer_busy");
+    drop(owner);
+    fs::rename(&receipt_path, &held_receipt).unwrap();
+    assert_eq!(inspect_selection()["error"]["kind"], "incompatible_store");
+    fs::rename(&held_receipt, &receipt_path).unwrap();
+    assert_eq!(fs::read(&live).unwrap(), before);
+    assert_eq!(fs::read(&trial).unwrap(), old_result);
+    assert_eq!(fs::read(&checkpoint).unwrap(), original_checkpoint);
+    assert_eq!(fs::read(&receipt_path).unwrap(), old_receipt);
+    assert_eq!(fs::read(&selection_path).unwrap(), saved_selection);
+
     fs::write(&receipt_path, vec![b' '; 8 * 1024 + 1]).unwrap();
     assert_eq!(prepare(&request)["error"]["kind"], "incompatible_store");
     assert_eq!(fs::read(&trial).unwrap(), old_result);
