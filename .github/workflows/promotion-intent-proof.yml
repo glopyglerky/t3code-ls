@@ -76,6 +76,8 @@ jobs:
           timeout -k 5s 180s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
             test --locked -j 2 -p t3-code-ls-storage --lib isolated_trial \
             -- --nocapture 2>&1 | tee "$RUNNER_TEMP/promotion-proof/existing-trial.log"
+          grep -F 'isolated_trial_refuses_generic_pre_activation_restore ... ok' \
+            "$RUNNER_TEMP/promotion-proof/existing-trial.log"
           cp "$RUNNER_TEMP/promotion-toolchain/installation-proof.json" "$RUNNER_TEMP/promotion-proof/"
       - name: Retain bounded recovery evidence
         if: always()
