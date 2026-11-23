@@ -2,6 +2,7 @@ import * as Assert from "node:assert/strict";
 import * as ChildProcess from "node:child_process";
 import * as Crypto from "node:crypto";
 import * as FS from "node:fs";
+import { registerHooks } from "node:module";
 import * as OS from "node:os";
 import * as Path from "node:path";
 import {
@@ -25,8 +26,24 @@ import {
 } from "../../server/scripts/packaged-server-fixture.ts";
 import { EventSinkV2 } from "../../server/src/orchestration-v2/EventSink.ts";
 import * as NativeEventSink from "../../server/src/orchestration-v2/NativeEventSink.ts";
-import { nativeRequest, withNative } from "../../../tools/redb-domain-fixture.mjs";
-import { fixedTime, jsonPayloads, makeEvent } from "../../../tools/redb-event-sink-fixtures.mjs";
+
+// The standalone storage fixtures normally load from a dedicated test runtime.
+// Use this checkout's locked server dependencies for both seeding and the client.
+const domainFixture = new URL("../../../tools/redb-domain-fixture.mjs", import.meta.url).href;
+const eventFixture = new URL("../../../tools/redb-event-sink-fixtures.mjs", import.meta.url).href;
+const serverWorkspace = new URL("../../server/package.json", import.meta.url).href;
+const dependencies = registerHooks({
+  resolve(specifier, context, next) {
+    const fixtureImport = context.parentURL === domainFixture || context.parentURL === eventFixture;
+    return next(specifier, fixtureImport && (specifier.startsWith("@") || specifier.startsWith("effect/"))
+      ? { ...context, parentURL: serverWorkspace }
+      : context);
+  },
+});
+const [{ nativeRequest, withNative }, { fixedTime, jsonPayloads, makeEvent }] = await Promise.all([
+  import(domainFixture),
+  import(eventFixture),
+]).finally(() => dependencies.deregister());
 
 const root = FS.realpathSync(Path.resolve(import.meta.dirname, "../../.."));
 const [argument] = process.argv.slice(2);
