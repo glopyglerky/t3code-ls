@@ -1,0 +1,80 @@
+name: Native promotion intent recovery
+
+on:
+  push:
+    branches: ["candidate/t3code-ls-t05-promotion-intent-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  promotion-intent:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      GIT_TERMINAL_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Select owned output and retain source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CARGO_HOME=$RUNNER_TEMP/promotion-cargo-home" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/promotion-target" >> "$GITHUB_ENV"
+          echo "T3_CODE_LS_TEST_TMPDIR=$RUNNER_TEMP/promotion-profiles" >> "$GITHUB_ENV"
+          mkdir "$RUNNER_TEMP/promotion-proof" "$RUNNER_TEMP/promotion-profiles"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/promotion-proof/source-identity.txt"
+          cp Cargo.lock database.lock.json toolchain.lock.json "$RUNNER_TEMP/promotion-proof/"
+      - name: Verify the pinned compiler
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/promotion-toolchain"
+      - name: Build the helper and exercise intent interruption and refusal
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout -k 5s 600s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            build --locked -j 2 -p t3-code-ls-storage --bin t3-code-ls-db
+          export T3_TEST_PROMOTION_HELPER="$CARGO_TARGET_DIR/debug/t3-code-ls-db"
+          sha256sum "$T3_TEST_PROMOTION_HELPER" > "$RUNNER_TEMP/promotion-proof/helper.sha256"
+          "$T3_TEST_PROMOTION_HELPER" trial-capabilities > "$RUNNER_TEMP/promotion-proof/capabilities.json"
+          timeout -k 5s 180s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            test --locked -j 2 -p t3-code-ls-storage --lib \
+            application_bootstrap::upgrade::tests::service_promotion_intent_is_durable_exact_and_keeps_publication_fenced \
+            -- --exact --nocapture 2>&1 | tee "$RUNNER_TEMP/promotion-proof/intent.log"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          log = (Path(os.environ["RUNNER_TEMP"]) / "promotion-proof/intent.log").read_text()
+          assert "T05 promotion intent uses the pinned built Rust helper" in log
+          assert "T05 promotion intent durable retry preserved source, checkpoint, stage and selection without publication" in log
+          PY
+          timeout -k 5s 180s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            test --locked -j 2 -p t3-code-ls-storage --lib isolated_trial \
+            -- --nocapture 2>&1 | tee "$RUNNER_TEMP/promotion-proof/existing-trial.log"
+          cp "$RUNNER_TEMP/promotion-toolchain/installation-proof.json" "$RUNNER_TEMP/promotion-proof/"
+      - name: Retain bounded recovery evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: native-promotion-intent-proof
+          path: ${{ runner.temp }}/promotion-proof
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove owned generated output
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -k "$RUNNER_TEMP"
+          rm -rf "$RUNNER_TEMP/promotion-cargo-home" "$RUNNER_TEMP/promotion-target" \
+            "$RUNNER_TEMP/promotion-profiles" "$RUNNER_TEMP/promotion-toolchain"
+          df -k "$RUNNER_TEMP"
