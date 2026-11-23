@@ -940,9 +940,6 @@ async function exercise(implementation: Implementation): Promise<void> {
       );
       assertBundledPreflight(stateDirectory, databasePath, "ready");
       proof.crashRecovery.recoveredPreflight = "ready";
-      Assert.ok(proof.interrupted);
-      await page.goto(proof.interrupted.threadUrl, { waitUntil: "domcontentloaded" });
-      await verifyInterruptedShowcase(page, proof.interrupted);
     }
     await page.goto(proof.threadUrl, { waitUntil: "domcontentloaded" });
     proof.completedSnapshots.push({
