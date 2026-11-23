@@ -34,6 +34,7 @@ type OwnedApplication = { pid: number; pairingUrl: string; stop: () => Promise<v
 type InterruptedShowcase = ReplayTurnIdentity & {
   threadId: string;
   threadUrl: string;
+  projectId: string;
   requestId: string;
   partialMessageId: string;
   partialText: string;
@@ -620,10 +621,22 @@ async function submitReplay(
   page: Page,
   modelLabel = "Showcase",
   prompt = replayPrompt,
-  projectName = "hybrid-fixture",
+  projectName?: string,
 ): Promise<string> {
-  await page.getByRole("button", { name: `New thread in ${projectName}`, exact: true }).click();
+  await page.getByRole("button", {
+    name: projectName === undefined ? "New thread in hybrid-fixture" : "New thread",
+    exact: true,
+  }).click();
   await page.waitForURL((url) => url.pathname.startsWith("/draft/"));
+  if (projectName !== undefined) {
+    const projectPicker = page.locator("[data-draft-project-trigger]");
+    await projectPicker.click();
+    await page.getByRole("combobox", { name: "Search projects", exact: true }).fill(projectName);
+    await page.getByRole("option").filter({
+      has: page.getByText(projectName, { exact: true }),
+    }).click();
+    await projectPicker.getByText(projectName, { exact: true }).waitFor({ state: "visible" });
+  }
   const picker = page.locator('[data-chat-provider-model-picker="true"]:visible');
   const search = page.getByPlaceholder("Search models...");
   await picker.click();
@@ -664,6 +677,7 @@ async function pendingShowcase(
     ...identity,
     threadId,
     threadUrl: page.url(),
+    projectId: pending.projection.thread.projectId,
     requestId: request.id,
     partialMessageId: partialMessage.id,
     partialText: partialMessage.text,
@@ -710,6 +724,7 @@ async function verifyParallelShowcases(page: Page, workspace: string) {
       open(interrupting, projectNames[1]),
     ]);
     Assert.notEqual(complete.threadId, interrupt.threadId);
+    Assert.notEqual(complete.projectId, interrupt.projectId);
     Assert.notEqual(complete.providerTurnId, interrupt.providerTurnId);
     Assert.notEqual(complete.requestId, interrupt.requestId);
 
