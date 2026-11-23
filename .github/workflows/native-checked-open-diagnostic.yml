@@ -335,7 +335,10 @@ jobs:
               variant="${variants[$position]}"
               directory=dist
               if [[ "$variant" == control ]]; then directory=dist-checked-open-control; fi
-              trial="$scratch/trials/paired-$round-$variant"
+              # The seed transcripts include their workspace path. Reuse the pathname with a
+              # fresh owned directory so each side receives the exact same workload bytes.
+              trial="$scratch/trials/paired-$round"
+              test ! -e "$trial"
               sample="$evidence/paired-$round-$variant.json"
               sudo -n unshare --net --pid --fork --mount-proc --kill-child -- bash -euc '
                 ip link set dev lo up
