@@ -712,3 +712,373 @@ async fn assistant_text_revisions_store_suffixes_and_replay_exactly_after_rollba
     app.rollback("after-prune").await.unwrap();
     store.shutdown().await.unwrap();
 }
+
+#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+struct LayoutByteCount {
+    records: u64,
+    key_bytes: u64,
+    value_bytes: u64,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+struct LayoutFootprint {
+    categories: std::collections::BTreeMap<&'static str, LayoutByteCount>,
+    total_key_value_bytes: u64,
+    checkpoint_rows: u64,
+    suffix_rows: u64,
+    key_value_sha256: String,
+}
+
+async fn layout_footprint(store: &Store) -> LayoutFootprint {
+    use sha2::{Digest, Sha256};
+    let mut tx = store.db.begin_read_only().await.unwrap();
+    let catalog = decode_catalog(&tx.get(&schema_key()).await.unwrap().unwrap()).unwrap();
+    let rows = row_prefix(&catalog.generation, EVENTS).unwrap();
+    let indexes = key(&catalog, "");
+    let heads = key(&catalog, "text-v1/head/");
+    let dependents = key(&catalog, "text-v1/dependent/");
+    let mut result = LayoutFootprint {
+        categories: [
+            "event_rows",
+            "event_indexes_and_metadata",
+            "text_heads",
+            "text_dependents",
+            "other_store_keys",
+        ]
+        .into_iter()
+        .map(|name| (name, LayoutByteCount::default()))
+        .collect(),
+        total_key_value_bytes: 0,
+        checkpoint_rows: 0,
+        suffix_rows: 0,
+        key_value_sha256: String::new(),
+    };
+    let mut digest = Sha256::new();
+    let mut start = Vec::new();
+    loop {
+        // Scan the actual backend table, not a logical row API which reconstructs text.
+        let page = tx.scan(&start, &[255], 32).await.unwrap();
+        if page.is_empty() {
+            break;
+        }
+        for (key, value) in &page {
+            let category = if key.starts_with(&rows) {
+                let physical: Value = serde_json::from_slice(value).unwrap();
+                if physical.get("text_revision").is_some() {
+                    result.suffix_rows += 1;
+                } else {
+                    result.checkpoint_rows += 1;
+                }
+                "event_rows"
+            } else if key.starts_with(&heads) {
+                "text_heads"
+            } else if key.starts_with(&dependents) {
+                "text_dependents"
+            } else if key.starts_with(&indexes) {
+                "event_indexes_and_metadata"
+            } else {
+                "other_store_keys"
+            };
+            let count = result.categories.get_mut(category).unwrap();
+            count.records += 1;
+            count.key_bytes += key.len() as u64;
+            count.value_bytes += value.len() as u64;
+            result.total_key_value_bytes += (key.len() + value.len()) as u64;
+            digest.update((key.len() as u64).to_le_bytes());
+            digest.update(key);
+            digest.update((value.len() as u64).to_le_bytes());
+            digest.update(value);
+        }
+        start = page.last().unwrap().0.clone();
+        start.push(0);
+    }
+    tx.rollback().await.unwrap();
+    result.key_value_sha256 = format!("{:x}", digest.finalize());
+    result
+}
+
+fn layout_file_size(path: &std::path::Path) -> Value {
+    let metadata = std::fs::metadata(path).unwrap();
+    #[cfg(unix)]
+    let allocated = {
+        use std::os::unix::fs::MetadataExt;
+        Some(metadata.blocks() * 512)
+    };
+    #[cfg(not(unix))]
+    let allocated: Option<u64> = None;
+    json!({ "file_bytes": metadata.len(), "allocated_file_bytes": allocated })
+}
+
+async fn layout_exact_replay(store: &Store, events: &[EventAppendRow]) -> Vec<EventResultRow> {
+    use crate::application::ApplicationTransactionMode;
+    let mut app = ApplicationTransactions::new(store.clone());
+    app.begin_mode("measure-read", ApplicationTransactionMode::Read, None)
+        .await
+        .unwrap();
+    let mut replay = Vec::new();
+    loop {
+        let page = app
+            .events_read(
+                "measure-read",
+                EventRead {
+                    after_sequence: replay.len() as u64,
+                    limit: 8,
+                    ..read_all()
+                },
+            )
+            .await
+            .unwrap();
+        if page.is_empty() {
+            break;
+        }
+        replay.extend(page);
+    }
+    assert_eq!(replay.len(), events.len());
+    for (index, (actual, expected)) in replay.iter().zip(events).enumerate() {
+        assert_eq!(actual.sequence, index as u64 + 1);
+        assert_eq!(actual.event_id, expected.event_id);
+        assert_eq!(actual.payload_json, expected.payload_json);
+        assert_eq!(actual.metadata_json, expected.metadata_json);
+    }
+    let statistics = app
+        .events_stats(
+            "measure-read",
+            stats("application", None, 0, events.len() as u64, None),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        statistics.raw_payload_bytes,
+        events
+            .iter()
+            .map(|event| event.payload_json.len() as u64)
+            .sum::<u64>()
+    );
+    app.rollback("measure-read").await.unwrap();
+    replay
+}
+
+async fn layout_storage_run(
+    revisions: bool,
+    events: &[EventAppendRow],
+) -> (Value, Vec<EventResultRow>) {
+    use crate::application::ApplicationEventLayout;
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    assert!(
+        store
+            .bootstrap_application_with_event_layout(
+                revisions.then_some(ApplicationEventLayout::AssistantTextRevisionsV1),
+            )
+            .await
+            .unwrap()
+            .initialized
+    );
+    prepare(&store).await;
+    let initial = layout_footprint(&store).await;
+    assert_eq!(initial.checkpoint_rows + initial.suffix_rows, 0);
+    let identity = ApplicationTransactions::new(store.clone())
+        .generation_identity()
+        .await
+        .unwrap()
+        .unwrap();
+    store.shutdown().await.unwrap();
+    let initial_file = layout_file_size(fixture.path());
+    let store = fixture.connect().await;
+    let mut app = ApplicationTransactions::new(store.clone());
+    let mut streaming = None;
+    for (index, event) in events.iter().enumerate() {
+        app.begin("measure-write").await.unwrap();
+        let appended = app
+            .events_append("measure-write", event.clone(), None)
+            .await
+            .unwrap();
+        assert_eq!(appended.sequence, index as u64 + 1);
+        app.commit("measure-write").await.unwrap();
+        if index + 1 == events.len() - 1 {
+            streaming = Some(layout_footprint(&store).await);
+        }
+    }
+    drop(app);
+    let streaming = streaming.unwrap();
+    assert_eq!(
+        streaming.categories["text_heads"].records,
+        if revisions { 1 } else { 0 }
+    );
+    let completed = layout_footprint(&store).await;
+    assert_eq!(completed.categories["text_heads"].records, 0);
+    assert_eq!(
+        completed.checkpoint_rows + completed.suffix_rows,
+        events.len() as u64
+    );
+    if revisions {
+        assert!(completed.suffix_rows > 8);
+        assert!(
+            completed.checkpoint_rows > 2,
+            "the workload must cross multiple bounded chains"
+        );
+        assert_eq!(
+            completed.categories["text_dependents"].records,
+            completed.suffix_rows
+        );
+    } else {
+        assert_eq!(completed.suffix_rows, 0);
+        assert_eq!(completed.categories["text_dependents"].records, 0);
+    }
+    store.shutdown().await.unwrap();
+    let store = fixture.connect().await;
+    let replay = layout_exact_replay(&store, events).await;
+    let reopened = layout_footprint(&store).await;
+    assert_eq!(reopened, completed);
+    let before_statistics = store.storage_statistics().await.unwrap();
+    store.shutdown().await.unwrap();
+    let before_compaction = layout_file_size(fixture.path());
+    let store = Store::open_exclusive(fixture.path()).await.unwrap();
+    let compaction = store.storage_compact().await.unwrap();
+    let compacted = layout_footprint(&store).await;
+    assert_eq!(
+        compacted, completed,
+        "compaction must preserve every actual key/value byte"
+    );
+    let after_statistics = store.storage_statistics().await.unwrap();
+    store.shutdown().await.unwrap();
+    let after_compaction = layout_file_size(fixture.path());
+    let store = fixture.connect().await;
+    assert_eq!(layout_exact_replay(&store, events).await, replay);
+    store.shutdown().await.unwrap();
+    (
+        json!({
+            "layout": if revisions { "assistant_text_revisions_v1" } else { "full_event" },
+            "identity": identity, "initial": initial, "initial_file": initial_file,
+            "streaming": streaming, "completed": completed,
+            "before_compaction": before_compaction, "after_compaction": after_compaction,
+            "compaction": compaction, "before_statistics": before_statistics, "after_statistics": after_statistics,
+        }),
+        replay,
+    )
+}
+
+#[tokio::test]
+async fn assistant_text_revisions_compare_event_owner_storage_bytes() {
+    use sha2::{Digest, Sha256};
+    const UPDATES: usize = 128;
+    let mut events = Vec::new();
+    let mut text = "起点 café e\u{301} 👩‍💻\n".repeat(160);
+    let suffix = "追加 雪🙂 e\u{301} café\n".repeat(48);
+    for index in 0..=UPDATES {
+        if index < UPDATES {
+            text.push_str(&format!("[{index:03}] {suffix}"));
+        }
+        let mut event = row(&format!("layout-{index:03}"), "thread");
+        event.event_type = "message.updated".into();
+        event.actor_kind = "provider".into();
+        event.payload_json = serde_json::to_string(&json!({
+            "threadId": "thread", "id": "message", "text": text, "role": "assistant",
+            "createdBy": "agent", "creationSource": "provider", "streaming": index < UPDATES,
+            "runId": "run", "nodeId": "node", "createdAt": "2026-11-10T00:00:00.000Z",
+            "updatedAt": "2026-11-10T00:00:01.000Z", "attachments": [],
+        }))
+        .unwrap();
+        assert!(event.payload_json.len() < 256 * 1024);
+        events.push(event);
+    }
+    let mut logical_digest = Sha256::new();
+    for event in &events {
+        logical_digest.update((event.payload_json.len() as u64).to_le_bytes());
+        logical_digest.update(event.payload_json.as_bytes());
+    }
+    let mut runs = Vec::new();
+    for pair in 0..5 {
+        let order = if pair % 2 == 0 {
+            [false, true]
+        } else {
+            [true, false]
+        };
+        let (first, first_replay) = layout_storage_run(order[0], &events).await;
+        let (second, second_replay) = layout_storage_run(order[1], &events).await;
+        assert_eq!(
+            first_replay, second_replay,
+            "both layouts must complete identical logical work"
+        );
+        assert_eq!(
+            first["completed"]["categories"]["event_indexes_and_metadata"],
+            second["completed"]["categories"]["event_indexes_and_metadata"],
+            "both layouts must pay for the same logical event indexes and statistics"
+        );
+        runs.extend([first, second]);
+    }
+    let summary = |layout: &str, field: &str| {
+        let mut values: Vec<u64> = runs
+            .iter()
+            .filter(|run| run["layout"] == layout)
+            .map(|run| {
+                if field == "key_value_bytes" {
+                    run["completed"]["total_key_value_bytes"].as_u64().unwrap()
+                } else {
+                    run["after_compaction"]["file_bytes"].as_u64().unwrap()
+                }
+            })
+            .collect();
+        values.sort_unstable();
+        json!({ "runs": values.len(), "minimum": values[0], "median": values[2], "maximum": values[4] })
+    };
+    let full = summary("full_event", "file_bytes");
+    let revisions = summary("assistant_text_revisions_v1", "file_bytes");
+    let settled = if revisions["maximum"].as_u64().unwrap() < full["minimum"].as_u64().unwrap() {
+        "smaller-in-all-observed-runs"
+    } else if revisions["minimum"].as_u64().unwrap() > full["maximum"].as_u64().unwrap() {
+        "larger-in-all-observed-runs"
+    } else if revisions["minimum"] == full["maximum"] && revisions["maximum"] == full["minimum"] {
+        "equal-no-settled-file-reduction"
+    } else {
+        "overlapping-ranges-no-settled-reduction-established"
+    };
+    let mut executable_digest = Sha256::new();
+    {
+        use std::io::Read;
+        let mut file = std::fs::File::open(std::env::current_exe().unwrap()).unwrap();
+        let mut buffer = [0; 32 * 1024];
+        loop {
+            let count = file.read(&mut buffer).unwrap();
+            if count == 0 {
+                break;
+            }
+            executable_digest.update(&buffer[..count]);
+        }
+    }
+    let report = json!({
+        "schema": 1, "scope": "native-event-owner-only-no-projection-provider-or-client-workload",
+        "stock_product_denominator": "28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f",
+        "streaming_updates": UPDATES, "completion_events": 1,
+        "workload_commits_per_run": events.len(),
+        "maximum_payload_bytes": events.iter().map(|event| event.payload_json.len()).max().unwrap(),
+        "platform": { "os": std::env::consts::OS, "architecture": std::env::consts::ARCH },
+        "test_executable_sha256": format!("{:x}", executable_digest.finalize()),
+        "codec_source_sha256": format!("{:x}", Sha256::digest(include_bytes!("redb_event_text_revisions.rs"))),
+        "workload_source_sha256": format!("{:x}", Sha256::digest(include_bytes!("redb_event_rows_tests.rs"))),
+        "logical_payload_bytes": events.iter().map(|e| e.payload_json.len() as u64).sum::<u64>(),
+        "logical_payload_sha256": format!("{:x}", logical_digest.finalize()),
+        "durability": "same pinned omdb Immediate profile for both layouts",
+        "method": "five paired runs with first layout reversed each pair; actual backend keys and values; closed file lengths and exclusive offline compaction",
+        "key_value_bytes": { "full_event": summary("full_event", "key_value_bytes"), "assistant_text_revisions_v1": summary("assistant_text_revisions_v1", "key_value_bytes") },
+        "compacted_file_bytes": { "full_event": full, "assistant_text_revisions_v1": revisions, "result": settled },
+        "runs": runs,
+    });
+    println!(
+        "T3_EVENT_LAYOUT_MEASUREMENT {}",
+        serde_json::to_string(&report).unwrap()
+    );
+    if let Some(path) = std::env::var_os("T3_CODE_LS_EVENT_LAYOUT_PROOF") {
+        use std::io::Write;
+        let path = std::path::PathBuf::from(path);
+        assert!(path.is_absolute());
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .unwrap();
+        serde_json::to_writer_pretty(&mut file, &report).unwrap();
+        file.write_all(b"\n").unwrap();
+        file.sync_all().unwrap();
+    }
+}

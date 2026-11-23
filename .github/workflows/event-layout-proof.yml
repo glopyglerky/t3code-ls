@@ -1,0 +1,66 @@
+name: Native event layout storage comparison
+
+on:
+  push:
+    branches: ["candidate/t3code-ls-t03-text-revision-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  event-layout:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      GIT_TERMINAL_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Select private generated output
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "CARGO_HOME=$RUNNER_TEMP/t03-layout-cargo" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/t03-layout-target" >> "$GITHUB_ENV"
+          echo "T3_CODE_LS_TEST_TMPDIR=$RUNNER_TEMP/t03-layout-profiles" >> "$GITHUB_ENV"
+          echo "T3_CODE_LS_EVENT_LAYOUT_PROOF=$RUNNER_TEMP/t03-layout-proof/measurement.json" >> "$GITHUB_ENV"
+          mkdir "$RUNNER_TEMP/t03-layout-proof" "$RUNNER_TEMP/t03-layout-profiles"
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/t03-layout-proof/source-identity.txt"
+          cp Cargo.lock database.lock.json toolchain.lock.json "$RUNNER_TEMP/t03-layout-proof/"
+      - name: Verify the pinned Lustr and BlueFe package
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/t03-layout-toolchain"
+      - name: Compare identical event workloads through both layouts
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout -k 5s 600s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            test --locked -j 2 -p t3-code-ls-storage --lib \
+            application_events::tests::assistant_text_revisions_compare_event_owner_storage_bytes \
+            -- --exact --nocapture 2>&1 | tee "$RUNNER_TEMP/t03-layout-proof/test.log"
+          test -s "$T3_CODE_LS_EVENT_LAYOUT_PROOF"
+          cp "$RUNNER_TEMP/t03-layout-toolchain/installation-proof.json" "$RUNNER_TEMP/t03-layout-proof/"
+      - name: Retain the bounded component evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: event-layout-storage-proof
+          path: ${{ runner.temp }}/t03-layout-proof
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove owned generated output
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -k "$RUNNER_TEMP"
+          rm -rf "$RUNNER_TEMP/t03-layout-cargo" "$RUNNER_TEMP/t03-layout-target" \
+            "$RUNNER_TEMP/t03-layout-profiles" "$RUNNER_TEMP/t03-layout-toolchain"
+          df -k "$RUNNER_TEMP"

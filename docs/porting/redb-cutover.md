@@ -432,3 +432,56 @@ verifies migration/source preservation and older-server exclusion. The browser
 flow additionally checks its native database and absence of new application
 SQLite files. These are integration assertions, not a claim that every platform
 or a not-yet-qualified commit has passed.
+
+### Event-owner storage accounting
+
+`assistant_text_revisions_compare_event_owner_storage_bytes` compares fresh native
+full-event and opt-in revision stores using one identical generated event vector.
+Each run commits 128 Unicode growing-prefix updates and a full completion event,
+one event per application transaction, with the same pinned omdb Immediate
+profile. The payload bound is asserted. It crosses multiple checkpoint chains,
+checks the live head before completion and its removal after completion, and
+counts a dependency witness for every retained suffix row.
+
+This is a storage accounting experiment for the native event owner. It excludes
+message projection rewrites, provider cadence, network encoding, client rendering,
+end-to-end timing and the stock application. Stock
+`28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f` remains the product denominator for a
+future complete-work comparison. The harness makes no latency or throughput claim.
+
+Five pairs run sequentially on the same host and filesystem, reversing the first
+layout each pair. Each snapshot pages through actual backend table keys and values
+with a 32-record bound, rather than through the logical row decoder. The report
+includes key and value bytes for event rows, event indexes and metadata, layout
+heads, dependency witnesses and all remaining store keys. The catalog and layout
+flag are therefore included. It records streaming and completed states, raw row
+forms, logical payload bytes, the exact logical payload hash and identical public
+replay rows between layouts. Event index byte counts must also match.
+
+After closing and reopening, the experiment measures whole database file length
+and, on Unix, allocated filesystem blocks. It then uses the existing exclusive
+offline compaction owner, closes it, records the settled file again and reopens
+for exact replay. A hash over every ordered backend key and value must remain
+unchanged by reopen and compaction. Engine allocation and fragmentation statistics
+are retained separately. File size includes allocator capacity and tree overhead,
+so a smaller row representation does not imply a smaller settled database.
+
+The report gives per-run measurements and minimum, median and maximum values for
+completed key/value bytes and compacted file length. It distinguishes smaller,
+larger, exactly equal and overlapping file-size ranges. No storage win is required
+for the test to pass. Equal or overlapping ranges explicitly establish no settled
+file reduction in this experiment. Investigate the retained engine statistics and
+file/block accounting before attributing a discrepancy or making a performance
+claim.
+
+The focused `event-layout-proof.yml` lane runs this single test through the pinned
+Lustr/BlueFe package with Cargo `--locked`, an exact test name and shell `pipefail`.
+A nonempty measurement file is required, preventing a zero-test success from
+qualifying the comparison. Evidence binds the source commit and tree, locks,
+compiled test executable, codec and workload source hashes. The lane retains small
+measurement and log artifacts, then removes owned profiles, compiler intermediates,
+dependency staging and toolchain extraction. Local formatting, source and workflow
+checks do not establish measured storage gains. Hosted execution remains pending.
+
+Method SHA-256:
+`5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
