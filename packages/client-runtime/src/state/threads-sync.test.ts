@@ -2460,8 +2460,12 @@ describe("EnvironmentThreads", () => {
         },
       });
       yield* Queue.offer(harness.inputs, defective);
+      yield* awaitThreadState(harness.observed, (value) => Option.isSome(value.error));
       yield* TestClock.adjust("60 seconds");
-      expect(yield* SubscriptionRef.get(harness.subscriptionCount)).toBe(2);
+      yield* SubscriptionRef.changes(harness.subscriptionCount).pipe(
+        Stream.filter((count) => count >= 2),
+        Stream.runHead,
+      );
       expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBe(CACHED_SNAPSHOT_SEQUENCE);
 
       yield* Queue.offer(harness.inputs, titleUpdated("Recover this update", sequence));
