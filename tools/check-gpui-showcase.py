@@ -87,8 +87,6 @@ def check_thread_snapshot(executable):
         ({**connection, "threadId": "missing-fixture-thread"}, False),
         (connection, True),
     ]
-    streamed_id = None
-    unsent = "Keep this unsent café draft."
     for request, success in cases:
         application = subprocess.Popen(
             [executable, "--thread-snapshot"], stdin=subprocess.PIPE, text=True,
@@ -125,6 +123,7 @@ def check_thread_compose(executable, approval=False, follow_up=False):
     connection = json.load(sys.stdin)
     prompt = "GPUI sends a follow-up in the same thread." if follow_up else "GPUI sends one recorded prompt."
     failure = "Could not confirm submission. Draft kept. Check the thread before retrying."
+    unsent = "Keep this unsent draft."
 
     def projection():
         path = urllib.parse.quote(connection["threadId"], safe="")
