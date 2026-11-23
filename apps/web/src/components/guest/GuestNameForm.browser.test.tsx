@@ -28,7 +28,8 @@ describe("guest name form renderer", () => {
     await vi.waitFor(() => expect(document.activeElement).toBe(screen.container.querySelector("input")));
     expect(screen.container.querySelector("input")!.maxLength).toBe(GUEST_NAME_MAX_LENGTH);
     expect(screen.container.querySelector("form")!.dataset.guestNameRenderer).toBe(native ? "dioxus-wasm" : "retained");
-    await userEvent.type(input, "  Sam🦊  ");
+    await userEvent.fill(input, "  Sam🦊  ");
+    await expect.element(input).toHaveValue("  Sam🦊  ");
     await act(async () => {
       const form = screen.container.querySelector("form")!;
       form.requestSubmit(); form.requestSubmit();
