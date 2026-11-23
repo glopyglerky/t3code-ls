@@ -116,7 +116,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --test tools/sea-identity.test.mjs
+          node --test tools/sea-identity.test.mjs tools/sea-identity-handshake.test.mjs
           isolated=$(mktemp -d "$RUNNER_TEMP/sea-identity.XXXXXX")
           trap 'rm -rf -- "$isolated"' EXIT
           version=$(node -p 'require("./apps/server/package.json").version')
@@ -138,8 +138,21 @@ jobs:
             status=0
             run_probe "$1" "$2" __sea-identity extra > "$2/refused.stdout" 2> "$2/refused.stderr" || status=$?
             test "$status" -eq 78
+            printf "finish\n" | run_probe "$1" "$2" __sea-identity-observe > "$2/hold.json" 2> "$2/hold.stderr"
+            status=0
+            run_probe "$1" "$2" __sea-identity-observe < /dev/null > "$2/lost-finish.json" 2> "$2/lost-finish.stderr" || status=$?
+            test "$status" -eq 78
           ' _ "$(id -un)" "$isolated"
           test ! -s "$isolated/observed.stderr"
+          test ! -s "$isolated/hold.stderr"
+          test ! -s "$isolated/lost-finish.stderr"
+          for frame in hold lost-finish; do
+            test "$(wc -l < "$isolated/$frame.json")" -eq 1
+            jq -e -s '
+              .[1].protocol == "t3-sea-identity-observe-v1" and
+              (.[0] | del(.pid, .protocol)) == (.[1] | del(.pid, .protocol))
+            ' "$isolated/observed.json" "$isolated/$frame.json" > /dev/null
+          done
           test ! -s "$isolated/refused.stdout"
           test ! -s "$isolated/refused.stderr"
           test -z "$(find "$isolated/home" "$isolated/tmp" "$isolated/cwd" -mindepth 1 -print)"
@@ -153,6 +166,7 @@ jobs:
             (.assetSha256 | type == "string" and test("^[0-9a-f]{64}$"))
           ' "$isolated/observed.json" > /dev/null
           install -m 0644 "$isolated/observed.json" "$proof/sea-identity.json"
+          install -m 0644 "$isolated/hold.json" "$proof/sea-identity-handshake.json"
       - name: Verify the isolated candidate through the packaged executable
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-packaged-preparation-') || startsWith(github.ref_name, 'candidate/t3code-ls-t05-launcher-promotion-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
         env:
