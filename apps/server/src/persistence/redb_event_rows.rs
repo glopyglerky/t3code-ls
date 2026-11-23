@@ -329,13 +329,27 @@ async fn event_at(
     catalog: &ApplicationCatalog,
     sequence: u64,
 ) -> Result<Option<EventRecord>> {
+    read_event_at(tx, catalog, sequence, None).await
+}
+
+async fn read_event_at(
+    tx: &mut Transaction,
+    catalog: &ApplicationCatalog,
+    sequence: u64,
+    previous: Option<&mut Option<text_revisions::ReplayBase>>,
+) -> Result<Option<EventRecord>> {
     let encoded_key = event_key(catalog, sequence)?;
     let Some(bytes) = tx.get(&encoded_key).await? else {
         return Ok(None);
     };
-    let value =
-        decode_transaction_row(tx, catalog, table(catalog, EVENTS)?, &encoded_key, &bytes).await?;
-    let event = EventRecord::from_row(value.row)?;
+    let definition = table(catalog, EVENTS)?;
+    let event = if let Some(previous) = previous.filter(|_| catalog.event_layout.is_some()) {
+        text_revisions::read_for_replay(tx, catalog, definition, &encoded_key, &bytes, previous)
+            .await?
+    } else {
+        let value = decode_transaction_row(tx, catalog, definition, &encoded_key, &bytes).await?;
+        EventRecord::from_row(value.row)?
+    };
     if event.sequence != sequence {
         return Err(Error::IncompatibleStore);
     }
@@ -1249,14 +1263,20 @@ pub(crate) async fn read_events(
         .await?;
     let mut output = Vec::with_capacity(rows.len());
     let mut payload_bytes = 0;
+    let mut previous = None;
     for (encoded, bytes) in rows {
         let sequence = sequence_from_key(&prefix, &encoded)?;
         if decode::<u64>(&bytes)? != sequence {
             return Err(Error::IncompatibleStore);
         }
-        let event = event_at(&mut session.transaction, &session.catalog, sequence)
-            .await?
-            .ok_or(Error::IncompatibleStore)?;
+        let event = read_event_at(
+            &mut session.transaction,
+            &session.catalog,
+            sequence,
+            Some(&mut previous),
+        )
+        .await?
+        .ok_or(Error::IncompatibleStore)?;
         if !(if agent {
             event.agent()
         } else {
