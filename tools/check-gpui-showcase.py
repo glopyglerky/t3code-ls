@@ -198,20 +198,91 @@ def check_thread_workspace(executable):
     connection = json.load(sys.stdin)
     second = connection.pop("secondThreadId")
     application = subprocess.Popen([executable, "--thread-workspace"], stdin=subprocess.PIPE, text=True)
-    def click(node):
-        bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
-        x11("mousemove", str(bounds.x + bounds.width // 2), str(bounds.y + bounds.height // 2))
-        x11("click", "1")
     def body(node):
         field = node.queryText()
         return field.getText(0, field.characterCount)
+    def observation(node):
+        # Never emit raw accessible names, document text, URLs or credentials.
+        states = node.getState()
+        bounds = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+        own_process = node.getApplication().get_process_id() == application.pid
+        showing = states.contains(pyatspi.STATE_SHOWING)
+        visible = states.contains(pyatspi.STATE_VISIBLE)
+        return {"ownProcess": own_process, "showing": showing, "visible": visible,
+                "focused": states.contains(pyatspi.STATE_FOCUSED),
+                "bounds": [bounds.x, bounds.y, bounds.width, bounds.height]}
+    def diagnostic(thread, phase, click=None):
+        rows = []
+        names = {"Open thread " + thread: "targetButton",
+                 "Selected thread " + connection["threadId"]: "selectedA",
+                 "Selected thread " + second: "selectedB",
+                 "Server thread snapshot": "snapshot",
+                 "Could not read the selected server thread.": "readFailure"}
+        for node in accessible_nodes(pyatspi.Registry.getDesktop(0)):
+            try:
+                kind = names.get(node.name)
+                if kind is None:
+                    continue
+                row = {"kind": kind, **observation(node)}
+                if kind == "snapshot":
+                    text = body(node)
+                    row.update(threadA="Thread " + connection["threadId"] + "\n" in text,
+                               threadB="Thread " + second + "\n" in text,
+                               exactPrompt="GPUI saved conversation prompt" in text,
+                               exactReply="GPUI server reply café 🦀" in text)
+                rows.append(row)
+            except (GLib.Error, RuntimeError, AttributeError, NotImplementedError):
+                rows.append({"kind": "unavailable"})
+        print(json.dumps({"navigationPhase": phase, "target": "A" if thread == connection["threadId"] else "B",
+                          "click": click, "nodes": rows[:16]}), flush=True)
+    def current(name):
+        def matching():
+            for node in accessible_nodes(pyatspi.Registry.getDesktop(0)):
+                try:
+                    if node.name == name:
+                        seen = observation(node)
+                        if seen["ownProcess"] and seen["showing"] and seen["visible"]:
+                            return node
+                except (GLib.Error, RuntimeError, AttributeError, NotImplementedError):
+                    pass
+            return None
+        return wait_for(matching, "No current visible node for " + name, application)
+    def click(node):
+        observed = observation(node)
+        bounds = observed["bounds"]
+        assert observed["ownProcess"] and observed["showing"] and observed["visible"], "Click target is not current and visible"
+        assert bounds[2] > 0 and bounds[3] > 0, "Click target has empty bounds"
+        x, y = bounds[0] + bounds[2] // 2, bounds[1] + bounds[3] // 2
+        x11("mousemove", str(x), str(y))
+        x11("click", "1")
+        return {**observed, "point": [x, y]}
     def select(thread):
-        click(find("Open thread " + thread, application))
+        try:
+            clicked = click(current("Open thread " + thread))
+            diagnostic(thread, "pointer-dispatched", clicked)
+            current("Selected thread " + thread)
+            diagnostic(thread, "selection-accepted")
+        except AssertionError:
+            diagnostic(thread, "selection-unconfirmed")
+            raise
     def snapshot(thread):
         def matches():
-            document = find("Server thread snapshot", application)
-            return document if "Thread " + thread + "\n" in body(document) else None
-        return wait_for(matches, "Wrong selected thread content", application)
+            for document in accessible_nodes(pyatspi.Registry.getDesktop(0)):
+                try:
+                    if document.name != "Server thread snapshot":
+                        continue
+                    seen = observation(document)
+                    if (seen["ownProcess"] and seen["showing"] and seen["visible"]
+                            and "Thread " + thread + "\n" in body(document)):
+                        return document
+                except (GLib.Error, RuntimeError, AttributeError, NotImplementedError):
+                    pass
+            return None
+        try:
+            return wait_for(matches, "Wrong selected thread content", application)
+        except AssertionError:
+            diagnostic(thread, "snapshot-unconfirmed")
+            raise
     try:
         application.stdin.write(json.dumps(connection))
         application.stdin.close()
