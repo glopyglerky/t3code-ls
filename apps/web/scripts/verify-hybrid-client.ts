@@ -4,6 +4,7 @@
 // The fixture and application state stay outside the checkout. They are retained for investigation.
 import * as Assert from "node:assert/strict";
 import * as ChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeNet from "node:net";
 import * as NodeOS from "node:os";
@@ -41,6 +42,14 @@ const timeoutMs = 90_000;
 const startupTimeoutMs = 180_000;
 const replayPrompt = "Replay: showcase";
 const replayMarker = "This turn is a replay.";
+const capturedApproval = {
+  path: "apps/server/src/orchestration-v2/testkit/fixtures/tool_call_read_only_on_request/registry_transcript.ndjson",
+  sha256: "f9c09f88e3b8480c44adc62ba30c085a33044a6bfc1611839128c3f80ea5ad81",
+  model: "approval",
+  modelLabel: "Write approval",
+  prompt: "Replay the recorded permission request",
+  reply: "Created the requested probe file.",
+};
 const decodeSnapshot = Schema.decodeUnknownSync(
   Schema.toCodecJson(OrchestrationV2ThreadDetailSnapshot),
 );
@@ -325,14 +334,18 @@ async function readThreadSnapshot(
   return snapshot;
 }
 
-async function submitShowcase(page: Page): Promise<string> {
+async function submitReplay(
+  page: Page,
+  modelLabel = "Showcase",
+  prompt = replayPrompt,
+): Promise<string> {
   await page.getByRole("button", { name: "New thread in hybrid-fixture", exact: true }).click();
   await page.waitForURL((url) => url.pathname.startsWith("/draft/"));
   const picker = page.locator('[data-chat-provider-model-picker="true"]:visible');
   const search = page.getByPlaceholder("Search models...");
   await picker.click();
-  await search.fill("Showcase");
-  await page.getByRole("option", { name: /Showcase/u }).click();
+  await search.fill(modelLabel);
+  await page.getByRole("option", { name: modelLabel }).click();
   if (!(await search.isVisible())) await picker.click();
   await page.locator("[data-composer-permissions-trigger]:visible").click();
   await page.getByRole("menuitemradio", { name: "Supervised", exact: true }).click();
@@ -341,7 +354,7 @@ async function submitShowcase(page: Page): Promise<string> {
 
   const editor = page.getByTestId("composer-editor");
   await editor.click();
-  await editor.fill(replayPrompt);
+  await editor.fill(prompt);
   await page.getByRole("button", { name: "Submit message", exact: true }).click();
   await page.waitForURL((url) => /^\/(?!draft\/)[^/]+\/[^/]+$/u.test(url.pathname));
   const thread = new URL(page.url()).pathname.split("/").at(-1);
@@ -350,7 +363,7 @@ async function submitShowcase(page: Page): Promise<string> {
 }
 
 async function interruptShowcase(page: Page): Promise<InterruptedShowcase> {
-  const threadId = await submitShowcase(page);
+  const threadId = await submitReplay(page);
   await page.getByRole("button", { name: /^(Yes|Approve)$/u }).first().waitFor({ state: "visible" });
   const pending = await readThreadSnapshot(page, threadId);
   const identity = replayTurnIdentity(pending);
@@ -439,10 +452,15 @@ function summarizeSnapshot(snapshot: OrchestrationV2ThreadDetailSnapshot) {
 }
 const snapshotMetadata = new WeakMap<Page, ReturnType<typeof summarizeSnapshot>>();
 
-async function assertCompleted(page: Page, threadId: string, identity: ReplayTurnIdentity) {
+async function assertCompleted(
+  page: Page,
+  threadId: string,
+  identity: ReplayTurnIdentity,
+  reply = replayMarker,
+) {
   await page.waitForURL((url) => url.pathname.endsWith(`/${threadId}`), { timeout: timeoutMs });
   await page
-    .getByText(replayMarker, { exact: false })
+    .getByText(reply, { exact: false })
     .last()
     .waitFor({ state: "visible", timeout: timeoutMs });
   await page
@@ -474,7 +492,7 @@ async function assertCompleted(page: Page, threadId: string, identity: ReplayTur
   Assert.ok(providerTurn.completedAt);
   const message = snapshot.projection.messages.find(
     (item) =>
-      item.role === "assistant" && item.runId === run.id && item.text.includes(replayMarker),
+      item.role === "assistant" && item.runId === run.id && item.text.includes(reply),
   );
   Assert.ok(message, "The completed replay text must belong to the recorded run");
   Assert.equal(message.streaming, false);
@@ -491,6 +509,36 @@ async function assertCompleted(page: Page, threadId: string, identity: ReplayTur
     providerTurnCompletedAt: DateTime.formatIso(providerTurn.completedAt),
     assistantMessageId: message.id,
   };
+}
+
+async function acceptCapturedApproval(page: Page) {
+  const contents = NodeFS.readFileSync(NodePath.join(repoRoot, capturedApproval.path));
+  const sha256 = NodeCrypto.createHash("sha256").update(contents).digest("hex");
+  Assert.equal(sha256, capturedApproval.sha256, "The recorded ACP approval fixture changed");
+  const threadId = await submitReplay(page, capturedApproval.modelLabel, capturedApproval.prompt);
+  const button = page.getByRole("button", { name: "Allow once", exact: true });
+  await button.waitFor({ state: "visible" });
+  const pending = await readThreadSnapshot(page, threadId);
+  const identity = replayTurnIdentity(pending, capturedApproval.model);
+  const request = pending.projection.runtimeRequests.find(
+    (item) => item.providerTurnId === identity.providerTurnId && item.status === "pending",
+  );
+  Assert.ok(request, "The recorded approval must belong to the live provider turn");
+  Assert.ok(
+    pending.projection.messages.some(
+      (message) => message.role === "user" && message.text === capturedApproval.prompt,
+    ),
+    "The recorded-approval turn must contain the submitted prompt",
+  );
+  await button.click();
+  const completed = await assertCompleted(page, threadId, identity, capturedApproval.reply);
+  Assert.equal(
+    (await readThreadSnapshot(page, threadId)).projection.runtimeRequests.find(
+      (item) => item.id === request.id,
+    )?.status,
+    "resolved",
+  );
+  return { ...completed, requestId: request.id, source: capturedApproval.path, sha256 };
 }
 
 async function exercise(implementation: Implementation): Promise<void> {
@@ -551,6 +599,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     threadUrl: null as string | null,
     turnIdentity: null as ReplayTurnIdentity | null,
     interrupted: null as InterruptedShowcase | null,
+    capturedApproval: null as Awaited<ReturnType<typeof acceptCapturedApproval>> | null,
     completedSnapshots: [] as Array<
       Awaited<ReturnType<typeof assertCompleted>> & { checkpoint: string }
     >,
@@ -629,7 +678,7 @@ async function exercise(implementation: Implementation): Promise<void> {
     completed("Created local project through the normal client");
 
     starting("normal composer submission and controlled approval");
-    const threadId = await submitShowcase(page);
+    const threadId = await submitReplay(page);
     proof.threadId = threadId;
     const approval = page.getByRole("button", { name: /^(Yes|Approve)$/u }).first();
     await approval.waitFor({ state: "visible" });
@@ -710,6 +759,9 @@ async function exercise(implementation: Implementation): Promise<void> {
     await page.goto(proof.interrupted.threadUrl, { waitUntil: "domcontentloaded" });
     await verifyInterruptedShowcase(page, proof.interrupted);
     completed("Recovered the interrupted turn and partial reply in the new browser session");
+    starting("recorded ACP permission request");
+    proof.capturedApproval = await acceptCapturedApproval(page);
+    completed("Approved the recorded ACP permission request and received its expected reply");
     if (implementation === "native") {
       Assert.equal(proof.persistence.length, 4);
       completed(
