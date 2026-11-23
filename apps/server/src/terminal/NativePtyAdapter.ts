@@ -20,7 +20,7 @@ function nonnegativeInteger(value: unknown): value is number {
 
 class PtyHostConnection {
   readonly child: ChildProcess.ChildProcessWithoutNullStreams;
-  private frame = Buffer.alloc(0);
+  private frame: Buffer = Buffer.alloc(0);
   private pending: {
     readonly resolve: (response: Record<string, unknown>) => void;
     readonly reject: (error: Error) => void;
@@ -273,7 +273,7 @@ export const layer = (executable: string) => Layer.succeed(PtyAdapter.PtyAdapter
   })),
 });
 
-export const selectedLayer = Layer.unwrap(Effect.gen(function* () {
+const select = Effect.fn("NativePtyAdapter.select")(function* () {
   const env = yield* HostProcess.Environment;
   const executable = env.T3_CODE_LS_PTY_HOST_EXECUTABLE;
   if (executable === undefined || env.T3_CODE_LS_IMPLEMENTATION === "upstream") {
@@ -285,4 +285,6 @@ export const selectedLayer = Layer.unwrap(Effect.gen(function* () {
     return yield* Effect.die(new Error("The native PTY requires an absolute helper path on Linux x64."));
   }
   return layer(executable);
-}));
+});
+
+export const selectedLayer = Layer.unwrap(select());
