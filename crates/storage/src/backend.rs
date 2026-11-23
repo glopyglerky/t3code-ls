@@ -577,12 +577,21 @@ impl Backend {
         tokio::task::spawn_blocking(move || {
             let source = handles.begin_read()?;
             validate_tables(&source)?;
-            let mut options = OpenOptions::new();
-            options.read(true).write(true).create_new(true);
+            let directory = destination.parent().ok_or(Error::IncompatibleStore)?;
+            match destination.symlink_metadata() {
+                Ok(_) => return Err(Error::Database("backup destination already exists".into())),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(storage_error(error)),
+            }
             #[cfg(unix)]
-            options.mode(0o600);
-            let file = options.open(&destination).map_err(storage_error)?;
-            let backup_identity = file_identity(&file)?;
+            let directory_handle = std::fs::File::open(directory).map_err(storage_error)?;
+            let staged = tempfile::Builder::new()
+                .prefix(".t3-backup-")
+                .suffix(".partial")
+                .tempfile_in(directory)
+                .map_err(storage_error)?;
+            let backup_identity = file_identity(staged.as_file())?;
+            let file = staged.reopen().map_err(storage_error)?;
             let file = redb::backends::FileBackend::new(file).map_err(storage_error)?;
             let mut builder = redb::Database::builder();
             builder
@@ -610,16 +619,9 @@ impl Backend {
                     count = count.checked_add(1).ok_or(Error::IncompatibleStore)?;
                 }
             }
-            write.commit().map_err(commit_error)?;
+            write.commit().map_err(storage_error)?;
             drop(backup);
-            let verified_file = OpenOptions::new()
-                .read(true)
-                .write(true)
-                .open(&destination)
-                .map_err(storage_error)?;
-            if file_identity(&verified_file)? != backup_identity {
-                return Err(Error::IncompatibleStore);
-            }
+            let verified_file = staged.reopen().map_err(storage_error)?;
             let backup = builder
                 .create_with_backend(
                     redb::backends::FileBackend::new(verified_file).map_err(storage_error)?,
@@ -650,22 +652,30 @@ impl Backend {
             }
             drop(verify);
             drop(backup);
+            staged.as_file().sync_all().map_err(storage_error)?;
+            let bytes = staged.as_file().metadata().map_err(storage_error)?.len();
             handles.verify_identity()?;
+            if same_file::Handle::from_path(staged.path()).map_err(storage_error)?
+                != backup_identity
+            {
+                return Err(Error::IncompatibleStore);
+            }
+            // A failed write leaves the final name free for retry. A competing backup
+            // can claim the name during the copy, so publication must also be no-clobber.
+            staged
+                .persist_noclobber(&destination)
+                .map_err(storage_error)?;
             if same_file::Handle::from_path(&destination).map_err(storage_error)? != backup_identity
             {
                 return Err(Error::IncompatibleStore);
             }
             #[cfg(unix)]
-            {
-                std::fs::File::open(destination.parent().ok_or(Error::IncompatibleStore)?)
-                    .and_then(|directory| directory.sync_all())
-                    .map_err(storage_error)?;
-            }
+            directory_handle
+                .sync_all()
+                .map_err(|_| Error::UnknownCommit)?;
             Ok(crate::application_storage::StorageBackup {
                 rows: count,
-                bytes: std::fs::metadata(&destination)
-                    .map_err(storage_error)?
-                    .len(),
+                bytes,
                 checksum: digest.iter().map(|byte| format!("{byte:02x}")).collect(),
             })
         })

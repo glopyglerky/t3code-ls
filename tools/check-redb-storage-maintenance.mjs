@@ -271,11 +271,56 @@ try {
           client.get("maintenance_fixture", [{ type: "text", value: `row:${index}` }]),
         ),
       );
-      yield* database.request(
+      if (process.platform === "linux" || process.platform === "darwin") {
+        yield* Effect.promise(async () => {
+          const filesBefore = (await FS.readdir(fixture.root)).sort();
+          const databaseBefore = hash(await FS.readFile(fixture.databasePath));
+          // Limit only the backup process so real writes fail without filling the disk.
+          const limited = ChildProcess.spawnSync(
+            "/bin/sh",
+            [
+              "-c",
+              "trap '' XFSZ && ulimit -f 1 && exec \"$@\"",
+              "storage-backup-limit",
+              executable,
+              "read-only-local",
+              fixture.databasePath,
+            ],
+            {
+              env: {},
+              input:
+                JSON.stringify({ operation: "snapshot" }) + "\n" +
+                JSON.stringify({ operation: "storage_backup", destination: manualBackup }) + "\n",
+              encoding: "utf8",
+              timeout: 30_000,
+            },
+          );
+          if (limited.error) throw limited.error;
+          Assert.equal(limited.status, 0, limited.stderr || String(limited.signal));
+          const replies = limited.stdout.trim().split("\n").map((line) => JSON.parse(line));
+          Assert.equal(replies.length, 2, limited.stdout);
+          const [snapshot, reply] = replies;
+          Assert.equal(snapshot.ok, true, limited.stdout);
+          Assert.equal(reply.ok, false, limited.stdout);
+          Assert.equal(reply.error.kind, "database_error", limited.stdout);
+          Assert.deepEqual(
+            (await FS.readdir(fixture.root)).sort(),
+            filesBefore,
+            "A failed backup must leave the destination free for retry and remove its staging file",
+          );
+          Assert.equal(hash(await FS.readFile(fixture.databasePath)), databaseBefore);
+        });
+        checks.push(
+          "An OS file-size limit forces a real backup write failure, preserving live bytes and leaving the same destination available for the verified retry",
+        );
+      }
+      const backup = yield* database.request(
         { operation: "storage_backup", destination: manualBackup },
-        Schema.Unknown,
+        Schema.Struct({ bytes: Schema.Number }),
       );
-      const backupHash = yield* Effect.promise(async () => hash(await FS.readFile(manualBackup)));
+      const backupBytes = yield* Effect.promise(() => FS.readFile(manualBackup));
+      Assert.equal(backup.bytes, backupBytes.byteLength);
+      const backupHash = hash(backupBytes);
       yield* failed(
         database.request(
           { operation: "storage_backup", destination: manualBackup },
@@ -385,6 +430,7 @@ try {
       "apps/server/src/persistence/NativeDatabaseMaintenance.ts",
       "apps/server/src/persistence/redb_database_storage.rs",
       "apps/server/src/persistence/redb_server_ownership.rs",
+      "crates/storage/Cargo.toml",
       "crates/storage/src/backend.rs",
       "tools/check-redb-storage-maintenance.mjs",
     ],
