@@ -56,3 +56,39 @@ jobs:
           pnpm exec vp test run --project t3 --maxWorkers 1 \
             apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts \
             -t 'runs ClaudeAdapterV2 against the Rust stdio host'
+      - name: Open and reap the pinned vendor CLI without network or a prompt
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-claude-adapter-vendor-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d "$RUNNER_TEMP/claude-vendor.XXXXXX")"
+          trap 'rm -rf -- "$scratch"' EXIT
+          proof="$RUNNER_TEMP/claude-vendor-proof"
+          mkdir "$proof" "$scratch/profile"
+          git rev-parse HEAD HEAD^{tree} > "$proof/source.txt"
+          archive="$scratch/vendor.tgz"
+          curl --fail --silent --show-error --location --proto '=https' --max-time 120 \
+            https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk-linux-x64/-/claude-agent-sdk-linux-x64-0.3.321.tgz \
+            --output "$archive"
+          expected='i/Y8Ps4q68SRwWB54yFXyItBwn5YHIOYY4R1gla6p4UwF/pM+xxrHycv+yecbC7oU30ShuBYKWN9mRIZ/BCMqw=='
+          test "$(openssl dgst -sha512 -binary "$archive" | openssl base64 -A)" = "$expected"
+          tar -xOzf "$archive" package/claude > "$scratch/claude"
+          chmod u+x "$scratch/claude"
+          sha256sum "$archive" "$scratch/claude" "$T3_CLAUDE_STDIO_FIXTURE" > "$proof/inputs.sha256"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            cd "$2/profile"
+            runuser -u "$1" -- env -i HOME="$2/profile" PATH=/usr/bin:/bin \
+              CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 "$2/claude" --version
+            exec runuser -u "$1" -- env -i TMPDIR="$2/profile" PATH=/usr/bin:/bin \
+              "$3" --vendor-handshake "$2/claude"
+          ' _ "$(id -un)" "$scratch" "$T3_CLAUDE_STDIO_FIXTURE" | tee "$proof/handshake.log"
+          grep -F 'Pinned vendor CLI acknowledged initialization and was reaped without a prompt.' "$proof/handshake.log"
+      - name: Retain vendor handshake evidence
+        if: always() && startsWith(github.ref_name, 'candidate/t3code-ls-t01-claude-adapter-vendor-')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: claude-vendor-handshake
+          path: ${{ runner.temp }}/claude-vendor-proof/
+          if-no-files-found: error
+          retention-days: 7

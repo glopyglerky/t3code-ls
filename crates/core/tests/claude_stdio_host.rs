@@ -54,6 +54,11 @@ mod unix {
         if mode.as_deref() == Some("--adapter-bridge") {
             return adapter_bridge(&profile.0);
         }
+        if mode.as_deref() == Some("--vendor-handshake") {
+            let program = PathBuf::from(args.next().expect("pinned Claude executable"));
+            assert!(args.next().is_none());
+            return vendor_handshake(&profile.0, program);
+        }
         session(&profile.0);
         eprintln!(
             "Claude stdio fixture: user/steer identity, revocation, interrupt order and reap"
@@ -85,6 +90,55 @@ mod unix {
                 request_timeout: WAIT,
             },
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn vendor_handshake(profile: &Path, program: PathBuf) {
+        assert!(program.is_absolute());
+        let program = fs::canonicalize(program).expect("resolve the pinned executable");
+        let fixture = config(profile, "");
+        let input = Config {
+            program: program.clone(),
+            args: [
+                "--print",
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--no-session-persistence",
+                "--setting-sources",
+                "",
+            ]
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+            environment: vec![(
+                "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".into(),
+                "1".into(),
+            )],
+            limits: Limits {
+                max_frame_bytes: 256 * 1024,
+                request_timeout: Duration::from_secs(15),
+                ..fixture.limits
+            },
+            ..fixture
+        };
+        let session = ClaudeStdioSession::open(input).expect("vendor CLI initialization receipt");
+        assert!(
+            matches!(session.initialization_response(), Value::Object(fields) if !fields.is_empty()),
+            "Expected a nonempty initialization receipt"
+        );
+        let process = PathBuf::from(format!("/proc/{}", session.id()));
+        assert_eq!(fs::read_link(process.join("exe")).unwrap(), program);
+        session.close().expect("close and reap the vendor CLI");
+        assert!(!process.exists());
+        println!("Pinned vendor CLI acknowledged initialization and was reaped without a prompt.");
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn vendor_handshake(_profile: &Path, _program: PathBuf) {
+        panic!("The pinned vendor handshake fixture requires Linux");
     }
 
     fn fixture(mode: &str) {
