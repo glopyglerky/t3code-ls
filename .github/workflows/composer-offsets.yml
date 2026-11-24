@@ -16,7 +16,7 @@ permissions:
 jobs:
   composer-offsets:
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
-    timeout-minutes: 20
+    timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') && 30 || 20 }}
     env:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
