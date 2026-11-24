@@ -32,7 +32,7 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
             node, bundle, trial, Some((driver, chrome)),
             match mode.to_str() {
                 Some("stock" | "stock-j06" | "stock-j06-attribution") => None,
-                Some("native-j06-attribution" | "native-j06" | "native-j06-turn-start-batch" | "native-j06-turn-start-batch-attribution" | "native-j06-independent-reads-attribution" | "native" | "native-single-reads" | "native-independent-reads" | "native-independent-lookups") => Some("native"),
+                Some("native-j06-receipt-reads" | "native-j06-attribution" | "native-j06" | "native-j06-turn-start-batch" | "native-j06-turn-start-batch-attribution" | "native-j06-independent-reads-attribution" | "native" | "native-single-reads" | "native-independent-reads" | "native-independent-lookups") => Some("native"),
                 Some("fork-sqlite" | "fork-sqlite-j06-attribution") => Some("upstream"),
                 _ => return Err("unknown conversation profile".into()),
             },
@@ -41,7 +41,7 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
                 Ok::<_, std::io::Error>((fs::canonicalize(wrapper)?, trace.len() == 2))
             }).transpose()?,
         ),
-        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|stock-j06|native-j06|native-j06-turn-start-batch|stock-j06-attribution|native-j06-attribution|native-j06-turn-start-batch-attribution|native-j06-independent-reads-attribution|native|native-single-reads|native-independent-reads|native-independent-lookups|fork-sqlite|fork-sqlite-j06-attribution [TRACE_WRAPPER [server-spans]]".into()),
+        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|stock-j06|native-j06|native-j06-turn-start-batch|native-j06-receipt-reads|stock-j06-attribution|native-j06-attribution|native-j06-turn-start-batch-attribution|native-j06-independent-reads-attribution|native|native-single-reads|native-independent-reads|native-independent-lookups|fork-sqlite|fork-sqlite-j06-attribution [TRACE_WRAPPER [server-spans]]".into()),
         _ => return Err("usage: t3code-ls-tools probe-startup NODE BUNDLE NEW_TRIAL_DIRECTORY [CHROMEDRIVER CHROME [fork-sqlite]]".into()),
     };
     let node = fs::canonicalize(node)?;
@@ -57,8 +57,9 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
         return Err("J06 attribution requires the shared trace wrapper and server-spans".into());
     }
     let batch_turn_start = matches!(profile, Some("native-j06-turn-start-batch" | "native-j06-turn-start-batch-attribution"));
+    let single_receipt_reads = profile == Some("native-j06-receipt-reads");
     let scoped_j06 =
-        attribution || batch_turn_start || matches!(profile, Some("stock-j06" | "native-j06"));
+        attribution || batch_turn_start || single_receipt_reads || matches!(profile, Some("stock-j06" | "native-j06"));
     let single_projection_reads = matches!(
         profile,
         Some("native-single-reads" | "native-independent-lookups")
@@ -135,6 +136,9 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
     }
     if independent_reads {
         command.env("T3_CODE_LS_INDEPENDENT_READS", "1");
+    }
+    if single_receipt_reads {
+        command.env("T3_CODE_LS_SINGLE_RECEIPT_READS", "1");
     }
     if batch_turn_start {
         command.env("T3_CODE_LS_BATCH_TURN_START_CONTEXT", "1");
@@ -240,6 +244,7 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
             "attribution": attribution,
             "accept_observer": if scoped_j06 { "browser-websocket-launch-ack-upper-bound" } else { "none" },
             "single_projection_reads": single_projection_reads,
+            "single_receipt_reads": single_receipt_reads,
             "independent_reads": independent_reads,
             "batch_turn_start_context": batch_turn_start,
             "poll_interval_micros": POLL_INTERVAL.as_micros(),

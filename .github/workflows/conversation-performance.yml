@@ -17,11 +17,12 @@ jobs:
       COMPOSED_J06: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') }}
       LAUNCH_RECEIPT_COMPARISON: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') }}
       BATCH_TURN_START_COMPARISON: ${{ (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-turn-start-batch-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-turn-start-batch-')) }}
+      J06_RECEIPT_READS_COMPARISON: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-receipt-reads-') }}
       J06_FORK_SQLITE_COMPARISON: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-fork-sqlite-') }}
       J06_NATIVE_READER_COMPARISON: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-native-reader-') }}
       LIGHTWEIGHT_RESPONSE_COMPARISON: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-lightweight-response-') }}
-      CANDIDATE_COMMIT: ${{ ((startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-turn-start-batch-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-turn-start-batch-')) || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-native-reader-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-fork-sqlite-')) && '134c97974f287cfb4a76402dc12eb2cf2dc47933' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-lightweight-response-') && '14671e4314fa982fed480e4636141bc11431bba2' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && '951537f189353748fa6bdb3f936fd716b9c86d18' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') && 'd3217d6c0176faad753f8ce2525cc2552fe502d7' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '7216183e0c013c7f5d7e9975d8aee7beda42b880' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '08eadccbff571219466f7bc35e982730295f15d8' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
-      CANDIDATE_TREE: ${{ ((startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-turn-start-batch-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-turn-start-batch-')) || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-native-reader-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-fork-sqlite-')) && '65e88524d4104c972fafdb2f30e7dafd0fbcca91' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-lightweight-response-') && 'aa4bd4013148d3d024c5f29338e99b79bfc337a1' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && 'bf42c79d73bc46a39c6c41e71084bfd140fc7c7f' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') && '0bf400e6b6884ce602e9cb1cd094abe437e1c62f' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '675636c7feb22a55179fa726af94e5cfa49212b8' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '38ff3e9ac680e4defe3d06fcfb3e79d0b94b841c' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '78647c8e507b6b677fa6f1585839bd8bdc12bc55' || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
+      CANDIDATE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-receipt-reads-') && '1947bcfa84b3b41a0df9a0c28217bf44bf05dbb4' || ((startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-turn-start-batch-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-turn-start-batch-')) || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-native-reader-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-fork-sqlite-')) && '134c97974f287cfb4a76402dc12eb2cf2dc47933' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-lightweight-response-') && '14671e4314fa982fed480e4636141bc11431bba2' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && '951537f189353748fa6bdb3f936fd716b9c86d18' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') && 'd3217d6c0176faad753f8ce2525cc2552fe502d7' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '7216183e0c013c7f5d7e9975d8aee7beda42b880' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '08eadccbff571219466f7bc35e982730295f15d8' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
+      CANDIDATE_TREE: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-receipt-reads-') && 'c498ead489dbc7f3533963d65166daf019c29fae' || ((startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-turn-start-batch-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-turn-start-batch-')) || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-native-reader-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-fork-sqlite-')) && '65e88524d4104c972fafdb2f30e7dafd0fbcca91' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-lightweight-response-') && 'aa4bd4013148d3d024c5f29338e99b79bfc337a1' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && 'bf42c79d73bc46a39c6c41e71084bfd140fc7c7f' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') && '0bf400e6b6884ce602e9cb1cd094abe437e1c62f' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '675636c7feb22a55179fa726af94e5cfa49212b8' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '38ff3e9ac680e4defe3d06fcfb3e79d0b94b841c' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '78647c8e507b6b677fa6f1585839bd8bdc12bc55' || '0c88f18ec4f3e7e9d13e419f6694d75bb548fc8a' }}
       CATALOG_COMMIT: 2bb6ae9e57559bde6cff0feeddcff8ddf02de009
       CATALOG_TREE: 55e2c8aba6fc06642b06a8d60861c7bdaf3c67f9
       ROOT_RELEASE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-lightweight-response-') && 'c29e9d9ed8e975ea658e55f40e8316e8294c5a13' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && '143ee1ffe940cf519b1d55bc988beaa441f82599' || 'a7ca741bd4c4d508fef316e164fb1ae897301965' }}
@@ -190,7 +191,7 @@ jobs:
           export CARGO_TARGET_DIR="$RUNNER_TEMP/conversation-target"
           cd measurement
           if [[ "$COMPOSED_J06" == true ]]; then node tools/src/startup_probe/browser/conversation-probe.test.mjs; fi
-          if [[ "$BATCH_TURN_START_COMPARISON" == true && "$J06_ATTRIBUTION" != true ]]; then
+          if [[ ( "$BATCH_TURN_START_COMPARISON" == true || "$J06_RECEIPT_READS_COMPARISON" == true ) && "$J06_ATTRIBUTION" != true ]]; then
             "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test \
               --locked -p t3code-ls-tools --bin t16-j06-budget
           fi
@@ -210,6 +211,8 @@ jobs:
             "stock/$transcript" | sha256sum --check
           sha256sum "$probe" "$replay" "stock/$transcript" > "$evidence/fixture.sha256"
           trace=()
+          budget_options=()
+          if [[ "$J06_RECEIPT_READS_COMPARISON" == true ]]; then budget_options+=(receipt-reads); fi
           pairs=8
           if [[ "$TRACE_CONVERSATION" == true || "$J06_ATTRIBUTION" == true ]]; then
             trace=("$PWD/measurement/tools/src/startup_probe/browser/conversation-provider-trace.mjs")
@@ -232,17 +235,18 @@ jobs:
             'candidate stock root-release' 'candidate root-release stock'
             'root-release stock candidate' 'root-release candidate stock'
           )
-          if [[ "$BATCH_TURN_START_COMPARISON" == true || "$J06_NATIVE_READER_COMPARISON" == true || "$J06_FORK_SQLITE_COMPARISON" == true ]]; then
+          if [[ "$BATCH_TURN_START_COMPARISON" == true || "$J06_NATIVE_READER_COMPARISON" == true || "$J06_FORK_SQLITE_COMPARISON" == true || "$J06_RECEIPT_READS_COMPARISON" == true ]]; then
             comparison=turn-start-batch
             if [[ "$J06_NATIVE_READER_COMPARISON" == true ]]; then comparison=independent-reads; fi
             if [[ "$J06_FORK_SQLITE_COMPARISON" == true ]]; then comparison=fork-sqlite; fi
+            if [[ "$J06_RECEIPT_READS_COMPARISON" == true ]]; then comparison=receipt-reads; fi
             orders=(
               "stock candidate $comparison" "stock $comparison candidate"
               "candidate stock $comparison" "candidate $comparison stock"
               "$comparison stock candidate" "$comparison candidate stock"
             )
           fi
-          if [[ "$LAUNCH_RECEIPT_COMPARISON" == true || "$LIGHTWEIGHT_RESPONSE_COMPARISON" == true || "$BATCH_TURN_START_COMPARISON" == true || "$J06_NATIVE_READER_COMPARISON" == true || "$J06_FORK_SQLITE_COMPARISON" == true ]]; then pairs="${#orders[@]}"; fi
+          if [[ "$LAUNCH_RECEIPT_COMPARISON" == true || "$LIGHTWEIGHT_RESPONSE_COMPARISON" == true || "$BATCH_TURN_START_COMPARISON" == true || "$J06_NATIVE_READER_COMPARISON" == true || "$J06_FORK_SQLITE_COMPARISON" == true || "$J06_RECEIPT_READS_COMPARISON" == true ]]; then pairs="${#orders[@]}"; fi
           for profile in "${bundles[@]}"; do
             (
               cd "$profile"
@@ -258,6 +262,7 @@ jobs:
             --argjson compareIndependentReads "$COMPARE_INDEPENDENT_READS" \
             --argjson composedNativeReader "$J06_NATIVE_READER_COMPARISON" \
             --argjson composedForkSqlite "$J06_FORK_SQLITE_COMPARISON" \
+            --argjson composedReceiptReads "$J06_RECEIPT_READS_COMPARISON" \
             --arg rootRelease "$ROOT_RELEASE_COMMIT" --arg rootReleaseTree "$ROOT_RELEASE_TREE" --argjson compareRootRelease "$COMPARE_ROOT_RELEASE" \
             --argjson attribution "$J06_ATTRIBUTION" --arg probe "$(git -C measurement rev-parse HEAD)" --arg node "$(node --version)" \
             --arg chrome "$("$chrome" --version)" --arg driver "$("$driver" --version)" \
@@ -267,10 +272,10 @@ jobs:
             --argjson lightweightResponseComparison "$LIGHTWEIGHT_RESPONSE_COMPARISON" \
             --argjson launchReceiptComparison "$LAUNCH_RECEIPT_COMPARISON" \
             --arg systemLoad "$(uptime)" --argjson cpus "$(nproc)" \
-            '{attribution:$attribution,composedJ06:$composedJ06,launchReceiptComparison:$launchReceiptComparison,lightweightResponseComparison:$lightweightResponseComparison,responseRoles:(if $lightweightResponseComparison then {candidate:"receipt",rootRelease:"legacy-projection",stock:"legacy-projection"} else null end),acceptBoundary:(if $composedJ06 then "browser launch acknowledgement upper bound; observer overhead included" else null end),stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},catalog:(if $compareCatalog then {commit:$catalog,tree:$catalogTree,durability:"omdb Immediate"} else null end),rootRelease:(if $compareRootRelease then {commit:$rootRelease,tree:$rootReleaseTree,durability:"omdb Immediate"} else null end),singleProjectionReads:$compareSingleReads,independentReads:($compareIndependentReads or $composedNativeReader),independentLookups:$compareIndependentLookups,forkSqliteControl:($trace or $composedForkSqlite),forkSqlite:(if $composedForkSqlite then {bundle:"candidate",commit:$candidate,tree:$candidateTree,durability:"SQLite WAL/NORMAL"} else null end),providerTrace:($trace or $attribution),probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
+            '{attribution:$attribution,composedJ06:$composedJ06,launchReceiptComparison:$launchReceiptComparison,lightweightResponseComparison:$lightweightResponseComparison,responseRoles:(if $lightweightResponseComparison then {candidate:"receipt",rootRelease:"legacy-projection",stock:"legacy-projection"} else null end),acceptBoundary:(if $composedJ06 then "browser launch acknowledgement upper bound; observer overhead included" else null end),stock:{commit:$stock,tree:$stockTree,durability:"SQLite WAL/NORMAL"},candidate:{commit:$candidate,tree:$candidateTree,durability:"omdb Immediate"},catalog:(if $compareCatalog then {commit:$catalog,tree:$catalogTree,durability:"omdb Immediate"} else null end),rootRelease:(if $compareRootRelease then {commit:$rootRelease,tree:$rootReleaseTree,durability:"omdb Immediate"} else null end),singleProjectionReads:$compareSingleReads,singleReceiptReads:$composedReceiptReads,independentReads:($compareIndependentReads or $composedNativeReader),independentLookups:$compareIndependentLookups,forkSqliteControl:($trace or $composedForkSqlite),forkSqlite:(if $composedForkSqlite then {bundle:"candidate",commit:$candidate,tree:$candidateTree,durability:"SQLite WAL/NORMAL"} else null end),providerTrace:($trace or $attribution),probe:$probe,node:$node,chrome:$chrome,driver:$driver,image:$image,kernel:$kernel,cpu:$cpu,systemLoad:$systemLoad,cpus:$cpus,cache:"fresh profile and browser per turn, unmanaged filesystem cache"}' \
             > "$evidence/inputs.json"
-          if [[ "$BATCH_TURN_START_COMPARISON" == true && "$J06_ATTRIBUTION" != true ]]; then
-            "$CARGO_TARGET_DIR/release/t16-j06-budget" policy > "$evidence/j06-policy.json"
+          if [[ ( "$BATCH_TURN_START_COMPARISON" == true || "$J06_RECEIPT_READS_COMPARISON" == true ) && "$J06_ATTRIBUTION" != true ]]; then
+            "$CARGO_TARGET_DIR/release/t16-j06-budget" policy "${budget_options[@]}" > "$evidence/j06-policy.json"
             sha256sum "$CARGO_TARGET_DIR/release/t16-j06-budget" > "$evidence/j06-budget.sha256"
           fi
           printf 'pair\tposition\tprofile\tfirst_visible_ms\tterminal_ms\tmax_frame_gap_ms\n' > "$evidence/trials.tsv"
@@ -286,7 +291,7 @@ jobs:
             if [[ "$COMPARE_INDEPENDENT_READS" == true ]]; then profiles+=(independent-reads); fi
             if [[ "$COMPARE_INDEPENDENT_LOOKUPS" == true ]]; then profiles+=(independent-lookups); fi
             if [[ "$COMPARE_ROOT_RELEASE" == true ]]; then profiles+=(root-release); fi
-            if [[ "$LAUNCH_RECEIPT_COMPARISON" == true || "$LIGHTWEIGHT_RESPONSE_COMPARISON" == true || "$BATCH_TURN_START_COMPARISON" == true || "$J06_NATIVE_READER_COMPARISON" == true || "$J06_FORK_SQLITE_COMPARISON" == true ]]; then
+            if [[ "$LAUNCH_RECEIPT_COMPARISON" == true || "$LIGHTWEIGHT_RESPONSE_COMPARISON" == true || "$BATCH_TURN_START_COMPARISON" == true || "$J06_NATIVE_READER_COMPARISON" == true || "$J06_FORK_SQLITE_COMPARISON" == true || "$J06_RECEIPT_READS_COMPARISON" == true ]]; then
               read -r -a profiles <<< "${orders[pair - 1]}"
             fi
             for ((position=0; position<${#profiles[@]}; position++)); do
@@ -307,6 +312,7 @@ jobs:
                 if [[ "$profile" == turn-start-batch ]]; then mode=native-j06-turn-start-batch; bundle_profile=candidate; fi
                 if [[ "$profile" == independent-reads ]]; then mode=native-j06-independent-reads; bundle_profile=candidate; fi
                 if [[ "$profile" == fork-sqlite ]]; then mode=fork-sqlite-j06; bundle_profile=candidate; fi
+                if [[ "$profile" == receipt-reads ]]; then mode=native-j06-receipt-reads; bundle_profile=candidate; fi
                 if [[ "$J06_ATTRIBUTION" == true ]]; then mode="$mode-attribution"; fi
               fi
               sudo -n unshare --net -- bash -euc '
@@ -317,10 +323,11 @@ jobs:
               ' _ "$(id -un)" "$probe" probe-conversation "$node_path" \
                 "$PWD/$bundle_profile/apps/server/dist/bin.mjs" "$RUNNER_TEMP/conversation-trial-$trial" \
                 "$driver" "$chrome" "$replay" "$mode" "${trace[@]}" | tee "$result" > /dev/null
-              if [[ "$LIGHTWEIGHT_RESPONSE_COMPARISON" == true || "$BATCH_TURN_START_COMPARISON" == true || "$J06_NATIVE_READER_COMPARISON" == true || "$J06_FORK_SQLITE_COMPARISON" == true ]]; then
+              if [[ "$LIGHTWEIGHT_RESPONSE_COMPARISON" == true || "$BATCH_TURN_START_COMPARISON" == true || "$J06_NATIVE_READER_COMPARISON" == true || "$J06_FORK_SQLITE_COMPARISON" == true || "$J06_RECEIPT_READS_COMPARISON" == true ]]; then
                 jq -e --arg profile "$profile" '
                   .browser.conversation.acceptance as $ack |
                   .batch_turn_start_context == ($profile == "turn-start-batch") and
+                  .single_receipt_reads == ($profile == "receipt-reads") and
                   .profile == (if $profile == "fork-sqlite" then "new-fork-linux-browser-profile"
                     elif $profile == "stock" then "new-stock-linux-browser-profile" else "new-native-linux-browser-profile" end) and
                   $ack.requests == 1 and $ack.error == null and
@@ -360,12 +367,12 @@ jobs:
                 <(jq -c '.browser.conversation.snapshot.assistant' "$evidence/sample-$pair-$profile.json")
             done
           done
-          if [[ "$BATCH_TURN_START_COMPARISON" == true || "$J06_NATIVE_READER_COMPARISON" == true || "$J06_FORK_SQLITE_COMPARISON" == true ]]; then
+          if [[ "$BATCH_TURN_START_COMPARISON" == true || "$J06_NATIVE_READER_COMPARISON" == true || "$J06_FORK_SQLITE_COMPARISON" == true || "$J06_RECEIPT_READS_COMPARISON" == true ]]; then
             for profile in stock candidate; do
               (cd "$profile" && sha256sum --check --quiet "$evidence/$profile.sha256")
             done
             if [[ "$J06_ATTRIBUTION" != true ]]; then
-              "$CARGO_TARGET_DIR/release/t16-j06-budget" judge "$evidence/j06.tsv" \
+              "$CARGO_TARGET_DIR/release/t16-j06-budget" judge "$evidence/j06.tsv" "${budget_options[@]}" \
                 > "$evidence/j06-budget.json"
             fi
           fi
