@@ -1,9 +1,10 @@
-//! MIT. Benchmark-only verifier; never changes a product default or opens a profile.
+//! MIT. Benchmark-only verifier; never changes a product default or opens a database.
 use serde_json::{Value, json};
 use std::{
     collections::BTreeSet,
     env, fs,
     io::{self, Read},
+    os::unix::fs::MetadataExt,
     path::Path,
     process::Command,
 };
@@ -232,6 +233,80 @@ fn read_sample(path: &Path) -> Result<Value> {
     Ok(serde_json::from_slice(&bytes)?)
 }
 
+fn stopped_footprint(variant: &str, trial: &Path, sample: &Value) -> Result<Value> {
+    const SQLITE_FILES: &[&str] = &[
+        "statev2.sqlite",
+        "statev2.sqlite-wal",
+        "statev2.sqlite-shm",
+        "statev2.sqlite-journal",
+    ];
+    const OMDB_FILES: &[&str] = &["statev2.omdb"];
+    let (profile, durability, names, other_main) = match variant {
+        "stock" => ("stock", "SQLite WAL/NORMAL", SQLITE_FILES, OMDB_FILES[0]),
+        "full" => ("stock", "SQLite WAL/FULL", SQLITE_FILES, OMDB_FILES[0]),
+        "native" => ("native", "omdb Immediate", OMDB_FILES, SQLITE_FILES[0]),
+        _ => return Err("unknown plain comparison variant".into()),
+    };
+    if sample["journey"] != "J02"
+        || sample["profile"] != profile
+        || sample["snapshot"]["valid"] != true
+    {
+        return Err("footprint requires a successful matching J02 sample".into());
+    }
+    let initial_main = sample["database_bytes_at_reopen"]
+        .as_u64()
+        .filter(|&bytes| bytes > 0)
+        .ok_or("missing apparent size before reopen")?;
+    let trial = trial.canonicalize()?;
+    let state = trial.join("profile/userdata");
+    if state.canonicalize()? != state {
+        return Err("unexpected database directory".into());
+    }
+    match state.join(other_main).symlink_metadata() {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+        Ok(_) => return Err("unexpected competing database".into()),
+    }
+    let mut files = Vec::new();
+    let mut absent = Vec::new();
+    let mut apparent_bytes = 0_u64;
+    let mut allocated_bytes = 0_u64;
+    for (index, &name) in names.iter().enumerate() {
+        let metadata = match state.join(name).symlink_metadata() {
+            Ok(metadata) => metadata,
+            Err(error) if index > 0 && error.kind() == io::ErrorKind::NotFound => {
+                absent.push(name);
+                continue;
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if !metadata.is_file() || (index == 0 && metadata.len() == 0) {
+            return Err("expected regular database files and a nonempty main file".into());
+        }
+        let apparent = metadata.len();
+        let allocated = metadata
+            .blocks()
+            .checked_mul(512)
+            .ok_or("block count overflow")?;
+        apparent_bytes = apparent_bytes
+            .checked_add(apparent)
+            .ok_or("apparent size overflow")?;
+        allocated_bytes = allocated_bytes
+            .checked_add(allocated)
+            .ok_or("allocated size overflow")?;
+        files.push(json!({"name":name,"apparent_bytes":apparent,"allocated_bytes":allocated}));
+    }
+    Ok(json!({
+        "journey":"J02","variant":variant,"durability":durability,
+        "phase":"after the measured reopen and graceful shutdown",
+        "before_reopen_main_apparent_bytes":initial_main,
+        "files":files,"absent_sidecars":absent,
+        "apparent_bytes":apparent_bytes,"allocated_bytes":allocated_bytes,
+        "allocation_source":"Linux stat blocks in 512-byte units, main and SQLite sidecars",
+        "write_amplification_qualified":false,"compaction_qualified":false,
+    }))
+}
+
 fn main() -> Result<()> {
     let args: Vec<_> = env::args_os().skip(1).collect();
     match args.as_slice() {
@@ -252,6 +327,13 @@ fn main() -> Result<()> {
                 return Err("unequal completed work; retain receipt and investigate events".into());
             }
         }
+        [command, variant, trial, sample] if command == "footprint" => {
+            let variant = variant.to_str().ok_or("invalid footprint variant")?;
+            println!(
+                "{}",
+                stopped_footprint(variant, Path::new(trial), &read_sample(Path::new(sample))?)?
+            );
+        }
         [command] if command == "account" => {
             let mut bytes = Vec::new();
             io::stdin().take(4_194_305).read_to_end(&mut bytes)?;
@@ -262,7 +344,7 @@ fn main() -> Result<()> {
         }
         _ => {
             return Err(
-                "usage: t16-strict-control source CLEAN_FROZEN_STOCK | plain-source CLEAN_FROZEN_STOCK | match STOCK FULL NATIVE | account < sample.json"
+                "usage: t16-strict-control source CLEAN_FROZEN_STOCK | plain-source CLEAN_FROZEN_STOCK | match STOCK FULL NATIVE | footprint VARIANT TRIAL SAMPLE | account < sample.json"
                     .into(),
             );
         }

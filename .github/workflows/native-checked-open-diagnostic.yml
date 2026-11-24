@@ -731,6 +731,8 @@ jobs:
                 | [$round,$position,$variant,.descriptor_micros,.html_micros] | @tsv' "$sample" >> "$evidence/plain-reopen.tsv"
               # Separate untimed control. Probe has stopped browser and server.
               # Retain original strict matcher and all fixture/output gates below.
+              "$verifier" footprint "$variant" "$trial" "$sample" \
+                > "$evidence/plain-footprint-$round-$variant.json"
               if [[ "$round" == 1 ]]; then
                 "$CARGO_TARGET_DIR/release/t16-cursor-diagnostic" "$mode" \
                   "$root/apps/server/dist/bin.mjs" "$trial" "$sample" \
