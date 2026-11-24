@@ -32,7 +32,7 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
             node, bundle, trial, Some((driver, chrome)),
             match mode.to_str() {
                 Some("stock" | "stock-j06" | "stock-j06-attribution") => None,
-                Some("native-j06-receipt-reads" | "native-j06-attribution" | "native-j06" | "native-j06-turn-start-batch" | "native-j06-turn-start-batch-attribution" | "native-j06-independent-reads-attribution" | "native" | "native-single-reads" | "native-independent-reads" | "native-independent-lookups") => Some("native"),
+                Some("native-j06-combined-reads" | "native-j06-receipt-reads" | "native-j06-attribution" | "native-j06" | "native-j06-turn-start-batch" | "native-j06-turn-start-batch-attribution" | "native-j06-independent-reads-attribution" | "native" | "native-single-reads" | "native-independent-reads" | "native-independent-lookups") => Some("native"),
                 Some("fork-sqlite" | "fork-sqlite-j06-attribution") => Some("upstream"),
                 _ => return Err("unknown conversation profile".into()),
             },
@@ -41,7 +41,7 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
                 Ok::<_, std::io::Error>((fs::canonicalize(wrapper)?, trace.len() == 2))
             }).transpose()?,
         ),
-        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|stock-j06|native-j06|native-j06-turn-start-batch|native-j06-receipt-reads|stock-j06-attribution|native-j06-attribution|native-j06-turn-start-batch-attribution|native-j06-independent-reads-attribution|native|native-single-reads|native-independent-reads|native-independent-lookups|fork-sqlite|fork-sqlite-j06-attribution [TRACE_WRAPPER [server-spans]]".into()),
+        _ if conversation => return Err("usage: t3code-ls-tools probe-conversation NODE BUNDLE NEW_TRIAL_DIRECTORY CHROMEDRIVER CHROME STOCK_REPLAY_AGENT stock|stock-j06|native-j06|native-j06-turn-start-batch|native-j06-receipt-reads|native-j06-combined-reads|stock-j06-attribution|native-j06-attribution|native-j06-turn-start-batch-attribution|native-j06-independent-reads-attribution|native|native-single-reads|native-independent-reads|native-independent-lookups|fork-sqlite|fork-sqlite-j06-attribution [TRACE_WRAPPER [server-spans]]".into()),
         _ => return Err("usage: t3code-ls-tools probe-startup NODE BUNDLE NEW_TRIAL_DIRECTORY [CHROMEDRIVER CHROME [fork-sqlite]]".into()),
     };
     let node = fs::canonicalize(node)?;
@@ -56,11 +56,12 @@ pub fn run(args: impl Iterator<Item = OsString>, conversation: bool) -> Result<(
     if attribution && !trace.as_ref().is_some_and(|(_, spans)| *spans) {
         return Err("J06 attribution requires the shared trace wrapper and server-spans".into());
     }
-    let batch_turn_start = matches!(profile, Some("native-j06-turn-start-batch" | "native-j06-turn-start-batch-attribution"));
-    let single_receipt_reads = profile == Some("native-j06-receipt-reads");
+    let combined_reads = profile == Some("native-j06-combined-reads");
+    let batch_turn_start = combined_reads || matches!(profile, Some("native-j06-turn-start-batch" | "native-j06-turn-start-batch-attribution"));
+    let single_receipt_reads = combined_reads || profile == Some("native-j06-receipt-reads");
     let scoped_j06 =
         attribution || batch_turn_start || single_receipt_reads || matches!(profile, Some("stock-j06" | "native-j06"));
-    let single_projection_reads = matches!(
+    let single_projection_reads = combined_reads || matches!(
         profile,
         Some("native-single-reads" | "native-independent-lookups")
     );

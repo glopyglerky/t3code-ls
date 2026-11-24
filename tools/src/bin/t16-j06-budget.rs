@@ -6,6 +6,7 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const ROUNDS: usize = 6;
 const BATCH: &str = "turn-start-batch";
 const RECEIPTS: &str = "receipt-reads";
+const COMBINED: &str = "combined-reads";
 const METRICS: [&str; 5] = [
     "accept_ack_ms",
     "first_visible_ms",
@@ -110,10 +111,9 @@ fn judge(input: &str, variant: &str) -> Result<Value> {
 
 fn main() -> Result<()> {
     let args: Vec<_> = env::args_os().skip(1).collect();
-    let (command, variant) = if args.last().is_some_and(|arg| arg == RECEIPTS) {
-        (&args[..args.len() - 1], RECEIPTS)
-    } else {
-        (args.as_slice(), BATCH)
+    let (command, variant) = match args.last().and_then(|arg| arg.to_str()) {
+        Some(variant @ (RECEIPTS | COMBINED)) => (&args[..args.len() - 1], variant),
+        _ => (args.as_slice(), BATCH),
     };
     match command {
         [action] if action == "policy" => println!("{}", policy(variant)),
@@ -131,7 +131,12 @@ fn main() -> Result<()> {
                 return Err("J06 median latency exceeds matched stock budget".into());
             }
         }
-        _ => return Err("usage: t16-j06-budget (policy | judge J06_TSV) [receipt-reads]".into()),
+        _ => {
+            return Err(
+                "usage: t16-j06-budget (policy | judge J06_TSV) [receipt-reads | combined-reads]"
+                    .into(),
+            );
+        }
     }
     Ok(())
 }
@@ -189,13 +194,15 @@ mod tests {
     }
 
     #[test]
-    fn applies_the_same_stock_budget_to_receipt_reads() {
-        let slow = sample(RECEIPTS, 101);
-        assert!(judge(&slow, BATCH).is_err());
-        assert_eq!(judge(&slow, RECEIPTS).unwrap()["passed"], false);
-        assert_eq!(
-            judge(&sample(RECEIPTS, 100), RECEIPTS).unwrap()["passed"],
-            true
-        );
+    fn applies_the_same_stock_budget_to_both_read_variants() {
+        for variant in [RECEIPTS, COMBINED] {
+            let slow = sample(variant, 101);
+            assert!(judge(&slow, BATCH).is_err());
+            assert_eq!(judge(&slow, variant).unwrap()["passed"], false);
+            assert_eq!(
+                judge(&sample(variant, 100), variant).unwrap()["passed"],
+                true
+            );
+        }
     }
 }
