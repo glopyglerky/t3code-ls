@@ -164,6 +164,8 @@ jobs:
             > "$evidence/packaged-artifacts.sha256"
           if [[ "$STORAGE_ACCOUNTING_PROOF" == true ]]; then
             cp "$GITHUB_WORKSPACE/tools/diagnostics/t16-storage-accounting.rs" crates/storage/src/bin/
+            "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --release --locked \
+              -p t3-code-ls-storage --bin t16-storage-accounting
             "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --release --locked \
               -p t3-code-ls-storage --bin t16-storage-accounting
             sha256sum "$CARGO_TARGET_DIR/release/t16-storage-accounting" > "$evidence/storage-accounting.sha256"

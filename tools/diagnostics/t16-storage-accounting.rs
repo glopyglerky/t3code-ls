@@ -5,35 +5,76 @@ use redb::{
 };
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::{collections::BTreeMap, env, fs, io::Read, path::Path};
+use std::{collections::BTreeMap, env, fmt::Write, fs, io::Read, path::Path};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("t3_code_ls_v2");
-const GENERATION: &[u8] = b"t3-code-ls/v2/application/generation/native/";
+const SCHEMA: &[u8] = b"t3-code-ls/v2/application/schema";
+
+struct RecordPrefixes {
+    generation: String,
+    events: String,
+    messages: String,
+    projections: String,
+}
+
+impl RecordPrefixes {
+    fn new(generation: &str) -> Result<Self> {
+        if generation != "native"
+            && !(generation.len() == 64
+                && generation
+                    .bytes()
+                    .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f')))
+        {
+            return Err("invalid application generation".into());
+        }
+        Ok(Self {
+            generation: format!("t3-code-ls/v2/application/generation/{generation}/"),
+            events: row_prefix("orchestration_events", true),
+            messages: row_prefix("orchestration_v2_projection_messages", true),
+            projections: row_prefix("orchestration_v2_projection_", false),
+        })
+    }
+
+    fn category(&self, key: &[u8]) -> &'static str {
+        let Some(suffix) = key.strip_prefix(self.generation.as_bytes()) else {
+            return "other";
+        };
+        if suffix.starts_with(self.events.as_bytes()) {
+            "event_rows"
+        } else if suffix.starts_with(self.messages.as_bytes()) {
+            "message_projection_rows"
+        } else if suffix.starts_with(self.projections.as_bytes()) {
+            "other_projection_rows"
+        } else if suffix.starts_with(b"events/v1/") {
+            "event_indexes"
+        } else if suffix.starts_with(b"projection-reads/v1/")
+            || suffix.starts_with(b"projections/v1/")
+        {
+            "projection_indexes"
+        } else {
+            "other"
+        }
+    }
+}
+
+fn row_prefix(table: &str, exact: bool) -> String {
+    // The application stores the table name as lowercase hexadecimal.
+    let mut prefix = String::from("row/");
+    for byte in table.bytes() {
+        write!(prefix, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    if exact {
+        prefix.push('/');
+    }
+    prefix
+}
 
 #[derive(Default, Serialize)]
 struct Bytes {
     keys: u64,
     key_bytes: u64,
     value_bytes: u64,
-}
-
-fn category(key: &[u8]) -> &'static str {
-    let Some(suffix) = key.strip_prefix(GENERATION) else {
-        return "other";
-    };
-    if suffix.starts_with(b"row/orchestration_events/") {
-        "event_rows"
-    } else if suffix.starts_with(b"row/orchestration_v2_projection_") {
-        "projection_rows"
-    } else if suffix.starts_with(b"events/v1/") {
-        "event_indexes"
-    } else if suffix.starts_with(b"projection-reads/v1/") || suffix.starts_with(b"projections/v1/")
-    {
-        "projection_indexes"
-    } else {
-        "other"
-    }
 }
 
 fn inspect(trial: &Path, sample: &Value) -> Result<Value> {
@@ -60,20 +101,41 @@ fn inspect(trial: &Path, sample: &Value) -> Result<Value> {
     let result = {
         let snapshot = database.begin_read()?;
         let table = snapshot.open_table(TABLE)?;
+        let catalog: Value = serde_json::from_slice(
+            table
+                .get(SCHEMA)?
+                .ok_or("missing application catalog")?
+                .value(),
+        )?;
+        if catalog["schema"]["version"] != 1 {
+            return Err("unexpected application schema version".into());
+        }
+        let prefixes = RecordPrefixes::new(
+            catalog["generation"]
+                .as_str()
+                .ok_or("missing application generation")?,
+        )?;
         let stats = table.stats()?;
         let mut groups: BTreeMap<&str, Bytes> = BTreeMap::new();
         for row in table.iter()? {
             let (key, value) = row?;
-            let bytes = groups.entry(category(key.value())).or_default();
+            let bytes = groups.entry(prefixes.category(key.value())).or_default();
             bytes.keys += 1;
             bytes.key_bytes += key.value().len() as u64;
             bytes.value_bytes += value.value().len() as u64;
         }
-        if !groups.contains_key("event_rows")
-            || !groups.contains_key("projection_rows")
-            || groups.values().map(|bytes| bytes.keys).sum::<u64>() != table.len()?
-        {
-            return Err("native table did not contain the expected fixture records".into());
+        let event_rows = groups.get("event_rows").map_or(0, |bytes| bytes.keys);
+        let message_rows = groups
+            .get("message_projection_rows")
+            .map_or(0, |bytes| bytes.keys);
+        let counted = groups.values().map(|bytes| bytes.keys).sum::<u64>();
+        let expected = sample["fixture"]["total_messages"]
+            .as_u64()
+            .unwrap_or_default();
+        if event_rows < expected || message_rows != expected || counted != table.len()? {
+            return Err(format!(
+                "unexpected native fixture counts: {event_rows} events, {message_rows} messages, {counted} entries (expected {expected} messages)"
+            ).into());
         }
         json!({"journey":"J02","observation":"untimed read-only stopped fixture",
             "groups":groups,"table":{"key_and_value_bytes":stats.stored_bytes(),
@@ -103,4 +165,38 @@ fn main() -> Result<()> {
         inspect(Path::new(trial), &serde_json::from_slice(&input)?)?
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_encoded_rows_only_for_the_active_generation() {
+        let prefixes = RecordPrefixes::new("native").unwrap();
+        let events = "row/6f726368657374726174696f6e5f6576656e7473/key";
+        let messages =
+            "row/6f726368657374726174696f6e5f76325f70726f6a656374696f6e5f6d65737361676573/key";
+        for (suffix, category) in [
+            (events, "event_rows"),
+            (messages, "message_projection_rows"),
+            ("row/orchestration_events/key", "other"),
+            ("events/v1/index", "event_indexes"),
+            ("projection-reads/v1/index", "projection_indexes"),
+        ] {
+            assert_eq!(
+                prefixes.category(format!("{}{suffix}", prefixes.generation).as_bytes()),
+                category,
+            );
+        }
+        let imported = RecordPrefixes::new(&"f".repeat(64)).unwrap();
+        assert_eq!(
+            imported.category(format!("{}{events}", imported.generation).as_bytes()),
+            "event_rows"
+        );
+        assert_eq!(
+            imported.category(format!("{}{events}", prefixes.generation).as_bytes()),
+            "other"
+        );
+    }
 }
