@@ -119,7 +119,7 @@ jobs:
           echo "$scratch/npm/bin" >> "$GITHUB_PATH"
           (cd "$scratch/native" && node tools/install-toolchain.mjs --destination "$scratch/toolchain")
       - name: Build the frozen optimized stock bundle for paired comparison
-        if: env.PAIRED_REUSE_PROOF == 'true'
+        if: env.PAIRED_REUSE_PROOF == 'true' && env.STORAGE_COMPACTION_PROOF != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -193,7 +193,7 @@ jobs:
             "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --release --locked -p t3code-ls-tools --bin t16-strict-control
             sha256sum "$CARGO_TARGET_DIR/release/t16-strict-control" > "$evidence/strict-verifier.sha256"
           fi
-          if [[ "$PLAIN_STRICT_PROOF" == true ]]; then
+          if [[ "$PLAIN_STRICT_PROOF" == true && "$STORAGE_COMPACTION_PROOF" != true ]]; then
             "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked -p t3code-ls-tools --bin t16-cursor-diagnostic
             "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --release --locked -p t3code-ls-tools --bin t16-cursor-diagnostic
             sha256sum "$CARGO_TARGET_DIR/release/t16-cursor-diagnostic" > "$evidence/cursor-diagnostic.sha256"
@@ -534,7 +534,7 @@ jobs:
           test "$(wc -l < "$evidence/paired-reopen.tsv")" -eq "$expected"
           uptime >> "$evidence/paired-host.txt"
       - name: Verify separate benchmark-only WAL FULL stock control
-        if: env.STRICT_PROOF == 'true'
+        if: env.STRICT_PROOF == 'true' && env.STORAGE_COMPACTION_PROOF != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -634,7 +634,7 @@ jobs:
                 "Read-only mounts protect the workload view, not host-global immutable storage"]}' \
             > "$evidence/strict-verifier-scope.json"
       - name: Compare separate plain NORMAL FULL and Immediate arms
-        if: env.PLAIN_STRICT_PROOF == 'true'
+        if: env.PLAIN_STRICT_PROOF == 'true' && env.STORAGE_COMPACTION_PROOF != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -751,35 +751,6 @@ jobs:
                 "$CARGO_TARGET_DIR/release/t16-storage-accounting" "$trial" "$sample" \
                   > "$evidence/plain-native-storage-accounting.json"
                 sha256sum --check --quiet "$evidence/plain-native-closed.sha256"
-                if [[ "$STORAGE_COMPACTION_PROOF" == true ]]; then
-                  compact="$trial/profile/userdata/compaction-fixture.omdb"
-                  test ! -e "$compact"
-                  cp --sparse=always --reflink=never -- "$db" "$compact"
-                  test ! "$compact" -ef "$db"
-                  cmp -- "$db" "$compact"
-                  read -r before_size before_blocks before_unit < <(stat -c '%s %b %B' -- "$compact")
-                  printf '%s\n' '{"operation":"storage_compact"}' |
-                    timeout -k 5s 180s "$root/apps/server/dist/native-bin/t3-code-ls-db" exclusive-local "$compact" \
-                      > "$evidence/plain-native-compaction-helper.json"
-                  read -r after_size after_blocks after_unit < <(stat -c '%s %b %B' -- "$compact")
-                  jq -e --argjson after "$after_size" '.ok == true and .result.after_bytes == $after' \
-                    "$evidence/plain-native-compaction-helper.json" > /dev/null
-                  "$CARGO_TARGET_DIR/release/t16-storage-accounting" "$trial" "$sample" compact-copy \
-                    > "$evidence/plain-native-compacted-accounting.json"
-                  jq -ne --slurpfile before "$evidence/plain-native-storage-accounting.json" \
-                    --slurpfile after "$evidence/plain-native-compacted-accounting.json" \
-                    --argjson before_size "$before_size" --argjson after_size "$after_size" \
-                    --argjson before_allocated "$((before_blocks * before_unit))" \
-                    --argjson after_allocated "$((after_blocks * after_unit))" '
-                      select(($before[0].live_records_sha256 | test("^[0-9a-f]{64}$"))
-                        and $before[0].live_records_sha256 == $after[0].live_records_sha256
-                        and $before[0].groups == $after[0].groups)
-                      | {scope:"one isolated byte-identical fixture copy",same_application_records:true,
-                        before:{file_bytes:$before_size,allocated_bytes:$before_allocated,table:$before[0].table},
-                        after:{file_bytes:$after_size,allocated_bytes:$after_allocated,table:$after[0].table}}' \
-                    > "$evidence/plain-native-compaction.json"
-                  sha256sum --check --quiet "$evidence/plain-native-closed.sha256"
-                fi
               fi
               if [[ "$round" == 1 ]]; then
                 "$CARGO_TARGET_DIR/release/t16-cursor-diagnostic" "$mode" \
@@ -807,6 +778,63 @@ jobs:
             (cd "$root" && sha256sum --check "$evidence/plain-arm-$variant.sha256") > "$evidence/plain-after-$variant.txt"
           done
           uptime >> "$evidence/plain-host-tools-source.txt"
+      - name: Compare the same closed native fixture before and after offline compaction
+        if: env.STORAGE_COMPACTION_PROOF == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          root="$DIAGNOSTIC_WORK/native"
+          evidence="$RUNNER_TEMP/checked-open-evidence"
+          trial="$DIAGNOSTIC_WORK/trials/native-compaction"
+          sample="$evidence/plain-native.json"
+          probe="$CARGO_TARGET_DIR/release/t3code-ls-tools"
+          accounting="$CARGO_TARGET_DIR/release/t16-storage-accounting"
+          driver="$(command -v chromedriver || printf '%s/chromedriver' "$CHROMEWEBDRIVER")"
+          chrome="$(command -v google-chrome)"
+          sudo -n unshare --net --pid --fork --mount-proc --kill-child -- bash -euc '
+            ip link set dev lo up
+            user="$1"; shift
+            exec runuser -u "$user" -- "$@"
+          ' _ "$(id -un)" env -u REDB_CHECKED_OPEN_DIAGNOSTICS -u T3_CODE_LS_DIAGNOSTIC_DB \
+            T16_COMPLETED_WORK=1 "$probe" probe-reopen "$(command -v node)" \
+            "$root/apps/server/dist/bin.mjs" "$trial" "$driver" "$chrome" native > "$sample"
+          "$CARGO_TARGET_DIR/release/t16-strict-control" footprint native "$trial" "$sample" \
+            > "$evidence/plain-native-original-footprint.json"
+          db="$trial/profile/userdata/statev2.omdb"
+          compact="$trial/profile/userdata/compaction-fixture.omdb"
+          sha256sum "$db" > "$evidence/plain-native-closed.sha256"
+          "$accounting" "$trial" "$sample" > "$evidence/plain-native-storage-accounting.json"
+          sha256sum --check --quiet "$evidence/plain-native-closed.sha256"
+          test ! -e "$compact"
+          cp --sparse=always --reflink=never -- "$db" "$compact"
+          test ! "$compact" -ef "$db"
+          cmp -- "$db" "$compact"
+          stat -c '%s %b %B' -- "$compact" > "$evidence/compact-copy-before.stat"
+          printf '%s\n' '{"operation":"storage_compact"}' |
+            timeout -k 5s 180s "$root/apps/server/dist/native-bin/t3-code-ls-db" exclusive-local "$compact" \
+              > "$evidence/plain-native-compaction-helper.json"
+          stat -c '%s %b %B' -- "$compact" > "$evidence/compact-copy-after.stat"
+          read -r before_size before_blocks before_unit < "$evidence/compact-copy-before.stat"
+          read -r after_size after_blocks after_unit < "$evidence/compact-copy-after.stat"
+          # The helper reports the open file. Its final close may change allocator pages.
+          jq -e '.ok == true and (.result.before_bytes > 0) and (.result.after_bytes > 0)' \
+            "$evidence/plain-native-compaction-helper.json" > /dev/null
+          "$accounting" "$trial" "$sample" compact-copy > "$evidence/plain-native-compacted-accounting.json"
+          jq -ne --slurpfile before "$evidence/plain-native-storage-accounting.json" \
+            --slurpfile after "$evidence/plain-native-compacted-accounting.json" \
+            --argjson before_size "$before_size" --argjson after_size "$after_size" \
+            --argjson before_allocated "$((before_blocks * before_unit))" \
+            --argjson after_allocated "$((after_blocks * after_unit))" '
+              select(($before[0].live_records_sha256 | test("^[0-9a-f]{64}$"))
+                and $before[0].live_records_sha256 == $after[0].live_records_sha256
+                and $before[0].groups == $after[0].groups)
+              | {scope:"one isolated byte-identical fixture copy",same_application_records:true,
+                before:{file_bytes:$before_size,allocated_bytes:$before_allocated,table:$before[0].table},
+                after:{file_bytes:$after_size,allocated_bytes:$after_allocated,table:$after[0].table}}' \
+            > "$evidence/plain-native-compaction.json"
+          sha256sum --check --quiet "$evidence/plain-native-closed.sha256"
+          (cd "$root/apps/server/dist" && sha256sum --check --quiet "$evidence/packaged-artifacts.sha256")
       - name: Remove task-owned generated files and record available space
         if: always() && env.DIAGNOSTIC_WORK != ''
         shell: bash
