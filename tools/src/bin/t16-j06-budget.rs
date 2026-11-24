@@ -58,10 +58,11 @@ fn judge(input: &str) -> Result<Value> {
         }
         round_order[position - 1] = Some(arm);
         for (value, column) in samples[round - 1][arm].iter_mut().zip(&columns[3..]) {
-            *value = column.parse()?;
-            if !value.is_finite() || *value <= 0.0 {
+            let parsed = column.parse::<f64>()?;
+            if !parsed.is_finite() || parsed <= 0.0 {
                 return Err("invalid J06 time".into());
             }
+            *value = parsed;
         }
     }
     if order.iter().flatten().any(Option::is_none)
