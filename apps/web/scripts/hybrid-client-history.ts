@@ -9,7 +9,7 @@ import * as Path from "node:path";
 import { OrchestrationV2ThreadBoundedSnapshot, OrchestrationV2ThreadHistoryPage } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { boundedSnapshotProjection } from "@t3tools/shared/orchestrationV2BoundedSnapshot";
-import type { Page } from "playwright";
+import type { Page, Response } from "playwright";
 
 export const savedHistoryThread = "import:codex:0251af00-0000-4000-8000-000000000000";
 const count = 200;
@@ -63,11 +63,11 @@ export async function importSavedHistory(page: Page, stateDirectory: string, wor
 export async function verifySavedHistory(page: Page, seed: Awaited<ReturnType<typeof importSavedHistory>>) {
   const path = `/api/orchestration/threads/${encodeURIComponent(savedHistoryThread)}`;
   const origin = new URL(page.url()).origin;
-  const observedPage = (anchored: boolean) => page.waitForResponse((response) => {
+  const isHistoryPage = (response: Response, anchored: boolean) => {
     const url = new URL(response.url());
     return url.origin === origin && decodeURIComponent(url.pathname) === decodeURIComponent(path) + "/history" &&
       url.searchParams.has("throughEntryId") === anchored;
-  });
+  };
   await page.goto(origin + seed.route, { waitUntil: "domcontentloaded" });
   const scroll = page.locator(".messages-timeline-scroll");
   await scroll.waitFor({ state: "visible" });
@@ -104,7 +104,10 @@ export async function verifySavedHistory(page: Page, seed: Awaited<ReturnType<ty
     await dismiss.click({ timeout: 10_000 });
     await dismiss.waitFor({ state: "hidden" });
   }
-  const [older] = await Promise.all([observedPage(false), loadEarlier.click({ timeout: 10_000 })]);
+  const [older] = await Promise.all([
+    page.waitForResponse((response) => isHistoryPage(response, false)),
+    loadEarlier.click({ timeout: 10_000 }),
+  ]);
   Assert.ok(older.ok());
   const history = decodePage(await older.json());
   Assert.ok(history.items.length > 0);
@@ -130,6 +133,10 @@ export async function verifySavedHistory(page: Page, seed: Awaited<ReturnType<ty
   await bar.waitFor({ state: "visible" });
   const input = bar.getByRole("searchbox", { name: "Find in thread" });
   const jumps: Array<{ index: number; text: string; messageId: string | undefined }> = [];
+  const anchoredPages: Response[] = [];
+  const trackAnchoredPage = (response: Response) => {
+    if (isHistoryPage(response, true)) anchoredPages.push(response);
+  };
   for (const index of [1, count - 1, 1]) {
     const query = text(index).split("\n")[0]!;
     const revealMatch = async () => {
@@ -143,9 +150,14 @@ export async function verifySavedHistory(page: Page, seed: Awaited<ReturnType<ty
           bounds.top >= 0 && bounds.bottom <= innerHeight;
       }), query);
     };
-    let soughtResponse;
     if (jumps.length === 0) {
-      [soughtResponse] = await Promise.all([observedPage(true), revealMatch()]);
+      // A deep match can require several bounded pages before reaching its row.
+      page.on("response", trackAnchoredPage);
+      try {
+        await revealMatch();
+      } finally {
+        page.off("response", trackAnchoredPage);
+      }
     } else {
       await revealMatch();
     }
@@ -157,15 +169,21 @@ export async function verifySavedHistory(page: Page, seed: Awaited<ReturnType<ty
     });
     Assert.equal(active.text, query);
     Assert.ok(active.messageId);
-    if (soughtResponse) {
-      Assert.ok(soughtResponse.ok());
-      const sought = decodePage(await soughtResponse.json());
-      const row = sought.items.find((row) => row.item.type === "assistant_message" &&
-        row.item.messageId === active.messageId);
-      Assert.ok(row && row.item.type === "assistant_message");
+    if (jumps.length === 0) {
+      const targeted = anchoredPages.filter((response) =>
+        new URL(response.url()).searchParams.get("throughEntryId") === active.messageId);
+      Assert.ok(targeted.length > 0, "Find must request the revealed message by its exact ID");
+      const pages = await Promise.all(targeted.map(async (response) => {
+        Assert.ok(response.ok(), `Targeted history page returned ${response.status()}`);
+        const page = decodePage(await response.json());
+        Assert.ok(page.snapshotSequence >= initial.snapshotSequence);
+        return page;
+      }));
+      const row = pages.flatMap((page) => page.items).find((row) =>
+        row.item.type === "assistant_message" && row.item.messageId === active.messageId);
+      Assert.ok(row && row.item.type === "assistant_message", "Targeted pages must supply the rendered reply");
       Assert.equal(row.sourceThreadId, savedHistoryThread);
       Assert.equal(row.item.text, text(index));
-      Assert.ok(sought.snapshotSequence >= initial.snapshotSequence);
     }
     if (index === count - 1) Assert.equal(active.messageId, newest.id);
     else if (jumps.length === 2) Assert.equal(active.messageId, jumps[0]!.messageId);
@@ -185,5 +203,5 @@ export async function verifySavedHistory(page: Page, seed: Awaited<ReturnType<ty
   return { threadId: savedHistoryThread, snapshotSequence: initial.snapshotSequence,
     historyViewRevision: initial.historyViewRevision ?? null, initialMessages: projection.messages.length,
     olderRows: history.items.map(({ sourceThreadId, sourceItemId, position }) => ({ sourceThreadId, sourceItemId, position })),
-    jumps, draftPreserved: true, searchFocusPreserved: true, coverage: "1 thread, 200 alternating messages; 32-thread benchmark remains separate" };
+    jumps, anchoredPages: anchoredPages.length, draftPreserved: true, searchFocusPreserved: true, coverage: "1 thread, 200 alternating messages; 32-thread benchmark remains separate" };
 }
