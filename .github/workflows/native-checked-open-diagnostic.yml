@@ -25,6 +25,7 @@ jobs:
       PAIRED_REUSE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-') }}
       PLAIN_STRICT_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-plain-strict-') }}
       STORAGE_ACCOUNTING_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-plain-strict-accounting-') }}
+      STORAGE_COMPACTION_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-plain-strict-accounting-compact-') }}
       STRICT_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-strict-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-plain-strict-') }}
       READINESS_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-readiness-') }}
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
@@ -750,6 +751,35 @@ jobs:
                 "$CARGO_TARGET_DIR/release/t16-storage-accounting" "$trial" "$sample" \
                   > "$evidence/plain-native-storage-accounting.json"
                 sha256sum --check --quiet "$evidence/plain-native-closed.sha256"
+                if [[ "$STORAGE_COMPACTION_PROOF" == true ]]; then
+                  compact="$trial/profile/userdata/compaction-fixture.omdb"
+                  test ! -e "$compact"
+                  cp --sparse=always --reflink=never -- "$db" "$compact"
+                  test ! "$compact" -ef "$db"
+                  cmp -- "$db" "$compact"
+                  read -r before_size before_blocks before_unit < <(stat -c '%s %b %B' -- "$compact")
+                  printf '%s\n' '{"operation":"storage_compact"}' |
+                    timeout -k 5s 180s "$root/apps/server/dist/native-bin/t3-code-ls-db" exclusive-local "$compact" \
+                      > "$evidence/plain-native-compaction-helper.json"
+                  read -r after_size after_blocks after_unit < <(stat -c '%s %b %B' -- "$compact")
+                  jq -e --argjson after "$after_size" '.ok == true and .result.after_bytes == $after' \
+                    "$evidence/plain-native-compaction-helper.json" > /dev/null
+                  "$CARGO_TARGET_DIR/release/t16-storage-accounting" "$trial" "$sample" compact-copy \
+                    > "$evidence/plain-native-compacted-accounting.json"
+                  jq -ne --slurpfile before "$evidence/plain-native-storage-accounting.json" \
+                    --slurpfile after "$evidence/plain-native-compacted-accounting.json" \
+                    --argjson before_size "$before_size" --argjson after_size "$after_size" \
+                    --argjson before_allocated "$((before_blocks * before_unit))" \
+                    --argjson after_allocated "$((after_blocks * after_unit))" '
+                      select(($before[0].live_records_sha256 | test("^[0-9a-f]{64}$"))
+                        and $before[0].live_records_sha256 == $after[0].live_records_sha256
+                        and $before[0].groups == $after[0].groups)
+                      | {scope:"one isolated byte-identical fixture copy",same_application_records:true,
+                        before:{file_bytes:$before_size,allocated_bytes:$before_allocated,table:$before[0].table},
+                        after:{file_bytes:$after_size,allocated_bytes:$after_allocated,table:$after[0].table}}' \
+                    > "$evidence/plain-native-compaction.json"
+                  sha256sum --check --quiet "$evidence/plain-native-closed.sha256"
+                fi
               fi
               if [[ "$round" == 1 ]]; then
                 "$CARGO_TARGET_DIR/release/t16-cursor-diagnostic" "$mode" \

@@ -5,6 +5,7 @@ use redb::{
 };
 use serde::Serialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, env, fmt::Write, fs, io::Read, path::Path};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -52,6 +53,10 @@ impl RecordPrefixes {
             || suffix.starts_with(b"projections/v1/")
         {
             "projection_indexes"
+        } else if suffix.starts_with(b"metadata/search-") {
+            "search_indexes"
+        } else if suffix.starts_with(b"message-rowids/") {
+            "message_row_id_indexes"
         } else {
             "other"
         }
@@ -77,7 +82,7 @@ struct Bytes {
     value_bytes: u64,
 }
 
-fn inspect(trial: &Path, sample: &Value) -> Result<Value> {
+fn inspect(trial: &Path, sample: &Value, compact_copy: bool) -> Result<Value> {
     let trial = trial.canonicalize()?;
     if sample["journey"] != "J02"
         || sample["profile"] != "native"
@@ -88,7 +93,11 @@ fn inspect(trial: &Path, sample: &Value) -> Result<Value> {
     {
         return Err("expected a matching stopped native J02 fixture".into());
     }
-    let path = trial.join("profile/userdata/statev2.omdb");
+    let path = trial.join(if compact_copy {
+        "profile/userdata/compaction-fixture.omdb"
+    } else {
+        "profile/userdata/statev2.omdb"
+    });
     if path.canonicalize()? != path || !path.symlink_metadata()?.is_file() {
         return Err("unexpected database path".into());
     }
@@ -117,12 +126,17 @@ fn inspect(trial: &Path, sample: &Value) -> Result<Value> {
         )?;
         let stats = table.stats()?;
         let mut groups: BTreeMap<&str, Bytes> = BTreeMap::new();
+        let mut digest = Sha256::new();
         for row in table.iter()? {
             let (key, value) = row?;
             let bytes = groups.entry(prefixes.category(key.value())).or_default();
             bytes.keys += 1;
             bytes.key_bytes += key.value().len() as u64;
             bytes.value_bytes += value.value().len() as u64;
+            for field in [key.value(), value.value()] {
+                digest.update((field.len() as u64).to_be_bytes());
+                digest.update(field);
+            }
         }
         let event_rows = groups.get("event_rows").map_or(0, |bytes| bytes.keys);
         let message_rows = groups
@@ -137,8 +151,14 @@ fn inspect(trial: &Path, sample: &Value) -> Result<Value> {
                 "unexpected native fixture counts: {event_rows} events, {message_rows} messages, {counted} entries (expected {expected} messages)"
             ).into());
         }
+        let live_records_sha256: String = digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
         json!({"journey":"J02","observation":"untimed read-only stopped fixture",
-            "groups":groups,"table":{"key_and_value_bytes":stats.stored_bytes(),
+            "groups":groups,"live_records_sha256":live_records_sha256,
+            "table":{"key_and_value_bytes":stats.stored_bytes(),
             "metadata_bytes":stats.metadata_bytes(),"fragmented_bytes":stats.fragmented_bytes(),
             "leaf_pages":stats.leaf_pages(),"branch_pages":stats.branch_pages()},
             "scope":"live entries in the application table; engine-wide free, retired or reserved pages use separate accounting",
@@ -150,8 +170,14 @@ fn inspect(trial: &Path, sample: &Value) -> Result<Value> {
 
 fn main() -> Result<()> {
     let args: Vec<_> = env::args_os().skip(1).collect();
-    let [trial, sample] = args.as_slice() else {
-        return Err("usage: t16-storage-accounting STOPPED_J02_TRIAL SAMPLE.json".into());
+    let (trial, sample, compact_copy) = match args.as_slice() {
+        [trial, sample] => (trial, sample, false),
+        [trial, sample, mode] if mode == "compact-copy" => (trial, sample, true),
+        _ => {
+            return Err(
+                "usage: t16-storage-accounting STOPPED_J02_TRIAL SAMPLE.json [compact-copy]".into(),
+            );
+        }
     };
     let mut input = Vec::new();
     fs::File::open(sample)?
@@ -162,7 +188,11 @@ fn main() -> Result<()> {
     }
     println!(
         "{}",
-        inspect(Path::new(trial), &serde_json::from_slice(&input)?)?
+        inspect(
+            Path::new(trial),
+            &serde_json::from_slice(&input)?,
+            compact_copy
+        )?
     );
     Ok(())
 }
@@ -183,6 +213,8 @@ mod tests {
             ("row/orchestration_events/key", "other"),
             ("events/v1/index", "event_indexes"),
             ("projection-reads/v1/index", "projection_indexes"),
+            ("metadata/search-live-posting/index", "search_indexes"),
+            ("message-rowids/v1/rows/index", "message_row_id_indexes"),
         ] {
             assert_eq!(
                 prefixes.category(format!("{}{suffix}", prefixes.generation).as_bytes()),
