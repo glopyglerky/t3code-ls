@@ -7,6 +7,7 @@ const ROUNDS: usize = 6;
 const BATCH: &str = "turn-start-batch";
 const RECEIPTS: &str = "receipt-reads";
 const COMBINED: &str = "combined-reads";
+const EVENT_INDEX: &str = "event-index-batch";
 const METRICS: [&str; 5] = [
     "accept_ack_ms",
     "first_visible_ms",
@@ -112,7 +113,7 @@ fn judge(input: &str, variant: &str) -> Result<Value> {
 fn main() -> Result<()> {
     let args: Vec<_> = env::args_os().skip(1).collect();
     let (command, variant) = match args.last().and_then(|arg| arg.to_str()) {
-        Some(variant @ (RECEIPTS | COMBINED)) => (&args[..args.len() - 1], variant),
+        Some(variant @ (RECEIPTS | COMBINED | EVENT_INDEX)) => (&args[..args.len() - 1], variant),
         _ => (args.as_slice(), BATCH),
     };
     match command {
@@ -133,7 +134,7 @@ fn main() -> Result<()> {
         }
         _ => {
             return Err(
-                "usage: t16-j06-budget (policy | judge J06_TSV) [receipt-reads | combined-reads]"
+                "usage: t16-j06-budget (policy | judge J06_TSV) [receipt-reads | combined-reads | event-index-batch]"
                     .into(),
             );
         }
@@ -194,8 +195,8 @@ mod tests {
     }
 
     #[test]
-    fn applies_the_same_stock_budget_to_both_read_variants() {
-        for variant in [RECEIPTS, COMBINED] {
+    fn applies_the_same_stock_budget_to_experimental_variants() {
+        for variant in [RECEIPTS, COMBINED, EVENT_INDEX] {
             let slow = sample(variant, 101);
             assert!(judge(&slow, BATCH).is_err());
             assert_eq!(judge(&slow, variant).unwrap()["passed"], false);
