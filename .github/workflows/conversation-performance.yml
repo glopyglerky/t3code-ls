@@ -19,6 +19,7 @@ jobs:
       BATCH_TURN_START_COMPARISON: ${{ (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-turn-start-batch-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-turn-start-batch-')) }}
       J06_RECEIPT_READS_COMPARISON: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-receipt-reads-') }}
       J06_FORK_SQLITE_COMPARISON: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-fork-sqlite-') }}
+      J06_FORK_SQLITE_FULL: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-fork-sqlite-full-') }}
       J06_NATIVE_READER_COMPARISON: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-native-reader-') }}
       LIGHTWEIGHT_RESPONSE_COMPARISON: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-lightweight-response-') }}
       CANDIDATE_COMMIT: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-receipt-reads-') && '1947bcfa84b3b41a0df9a0c28217bf44bf05dbb4' || ((startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-turn-start-batch-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-turn-start-batch-')) || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-native-reader-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-attribution-fork-sqlite-')) && '134c97974f287cfb4a76402dc12eb2cf2dc47933' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-lightweight-response-') && '14671e4314fa982fed480e4636141bc11431bba2' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-launch-receipt-') && '951537f189353748fa6bdb3f936fd716b9c86d18' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-composed-j06-') && 'd3217d6c0176faad753f8ce2525cc2552fe502d7' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-lookup-once-') && '7216183e0c013c7f5d7e9975d8aee7beda42b880' || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-independent-reads-') && '08eadccbff571219466f7bc35e982730295f15d8' || (startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-single-reads-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-conversation-root-release-')) && '9201e4b80c5b13503ce4763a296a7294c0bada7d' || 'c8e1245f85f48699f91de99e749635d8d06c2c6e' }}
@@ -147,6 +148,40 @@ jobs:
           node tools/check-hybrid.mjs --verify-binaries
           T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$PWD/bin" \
             pnpm --dir apps/server run build:bundle
+      - name: Build and verify the same fork with SQLite WAL FULL
+        if: env.J06_FORK_SQLITE_FULL == 'true'
+        run: |
+          git -C candidate worktree add --detach "$GITHUB_WORKSPACE/fork-sqlite-full" "$CANDIDATE_COMMIT"
+          candidate_root="$PWD/candidate"
+          cd fork-sqlite-full
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_COMMIT"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$CANDIDATE_TREE"
+          test -z "$(git status --porcelain)"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("apps/server/src/persistence/Sqlite.ts")
+          original = source.read_text()
+          normal = "      yield* sql`PRAGMA synchronous = NORMAL;`;"
+          if original.count(normal) != 1:
+              raise SystemExit("expected exactly one WAL synchronous setting")
+          replacement = """      yield* sql`PRAGMA synchronous = FULL;`;
+                const journal = yield* sql<{ readonly journal_mode: string }>`PRAGMA journal_mode;`;
+                const sync = yield* sql<{ readonly synchronous: number }>`PRAGMA synchronous;`;
+                if (journal[0]?.journal_mode !== "wal" || sync[0]?.synchronous !== 2) {
+                  return yield* Effect.die(new Error("The J06 SQLite control requires WAL/FULL"));
+                }"""
+          source.write_text(original.replace(normal, replacement))
+          PY
+          git diff --check
+          test "$(git diff --name-only)" = apps/server/src/persistence/Sqlite.ts
+          git diff --binary > "$RUNNER_TEMP/j06-fork-full-sqlite.patch"
+          pnpm install --frozen-lockfile
+          mkdir -p apps/web/dist
+          cp -a "$candidate_root/apps/web/dist/." apps/web/dist/
+          diff -qr "$candidate_root/apps/web/dist" apps/web/dist
+          T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$candidate_root/bin" \
+            pnpm --dir apps/server run build:bundle
       - name: Build the catalog variant with the same packaged client and server
         if: env.COMPARE_CATALOG == 'true'
         working-directory: catalog
@@ -247,6 +282,27 @@ jobs:
             )
           fi
           if [[ "$LAUNCH_RECEIPT_COMPARISON" == true || "$LIGHTWEIGHT_RESPONSE_COMPARISON" == true || "$BATCH_TURN_START_COMPARISON" == true || "$J06_NATIVE_READER_COMPARISON" == true || "$J06_FORK_SQLITE_COMPARISON" == true || "$J06_RECEIPT_READS_COMPARISON" == true ]]; then pairs="${#orders[@]}"; fi
+          if [[ "$J06_FORK_SQLITE_FULL" == true ]]; then
+            bundles+=(fork-sqlite-full)
+            orders=(
+              'stock fork-sqlite candidate fork-sqlite-full'
+              'fork-sqlite fork-sqlite-full stock candidate'
+              'fork-sqlite-full candidate fork-sqlite stock'
+              'candidate stock fork-sqlite-full fork-sqlite'
+              'fork-sqlite-full candidate fork-sqlite stock'
+              'candidate stock fork-sqlite-full fork-sqlite'
+              'stock fork-sqlite candidate fork-sqlite-full'
+              'fork-sqlite fork-sqlite-full stock candidate'
+            )
+            pairs="${#orders[@]}"
+            cp "$RUNNER_TEMP/j06-fork-full-sqlite.patch" "$evidence/fork-sqlite-full.patch"
+            sha256sum "$evidence/fork-sqlite-full.patch" >> "$evidence/fixture.sha256"
+            jq -n --arg commit "$CANDIDATE_COMMIT" --arg tree "$CANDIDATE_TREE" '
+              {commit:$commit,tree:$tree,sqlite:{journal_mode:"wal",synchronous:"full",
+                witness:"startup reads back policy on the running SQLite writer"},
+                shared_web_dist:true,power_loss_qualified:false,equal_durability_qualified:false}' \
+              > "$evidence/fork-sqlite-full-policy.json"
+          fi
           for profile in "${bundles[@]}"; do
             (
               cd "$profile"
@@ -312,6 +368,7 @@ jobs:
                 if [[ "$profile" == turn-start-batch ]]; then mode=native-j06-turn-start-batch; bundle_profile=candidate; fi
                 if [[ "$profile" == independent-reads ]]; then mode=native-j06-independent-reads; bundle_profile=candidate; fi
                 if [[ "$profile" == fork-sqlite ]]; then mode=fork-sqlite-j06; bundle_profile=candidate; fi
+                if [[ "$profile" == fork-sqlite-full ]]; then mode=fork-sqlite-j06; fi
                 if [[ "$profile" == receipt-reads ]]; then mode=native-j06-receipt-reads; bundle_profile=candidate; fi
                 if [[ "$J06_ATTRIBUTION" == true ]]; then mode="$mode-attribution"; fi
               fi
@@ -328,7 +385,7 @@ jobs:
                   .browser.conversation.acceptance as $ack |
                   .batch_turn_start_context == ($profile == "turn-start-batch") and
                   .single_receipt_reads == ($profile == "receipt-reads") and
-                  .profile == (if $profile == "fork-sqlite" then "new-fork-linux-browser-profile"
+                  .profile == (if $profile == "fork-sqlite" or $profile == "fork-sqlite-full" then "new-fork-linux-browser-profile"
                     elif $profile == "stock" then "new-stock-linux-browser-profile" else "new-native-linux-browser-profile" end) and
                   $ack.requests == 1 and $ack.error == null and
                   $ack.result.requestResponseMode == (if $profile == "stock" then null else "receipt" end) and
@@ -368,7 +425,7 @@ jobs:
             done
           done
           if [[ "$BATCH_TURN_START_COMPARISON" == true || "$J06_NATIVE_READER_COMPARISON" == true || "$J06_FORK_SQLITE_COMPARISON" == true || "$J06_RECEIPT_READS_COMPARISON" == true ]]; then
-            for profile in stock candidate; do
+            for profile in "${bundles[@]}"; do
               (cd "$profile" && sha256sum --check --quiet "$evidence/$profile.sha256")
             done
             if [[ "$J06_ATTRIBUTION" != true ]]; then
