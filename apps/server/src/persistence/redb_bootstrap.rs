@@ -1,13 +1,16 @@
 //! Compile-time current schema: fresh application startup has no SQL dependency.
 use crate::application::{
-    ApplicationCatalog, ApplicationSchema, decode_catalog, decode_row, encode_catalog, row_prefix,
-    schema_key, table, validate_schema,
+    ApplicationCatalog, ApplicationEventLayout, ApplicationSchema, decode_catalog, decode_row,
+    encode_catalog, read_generation_identity, record_generation_identity, row_prefix, schema_key,
+    table, validate_schema,
 };
 use crate::application_rows::{int_cell, integer, text, text_cell, write_row};
-use crate::{Error, Result, Store};
+use crate::{Error, Result, Store, store_key};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
+
+const SCHEMA_DEFINITION: &str = include_str!("omdb-schema.json");
 
 #[path = "redb_schema_upgrade.rs"]
 mod upgrade;
@@ -34,8 +37,8 @@ pub struct BootstrapResult {
 }
 
 fn definition() -> Result<Definition> {
-    let definition: Definition = serde_json::from_str(include_str!("omdb-schema.json"))
-        .map_err(|_| Error::IncompatibleStore)?;
+    let definition: Definition =
+        serde_json::from_str(SCHEMA_DEFINITION).map_err(|_| Error::IncompatibleStore)?;
     if definition.format != 1 {
         return Err(Error::IncompatibleStore);
     }
@@ -43,14 +46,58 @@ fn definition() -> Result<Definition> {
     Ok(definition)
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) fn bootstrap_schema_sha256() -> String {
+    use sha2::{Digest, Sha256};
+
+    Sha256::digest(SCHEMA_DEFINITION.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 impl Store {
+    #[cfg(target_os = "linux")]
+    pub(crate) async fn verify_bootstrap_schema(&self) -> Result<()> {
+        let expected = definition()?;
+        let (catalog, _) = crate::application::ApplicationTransactions::new(self.clone())
+            .catalog_and_identity()
+            .await?
+            .ok_or(Error::IncompatibleStore)?;
+        if catalog.schema != expected.schema
+            || self.application_migrations().await? != expected.migrations
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    }
+
     pub async fn application_migrations(&self) -> Result<Vec<Migration>> {
+        Ok(self
+            .read_application_migrations(false)
+            .await?
+            .unwrap_or_default())
+    }
+
+    /// Inspect the serving catalog and its migration rows on the same snapshot.
+    pub async fn serving_startup_migrations(&self) -> Result<Option<Vec<Migration>>> {
+        self.read_application_migrations(true).await
+    }
+
+    async fn read_application_migrations(
+        &self,
+        require_serving: bool,
+    ) -> Result<Option<Vec<Migration>>> {
         let mut tx = self.db.begin_read_only().await?;
         let Some(bytes) = tx.get(&schema_key()).await? else {
             tx.rollback().await?;
-            return Ok(Vec::new());
+            return Ok(None);
         };
         let catalog = decode_catalog(&bytes)?;
+        read_generation_identity(&mut tx, &catalog, &bytes).await?;
+        if require_serving {
+            catalog.ensure_serving()?;
+        }
         let prefix = row_prefix(&catalog.generation, "effect_sql_migrations")?;
         let mut end = prefix.clone();
         *end.last_mut().ok_or(Error::IncompatibleStore)? += 1;
@@ -82,12 +129,19 @@ impl Store {
         }
         result.sort_by_key(|entry| entry.id.parse::<i64>().unwrap_or(i64::MAX));
         tx.rollback().await?;
-        Ok(result)
+        Ok(Some(result))
     }
 
     /// New files are initialized atomically; an imported or existing file is
     /// verified, never overwritten or silently replaced by an empty database.
     pub async fn bootstrap_application(&self) -> Result<BootstrapResult> {
+        self.bootstrap_application_with_event_layout(None).await
+    }
+
+    pub async fn bootstrap_application_with_event_layout(
+        &self,
+        event_layout: Option<ApplicationEventLayout>,
+    ) -> Result<BootstrapResult> {
         let definition = definition()?;
         let mut tx = self
             .db
@@ -95,11 +149,24 @@ impl Store {
             .await?;
         if let Some(bytes) = tx.get(&schema_key()).await? {
             let catalog = decode_catalog(&bytes)?;
+            read_generation_identity(&mut tx, &catalog, &bytes).await?;
+            catalog.ensure_serving()?;
             tx.rollback().await?;
+            if event_layout.is_some() && event_layout != catalog.event_layout {
+                return Err(Error::Invalid(
+                    "assistant text revisions require a fresh native application profile".into(),
+                ));
+            }
             if catalog.schema != definition.schema {
+                if catalog.event_layout.is_some() {
+                    return Err(Error::IncompatibleStore);
+                }
                 return self.upgrade_application_80(catalog, definition).await;
             }
             if self.application_migrations().await? != definition.migrations {
+                if catalog.event_layout.is_some() {
+                    return Err(Error::IncompatibleStore);
+                }
                 return self.upgrade_application_88(catalog, definition).await;
             }
             return Ok(BootstrapResult {
@@ -108,11 +175,26 @@ impl Store {
                 schema_version: 1,
             });
         }
+        if event_layout.is_some()
+            && !tx
+                .scan(&store_key("application/"), &store_key("application0"), 1)
+                .await?
+                .is_empty()
+        {
+            return Err(Error::Invalid(
+                "assistant text revisions require an empty application namespace".into(),
+            ));
+        }
         let catalog = ApplicationCatalog {
             schema: definition.schema,
             generation: "native".into(),
+            event_layout,
+            prepared_service_activation_v1: None,
+            forward_service_activation_v1: None,
         };
-        tx.put(schema_key(), encode_catalog(&catalog)?).await?;
+        let bytes = encode_catalog(&catalog)?;
+        record_generation_identity(&mut tx, &catalog, &bytes).await?;
+        tx.put(schema_key(), bytes).await?;
         for migration in &definition.migrations {
             let id = migration
                 .id
@@ -173,6 +255,14 @@ mod tests {
         let first = store.bootstrap_application().await.unwrap();
         assert!(first.initialized);
         assert_eq!(first.migrations.len(), 89);
+        assert!(matches!(
+            store
+                .bootstrap_application_with_event_layout(Some(
+                    ApplicationEventLayout::AssistantTextRevisionsV1
+                ))
+                .await,
+            Err(Error::Invalid(_))
+        ));
         assert!(store.prepare_application_search().await.unwrap().prepared);
         assert!(!store.bootstrap_application().await.unwrap().initialized);
         assert_eq!(store.application_migrations().await.unwrap().len(), 89);

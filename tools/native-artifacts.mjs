@@ -17,6 +17,7 @@ export const nativeComponents = [
   "project-store",
   "db",
 ];
+export const optionalNativeComponents = ["pty-host", "git-workspace", "claude-stdio"];
 export const nativeTargets = {
   "linux-x64": "x86_64-unknown-linux-gnu",
   "linux-arm64": "aarch64-unknown-linux-gnu",
@@ -52,7 +53,7 @@ export function stageUpstreamManifest(destination, target, selection = "unqualif
     ? JSON.parse(NodeFS.readFileSync(priorPath, "utf8"))
     : undefined;
   const obsolete = [];
-  for (const component of nativeComponents) {
+  for (const component of [...nativeComponents, ...optionalNativeComponents]) {
     for (const file of [nativeFile(component, "linux-x64"), nativeFile(component, "win32-x64")]) {
       const existing = NodePath.join(destination, file);
       if (NodeFS.existsSync(existing)) {
@@ -108,7 +109,7 @@ export function nativeArtifactFiles(source, target) {
       Object.keys(manifest.files).length !== 0
     )
       throw new Error(`Invalid upstream-only service manifest for ${target}`);
-    for (const component of nativeComponents) {
+    for (const component of [...nativeComponents, ...optionalNativeComponents]) {
       for (const file of [nativeFile(component, "linux-x64"), nativeFile(component, "win32-x64")]) {
         if (NodeFS.existsSync(NodePath.join(source, file)))
           throw new Error(`Upstream-only manifest contains a native component: ${file}`);
@@ -122,16 +123,22 @@ export function nativeArtifactFiles(source, target) {
     );
   if (manifest.implementation !== undefined && manifest.implementation !== "native")
     throw new Error(`Unknown service implementation: ${manifest.implementation}`);
+  const optional = optionalNativeComponents.filter((component) =>
+    Object.hasOwn(manifest.files ?? {}, nativeFile(component, target)),
+  );
+  const components = [...nativeComponents, ...optional];
   if (
     !manifest.files ||
     typeof manifest.files !== "object" ||
     Array.isArray(manifest.files) ||
-    Object.keys(manifest.files).length !== nativeComponents.length
+    Object.keys(manifest.files).length !== components.length
   )
     throw new Error("Native component manifest must identify every selected component");
-  for (const component of nativeComponents) {
+  for (const component of components) {
     const file = nativeFile(component, target);
     const input = NodePath.resolve(source, file);
+    if (!NodeFS.lstatSync(input).isFile())
+      throw new Error(`Native component must be a regular executable: ${file}`);
     if (manifest.files[file] !== nativeHash(input))
       throw new Error(`Native component hash mismatch: ${file}`);
     NodeFS.accessSync(
@@ -139,7 +146,7 @@ export function nativeArtifactFiles(source, target) {
       target.startsWith("win32-") ? NodeFS.constants.R_OK : NodeFS.constants.X_OK,
     );
   }
-  return [...nativeComponents.map((component) => nativeFile(component, target)), "manifest.json"];
+  return [...components.map((component) => nativeFile(component, target)), "manifest.json"];
 }
 
 export function stageNativeArtifacts(source, destination, target) {

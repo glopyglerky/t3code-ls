@@ -130,6 +130,7 @@ import {
   isUndeliveredMailboxSteer,
 } from "./NotificationMailbox.ts";
 import { EventSinkV2 } from "./EventSink.ts";
+import { watchForkHistory } from "./ForkHistoryInvalidations.ts";
 import type { GuestShareCommand } from "./GuestShareDecider.ts";
 import * as NativeGuestShare from "./NativeGuestShare.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
@@ -406,11 +407,7 @@ export interface OrchestratorV2Shape {
     input: OrchestrationV2SearchThreadInput,
   ) => Effect.Effect<OrchestrationV2SearchThreadResult, OrchestratorV2Error>;
   readonly getThreadHistoryPage: (
-    threadId: ThreadId,
-    cursor: string,
-    throughEntryId?: string,
-    conversationOnly?: boolean,
-    workMode?: "deferred" | "work",
+    ...args: Parameters<ProjectionStoreV2["Service"]["getThreadHistoryPage"]>
   ) => Effect.Effect<OrchestrationV2ThreadHistoryPage, OrchestratorV2Error>;
   readonly getTimelinePage: (
     threadId: ThreadId,
@@ -458,11 +455,7 @@ export interface OrchestratorV2Shape {
     threadId: ThreadId,
     options: Parameters<ProjectionStoreV2["Service"]["getThreadSnapshotWindow"]>[1],
   ) => Effect.Effect<
-    {
-      readonly schemaVersion: number;
-      readonly snapshotSequence: number;
-      readonly projection: OrchestrationV2ThreadProjection;
-    },
+    Effect.Success<ReturnType<ProjectionStoreV2["Service"]["getThreadSnapshotWindow"]>>,
     OrchestratorV2Error
   >;
   readonly getPullRequestSnapshot: (
@@ -515,6 +508,7 @@ export interface OrchestratorV2Shape {
     threadId: ThreadId,
   ) => Effect.Effect<number, OrchestratorV2Error>;
   readonly streamStoredEvents: Stream.Stream<OrchestrationV2StoredEvent, OrchestratorV2Error>;
+  readonly watchForkHistory: (threadId: ThreadId) => ReturnType<typeof watchForkHistory>;
   /** Events arrive projected for the wire and shared by every subscriber; never mutate them. */
   readonly streamStoredEventsFrom: (input?: {
     readonly threadId?: ThreadId;
@@ -11510,8 +11504,19 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
       }
       const now = yield* DateTime.now;
+      let thread = projection.thread;
+      if (command.rootBranch !== undefined) {
+        if (state.run.workspacePreparation?.type !== "root" || thread.worktreePath !== null) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: `Run ${command.runId} no longer owns the root workspace.`,
+          });
+        }
+        thread = { ...thread, branch: command.rootBranch, updatedAt: now };
+      }
       const resolvedRuntimePolicy = yield* runtimePolicy
-        .resolve({ thread: projection.thread, modelSelection: state.run.modelSelection })
+        .resolve({ thread, modelSelection: state.run.modelSelection })
         .pipe(mapDispatchError(command));
       const checkpointScope = yield* checkpointService
         .prepareRootRunScope({
@@ -11524,6 +11529,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         })
         .pipe(mapDispatchError(command));
       const emitEvent = emit(events, command);
+      if (thread !== projection.thread) {
+        yield* emitEvent({
+          type: "thread.metadata-updated",
+          threadId: command.threadId,
+          providerInstanceId: thread.providerInstanceId,
+          occurredAt: now,
+          payload: thread,
+        });
+      }
       yield* emitEvent({
         type: "checkpoint-scope.created",
         threadId: command.threadId,
@@ -15766,9 +15780,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         );
     }),
     getThreadHistoryPage: Effect.fn("OrchestratorV2.getThreadHistoryPage")(
-      function (threadId, cursor, throughEntryId, conversationOnly, workMode) {
+      function (...args: Parameters<OrchestratorV2Shape["getThreadHistoryPage"]>) {
+        const [threadId] = args;
         return projectionStore
-          .getThreadHistoryPage(threadId, cursor, throughEntryId, conversationOnly, workMode)
+          .getThreadHistoryPage(...args)
           .pipe(Effect.mapError((cause) => new OrchestratorProjectionError({ threadId, cause })));
       },
     ),
@@ -15911,6 +15926,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           }),
       ),
     ),
+    watchForkHistory: Effect.fn("OrchestratorV2.watchForkHistory")(function (threadId) {
+      return watchForkHistory(threadId, projectionStore, eventSink);
+    }),
     streamStoredEventsFrom: (input) =>
       eventSink.stream({ ...input, bounded: true }).pipe(
         Stream.mapError(

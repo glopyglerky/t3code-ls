@@ -1,6 +1,14 @@
 #![forbid(unsafe_code)]
 
 mod backend;
+#[cfg(feature = "packaged-event-accounting-fixture")]
+pub mod packaged_event_accounting;
+#[cfg(all(test, feature = "ordered-engine-fixture"))]
+mod ordered_engine_fixture;
+
+#[cfg(target_os = "linux")]
+#[path = "../../../apps/server/src/persistence/redb_forward_child_readiness.rs"]
+pub mod forward_child_readiness;
 
 #[path = "../../../apps/server/src/persistence/redb_transactions.rs"]
 pub mod application;
@@ -193,6 +201,7 @@ pub enum Error {
     Invalid(String),
     ResourceLimit(ResourceLimit),
     IncompatibleStore,
+    RecoveryRequired,
     StaleRevision { expected: u64, actual: u64 },
     CommandConflict,
     DuplicateRecord,
@@ -209,6 +218,9 @@ impl fmt::Display for Error {
             Self::ResourceLimit(limit) => write!(f, "Invalid database request: {limit}"),
             Self::IncompatibleStore => {
                 write!(f, "The database is not a supported t3 code ls store")
+            }
+            Self::RecoveryRequired => {
+                write!(f, "The native database requires recovery after an unclean shutdown")
             }
             Self::StaleRevision { expected, actual } => write!(
                 f,
@@ -488,6 +500,13 @@ impl Store {
         };
         store.metadata().await?;
         Ok(store)
+    }
+
+    /// Open a read-only service whose independent roots each take a fresh snapshot.
+    pub async fn open_current_reader(path: impl AsRef<Path>) -> Result<Self> {
+        Ok(Self {
+            db: Backend::open_current_reader(path).await?,
+        })
     }
 
     pub async fn shutdown(self) -> Result<()> {

@@ -220,3 +220,35 @@ describe("ServerBrowserSurface history", () => {
     expect(mouseInputs()).not.toEqual([]);
   });
 });
+
+describe("ServerBrowserSurface visibility ownership", () => {
+  it("stops the hidden viewer and reconnects only the same scoped tab", async () => {
+    setup();
+    const clients: Array<{ send: (input: PreviewStreamInput) => void; stop: ReturnType<typeof vi.fn> }> = [];
+    mocks.createClient.mockImplementation(() => {
+      const client = { send: (input: PreviewStreamInput) => { mocks.sent.push(input); }, stop: vi.fn() };
+      clients.push(client);
+      return client;
+    });
+    const { screen } = await renderSurface("you");
+    await using _screen = screen;
+    const view = (visible: boolean) => <ServerBrowserSurface
+      environmentId={EnvironmentId.make("environment-copy")}
+      threadId="thread-copy" tabId="tab-copy" visible={visible} followSize={false} className="flex-1"
+    />;
+    const original = clients.at(-1)!;
+    await screen.rerender(view(false));
+    await vi.waitFor(() => expect(original.stop).toHaveBeenCalledTimes(1));
+    const hiddenCount = clients.length;
+    await screen.rerender(view(false));
+    expect(clients.length).toBe(hiddenCount);
+    await screen.rerender(view(true));
+    await vi.waitFor(() => expect(clients.length).toBeGreaterThan(hiddenCount));
+    expect(mocks.createClient.mock.calls.at(-1)![0]).toMatchObject({ threadId: "thread-copy", tabId: "tab-copy" });
+    const reconnected = clients.at(-1)!;
+    expect(reconnected).not.toBe(original);
+    await screen.rerender(view(false));
+    await vi.waitFor(() => expect(reconnected.stop).toHaveBeenCalledTimes(1));
+    expect(original.stop).toHaveBeenCalledTimes(1);
+  });
+});

@@ -375,8 +375,8 @@ const make = Effect.fn("MobilePreferencesStore.make")(function* () {
   const lock = yield* Semaphore.make(1);
   const lastUpdatedAt = yield* Ref.make(0);
 
-  const parsePayload = (raw: string | null): Preferences | null => {
-    if (raw === null || !raw.trim()) return null;
+  const parsePayload = (raw: unknown): Preferences | null => {
+    if (typeof raw !== "string" || !raw.trim()) return null;
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -434,12 +434,16 @@ const make = Effect.fn("MobilePreferencesStore.make")(function* () {
     return [next, next] as const;
   });
 
-  const saveJson = Effect.fn("MobilePreferencesStore.saveJson")(function* (
-    payload: string,
-    updatedAt?: number,
-  ) {
-    const timestamp = updatedAt ?? (yield* nextUpdatedAt);
-    yield* Ref.update(lastUpdatedAt, (last) => Math.max(last, timestamp));
+  const removeFallback = secureStorage.removeItem(PREFERENCES_FALLBACK_KEY).pipe(
+    Effect.catch((error) =>
+      Effect.logWarning("Could not remove the mobile preferences fallback.").pipe(
+        Effect.annotateLogs({ error }),
+      ),
+    ),
+  );
+
+  const saveJson = Effect.fn("MobilePreferencesStore.saveJson")(function* (payload: string) {
+    const timestamp = yield* nextUpdatedAt;
     const databaseResult = yield* Effect.result(database.savePreferencesJson(payload, timestamp));
     if (databaseResult._tag === "Failure") {
       yield* Effect.logWarning("Database unavailable; saving preferences to secure storage.").pipe(
@@ -449,15 +453,7 @@ const make = Effect.fn("MobilePreferencesStore.make")(function* () {
       yield* secureStorage.setItem(PREFERENCES_FALLBACK_KEY, fallback);
       return;
     }
-    yield* secureStorage
-      .removeItem(PREFERENCES_FALLBACK_KEY)
-      .pipe(
-        Effect.catch((error) =>
-          Effect.logWarning("Could not remove the mobile preferences fallback.").pipe(
-            Effect.annotateLogs({ error }),
-          ),
-        ),
-      );
+    yield* removeFallback;
   });
 
   const loadUnlocked = Effect.gen(function* () {
@@ -497,21 +493,20 @@ const make = Effect.fn("MobilePreferencesStore.make")(function* () {
     if (fallbackIsNewer) {
       parsed = fallback.preferences;
       yield* Ref.update(lastUpdatedAt, (last) => Math.max(last, fallback.updatedAt));
-      if (databaseAvailable) yield* saveJson(fallback.payload, fallback.updatedAt);
+      if (databaseAvailable) {
+        yield* database.savePreferencesJson(fallback.payload, fallback.updatedAt).pipe(
+          Effect.andThen(removeFallback),
+          Effect.catch((cause) =>
+            Effect.logWarning("Could not restore the mobile preferences fallback.").pipe(
+              Effect.annotateLogs({ cause }),
+            ),
+          ),
+        );
+      }
     } else if (storedPreferences !== null && Option.isSome(storedJson)) {
       parsed = storedPreferences;
       yield* Ref.update(lastUpdatedAt, (last) => Math.max(last, storedJson.value.updatedAt));
-      if (fallbackJson !== null) {
-        yield* secureStorage
-          .removeItem(PREFERENCES_FALLBACK_KEY)
-          .pipe(
-            Effect.catch((error) =>
-              Effect.logWarning("Could not remove a stale mobile preferences fallback.").pipe(
-                Effect.annotateLogs({ error }),
-              ),
-            ),
-          );
-      }
+      if (fallbackJson !== null) yield* removeFallback;
     }
 
     if (parsed === null) {

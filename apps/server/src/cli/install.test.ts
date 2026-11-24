@@ -7,6 +7,7 @@ import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as TestClock from "effect/testing/TestClock";
+import { CliError } from "effect/cli";
 
 import packageJson from "../../package.json" with { type: "json" };
 import { installCli, isForegroundProcStat, isForegroundPs, offerCliInstall } from "./install.ts";
@@ -84,6 +85,7 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
       yield* fs.remove(link);
       yield* fs.writeFileString(link, "#!/bin/sh\n");
       const error = yield* provide(installCli()).pipe(Effect.flip);
+      assert.equal(CliError.getUserMessage(error), error.message);
       assert.include(error.message, "Another t3 is already at");
       assert.equal(yield* fs.readFileString(link), "#!/bin/sh\n");
 
@@ -150,7 +152,7 @@ it.layer(NodeServices.layer)("t3 install", (it) => {
         `@echo off\r\n"${path.join(runtimeDir, "versions/0.0.1/t3.exe")}" %*`,
       );
       const windowsInstalled = yield* windows(installCli());
-      assert.equal(yield* fs.readFileString(shim), `@echo off\r\n"${executable}" %*`);
+      assert.equal(yield* fs.readFileString(shim), `@echo off\r\ngoto t3_shim_end 2>nul || "${executable}" %*`);
       // A PowerShell command for this window; the saved PATH is left to the user.
       assert.equal(windowsInstalled.pathCommand, `$env:Path += ';${path.join(root, "bin")}'`);
       const unrunnable = yield* windows(

@@ -5,6 +5,7 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodeSqlite from "node:sqlite";
+import * as NodeZlib from "node:zlib";
 import { describe, expect, it } from "@effect/vitest";
 import {
   AgentSessionImportSource,
@@ -163,13 +164,17 @@ const makeTempDir = Effect.fn("AgentSessionScanner.test.makeTempDir")(function* 
 
 const writeTranscript = Effect.fn("AgentSessionScanner.test.writeTranscript")(function* (input: {
   readonly filePath: string;
-  readonly contents: string;
+  readonly contents: string | Uint8Array;
   readonly mtimeMs: number;
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   yield* fileSystem.makeDirectory(path.dirname(input.filePath), { recursive: true });
-  yield* fileSystem.writeFileString(input.filePath, input.contents);
+  if (typeof input.contents === "string") {
+    yield* fileSystem.writeFileString(input.filePath, input.contents);
+  } else {
+    yield* fileSystem.writeFile(input.filePath, input.contents);
+  }
   const seconds = input.mtimeMs / 1000;
   yield* fileSystem.utimes(input.filePath, seconds, seconds);
 });
@@ -398,6 +403,42 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
             git: null,
           },
         ]);
+      }),
+    );
+
+    it.effect("discovers and imports a compressed Codex rollout with its physical source identity", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const claudeHomePath = yield* makeTempDir("t3code-claude-compressed-");
+        const codexHomePath = yield* makeTempDir("t3code-codex-compressed-");
+        const workspace = yield* makeTempDir("t3code-workspace-compressed-");
+        const directory = path.join(codexHomePath, "sessions", "2026", "04", "01");
+        const filePath = path.join(directory, "rollout-2026-04-01T09-00-00-fixture.jsonl.zst");
+        const prompt = "Restore the compressed café 🦀";
+        const contents = codexRolloutLine(workspace) + encodeTranscriptRecord({
+          type: "event_msg",
+          payload: { type: "user_message", message: prompt },
+        });
+        const compressed = NodeZlib.zstdCompressSync(contents);
+        yield* fs.makeDirectory(directory, { recursive: true });
+        yield* fs.writeFile(filePath, compressed);
+        const seconds = DateTime.toEpochMillis(yield* DateTime.now) / 1000;
+        yield* fs.utimes(filePath, seconds, seconds);
+        const input = { claudeHomePath, codexHomePath };
+        const scan = yield* runScan(input);
+        expect(scan.candidates.map(({ path, threadCount }) => [path, threadCount])).toEqual([
+          [workspace, 1],
+        ]);
+        const outcomes = yield* runRecentThreadOutcomes({ ...input, workspaceRoot: workspace });
+        const imported = outcomes.find((outcome) => outcome._tag === "Importable");
+        expect(imported?.source).toMatchObject({ filePath, size: compressed.byteLength });
+        expect(imported?.thread.messages).toMatchObject([{ role: "user", text: prompt }]);
+
+        yield* fs.writeFile(filePath, compressed.subarray(0, -1));
+        yield* fs.utimes(filePath, seconds, seconds);
+        const afterTruncation = yield* runRecentThreads({ ...input, workspaceRoot: workspace });
+        expect(afterTruncation).toEqual([]);
       }),
     );
 
@@ -1641,7 +1682,7 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
       }),
     );
 
-    it.effect("imports a rewound Codex thread with the history its new rollout inherits", () =>
+    it.effect.each([false, true])("imports a rewound Codex thread with compressed parent %s", (compressed) =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
@@ -1674,9 +1715,12 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
           .map((record) => `${record}\n`)
           .join("");
 
+        const history = `${keptHistory}${prompt("Rewound request")}\n${reply("Rewound reply")}\n`;
+        const parent = compressed ? NodeZlib.zstdCompressSync(history) : history;
+        if (compressed) expect(Buffer.byteLength(parent)).toBeLessThan(Buffer.byteLength(keptHistory));
         yield* writeTranscript({
-          filePath: path.join(sessionsDir, `rollout-2026-08-24T10-00-00-${threadId}.jsonl`),
-          contents: `${keptHistory}${prompt("Rewound request")}\n${reply("Rewound reply")}\n`,
+          filePath: path.join(sessionsDir, `rollout-2026-08-24T10-00-00-${threadId}.jsonl${compressed ? ".zst" : ""}`),
+          contents: parent,
           mtimeMs: nowMs - 60_000,
         });
         yield* writeTranscript({
@@ -2239,6 +2283,47 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
             expect(fixture.opens()).toBe(opensBeforeBackfill + 1);
           }
         }),
+    );
+
+    it.effect("keeps visible Claude turns when local UI records fill the import window", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+        yield* TestClock.setTime(nowMs);
+        const claudeHomePath = yield* makeTempDir("t3code-claude-visible-");
+        const codexHomePath = yield* makeTempDir("t3code-codex-empty-");
+        const workspace = yield* makeTempDir("t3code-claude-workspace-");
+        const command = "<command-name>/review</command-name><command-args>the login flow</command-args>";
+        const encode = (role: "user" | "assistant", content: string) =>
+          encodeTranscriptRecord({ type: role, sessionId: "visible", cwd: workspace, message: { role, content } });
+        yield* writeTranscript({
+          filePath: path.join(claudeHomePath, "projects", "-slug", "visible.jsonl"),
+          contents: [
+            encodeTranscriptRecord({ type: "ai-title", aiTitle: command }),
+            encode("user", command),
+            encode("assistant", "First answer"),
+            ...Array.from({ length: 220 }, () =>
+              encode("user", "<local-command-stdout>Enabled plan mode</local-command-stdout>"),
+            ),
+            encode("user", "<bash-input>npm test</bash-input>"),
+            encode("assistant", "Final 世界"),
+          ].join("\n"),
+          mtimeMs: nowMs,
+        });
+
+        const threads = yield* runRecentThreads({ claudeHomePath, codexHomePath, workspaceRoot: workspace });
+        expect(threads).toMatchObject([{
+          providerSessionId: "visible",
+          title: "the login flow",
+          omittedMessageCount: 0,
+          messages: [
+            { role: "user", text: "/review the login flow" },
+            { role: "assistant", text: "First answer" },
+            { role: "user", text: "!npm test" },
+            { role: "assistant", text: "Final 世界" },
+          ],
+        }]);
+      }),
     );
 
     it.effect("imports long Claude tool history with metadata from discarded records", () =>

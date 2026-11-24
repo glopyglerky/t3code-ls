@@ -215,6 +215,60 @@ export function inspectNativeMessageUpdates(executable: string, stateDirectory: 
   });
 }
 
+function inspectNativeThreadReceipt(
+  executable: string,
+  stateDirectory: string,
+  commandId: string,
+  threadId: string,
+  commandType: string,
+  snapshotSequence: number,
+) {
+  const databasePath = Path.join(stateDirectory, "userdata", "statev2.omdb");
+  const responses = readNativeResponses(executable, databasePath, [
+    { operation: "application_begin", transaction_id: transactionId, mode: "read" },
+    { operation: "application_receipts_get", transaction_id: transactionId, command_id: commandId },
+    { operation: "application_commit", transaction_id: transactionId },
+  ]);
+  Assert.equal(responses.length, 3);
+  for (const response of responses) Assert.equal(response.ok, true, JSON.stringify(response.error));
+  const receipt = object(responses[1].result, "Expected the exact native command receipt");
+  Assert.equal(receipt.command_id, commandId);
+  Assert.equal(receipt.aggregate_kind, "thread");
+  Assert.equal(receipt.aggregate_id, threadId);
+  Assert.equal(receipt.command_type, commandType);
+  Assert.equal(receipt.status, "accepted");
+  const sequence = receipt.result_sequence;
+  Assert.ok(typeof sequence === "number" && Number.isSafeInteger(sequence) && sequence > 0);
+  Assert.ok(sequence <= snapshotSequence, "Command receipt must precede the reopened snapshot");
+  return { commandId, threadId, sequence, engine: "omdb" as const };
+}
+
+export function inspectNativeApprovalReceipt(
+  executable: string,
+  stateDirectory: string,
+  commandId: string,
+  threadId: string,
+  snapshotSequence: number,
+) {
+  return inspectNativeThreadReceipt(
+    executable, stateDirectory, commandId, threadId, "runtime-request.respond", snapshotSequence,
+  );
+}
+
+export function inspectNativeLaunchReceipt(
+  executable: string,
+  stateDirectory: string,
+  launchCommandId: string,
+  threadId: string,
+  sequence: number,
+) {
+  const receipt = inspectNativeThreadReceipt(
+    executable, stateDirectory, `${launchCommandId}:initial-message`, threadId, "message.dispatch", sequence,
+  );
+  Assert.equal(receipt.sequence, sequence, "The wire sequence must match the committed message");
+  return receipt;
+}
+
 export function inspectNativeReplay(input: {
   readonly executable: string;
   readonly stateDirectory: string;
@@ -247,4 +301,41 @@ export function inspectNativeReplay(input: {
     closedDatabaseUnchanged: before === null ? null : true,
     ...persisted,
   };
+}
+
+// Reconstructed logical rows are an equality oracle, never physical storage bytes.
+export function assertNativeTextUpdates(rows: unknown, threadId: string) {
+  Assert.ok(Array.isArray(rows) && rows.length > 0 && rows.length < 129,
+    "The bounded message-update read must be nonempty and complete");
+  let previous = 0;
+  const updates: Array<{ text: string; streaming: boolean }> = [];
+  for (const value of rows) {
+    const row = object(value, "Expected an event row");
+    Assert.ok(typeof row.sequence === "number" && Number.isSafeInteger(row.sequence) && row.sequence > previous);
+    previous = row.sequence;
+    Assert.equal(typeof row.payload_json, "string");
+    const message = object(JSON.parse(row.payload_json as string), "Expected a message payload");
+    Assert.equal(message.threadId, threadId);
+    if (message.role !== "assistant") continue;
+    Assert.equal(typeof message.text, "string");
+    Assert.equal(typeof message.streaming, "boolean");
+    updates.push({ text: message.text as string, streaming: message.streaming as boolean });
+  }
+  Assert.ok(updates.filter((update) => update.streaming).length >= 2);
+  Assert.equal(updates.at(-1)?.streaming, false);
+  return updates;
+}
+
+export function inspectNativeTextUpdates(executable: string, stateDirectory: string, threadId: string) {
+  const responses = readNativeResponses(executable,
+    Path.join(stateDirectory, "userdata", "statev2.omdb"), [
+      { operation: "application_begin", transaction_id: transactionId, mode: "read" },
+      { operation: "application_events_read", transaction_id: transactionId,
+        thread_id: threadId, event_type: "message.updated", only_agent_events: true,
+        after_sequence: 0, limit: 129 },
+      { operation: "application_rollback", transaction_id: transactionId },
+    ]);
+  Assert.equal(responses.length, 3);
+  Assert.ok(responses.every((response) => response.ok === true));
+  return assertNativeTextUpdates(responses[1].result, threadId);
 }

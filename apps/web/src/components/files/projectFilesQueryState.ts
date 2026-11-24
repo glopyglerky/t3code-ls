@@ -76,6 +76,7 @@ export function getProjectFileQueryAtom(
     input: {
       cwd,
       relativePath: relativePath ?? EMPTY_PROJECT_FILE_PATH,
+      requestRevision: true,
       ...(relativePath === T3_PROJECT_FILE_NAME ? { allowMissing: true } : {}),
     },
   });
@@ -88,6 +89,14 @@ export function setProjectFileQueryData(
   contents: string,
 ): void {
   const atom = optimisticFileAtom(environmentId, cwd, relativePath);
+  const previous = appAtomRegistry.get(atom);
+  const revision = previous
+    ? previous.data.revision
+    : Option.getOrUndefined(
+        AsyncResult.value(
+          appAtomRegistry.get(getProjectFileQueryAtom(environmentId, cwd, relativePath)),
+        ),
+      )?.revision;
   if (!unsavedFileMounts.has(atom)) {
     unsavedFileMounts.set(atom, appAtomRegistry.mount(atom));
   }
@@ -98,8 +107,22 @@ export function setProjectFileQueryData(
       contents,
       byteLength: new TextEncoder().encode(contents).byteLength,
       truncated: false,
+      ...(revision === undefined ? {} : { revision }),
     },
   });
+}
+
+export function advanceProjectFileRevision(
+  environmentId: EnvironmentId,
+  cwd: string,
+  relativePath: string,
+  expected: string | null,
+  revision: string,
+): void {
+  const atom = optimisticFileAtom(environmentId, cwd, relativePath);
+  const previous = appAtomRegistry.get(atom);
+  if (previous?.data.revision !== expected) return;
+  appAtomRegistry.set(atom, { ...previous, data: { ...previous.data, revision } });
 }
 
 export function getOptimisticProjectFileQueryData(

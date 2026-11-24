@@ -1,0 +1,52 @@
+name: Cursor Rust adapter fixture
+
+on:
+  push:
+    branches:
+      - "candidate/t3code-ls-t01-cursor-adapter-*"
+      - "candidate/t3code-ls-t02-bundled-native-integrated-*"
+
+permissions:
+  contents: read
+
+jobs:
+  cursor-adapter:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 12
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install the pinned compiler and locked test dependencies
+        run: |
+          node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/cursor-toolchain"
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+      - name: Exercise Connect framing and build the native host
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/cursor-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/cursor-target"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-cursor-bridge -p t3-code-ls-cursor-bridge-host
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --locked \
+            -p t3-code-ls-cursor-bridge-host --bin t3-code-ls-cursor-bridge-host
+          sha256sum "$CARGO_TARGET_DIR/debug/t3-code-ls-cursor-bridge-host"
+          printf 'T3_CODE_LS_CURSOR_BRIDGE_EXECUTABLE=%s\n' \
+            "$CARGO_TARGET_DIR/debug/t3-code-ls-cursor-bridge-host" >> "$GITHUB_ENV"
+      - name: Run the real Cursor adapter with the SDK blocked
+        run: |
+          # packages/provider-cursor/src/server/CursorBridge.integration.test.ts
+          pnpm --filter @t3tools/provider-cursor test src/server/CursorBridge.integration.test.ts
+          status=0
+          pnpm --filter @t3tools/provider-cursor typecheck > "$RUNNER_TEMP/cursor-typecheck.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/cursor-typecheck.log"
+          exit "$status"

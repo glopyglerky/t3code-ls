@@ -3,7 +3,10 @@ import * as Notifications from "expo-notifications";
 import { setAndroidThreadOnScreen } from "./androidNotifications";
 import { foregroundNotificationBehavior } from "./foregroundNotificationBehavior";
 import { routeAgentNotificationResponseOnce, threadDeepLinkOnScreen } from "./notificationPayload";
-import { consumeLastAgentNotificationResponse } from "./notificationResponseConsumer";
+import {
+  consumeLastAgentNotificationResponse,
+  NotificationNavigationError,
+} from "./notificationResponseConsumer";
 
 let deepLinkOnScreen: string | null = null;
 
@@ -18,17 +21,28 @@ export function setAgentNotificationPathname(pathname: string): void {
  * thread already on screen, and taps (including the cold-start tap) open the
  * notification's deep link through `navigate`.
  */
-export function installAgentNotificationNavigation(navigate: (href: string) => void): () => void {
-  const handledResponseIds = new Set<string>();
+export function installAgentNotificationNavigation(
+  navigate: (href: string) => void | Promise<void>,
+): () => void {
+  const responses = new Map<string, Promise<void>>();
   Notifications.setNotificationHandler({
     handleNotification: (notification) =>
       Promise.resolve(foregroundNotificationBehavior(notification, deepLinkOnScreen)),
   });
 
-  const handleResponse = (response: Notifications.NotificationResponse): void => {
-    routeAgentNotificationResponseOnce({ handledResponseIds, response, navigate });
-  };
-  const subscription = Notifications.addNotificationResponseReceivedListener(handleResponse);
+  const handleResponse = (response: Notifications.NotificationResponse) =>
+    routeAgentNotificationResponseOnce({ responses, response, navigate });
+  const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+    void handleResponse(response).catch((cause) => {
+      console.error(
+        new NotificationNavigationError({
+          operation: "route",
+          notificationId: response.notification.request.identifier,
+          cause,
+        }),
+      );
+    });
+  });
   void consumeLastAgentNotificationResponse({
     getLastResponse: () => Notifications.getLastNotificationResponseAsync(),
     clearLastResponse: () => Notifications.clearLastNotificationResponseAsync(),

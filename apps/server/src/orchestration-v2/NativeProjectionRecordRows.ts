@@ -5,6 +5,7 @@ import { ThreadId } from "@t3tools/contracts";
 
 import { RedbClient } from "../persistence/RedbClient.ts";
 import * as NativeEventRows from "../persistence/NativeEventRows.ts";
+import { readRevision } from "./NativeThreadFind.ts";
 import {
   ProjectionRecordRowsError,
   type ProjectionRecordRows,
@@ -207,6 +208,7 @@ export const makeSnapshots = Effect.gen(function* () {
         .pipe(Effect.mapError(failure)),
     snapshotSequence: (threadId) =>
       events.latest({ kind: "agent", thread_id: threadId }).pipe(Effect.mapError(failure)),
+    historyRevision: (threadIds) => readRevision(client, threadIds),
   });
 });
 
@@ -219,6 +221,7 @@ export const makeTimelinePages = Effect.gen(function* () {
     withReadTransaction: client.withReadTransaction,
     snapshotSequence: (threadId) =>
       events.latest({ kind: "agent", thread_id: threadId }).pipe(Effect.mapError(failure)),
+    historyRevision: (threadIds) => readRevision(client, threadIds),
     materialize: (sources) =>
       client
         .request(

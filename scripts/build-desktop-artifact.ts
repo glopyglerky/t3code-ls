@@ -2310,9 +2310,12 @@ export const stageLinuxCaptureHelper = Effect.fn("stageLinuxCaptureHelper")(func
   const reuseHelpers = yield* Config.Boolean("T3CODE_DESKTOP_REUSE_LINUX_CAPTURE_HELPERS").pipe(
     Config.withDefault(false),
   );
+  const configuredTargetDir = yield* Config.String("CARGO_TARGET_DIR").pipe(
+    Config.withDefault(`native/${input.backend}-snap-shot/target`),
+  );
+  const targetDir = path.resolve(input.repoRoot, configuredTargetDir);
   const binaryPath = path.join(
-    input.repoRoot,
-    `native/${input.backend}-snap-shot/target`,
+    targetDir,
     rustTarget!,
     `release/t3-${input.backend}-snap-shot`,
   );
@@ -2325,6 +2328,8 @@ export const stageLinuxCaptureHelper = Effect.fn("stageLinuxCaptureHelper")(func
       path.join(input.repoRoot, `native/${input.backend}-snap-shot/Cargo.toml`),
       "--target",
       rustTarget!,
+      "--target-dir",
+      targetDir,
     ]);
     yield* runCommand(
       ChildProcess.make(spawnCommand.command, spawnCommand.args, {
@@ -2373,6 +2378,10 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
   const reuseResourceMonitor = yield* Config.Boolean("T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR").pipe(
     Config.withDefault(false),
   );
+  const configuredTargetDir = yield* Config.String("CARGO_TARGET_DIR").pipe(
+    Config.withDefault("native/resource-monitor/target"),
+  );
+  const targetDir = path.resolve(input.repoRoot, configuredTargetDir);
   const builtBinaries: string[] = [];
 
   for (const rustTarget of rustTargets) {
@@ -2385,6 +2394,8 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
         manifestPath,
         "--target",
         rustTarget,
+        "--target-dir",
+        targetDir,
       ]);
       yield* runCommand(
         ChildProcess.make(spawnCommand.command, spawnCommand.args, {
@@ -2399,8 +2410,7 @@ export const stageResourceMonitor = Effect.fn("stageResourceMonitor")(function* 
     }
 
     const binaryPath = path.join(
-      input.repoRoot,
-      "native/resource-monitor/target",
+      targetDir,
       rustTarget,
       "release",
       executableName,

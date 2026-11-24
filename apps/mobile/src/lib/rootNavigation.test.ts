@@ -19,6 +19,7 @@ const {
   attachRootNavigation,
   flushRootNavigationQueue,
   linkToRootPath,
+  linkToRootPathAndWaitForDispatch,
   rootNavigationRef,
   whenRootNavigationReady,
 } = await import("./rootNavigation");
@@ -78,4 +79,31 @@ it("rejects an href without a leading slash, as useLinkTo does", () => {
   expect(toAction).toHaveBeenCalledExactlyOnceWith("/threads/env/t1");
   expect(dispatched).toEqual([{ target: "root", type: "NAVIGATE" }]);
   detach();
+});
+
+it("acknowledges queued links only after dispatch, and reports dispatch failures", async () => {
+  const { dispatched } = rootNavigationRef as unknown as { dispatched: Array<unknown> };
+  dispatched.length = 0;
+  const action = { type: "NAVIGATE", payload: { name: "Fixture Thread" } };
+  const toAction = vi.fn(() => action);
+  const completed = vi.fn();
+  const pending = linkToRootPathAndWaitForDispatch("/threads/env/t1", toAction).then(completed);
+  await Promise.resolve();
+  expect(toAction).not.toHaveBeenCalled();
+  expect(completed).not.toHaveBeenCalled();
+
+  const detach = attachRootNavigation(fakeContainer());
+  try {
+    flushRootNavigationQueue();
+    await pending;
+    expect(dispatched).toEqual([{ target: "root", ...action }]);
+    expect(completed).toHaveBeenCalledOnce();
+    await expect(
+      linkToRootPathAndWaitForDispatch("/threads/env/t1", () => {
+        throw new Error("Could not build the route");
+      }),
+    ).rejects.toThrow("Could not build the route");
+  } finally {
+    detach();
+  }
 });

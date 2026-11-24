@@ -34,12 +34,14 @@ import * as Layer from "effect/Layer";
 import * as References from "effect/References";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import { HttpRouter } from "effect/http";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as ServerSecretStore from "../apps/server/src/auth/ServerSecretStore.ts";
 import { CloudManagedEndpointRuntime } from "../apps/server/src/cloud/ManagedEndpointRuntime.ts";
 import * as ServerConfig from "../apps/server/src/config.ts";
 import * as DeviceService from "../apps/server/src/device/DeviceService.ts";
 import * as GuestShareService from "../apps/server/src/guest/GuestShareService.ts";
+import * as GuestHttp from "../apps/server/src/guest/http.ts";
 import { CodexProviderCapabilitiesV2 } from "../apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts";
 import * as CommandOutputHub from "../apps/server/src/orchestration-v2/CommandOutputHub.ts";
 import * as EffectOutbox from "../apps/server/src/orchestration-v2/EffectOutbox.ts";
@@ -1309,6 +1311,78 @@ async function uploadClassificationChecks(control) {
 
 async function nativeFailureChecks() {
   const control = await controlledForwarder();
+  await run(
+    Effect.gen(function* () {
+      yield* createThread();
+      const guest = yield* GuestShareService.GuestShareService;
+      const { url, share } = yield* guest.create({ threadId });
+      const credential = new URL(url).hash.slice(1);
+      const before = yield* snapshot();
+      const clock = yield* Clock.Clock;
+      const routes = Layer.mergeAll(
+        GuestHttp.layer,
+        Layer.succeed(GuestShareService.GuestShareService, guest),
+        Layer.succeed(Clock.Clock, clock),
+        NodeServices.layer,
+      );
+      const { handler } = yield* Effect.acquireRelease(
+        Effect.sync(() => HttpRouter.toWebHandler(routes, { disableLogger: true })),
+        ({ dispose }) => Effect.promise(dispose),
+      );
+      const redeem = (name) =>
+        Effect.promise(() =>
+          handler(new Request("https://env.t3.test/api/guest/redeem", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ credential, name }),
+          })),
+        );
+      yield* control.setMode({ operation: "authorize-invite", kind: "exit" });
+      const refused = yield* redeem("Fixture guest");
+      NodeAssert.equal(refused.status, 403);
+      NodeAssert.equal((yield* Effect.promise(() => refused.json())).reason, "unavailable");
+      NodeAssert.equal(refused.headers.has("set-cookie"), false);
+      NodeAssert.deepEqual(yield* snapshot(), before);
+      NodeAssert.deepEqual((yield* control.calls).map((call) => call.operation), ["authorize-invite"]);
+
+      yield* control.setMode();
+      const attempts = yield* Effect.all(
+        [redeem("Fixture guest A"), redeem("Fixture guest B")],
+        { concurrency: "unbounded" },
+      );
+      NodeAssert.deepEqual(attempts.map((response) => response.status).sort(), [204, 409]);
+      const accepted = attempts.find((response) => response.status === 204);
+      const cookie = accepted.headers.get("set-cookie");
+      NodeAssert.match(cookie, /(?:^|;\s*)HttpOnly(?:;|$)/iu);
+      NodeAssert.match(cookie, /(?:^|;\s*)Secure(?:;|$)/iu);
+      const after = yield* snapshot();
+      NodeAssert.equal(after.events.length, before.events.length + 1);
+      NodeAssert.equal(after.events.at(-1).event.type, "thread.guest-share-updated");
+      NodeAssert.deepEqual(after.outbox, before.outbox);
+      const [sessionCookie] = cookie.split(";");
+      const shareId = share.id;
+      const session = () => Effect.promise(() => handler(new Request(
+        `https://env.t3.test/api/guest/session?share=${encodeURIComponent(shareId)}`,
+        { headers: { cookie: sessionCookie } },
+      )));
+      yield* control.setMode({ operation: "authorize-session", kind: "exit" });
+      const unavailable = yield* session();
+      NodeAssert.equal(unavailable.status, 403);
+      NodeAssert.equal((yield* Effect.promise(() => unavailable.json())).reason, "unavailable");
+      NodeAssert.equal(unavailable.headers.has("set-cookie"), false);
+      NodeAssert.deepEqual(yield* snapshot(), after);
+      NodeAssert.deepEqual((yield* control.calls).map((call) => call.operation), ["authorize-session"]);
+      yield* control.setMode();
+      NodeAssert.equal((yield* session()).status, 204);
+      NodeAssert.deepEqual((yield* control.calls).map((call) => call.operation), ["authorize-session"]);
+      NodeAssert.deepEqual(yield* snapshot(), after);
+    }),
+    control.path,
+    "invite-authorization",
+  );
+  scenarios.push(
+    "guest HTTP redeem fails closed before any state changes when native authorization is unavailable, then issues one cookie for concurrent valid attempts",
+  );
   await uploadClassificationChecks(control);
   for (const kind of ["drop-pending", "reorder-pending"]) {
     await run(

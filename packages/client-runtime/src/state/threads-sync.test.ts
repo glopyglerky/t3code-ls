@@ -6,6 +6,7 @@ import {
   NodeId,
   ORCHESTRATION_V2_WS_METHODS,
   RuntimeRequestId,
+  RunId,
   ThreadId,
   TurnItemId,
   type OrchestrationV2ThreadDetailSnapshot,
@@ -122,6 +123,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   readonly httpSnapshots?: readonly ThreadSnapshotLoadResult[];
   /** The test sends the completion marker itself instead of the fake server sending it first. */
   readonly completionMarker?: boolean;
+  readonly fullSubscribeSnapshot?: () => Extract<OrchestrationV2ThreadStreamItem, { kind: "snapshot" }>;
   readonly resumeCache?: NonNullable<Parameters<typeof makeEnvironmentThreadState>[1]>;
   readonly loadCached?: ReturnType<Persistence.EnvironmentCacheStore["Service"]["loadThread"]>;
   readonly saveThread?: Persistence.EnvironmentCacheStore["Service"]["saveThread"];
@@ -143,6 +145,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
   const lastRequestCompletionMarker = yield* Ref.make(false);
   const lastAcceptBoundedSnapshot = yield* Ref.make<true | undefined>(undefined);
   const lastAcceptCompactTurnItems = yield* Ref.make<true | undefined>(undefined);
+  const lastAcceptHistoryInvalidation = yield* Ref.make<true | undefined>(undefined);
   const wakeups = yield* Queue.unbounded<ConnectionWakeups.ConnectionWakeup>();
   const savedThreads = yield* Ref.make<ReadonlyArray<OrchestrationV2ThreadDetailSnapshot>>([]);
   const removedThreads = yield* Ref.make<ReadonlyArray<ThreadId>>([]);
@@ -165,6 +168,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
       readonly requestCompletionMarker?: true;
       readonly acceptBoundedSnapshot?: true;
       readonly acceptCompactTurnItems?: true;
+      readonly acceptHistoryInvalidation?: true;
     }) =>
       Stream.unwrap(
         Ref.set(lastSubscribeAfterSequence, input.afterSequence).pipe(
@@ -173,11 +177,17 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
           ),
           Effect.andThen(Ref.set(lastAcceptBoundedSnapshot, input.acceptBoundedSnapshot)),
           Effect.andThen(Ref.set(lastAcceptCompactTurnItems, input.acceptCompactTurnItems)),
+          Effect.andThen(Ref.set(lastAcceptHistoryInvalidation, input.acceptHistoryInvalidation)),
           Effect.andThen(SubscriptionRef.update(subscriptionCount, (count) => count + 1)),
           Effect.as(
-            options?.completionMarker === true
-              ? streamFrom(inputs)
-              : Stream.concat(Stream.make(synchronized()), streamFrom(inputs)),
+            Stream.concat(
+              input.afterSequence === undefined && options?.fullSubscribeSnapshot !== undefined
+                ? Stream.make(options.fullSubscribeSnapshot())
+                : Stream.empty,
+              options?.completionMarker === true
+                ? streamFrom(inputs)
+                : Stream.concat(Stream.make(synchronized()), streamFrom(inputs)),
+            ),
           ),
         ),
       ),
@@ -303,6 +313,7 @@ const makeHarness = Effect.fn("TestEnvironmentThreads.makeHarness")(function* (o
     lastRequestCompletionMarker,
     lastAcceptBoundedSnapshot,
     lastAcceptCompactTurnItems,
+    lastAcceptHistoryInvalidation,
     supervisorState,
     supervisorSession,
     savedThreads,
@@ -957,6 +968,63 @@ describe("EnvironmentThreads", () => {
     }),
   );
 
+  it.effect.each(["disk", "retained"] as const)(
+    "reloads inherited history from a %s cache without changing the child replay watermark",
+    (cacheKind) => Effect.gen(function* () {
+      const parent = ThreadId.make("parent-only-edit");
+      const itemId = TurnItemId.make("inherited-notice");
+      const projection = (message: string): OrchestrationV2ThreadProjection => ({
+        ...BASE_PROJECTION,
+        thread: {
+          ...BASE_PROJECTION.thread,
+          forkedFrom: { type: "run", threadId: parent, runId: RunId.make("parent-run") },
+        },
+        visibleTurnItems: [{
+          position: 0, visibility: "inherited", sourceThreadId: parent, sourceItemId: itemId,
+          item: {
+            id: itemId, threadId: parent, runId: null, nodeId: null,
+            providerThreadId: null, providerTurnId: null, nativeItemRef: null,
+            parentItemId: null, ordinal: 1, status: "completed", title: null,
+            startedAt: v2Now, completedAt: v2Now, updatedAt: v2Now,
+            type: "system_notice", message,
+          },
+        }],
+      });
+      const cached = projection("Before the parent edit");
+      let authoritative = projection("After the parent edit");
+      const harness = yield* makeHarness({
+        cached,
+        ...(cacheKind === "retained" ? { resumeCache: {
+          owner: undefined,
+          snapshot: {
+            state: { ...EMPTY_ENVIRONMENT_THREAD_STATE, data: Option.some(cached), status: "cached" },
+            sequence: CACHED_SNAPSHOT_SEQUENCE, persisted: true,
+          },
+        } } : {}),
+        // Models the existing server: a child-only resume has no new child
+        // events; an unresumed subscription returns the current bounded view.
+        fullSubscribeSnapshot: () => snapshot(authoritative, CACHED_SNAPSHOT_SEQUENCE),
+      });
+      const opened = yield* awaitThreadState(harness.observed, (state) => state.status === "live");
+      expect(Option.getOrThrow(opened.data).visibleTurnItems).toEqual(authoritative.visibleTurnItems);
+      expect(opened.sequence).toBe(CACHED_SNAPSHOT_SEQUENCE);
+      expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBeUndefined();
+      expect(yield* Ref.get(harness.lastAcceptHistoryInvalidation)).toBeUndefined();
+      expect(yield* Ref.get(harness.loaderCalls)).toBe(0);
+
+      authoritative = projection("After another parent-only edit while disconnected");
+      yield* harness.replaceSession;
+      const reconnected = yield* awaitThreadState(harness.observed, (state) => {
+        const item = Option.isSome(state.data) ? state.data.value.visibleTurnItems[0]?.item : undefined;
+        return state.status === "live" && item?.type === "system_notice" &&
+          item.message === "After another parent-only edit while disconnected";
+      });
+      expect(Option.getOrThrow(reconnected.data).visibleTurnItems).toEqual(authoritative.visibleTurnItems);
+      expect(reconnected.sequence).toBe(CACHED_SNAPSHOT_SEQUENCE);
+      expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBeUndefined();
+    }),
+  );
+
   describe("cached work (#18188)", () => {
     const at = DateTime.makeUnsafe("2026-06-20T00:00:00.000Z");
     const parentThreadId = ThreadId.make("thread:parent");
@@ -999,18 +1067,237 @@ describe("EnvironmentThreads", () => {
     });
     const historyPage = (
       request: Parameters<typeof HttpClientResponse.fromWeb>[0],
-      items: ReadonlyArray<ReturnType<typeof localRow>>,
+      items: OrchestrationV2ThreadProjection["visibleTurnItems"],
       nextCursor: string | null,
+      historyViewRevision?: number,
     ) =>
       HttpClientResponse.fromWeb(
         request,
         Response.json({
           snapshotSequence: CACHED_SNAPSHOT_SEQUENCE,
+          historyViewRevision,
           items,
           nextCursor,
           hasMoreHistory: nextCursor !== null,
         }),
       );
+    it.effect("refreshes expanded fork history and rejects an old page with the same cursor", () =>
+      Effect.gen(function* () {
+        const tail = command("child-tail", "completed");
+        const marker = command("child-marker", "completed");
+        const parent = ThreadId.make("history-source");
+        const inherited = (text: string) => {
+          const item = {
+            ...command("inherited-prompt", "completed"),
+            threadId: parent,
+            type: "user_message" as const,
+            messageId: MessageId.make("inherited-prompt"),
+            inputIntent: "turn_start" as const,
+            createdBy: "user" as const,
+            creationSource: "web" as const,
+            text,
+            attachments: [],
+          };
+          return {
+            ...localRow(item, 0),
+            sourceThreadId: parent,
+            visibility: "inherited" as const,
+            item,
+          };
+        };
+        const initial = cachedItem(tail);
+        const projection = {
+          ...initial,
+          thread: {
+            ...initial.thread,
+            forkedFrom: { type: "run" as const, threadId: parent, runId: RunId.make("fork-run") },
+          },
+        };
+        const history = { historyCursor: "cursor-one", hasMoreHistory: true };
+        const started = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        const harness = yield* makeHarness({
+          cached: projection,
+          initialConfig: Effect.succeed({ threadHistoryInvalidation: true }),
+          fullSubscribeSnapshot: () => ({
+            ...snapshot(projection, CACHED_SNAPSHOT_SEQUENCE),
+            ...history,
+          }),
+          httpSnapshot: {
+            _tag: "present",
+            snapshot: { projection, snapshotSequence: CACHED_SNAPSHOT_SEQUENCE },
+            history,
+            historyViewRevision: 8,
+          },
+          historyHttpClient: HttpClient.make((request, url) => {
+            const cursor = url.searchParams.get("cursor");
+            const anchor = url.searchParams.get("throughEntryId");
+            if (cursor === "cursor-one" && anchor === null)
+              return Effect.succeed(historyPage(request, [inherited("Before edit")], "cursor-two"));
+            if (cursor === "cursor-one" && anchor === "inherited-prompt")
+              return Effect.succeed(historyPage(request, [inherited("After edit")], "cursor-two", 8));
+            if (cursor === "cursor-two")
+              return Deferred.succeed(started, undefined).pipe(
+                Effect.andThen(Deferred.await(release)),
+                Effect.as(historyPage(request, [localRow(marker, 0)], null)),
+              );
+            return Effect.die(`Unexpected history request ${url}`);
+          }),
+        });
+        yield* awaitThreadState(harness.observed, (value) => value.status === "live");
+        expect(yield* Ref.get(harness.lastAcceptHistoryInvalidation)).toBe(true);
+        expect(yield* harness.loadEarlier()).toEqual({ _tag: "loaded" });
+        const oldPage = yield* harness.loadEarlier().pipe(Effect.forkChild);
+        yield* Deferred.await(started);
+
+        yield* Queue.offer(harness.inputs, { kind: "history-invalidated" });
+        const refreshed = yield* awaitThreadState(harness.observed, (value) => {
+          const item = Option.getOrNull(value.data)?.visibleTurnItems[0]?.item;
+          return item?.type === "user_message" && item.text === "After edit";
+        });
+        expect(refreshed.sequence).toBe(CACHED_SNAPSHOT_SEQUENCE);
+        expect(refreshed.history).toMatchObject({
+          historyCursor: "cursor-two",
+          loading: false,
+          expanded: true,
+        });
+        expect(Option.getOrThrow(refreshed.data).visibleTurnItems.map((row) => row.sourceItemId))
+          .toEqual([inherited("After edit").sourceItemId, tail.id]);
+
+        yield* Deferred.succeed(release, undefined);
+        expect(yield* Fiber.join(oldPage)).toEqual({ _tag: "noop" });
+        expect((yield* SubscriptionRef.get(harness.threadState)).history.historyCursor)
+          .toBe("cursor-two");
+        expect(yield* SubscriptionRef.get(harness.subscriptionCount)).toBe(1);
+        expect(yield* Ref.get(harness.loaderCalls)).toBe(1);
+
+        yield* Queue.offer(harness.inputs, {
+          kind: "event",
+          sequence: CACHED_SNAPSHOT_SEQUENCE + 1,
+          event: {
+            id: EventId.make("child-edit"),
+            type: "thread.metadata-updated",
+            threadId: THREAD_ID,
+            occurredAt: v2Now,
+            payload: { ...projection.thread, title: "Child changed" },
+          },
+        });
+        const advanced = yield* awaitThreadState(
+          harness.observed,
+          (value) => value.sequence === CACHED_SNAPSHOT_SEQUENCE + 1,
+        );
+        expect(Option.getOrThrow(advanced.data).thread.title).toBe("Child changed");
+        expect(Option.getOrThrow(advanced.data).visibleTurnItems[0]?.item)
+          .toMatchObject({ type: "user_message", text: "After edit" });
+      }),
+    );
+
+    it.effect.each([
+      { boundedRevision: 8, pageRevision: 9, profile: "an ancestor commit between reads" },
+      { pageRevision: 9, profile: "a missing bounded revision" },
+      { boundedRevision: 8, profile: "a missing page revision" },
+      { profile: "an older server" },
+    ])("keeps the bounded fork view on $profile", ({ boundedRevision, pageRevision }) =>
+      Effect.gen(function* () {
+        const parent = ThreadId.make("history-source");
+        const tail = command("child-tail", "completed");
+        const older = (id: string) => ({
+          ...localRow({ ...command(id, "completed"), threadId: parent }, 0),
+          sourceThreadId: parent,
+          visibility: "inherited" as const,
+        });
+        const initial = cachedItem(tail);
+        const projection = {
+          ...initial,
+          thread: {
+            ...initial.thread,
+            forkedFrom: { type: "run" as const, threadId: parent, runId: RunId.make("fork-run") },
+          },
+        };
+        const history = { historyCursor: "initial-cursor", hasMoreHistory: true };
+        const fresh = { ...projection, thread: { ...projection.thread, title: "Refreshed fork" } };
+        const harness = yield* makeHarness({
+          cached: projection,
+          initialConfig: Effect.succeed({ threadHistoryInvalidation: true }),
+          fullSubscribeSnapshot: () => ({
+            ...snapshot(projection, CACHED_SNAPSHOT_SEQUENCE),
+            ...history,
+          }),
+          httpSnapshot: {
+            _tag: "present",
+            snapshot: { projection: fresh, snapshotSequence: CACHED_SNAPSHOT_SEQUENCE },
+            history: { ...history, historyCursor: "fresh-cursor" },
+            ...(boundedRevision === undefined ? {} : { historyViewRevision: boundedRevision }),
+          },
+          historyHttpClient: HttpClient.make((request, url) => {
+            const cursor = url.searchParams.get("cursor");
+            const anchor = url.searchParams.get("throughEntryId");
+            const id =
+              cursor === "initial-cursor"
+                ? "before-edit"
+                : anchor === null
+                  ? "retried-page"
+                  : "incompatible-page";
+            return Effect.succeed(historyPage(request, [older(id)], null, pageRevision));
+          }),
+        });
+        yield* awaitThreadState(harness.observed, (value) => value.status === "live");
+        expect(yield* harness.loadEarlier()).toEqual({ _tag: "loaded" });
+
+        yield* Queue.offer(harness.inputs, { kind: "history-invalidated" });
+        const refreshed = yield* awaitThreadState(
+          harness.observed,
+          (value) => Option.getOrNull(value.data)?.thread.title === "Refreshed fork",
+        );
+        expect(refreshed.sequence).toBe(CACHED_SNAPSHOT_SEQUENCE);
+        expect(refreshed.history).toMatchObject({ historyCursor: "fresh-cursor", expanded: false });
+        expect(Option.getOrThrow(refreshed.data).visibleTurnItems.map((row) => row.sourceItemId))
+          .toEqual([tail.id]);
+
+        expect(yield* harness.loadEarlier()).toEqual({ _tag: "loaded" });
+        const paged = yield* SubscriptionRef.get(harness.threadState);
+        expect(Option.getOrThrow(paged.data).visibleTurnItems.map((row) => row.sourceItemId))
+          .toEqual([older("retried-page").sourceItemId, tail.id]);
+      }),
+    );
+
+    it.effect("uses a bounded socket snapshot when the live fork refresh is unavailable", () =>
+      Effect.gen(function* () {
+        const projection = {
+          ...BASE_PROJECTION,
+          thread: {
+            ...BASE_PROJECTION.thread,
+            forkedFrom: {
+              type: "run" as const,
+              threadId: ThreadId.make("history-source"),
+              runId: RunId.make("fork-run"),
+            },
+          },
+        };
+        let opening = projection;
+        const harness = yield* makeHarness({
+          cached: projection,
+          initialConfig: Effect.succeed({ threadHistoryInvalidation: true }),
+          fullSubscribeSnapshot: () => ({
+            ...snapshot(opening, CACHED_SNAPSHOT_SEQUENCE),
+            historyCursor: null,
+            hasMoreHistory: false,
+          }),
+        });
+        yield* awaitThreadState(harness.observed, (value) => value.status === "live");
+        opening = { ...projection, thread: { ...projection.thread, title: "Refreshed fork" } };
+        yield* Queue.offer(harness.inputs, { kind: "history-invalidated" });
+        yield* awaitThreadState(
+          harness.observed,
+          (value) => value.status === "live" &&
+            Option.getOrNull(value.data)?.thread.title === "Refreshed fork",
+        );
+        expect(yield* Ref.get(harness.lastAcceptBoundedSnapshot)).toBe(true);
+        expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBeUndefined();
+        expect(yield* SubscriptionRef.get(harness.subscriptionCount)).toBe(2);
+      }),
+    );
+
     it.effect("loads a long unwrapped turn through its user message and resumes failed pages", () =>
       Effect.gen(function* () {
         const prompt = {

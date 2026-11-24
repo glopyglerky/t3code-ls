@@ -4,6 +4,9 @@ import Photos
 import Security
 import UIKit
 import UniformTypeIdentifiers
+#if canImport(T3Outbox)
+import T3Outbox
+#endif
 
 @ExpoModule("T3NativeControls")
 public final class T3NativeControlsModule: Module {
@@ -12,6 +15,12 @@ public final class T3NativeControlsModule: Module {
   private var filePresentation: T3NativeFilePresentation?
 
   public func definition() -> ModuleDefinition {
+    #if canImport(T3Outbox)
+    Function("resolveOutboxDeliveryV1") { (facts: Int) -> Int in
+      guard let input = Int32(exactly: facts) else { return -1 }
+      return Int(t3_outbox_delivery_v1(input))
+    }
+    #endif
     Events("videoPlaybackChange")
     Constants {
       if #available(iOS 26.0, *) {

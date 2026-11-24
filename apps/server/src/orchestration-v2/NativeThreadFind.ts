@@ -24,6 +24,17 @@ const Payloads = Schema.Array(
 const encodeSources = Schema.encodeEffect(Sources);
 const encodeThreadIds = Schema.encodeEffect(ThreadIds);
 
+export const readRevision = (client: RedbClient["Service"], threadIds: ReadonlyArray<ThreadId>) =>
+  encodeThreadIds(threadIds).pipe(
+    Effect.flatMap((ids) =>
+      client.request(
+        "application_thread_find_read",
+        { query: { kind: "revision", thread_ids: ids } },
+        Schema.Number,
+      ),
+    ),
+  );
+
 const makeRows = Effect.gen(function* () {
   const client = yield* RedbClient;
   while (!(yield* client.prepareProjectionReads).prepared) yield* Effect.yieldNow;
@@ -50,16 +61,7 @@ const makeRows = Effect.gen(function* () {
           ),
         ),
       ),
-    revision: (threadIds) =>
-      encodeThreadIds(threadIds).pipe(
-        Effect.flatMap((ids) =>
-          client.request(
-            "application_thread_find_read",
-            { query: { kind: "revision", thread_ids: ids } },
-            Schema.Number,
-          ),
-        ),
-      ),
+    revision: (threadIds) => readRevision(client, threadIds),
     withReadTransaction: client.withReadTransaction,
   } satisfies ThreadFindRows;
 });

@@ -43,7 +43,7 @@ import { fixPath } from "./os-jank.ts";
 import * as Ws from "./ws.ts";
 import * as AgentScopeLive from "./process/agentScope.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
-import * as NodePtyAdapter from "./terminal/NodePtyAdapter.ts";
+import * as NativePtyAdapter from "./terminal/NativePtyAdapter.ts";
 import * as PullRequestHttp from "./pullRequest/http.ts";
 import * as SpeechModelStore from "./speech/SpeechModelStore.ts";
 import * as SpeechService from "./speech/SpeechService.ts";
@@ -265,7 +265,7 @@ const layerProviderEventLoggers = Layer.effect(
   }),
 );
 
-const layerPtyAdapter = NodePtyAdapter.layer;
+const layerPtyAdapter = NativePtyAdapter.selectedLayer;
 
 const layerServerSettings = SelectedPersistence.settings.pipe(
   Layer.provide(ServerSecretStore.layer),
@@ -536,7 +536,11 @@ const layerProjectFaviconResolver = ProjectFaviconResolver.layer.pipe(
   Layer.provide(T3ProjectFileLoader.layer),
 );
 
-const layerServerEnvironment = ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer));
+const layerServerEnvironment = (
+  SelectedPersistence.selection.kind === "omdb"
+    ? ServerEnvironment.layerServing.pipe(Layer.provide(Omdb.layerConfig))
+    : ServerEnvironment.layer
+).pipe(Layer.provide(ServerSecretStore.layer));
 
 const layerAuth = EnvironmentAuth.layerSelected.pipe(
   Layer.provideMerge(layerPersistence),
@@ -1297,7 +1301,7 @@ const layerMakeServer = (ownership: AcquiredOwnership) =>
         Layer.provideMerge(layerRuntimeServices),
         Layer.provideMerge(
           McpSessionRegistry.layer.pipe(
-            Layer.provide(ServerEnvironment.layer.pipe(Layer.provide(ServerSecretStore.layer))),
+            Layer.provide(layerServerEnvironment),
           ),
         ),
         Layer.provide(layerActivation),
@@ -1338,4 +1342,7 @@ export const runServer = Effect.scoped(
       Effect.raceFirst(ownership.awaitLost),
     );
   }),
-).pipe(Effect.provide(ProcessRunner.layer));
+).pipe(
+  Effect.provide(ProcessRunner.layer),
+  ServerActivation.afterStagedCandidateReadiness,
+);

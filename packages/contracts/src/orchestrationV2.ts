@@ -3320,6 +3320,7 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     runId: RunId,
+    rootBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   }),
   Schema.Struct({
     type: Schema.Literal("notification.delivery.accept"),
@@ -3806,6 +3807,8 @@ export const OrchestrationV2ArchivedShellSnapshot = Schema.Struct({
 export type OrchestrationV2ArchivedShellSnapshot = typeof OrchestrationV2ArchivedShellSnapshot.Type;
 
 export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
+  /** Opt in to a durable receipt. Older servers ignore this and return the full result. */
+  responseMode: Schema.optional(Schema.Literal("receipt")),
   commandId: CommandId,
   creationSource: Schema.optional(OrchestrationV2CreationSource),
   threadId: Schema.optional(ThreadId),
@@ -3836,6 +3839,20 @@ export const OrchestrationV2ThreadLaunchResult = Schema.Struct({
   sequence: Schema.optionalKey(NonNegativeInt),
 });
 export type OrchestrationV2ThreadLaunchResult = typeof OrchestrationV2ThreadLaunchResult.Type;
+
+export const OrchestrationV2ThreadLaunchReceipt = Schema.Struct({
+  responseMode: Schema.Literal("receipt"),
+  threadId: ThreadId,
+  resumed: Schema.Boolean,
+  sequence: NonNegativeInt,
+});
+export type OrchestrationV2ThreadLaunchReceipt = typeof OrchestrationV2ThreadLaunchReceipt.Type;
+
+/** Legacy results remain valid when a server cannot use the receipt path. */
+export const OrchestrationV2ThreadLaunchResponse = Schema.Union([
+  OrchestrationV2ThreadLaunchResult,
+  OrchestrationV2ThreadLaunchReceipt,
+]);
 
 export const OrchestrationV2DispatchCommandResult = Schema.Struct({
   sequence: NonNegativeInt,
@@ -3974,11 +3991,14 @@ export const OrchestrationV2SubscribeThreadInput = Schema.Struct({
   afterSequence: Schema.optionalKey(NonNegativeInt),
   requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
   acceptBoundedSnapshot: Schema.optionalKey(Schema.Boolean),
+  /** Receive live history invalidations on a bounded subscription. */
+  acceptHistoryInvalidation: Schema.optionalKey(Schema.Boolean),
   acceptDeferredWork: Schema.optionalKey(Schema.Boolean),
   acceptCompactTurnItems: Schema.optionalKey(Schema.Boolean),
   /** The client restores `*Omitted` bodies from records it already holds. */
   acceptDedupedBodies: Schema.optionalKey(Schema.Boolean),
   acceptCompactIds: Schema.optionalKey(Schema.Boolean),
+  /** Version 1 accepts appends. Version 2 also accepts UTF-16 splices. */
   messageTextAppends: Schema.optionalKey(NonNegativeInt),
 });
 export type OrchestrationV2SubscribeThreadInput = typeof OrchestrationV2SubscribeThreadInput.Type;
@@ -4003,6 +4023,8 @@ export type OrchestrationV2ThreadDetailSnapshot = typeof OrchestrationV2ThreadDe
 export const OrchestrationV2ThreadBoundedSnapshot = withRecordIdTable(
   Schema.Struct({
     snapshotSequence: NonNegativeInt,
+    /** Compare only with a history page for the same fork. Replay still uses snapshotSequence. */
+    historyViewRevision: Schema.optionalKey(NonNegativeInt),
     projection: OrchestrationV2ThreadProjection,
     historyCursor: Schema.NullOr(TrimmedNonEmptyString),
     hasMoreHistory: Schema.Boolean,
@@ -4022,6 +4044,7 @@ export type OrchestrationV2ThreadBoundedSnapshot = typeof OrchestrationV2ThreadB
 export const OrchestrationV2ThreadHistoryPage = withRecordIdTable(
   Schema.Struct({
     snapshotSequence: NonNegativeInt,
+    historyViewRevision: Schema.optionalKey(NonNegativeInt),
     items: projectedTurnItemArray(
       OrchestrationV2ProjectedTurnItem,
       OrchestrationV2ProjectedTurnItem.mapFields((fields) => ({
@@ -4089,6 +4112,9 @@ export const OrchestrationV2ThreadStreamItem = withRecordIdTable(
       kind: Schema.Literal("synchronized"),
     }),
     Schema.Struct({
+      kind: Schema.Literal("history-invalidated"),
+    }),
+    Schema.Struct({
       kind: Schema.Literal("snapshot"),
       snapshotSequence: NonNegativeInt,
       projection: OrchestrationV2ThreadProjection,
@@ -4107,6 +4133,14 @@ export const OrchestrationV2ThreadStreamItem = withRecordIdTable(
       kind: Schema.Literal("message-text-append"),
       baseSequence: NonNegativeInt,
       sequence: NonNegativeInt,
+      event: OrchestrationV2MessageUpdated,
+    }),
+    Schema.Struct({
+      kind: Schema.Literal("message-text-splice"),
+      baseSequence: NonNegativeInt,
+      sequence: NonNegativeInt,
+      startUtf16: NonNegativeInt,
+      endUtf16: NonNegativeInt,
       event: OrchestrationV2MessageUpdated,
     }),
     OrchestrationV2UnknownThreadStreamEvent,
@@ -4476,7 +4510,7 @@ export const OrchestrationV2RpcSchemas = {
   },
   launchThread: {
     input: OrchestrationV2ThreadLaunchInput,
-    output: OrchestrationV2ThreadLaunchResult,
+    output: OrchestrationV2ThreadLaunchResponse,
   },
   subscribeShell: {
     input: OrchestrationV2SubscribeShellInput,

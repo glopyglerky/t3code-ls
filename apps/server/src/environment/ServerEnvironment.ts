@@ -21,6 +21,7 @@ import { resolveServerSelfUpdateCapability } from "../cloud/selfUpdate.ts";
 import { resolveServiceLauncherMode } from "../cloud/serviceLauncherClient.ts";
 import * as ServerConfig from "../config.ts";
 import { databaseMigrationHead } from "../persistence/databaseMigrationHead.ts";
+import { BootstrappedDatabaseMigration } from "../persistence/BootstrappedDatabaseMigration.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { isSpeechPlatformSupported } from "../speech/platform.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
@@ -182,6 +183,12 @@ const makeIdentity = Effect.gen(function* () {
   });
 });
 
+// Only the serving layer supplies this. Standalone/pre-admission readers keep their probe.
+const ServingMigration = Context.Reference<{ readonly databasePath: string; readonly head: number } | undefined>(
+  "t3/environment/ServerEnvironment/ServingMigration",
+  { defaultValue: () => undefined },
+);
+
 /** @public */
 export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
@@ -207,7 +214,11 @@ export const make = Effect.gen(function* () {
     serverConfig.desktopAppUpdate === true &&
     serverConfig.desktopTelemetryControlFd !== undefined;
 
-  const databaseMigration = databaseMigrationHead(serverConfig.dbPath);
+  const servingMigration = yield* ServingMigration;
+  if (servingMigration !== undefined && servingMigration.databasePath !== serverConfig.dbPath) {
+    return yield* Effect.die(new Error("The serving migration witness belongs to another database."));
+  }
+  const databaseMigration = servingMigration?.head ?? databaseMigrationHead(serverConfig.dbPath);
   const descriptor: ExecutionEnvironmentDescriptor = {
     environmentId,
     label,
@@ -313,6 +324,18 @@ export const make = Effect.gen(function* () {
 export const layerIdentity = Layer.effect(ServerEnvironmentIdentity, makeIdentity);
 
 export const layer = Layer.effect(ServerEnvironment, make).pipe(
+  Layer.provideMerge(layerIdentity),
+  Layer.provide(ProcessRunner.layer),
+);
+
+/** Normal native serving must await the selected persistence owner's successful startup. */
+export const layerServing = Layer.effect(
+  ServerEnvironment,
+  Effect.gen(function* () {
+    const witness = yield* BootstrappedDatabaseMigration;
+    return yield* make.pipe(Effect.provideService(ServingMigration, witness));
+  }),
+).pipe(
   Layer.provideMerge(layerIdentity),
   Layer.provide(ProcessRunner.layer),
 );

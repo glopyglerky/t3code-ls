@@ -709,6 +709,194 @@ it.effect("reads the project's own repository when the server inherited GIT_DIR"
   ).pipe(Effect.provide(layerTest)),
 );
 
+const gixFixture = process.env.T3_CODE_LS_GIX_FIXTURE;
+it.effect.skipIf(gixFixture === undefined)(
+  "reads repository paths and branch identity through the selected gix helper",
+  () => Effect.scoped(Effect.gen(function* () {
+    assert.isDefined(gixFixture);
+    const retained = yield* GitVcsDriver.GitVcsDriver;
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const delegate = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const calls: Array<{ command: string; args: ReadonlyArray<string> }> = [];
+    const spawner = ChildProcessSpawner.make((command) => {
+      if (ChildProcess.isStandardCommand(command)) {
+        calls.push({ command: String(command.command), args: command.args.map(String) });
+      }
+      return delegate.spawn(command);
+    });
+    const makeNative = (environment: NodeJS.ProcessEnv) => makeGitVcsDriverCore().pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(HostProcess.Environment, {
+          ...environment,
+          T3_CODE_LS_IMPLEMENTATION: "native",
+          T3_CODE_LS_GIT_WORKSPACE_EXECUTABLE: gixFixture,
+        }),
+      );
+    const native = yield* makeNative({});
+    const scratch = yield* makeTmpDir("git-native-workspace-");
+    const cwd = path.join(scratch, "checkout \n");
+    const nested = path.join(cwd, "nested");
+    yield* fs.makeDirectory(nested, { recursive: true });
+    const { initialBranch } = yield* initRepoWithCommit(cwd);
+    const linked = path.join(scratch, "linked ");
+    yield* git(cwd, ["worktree", "add", "-b", "linked-branch", linked]);
+    for (const name of ["ZZ-last", "aa-first", "作業/修正", "t3-fix/child", "T3-FIX-1"]) {
+      yield* git(cwd, ["branch", name]);
+    }
+    const alias = path.join(scratch, "alias");
+    NodeFS.symlinkSync(nested, alias);
+    const unborn = path.join(scratch, "unborn");
+    yield* fs.makeDirectory(unborn);
+    yield* git(unborn, ["init", "--initial-branch=unborn-branch"]);
+
+    for (const [location, branch] of [
+      [cwd, initialBranch], [nested, initialBranch], [alias, initialBranch],
+      [linked, "linked-branch"], [unborn, "unborn-branch"],
+    ] as const) {
+      const input = { cwd: location, refresh: true };
+      const expected = yield* retained.listRefs(input);
+      const start = calls.length;
+      const actual = yield* native.listRefs(input);
+      assert.deepEqual(actual.refs, expected.refs);
+      const discovery = calls.slice(start);
+      assert.equal(discovery.filter((call) => call.command === gixFixture).length, 1);
+      assert.isFalse(discovery.some((call) =>
+        call.args.includes("--git-common-dir") || call.args.includes("--show-toplevel"),
+      ));
+      const status = yield* native.statusDetailsLocal(location, { includeDivergence: false });
+      assert.equal(status.branch, branch);
+    }
+    yield* native.switchRef({ cwd: linked, refName: yield* git(linked, ["rev-parse", "HEAD"]) });
+    const detached = yield* native.listRefs({ cwd: linked, refresh: true });
+    assert.isFalse(detached.refs.some((ref) => ref.current));
+    const configured = yield* makeNative({ GIT_CONFIG_COUNT: "0" });
+    const configuredStart = calls.length;
+    assert.deepEqual((yield* configured.listRefs({ cwd: linked })).refs, detached.refs);
+    assert.isFalse(calls.slice(configuredStart).some((call) => call.command === gixFixture));
+
+    const readNativeNames = Effect.fn("GitVcsDriver.test.nativeNames")(function* (location: string) {
+      const output = yield* delegate.string(ChildProcess.make(gixFixture!, ["local-branch-names", location]));
+      return yield* Schema.decodeEffect(
+        Schema.fromJsonString(Schema.NullOr(Schema.Array(Schema.String))),
+      )(output);
+    });
+    const checkNames = Effect.fn("GitVcsDriver.test.checkNativeNames")(function* (location: string) {
+      const expected = (yield* git(location, ["for-each-ref", "--format=%(refname:strip=2)", "refs/heads/"]))
+        .split("\n").filter(Boolean);
+      assert.deepEqual(yield* readNativeNames(location), expected);
+    });
+    yield* checkNames(cwd);
+    yield* checkNames(linked);
+    assert.deepEqual(yield* readNativeNames(unborn), []);
+    const head = yield* git(cwd, ["rev-parse", "HEAD"]);
+    const manyBranches = Array.from({ length: 400 }, (_, index) =>
+      `update refs/heads/fixture-${String(index).padStart(4, "0")}-${"x".repeat(96)} ${head}`,
+    );
+    yield* gitWithStdin(cwd, ["update-ref", "--stdin"], `${manyBranches.join("\n")}\n`);
+    yield* checkNames(nested);
+    yield* git(cwd, ["pack-refs", "--all", "--prune"]);
+    yield* checkNames(linked);
+    yield* git(cwd, ["branch", "loose-after-pack"]);
+    yield* checkNames(cwd);
+
+    yield* git(cwd, ["branch", "rename-source"]);
+    const renameInput = { cwd: linked, oldBranch: "rename-source", newBranch: "t3-fix" };
+    const expectedName = yield* retained.renameBranch(renameInput);
+    yield* git(cwd, ["branch", "-m", "--", expectedName.branch, "rename-source"]);
+    const renameStart = calls.length;
+    assert.deepEqual(yield* native.renameBranch(renameInput), expectedName);
+    assert.equal(expectedName.branch, "t3-fix-2");
+    assert.equal(calls.slice(renameStart).filter((call) =>
+      call.command === gixFixture && call.args[0] === "local-branch-names").length, 1);
+    assert.isFalse(calls.slice(renameStart).some((call) => call.args.includes("--format=%(refname:strip=2)")));
+    yield* git(cwd, ["branch", "-m", "--", expectedName.branch, "rename-source"]);
+    const configuredRenameStart = calls.length;
+    assert.deepEqual(yield* configured.renameBranch(renameInput), expectedName);
+    assert.isTrue(calls.slice(configuredRenameStart).some((call) => call.args.includes("--format=%(refname:strip=2)")));
+    assert.isFalse(calls.slice(configuredRenameStart).some((call) => call.command === gixFixture));
+
+    yield* git(cwd, ["symbolic-ref", "refs/heads/symbolic-fixture", `refs/heads/${initialBranch}`]);
+    assert.equal(yield* readNativeNames(cwd), null);
+    yield* git(cwd, ["branch", "-m", "--", expectedName.branch, "rename-source"]);
+    const symbolicRenameStart = calls.length;
+    assert.deepEqual(yield* native.renameBranch(renameInput), expectedName);
+    assert.isTrue(calls.slice(symbolicRenameStart).some((call) => call.args.includes("--format=%(refname:strip=2)")));
+    yield* git(cwd, ["symbolic-ref", "--delete", "refs/heads/symbolic-fixture"]);
+
+    // Exact existence drives whether a fetched branch is created or updated.
+    yield* git(cwd, ["remote", "add", "fixture-local", cwd]);
+    yield* git(cwd, ["tag", "fixture-materialized"]);
+    const fetchInput = {
+      cwd: linked, remoteName: "fixture-local", remoteBranch: initialBranch,
+      localBranch: "fixture-materialized",
+    };
+    const expectedTarget = yield* git(cwd, ["rev-parse", `refs/heads/${initialBranch}`]);
+    for (const exists of [false, true]) {
+      const fetchStart = calls.length;
+      yield* native.fetchRemoteBranch(fetchInput);
+      assert.equal(yield* git(cwd, ["rev-parse", "refs/heads/fixture-materialized"]), expectedTarget);
+      const commands = calls.slice(fetchStart);
+      assert.equal(commands.filter((call) =>
+        call.command === gixFixture && call.args[0] === "has-local-ref").length, 1);
+      assert.isFalse(commands.some((call) =>
+        call.args.includes("show-ref") && call.args.includes("refs/heads/fixture-materialized")));
+      assert.equal(commands.some((call) =>
+        call.args.includes("branch") && call.args.includes("--force")), exists);
+      yield* git(cwd, ["pack-refs", "--all", "--prune"]);
+    }
+
+    const remote = "origin/team";
+    const remoteRef = `refs/remotes/${remote}/release`;
+    yield* git(cwd, ["update-ref", remoteRef, "HEAD"]);
+    yield* git(cwd, ["symbolic-ref", `refs/remotes/${remote}/HEAD`, remoteRef]);
+    yield* git(cwd, ["tag", "missing"]);
+    yield* git(cwd, ["update-ref", `refs/remotes/${remote}/nested/child`, "HEAD"]);
+    const checkRemote = (location: string, refName: string, exists: boolean) =>
+      Effect.gen(function* () {
+        const input = { cwd: location, remoteName: remote, refName };
+        assert.equal(yield* retained.remoteBranchExists(input), exists);
+        const start = calls.length;
+        assert.equal(yield* native.remoteBranchExists(input), exists);
+        const commands = calls.slice(start);
+        assert.equal(commands.filter((call) => call.command === gixFixture).length, 1);
+        assert.isFalse(commands.some((call) => call.args.includes("show-ref")));
+      });
+    yield* checkRemote(cwd, "release", true);
+    yield* checkRemote(linked, "HEAD", true);
+    yield* checkRemote(linked, "missing", false);
+    yield* checkRemote(nested, "nested", false);
+    yield* git(cwd, ["pack-refs", "--all", "--prune"]);
+    yield* checkRemote(linked, "release", true);
+    yield* git(cwd, ["update-ref", "-d", remoteRef]);
+    yield* checkRemote(linked, "release", false);
+    const malformedRef = path.join(cwd, ".git", "refs", "remotes", remote, "malformed");
+    yield* fs.makeDirectory(path.dirname(malformedRef), { recursive: true });
+    yield* fs.writeFileString(malformedRef, "invalid object id\n");
+    const malformedStart = calls.length;
+    assert.isFalse(yield* native.remoteBranchExists({ cwd, remoteName: remote, refName: "malformed" }));
+    assert.isTrue(calls.slice(malformedStart).some((call) => call.args.includes("show-ref")));
+    yield* fs.remove(malformedRef);
+
+    const configuredRefStart = calls.length;
+    assert.isFalse(yield* configured.remoteBranchExists({ cwd, remoteName: remote, refName: "release" }));
+    assert.isFalse(calls.slice(configuredRefStart).some((call) => call.command === gixFixture));
+    const badConfigProbe = path.join(cwd, "bad-config-probe");
+    yield* fs.makeDirectory(badConfigProbe);
+    const configFile = path.join(cwd, ".git", "config");
+    const config = yield* fs.readFileString(configFile);
+    yield* fs.writeFileString(path.join(cwd, ".git", "fixture-include"), "[bad\n");
+    yield* fs.writeFileString(configFile, `${config}\n[include]\npath = fixture-include\n`);
+    const before = calls.length;
+    assert.isTrue(Exit.isFailure(yield* Effect.exit(native.listRefs({ cwd: badConfigProbe }))));
+    assert.equal(calls.slice(before).filter((call) => call.command === gixFixture).length, 1);
+    assert.isTrue(calls.slice(before).some((call) => call.args.includes("--git-common-dir")));
+    const refBefore = calls.length;
+    assert.isFalse(yield* native.remoteBranchExists({ cwd, remoteName: remote, refName: "release" }));
+    assert.isTrue(calls.slice(refBefore).some((call) => call.args.includes("show-ref")));
+  })).pipe(Effect.provide(layerTest)),
+);
+
 it.effect("reads a branch whose name starts with a parenthesis as attached", () =>
   Effect.scoped(
     Effect.gen(function* () {

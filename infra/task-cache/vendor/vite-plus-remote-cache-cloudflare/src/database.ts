@@ -268,24 +268,29 @@ export async function cleanup(env: Env): Promise<void> {
 }
 
 async function cleanAssociations(db: D1Database, limit: number): Promise<void> {
-  // Cursor bounds scanning as well as deletion, even when all associations are live.
-  const batch = await db
-    .prepare(`SELECT scope_id, secondary_key FROM associations
-    WHERE (scope_id, secondary_key) > (SELECT scope_id, secondary_key FROM maintenance WHERE id = 1)
-    ORDER BY scope_id, secondary_key LIMIT ?`)
-    .bind(limit)
+  const { results: [cursor] } = await db
+    .prepare('SELECT scope_id, secondary_key FROM maintenance WHERE id = 1')
     .all<{ scope_id: string; secondary_key: number[] }>();
-  const last = batch.results.at(-1);
+  if (!cursor) throw new Error('Missing association cleanup cursor');
+  const secondary = binary(new Uint8Array(cursor.secondary_key));
+  const page = `SELECT scope_id, secondary_key FROM associations
+    WHERE (scope_id, secondary_key) > (?1, ?2)
+    ORDER BY scope_id, secondary_key LIMIT ?3`;
+
+  // Advance and sweep the same bounded page in one transaction. A stale cursor
+  // loses the update, so changes() also prevents that invocation from deleting.
   await db.batch([
     db
-      .prepare(`DELETE FROM associations WHERE (scope_id, secondary_key) IN (
-      SELECT scope_id, secondary_key FROM associations
-      WHERE (scope_id, secondary_key) > (SELECT scope_id, secondary_key FROM maintenance WHERE id = 1)
-      ORDER BY scope_id, secondary_key LIMIT ?)
-      AND NOT EXISTS (SELECT 1 FROM entries e WHERE e.scope_id = associations.scope_id AND e.key = associations.target_key)`)
-      .bind(limit),
+      .prepare(`UPDATE maintenance SET (scope_id, secondary_key) = (
+      SELECT scope_id, secondary_key FROM (${page})
+      UNION ALL SELECT '', X''
+      ORDER BY scope_id DESC, secondary_key DESC LIMIT 1
+      ) WHERE id = 1 AND (scope_id, secondary_key) = (?1, ?2)`)
+      .bind(cursor.scope_id, secondary, limit),
     db
-      .prepare('UPDATE maintenance SET scope_id = ?, secondary_key = ? WHERE id = 1')
-      .bind(last?.scope_id ?? '', binary(new Uint8Array(last?.secondary_key ?? []))),
+      .prepare(`DELETE FROM associations WHERE changes() = 1
+      AND (scope_id, secondary_key) IN (${page})
+      AND NOT EXISTS (SELECT 1 FROM entries e WHERE e.scope_id = associations.scope_id AND e.key = associations.target_key)`)
+      .bind(cursor.scope_id, secondary, limit),
   ]);
 }

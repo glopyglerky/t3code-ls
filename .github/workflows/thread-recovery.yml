@@ -1,17 +1,41 @@
-name: Client thread recovery
+name: Client recovery
 
 on:
   push:
-    branches: ["candidate/t3code-ls-t03-text-revision-*"]
+    branches:
+      - "candidate/t3code-ls-t03-text-revision-*"
+      - "candidate/t3code-ls-t04-inherited-history-*"
+      - "candidate/t3code-ls-t04-ordered-application-*"
+      - "candidate/t3code-ls-t03-layout-*"
+      - "candidate/t3code-ls-t05-helper-contract-*"
+      - "candidate/t3code-ls-t12-outbox-identity-*"
+      - "candidate/t3code-ls-t12-outbox-native-*"
+      - "candidate/t3code-ls-t12-outbox-package-*"
+      - "candidate/t3code-ls-t12-outbox-runtime-*"
+      - "candidate/t3code-ls-t13-device-viewer-*"
+      - "candidate/t3code-ls-t15-task-cache-*"
+      - "candidate/t3code-ls-t15-maintenance-snapshot-*"
+      - "candidate/t3code-ls-t02-bundled-native-integrated-*"
+      - "candidate/t3code-ls-acceptance-types-*"
+      - "candidate/t3code-ls-t16-independent-reads-*"
+      - "candidate/t3code-ls-t16-event-preparation-*"
+      - "candidate/t3code-ls-t16-migration-witness-*"
 
 permissions:
   contents: read
 
 jobs:
   thread-recovery:
+    if: >-
+      !startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-') &&
+      !startsWith(github.ref_name, 'candidate/t3code-ls-t04-ordered-application-') &&
+      !startsWith(github.ref_name, 'candidate/t3code-ls-acceptance-types-') &&
+      !startsWith(github.ref_name, 'candidate/t3code-ls-t15-maintenance-snapshot-') &&
+      !startsWith(github.ref_name, 'candidate/t3code-ls-t16-migration-witness-')
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-') && 25 || 10 }}
     env:
+      SAVINGS_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t15-task-cache-savings-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') }}
       ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
       VP_REMOTE_CACHE: "off"
       VP_REMOTE_CACHE_URL: ""
@@ -23,12 +47,929 @@ jobs:
         with:
           node-version: "26.12.1"
       - name: Install the locked client runtime dependencies
+        if: >-
+          startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-staged-') ||
+          (!startsWith(github.ref_name, 'candidate/t3code-ls-t03-layout-') &&
+          !startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-') &&
+          !startsWith(github.ref_name, 'candidate/t3code-ls-t16-independent-reads-'))
         run: |
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
+      - name: Check staged startup before server layer construction
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-staged-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
+        working-directory: apps/server
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          # apps/server/src/serverRuntimeStartup.test.ts
+          # apps/server/src/serverRuntimeStartup.autoPull.test.ts
+          pnpm exec vp test run --maxWorkers 2 \
+            src/serverRuntimeStartup.test.ts src/serverRuntimeStartup.autoPull.test.ts
+      - name: Exercise device preview close through the authenticated server route
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t13-device-viewer-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
+        run: |
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- env PATH="$2" VP_REMOTE_CACHE=off VP_REMOTE_CACHE_URL= "$3" \
+              exec vp test run --maxWorkers 1 \
+              apps/server/src/device/DeviceHubProxy.stream.test.ts apps/server/src/device/DeviceHubProxy.test.ts
+          ' _ "$(id -un)" "$PATH" "$(command -v pnpm)"
+      - name: Check type diagnostics for the device proxy and server wiring
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t13-device-viewer-')
+        working-directory: apps/server
+        run: |
+          log="$RUNNER_TEMP/device-viewer-types.log"
+          status=0
+          pnpm exec effect-tsgo tsrs --noEmit > "$log" 2>&1 || status=$?
+          if (( status == 0 )); then exit 0; fi
+          if (( status != 2 )) || ! grep -q 'error TS[0-9]' "$log"; then cat "$log"; exit "$status"; fi
+          if grep -E '^src/(device/DeviceHubProxy(\.stream)?(\.test)?\.ts|server\.ts)\(' "$log" \
+            | grep -E 'error TS[0-9]'; then exit 1; fi
+          printf 'No device proxy or server wiring type errors. Full project diagnostics: %s\n' \
+            "$(grep -c 'error TS[0-9]' "$log")"
+      - name: Exercise an active child stream during an ancestor commit
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-live-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm exec vp test run --maxWorkers 2 \
+            apps/server/src/orchestration-v2/boundedSnapshotTransport.test.ts \
+            -t 'an open run-fork grandchild'
+      - name: Check fork history view revisions through SQLite HTTP and client decoding
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-coherent-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm exec vp test run --maxWorkers 2 \
+            apps/server/src/orchestration-v2/boundedSnapshotTransport.test.ts \
+            packages/client-runtime/src/state/boundedThreadSnapshotHttp.test.ts \
+            -t 'HTTP: fork history view revision changes|HTTP: legacy, ignored and opted-in|HTTP: the ID table is opt-in|requests compact turnItems and loads'
       - name: Exercise thread replay and recovery
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t03-text-revision-') || startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
         run: |
           pnpm exec vp test run --maxWorkers 2 \
             packages/client-runtime/src/state/threads-sync.test.ts \
             packages/contracts/src/orchestrationV2.test.ts \
             apps/server/src/orchestration-v2/WireProjection.test.ts
+      - name: Install the pinned compiler for inherited history
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-')
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/history-toolchain"
+      - name: Check native inherited window and page revisions across ancestor commits
+        id: anchored-history
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x "$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+          export T3_CODE_LS_TEST_RUNTIME="$RUNNER_TEMP/history-runtime"
+          export CARGO_HOME="$RUNNER_TEMP/history-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/history-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          trap 'rm -rf -- "$CARGO_TARGET_DIR" "$CARGO_HOME" "$T3_CODE_LS_TEST_RUNTIME"' EXIT
+          node tools/install-server-tests.mjs
+          node tools/fetch-migration-sources.mjs
+          node tools/check-acceptance.mjs \
+            --tests '["tools/check-redb-projection-windows.mjs"]' \
+            --proof-directory "$RUNNER_TEMP/history-proof"
+      - name: Retain inherited window evidence
+        if: always() && startsWith(github.ref_name, 'candidate/t3code-ls-t04-inherited-history-') && steps.anchored-history.outcome != 'skipped'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: inherited-history-proof
+          path: ${{ runner.temp }}/history-proof
+          if-no-files-found: error
+          retention-days: 7
+      - name: Qualify removal when a mobile cleanup owner fails
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-cleanup-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
+        run: |
+          pnpm exec vp test run --maxWorkers 2 packages/client-runtime/src/connection/registry.test.ts \
+            packages/client-runtime/src/platform/storageDocument.test.ts
+          # apps/mobile/src/connection/environment-owned-data-cleanup.test.ts
+          pnpm --filter @t3tools/mobile exec vp test run --project unit --maxWorkers 2 \
+            src/connection/environment-owned-data-cleanup.test.ts \
+            src/connection/storage.test.ts src/connection/environment-removal-recovery.test.ts
+      - name: Retain cold-start notification taps until navigation dispatches
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-notification-')
+        working-directory: apps/mobile
+        run: |
+          pnpm exec vp test run --project unit --maxWorkers 2 \
+            src/lib/rootNavigation.test.ts src/features/agent-awareness/notificationNavigation.test.ts
+      - name: Exercise mobile outbox recovery
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-')
+        working-directory: apps/mobile
+        run: pnpm exec vp test run --project unit --maxWorkers 2 src/state/thread-outbox.test.ts
+      - name: Exercise mobile outbox convergence after reconnect
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-identity-reconnect-')
+        working-directory: apps/mobile
+        run: |
+          pnpm exec vp test run --project unit --maxWorkers 2 \
+            src/state/threadOutboxDelivery.permissions.test.ts src/state/threadOutboxDelivery.test.ts
+      - name: Exercise task-cache cleanup and savings transactions
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-task-cache-')
+        run: |
+          pnpm --filter @t3tools/task-cache typecheck
+          pnpm --filter @t3tools/task-cache test src/Cleanup.test.ts src/Cache.test.ts \
+            src/NativeClients.test.ts src/Savings.test.ts
+      - name: Exercise cache publication and reads through Workerd
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-task-cache-http-')
+        run: |
+          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/cache-http-source.txt"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- "$2" infra/task-cache/scripts/verify-cache-http-workerd.mjs "$3"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/cache-http-proof"
+      - name: Retain the cache HTTP proof
+        if: always() && startsWith(github.ref_name, 'candidate/t3code-ls-t15-task-cache-http-')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: cache-http-proof
+          path: |
+            ${{ runner.temp }}/cache-http-source.txt
+            ${{ runner.temp }}/cache-http-proof/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Install the pinned compiler for native savings
+        if: env.SAVINGS_PROOF == 'true'
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/savings-toolchain"
+      - name: Compare native savings and atomic D1 receipt accounting
+        if: env.SAVINGS_PROOF == 'true'
+        env:
+          WASM_BINDGEN_VERSION: "0.2.130"
+          WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/savings-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/savings-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test \
+            --locked -p t3-code-ls-task-cache-accounting
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" check \
+            --locked --target wasm32-unknown-unknown -p t3-code-ls-task-cache-accounting
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
+            --release --locked --target wasm32-unknown-unknown -p t3-code-ls-task-cache-accounting-web
+          archive="wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl"
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive.tar.gz" \
+            "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$WASM_BINDGEN_VERSION/$archive.tar.gz"
+          printf '%s  %s\n' "$WASM_BINDGEN_SHA256" "$RUNNER_TEMP/$archive.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/$archive.tar.gz" -O "$archive/wasm-bindgen" > "$RUNNER_TEMP/wasm-bindgen"
+          chmod u+x "$RUNNER_TEMP/wasm-bindgen"
+          "$RUNNER_TEMP/wasm-bindgen" --target nodejs --out-name savings \
+            --out-dir "$RUNNER_TEMP/savings-wasm" \
+            "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/t3_code_ls_task_cache_accounting_web.wasm"
+          sha256sum "$RUNNER_TEMP/savings-wasm/savings_bg.wasm"
+          pnpm --filter @t3tools/task-cache typecheck
+          node infra/task-cache/scripts/verify-savings-native.ts "$RUNNER_TEMP/savings-wasm/savings.js"
+          "$RUNNER_TEMP/wasm-bindgen" --target web --out-name savings \
+            --out-dir "$RUNNER_TEMP/savings-worker-wasm" \
+            "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/t3_code_ls_task_cache_accounting_web.wasm"
+          node infra/task-cache/scripts/verify-savings-worker.ts "$RUNNER_TEMP/savings-worker-wasm" \
+            "$RUNNER_TEMP/savings-worker-proof"
+      - name: Retain native savings packaging evidence
+        if: always() && env.SAVINGS_PROOF == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: savings-worker-evidence
+          path: ${{ runner.temp }}/savings-worker-proof/proof.json
+          if-no-files-found: ignore
+      - name: Check installed helper identity before starting native trials
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-')
+        run: node --test tools/service-launcher-trial.test.mjs
+      - name: Install the pinned compiler for event preparation
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t16-event-preparation-')
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/event-preparation-toolchain"
+      - name: Verify repeated native event index preparation
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t16-event-preparation-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CARGO_HOME="$RUNNER_TEMP/event-preparation-cargo"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/event-preparation-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          for test in preparation_metadata_pair_revalidates_completed_state_and_fails_closed preparation_resumes_after_reopen_and_does_not_rebuild_live_events; do
+            "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              test --locked -p t3-code-ls-storage --lib "$test" | tee "$RUNNER_TEMP/$test.log"
+            grep -F 'test result: ok. 1 passed; 0 failed' "$RUNNER_TEMP/$test.log"
+          done
+      - name: Install the pinned compiler for the independent read helper
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t16-independent-reads-')
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/independent-read-toolchain"
+      - name: Verify native readers while a writer holds its transaction
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t16-independent-reads-')
+        env:
+          T3_CODE_LS_INDEPENDENT_READS: "1"
+          T3_CODE_LS_SINGLE_PROJECTION_READS: "1"
+        run: |
+          export T3_CODE_LS_TEST_RUNTIME="$RUNNER_TEMP/independent-read-runtime"
+          export CARGO_HOME="$RUNNER_TEMP/independent-read-cargo"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/independent-read-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          node tools/install-server-tests.mjs
+          node tools/fetch-migration-sources.mjs
+          node tools/check-acceptance.mjs --tests '["tools/check-omdb-production.mjs","tools/check-redb-projection-lookups.mjs"]' \
+            --proof-directory "$RUNNER_TEMP/independent-read-proof"
+      - name: Install the pinned compiler for the trial helper
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-')
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/trial-toolchain"
+      - name: Build and run the actual trial helper contract
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-')
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/trial-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/trial-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          export CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-storage --test store isolated_trial_cli
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-storage --lib service_trial_backup
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-storage --lib selection_versions_match_the_launcher_order
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-storage --lib isolated_trial_upgrades_88_without_changing_the_stopped_source
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-storage --lib native_selection_lock
+          T3_TEST_SEALED_TRIAL_HELPER="$CARGO_TARGET_DIR/debug/t3-code-ls-db" \
+            node --test --test-name-pattern 'compiled Rust helper restores' tools/service-launcher-trial.test.mjs
+      - name: Exercise the sealed catalog with the retained helper
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-helper-contract-activation-')
+        run: |
+          retained="$RUNNER_TEMP/retained-trial-source"
+          git init --quiet "$retained"
+          git -C "$retained" fetch --quiet --depth=1 --no-tags \
+            https://github.com/glopyglerky/t3code-ls.git eb315803a299c9af0a63be4a44ae14099c146b7e
+          git -C "$retained" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$retained" rev-parse 'HEAD^{tree}')" = 0108ed98fabfc296b8a8a611238989d9ed744301
+          export CARGO_HOME="$RUNNER_TEMP/trial-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/retained-trial-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --locked \
+            --manifest-path "$retained/Cargo.toml" -p t3-code-ls-storage --bin t3-code-ls-db
+          export T3_TEST_RETAINED_TRIAL_HELPER="$CARGO_TARGET_DIR/debug/t3-code-ls-db"
+          sha256sum "$T3_TEST_RETAINED_TRIAL_HELPER"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/trial-target"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-storage --lib isolated_trial_upgrades_88_without_changing_the_stopped_source
+      - name: Measure retained storage for the matched text event layouts
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t03-layout-')
+        run: |
+          node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/layout-toolchain"
+      - name: Verify exact replay and report physical event storage
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t03-layout-')
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/layout-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/layout-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-storage --lib \
+            assistant_text_layout_preserves_logical_replay_with_less_retained_storage -- --ignored --nocapture
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-storage --lib \
+            assistant_text_revisions_store_suffixes_and_replay_exactly_after_rollback_reopen_and_prune
+      - name: Install the pinned compiler for the outbox checks
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
+        run: |
+          node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/outbox-toolchain"
+      - name: Build and exercise the mobile outbox policy and adapter
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/outbox-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-mobile-outbox -p t3-code-ls-client-text
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" rustc --locked --release \
+            -p t3-code-ls-mobile-outbox --crate-type cdylib
+          library="$CARGO_TARGET_DIR/release/libt3_outbox.so"
+          sha256sum "$library"
+          python3 - "$library" > "$RUNNER_TEMP/t12-outbox-cells.json" <<'PY'
+          import ctypes, json, sys
+          resolve = ctypes.CDLL(sys.argv[1]).t3_outbox_delivery_v1
+          resolve.argtypes = [ctypes.c_int32]
+          resolve.restype = ctypes.c_int32
+          assert resolve(-1) == resolve(64) == -1
+          outcomes = [resolve(facts) for facts in range(64)]
+          assert set(outcomes) == {0, 1, 2}
+          print(json.dumps(outcomes))
+          PY
+          T3_OUTBOX_PROOF_MATRIX="$(cat "$RUNNER_TEMP/t12-outbox-cells.json")"
+          export T3_OUTBOX_PROOF_MATRIX
+          pnpm --dir apps/mobile exec vp test run --project unit --maxWorkers 2 \
+            "$GITHUB_WORKSPACE/apps/mobile/src/native/outboxDelivery.test.ts" src/state/thread-outbox.test.ts \
+            src/state/threadOutboxDelivery.permissions.test.ts
+
+  mobile-outbox-android:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-') || startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-') && 35 || 10 }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build and inspect the Android JNI libraries
+        run: |
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-target"
+          rustup toolchain install 1.99.1 --profile minimal \
+            --target aarch64-linux-android,armv7-linux-androideabi
+          ndk="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:?Android NDK unavailable}}"
+          compilers="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$compilers/aarch64-linux-android24-clang"
+          export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$compilers/armv7a-linux-androideabi24-clang"
+          for target in armv7-linux-androideabi aarch64-linux-android; do
+            cargo +1.99.1 rustc --locked --release --target "$target" \
+              -p t3-code-ls-mobile-outbox --crate-type cdylib
+            library="$CARGO_TARGET_DIR/$target/release/libt3_outbox.so"
+            readelf --dyn-syms --wide "$library" > "$RUNNER_TEMP/$target-symbols.txt"
+            grep -F 'Java_expo_modules_t3nativecontrols_T3OutboxDelivery_resolveV1' \
+              "$RUNNER_TEMP/$target-symbols.txt"
+            sha256sum "$library"
+          done
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')
+        with:
+          node-version: "26.12.1"
+      - name: Package the Rust policy in the development app
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')
+        env:
+          APP_VARIANT: development
+          EXPO_NO_DOTENV: "1"
+          EXPO_NO_GIT_STATUS: "1"
+          T3CODE_MOBILE_UPDATES_ENABLED: "0"
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+          VP_REMOTE_CACHE: "off"
+          VP_REMOTE_CACHE_URL: ""
+          ORG_GRADLE_PROJECT_reactNativeArchitectures: arm64-v8a
+        shell: bash
+        run: |
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          export GRADLE_USER_HOME="$RUNNER_TEMP/outbox-gradle"
+          staging=apps/mobile/modules/t3-native-controls/android/src/main/jniLibs/arm64-v8a/libt3_outbox.so
+          install -Dm644 "$RUNNER_TEMP/outbox-target/aarch64-linux-android/release/libt3_outbox.so" "$staging"
+          trap 'rm -f "$staging"' EXIT
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          pnpm --dir apps/mobile exec expo prebuild --platform android --no-install
+          apps/mobile/android/gradlew -p apps/mobile/android --no-daemon --max-workers=2 :app:assembleDebug
+          apk=apps/mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          evidence="$RUNNER_TEMP/outbox-android-proof"
+          mkdir "$evidence"
+          git show -s --format='%H %T' > "$evidence/source.txt"
+          sha256sum "$staging" "$apk" > "$evidence/build.sha256"
+          library="$RUNNER_TEMP/packaged-libt3_outbox.so"
+          unzip -p "$apk" lib/arm64-v8a/libt3_outbox.so > "$library"
+          sha256sum "$library" >> "$evidence/build.sha256"
+          readelf --file-header "$library" > "$evidence/packaged-header.txt"
+          grep -F AArch64 "$evidence/packaged-header.txt"
+          readelf --wide --dyn-syms "$library" |
+            grep -F 'Java_expo_modules_t3nativecontrols_T3OutboxDelivery_resolveV1' > "$evidence/jni.txt"
+          unzip -p "$apk" 'classes*.dex' | strings |
+            grep -F 'expo/modules/t3nativecontrols/T3OutboxDelivery' > "$evidence/dex.txt"
+      - name: Retain the app and library identities
+        if: always() && startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-package-')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: outbox-android-proof
+          path: ${{ runner.temp }}/outbox-android-proof/
+          if-no-files-found: warn
+          retention-days: 14
+
+  mobile-outbox-android-runtime:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-normal-pair-') && 70 || 55 }}
+    permissions:
+      contents: read
+      actions: read
+    env:
+      APP_VARIANT: development
+      T3_ANDROID_OUTBOX_RUNTIME_PROOF: "1"
+      PREFERENCES_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-preferences-') }}
+      NORMAL_APP_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-normal-') }}
+      PAIR_RECONNECT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-normal-pair-') }}
+      RETAINED_APK_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-runtime-normal-pair-dispatch-retained-') }}
+      NODE_OPTIONS: --max-old-space-size=3072
+      EXPO_NO_DOTENV: "1"
+      EXPO_NO_GIT_STATUS: "1"
+      T3CODE_MOBILE_UPDATES_ENABLED: "0"
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+      ORG_GRADLE_PROJECT_reactNativeArchitectures: x86_64
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Stage the pinned Android emulator and system image
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          mkdir "$RUNNER_TEMP/outbox-runtime-proof"
+          sdk="$RUNNER_TEMP/outbox-runtime-sdk"
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$ANDROID_HOME/platform-tools/adb"
+          mkdir -p "$sdk/cmdline-tools/latest" "$RUNNER_TEMP/outbox-runtime-sdk-user"
+          cp -R "$ANDROID_HOME/licenses" "$sdk/licenses"
+          cp -a "$ANDROID_HOME/cmdline-tools/latest/." "$sdk/cmdline-tools/latest/"
+          ln -s "$ANDROID_HOME/platform-tools" "$sdk/platform-tools"
+          ANDROID_HOME="$sdk" ANDROID_SDK_ROOT="$sdk" ANDROID_USER_HOME="$RUNNER_TEMP/outbox-runtime-sdk-user" \
+            "$sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk" --channel=0 --install \
+              emulator 'system-images;android-36;google_apis;x86_64' </dev/null
+          img="$sdk/system-images/android-36/google_apis/x86_64"
+          sed -nE 's/^Pkg\.Revision[[:space:]]*=[[:space:]]*//p' "$sdk/emulator/source.properties" \
+            > "$RUNNER_TEMP/outbox-runtime-proof/emulator-revision.txt"
+          sed -nE 's/^Pkg\.Revision[[:space:]]*=[[:space:]]*//p' "$img/source.properties" \
+            > "$RUNNER_TEMP/outbox-runtime-proof/image-revision.txt"
+          grep -Fx '37.3.10' "$RUNNER_TEMP/outbox-runtime-proof/emulator-revision.txt"
+          grep -Fx '7' "$RUNNER_TEMP/outbox-runtime-proof/image-revision.txt"
+          # The emulator binary links PulseAudio even when launched with -no-audio.
+          sudo -n apt-get -o Acquire::Retries=2 update
+          sudo -n apt-get -o Acquire::Retries=2 install --yes --no-install-recommends libpulse0
+          dpkg-query -W -f='${Package} ${Version}\n' libpulse0 \
+            > "$RUNNER_TEMP/outbox-runtime-proof/emulator-host-packages.txt"
+          (
+            cd "$sdk"
+            sha256sum emulator/emulator emulator/package.xml platform-tools/adb \
+              system-images/android-36/google_apis/x86_64/{package.xml,system.img}
+          ) > "$RUNNER_TEMP/outbox-runtime-proof/sdk.sha256"
+      - name: Admit and boot an isolated x64 Android emulator before compiling
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test -c /dev/kvm
+          stat -c 'type=%F mode=%a group=%G' /dev/kvm > "$RUNNER_TEMP/outbox-runtime-proof/kvm-node.txt"
+          test "$(stat -c %G /dev/kvm)" = kvm
+          getent group kvm >/dev/null
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -g "$6" -G kvm -- env GITHUB_ACTIONS=true RUNNER_TEMP="$3" ANDROID_HOME="$4" ANDROID_SDK_ROOT="$4" JAVA_HOME="$5" \
+              "$2" scripts/verify-android-outbox-runtime.ts admit "$3/outbox-runtime-proof"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$RUNNER_TEMP/outbox-runtime-sdk" "$JAVA_HOME" "$(id -gn)"
+      - name: Build matching JNI and embedded-JS Android packages
+        id: build-runtime-packages
+        if: env.RETAINED_APK_PROOF != 'true' && env.PREFERENCES_PROOF != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          export CARGO_HOME="$RUNNER_TEMP/outbox-runtime-cargo"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-runtime-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          export GRADLE_USER_HOME="$RUNNER_TEMP/outbox-runtime-gradle"
+          test ! -e apps/mobile/android
+          test ! -e .env && test ! -e .env.local
+          staging=apps/mobile/modules/t3-native-controls/android/src/main/jniLibs/x86_64/libt3_outbox.so
+          test ! -e "$staging"
+          fixture_keystore="$RUNNER_TEMP/outbox-runtime-debug.keystore"
+          trap 'rm -f -- "$staging" "$fixture_keystore"; rm -rf -- apps/mobile/android "$CARGO_TARGET_DIR" "$CARGO_HOME" "$GRADLE_USER_HOME"' EXIT
+          rustup toolchain install 1.99.1 --profile minimal --target x86_64-linux-android
+          ndk="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:?Android NDK unavailable}}"
+          export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android24-clang"
+          cargo +1.99.1 rustc --locked --release --target x86_64-linux-android \
+            -p t3-code-ls-mobile-outbox --crate-type cdylib
+          library="$CARGO_TARGET_DIR/x86_64-linux-android/release/libt3_outbox.so"
+          install -Dm644 "$library" "$staging"
+          readelf --wide --dyn-syms "$library" > "$RUNNER_TEMP/outbox-runtime-proof/jni-symbols.txt"
+          grep -F 'Java_expo_modules_t3nativecontrols_T3OutboxDelivery_resolveV1' "$RUNNER_TEMP/outbox-runtime-proof/jni-symbols.txt"
+          git show -s --format='%H %T' > "$RUNNER_TEMP/outbox-runtime-proof/source.txt"
+          sha256sum "$library" Cargo.lock apps/mobile/modules/t3-native-controls/rust/src/lib.rs \
+            apps/mobile/modules/t3-native-controls/android/src/main/java/expo/modules/t3nativecontrols/T3NativeControlsModule.kt \
+            apps/mobile/src/native/outboxDelivery.ts apps/mobile/src/state/thread-outbox-model.ts \
+            apps/mobile/src/state/thread-outbox{,-manager,-storage}.ts \
+            apps/mobile/src/lib/{atomic-file,composerImages}.ts apps/mobile/src/state/use-composer-drafts.ts \
+            apps/mobile/outbox-runtime-proof.ts scripts/verify-android-outbox-runtime.ts \
+            > "$RUNNER_TEMP/outbox-runtime-proof/inputs.sha256"
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          pnpm --dir apps/mobile exec vp test run --project unit --maxWorkers 2 src/native/outboxDelivery.test.ts
+          if [[ "$PAIR_RECONNECT_PROOF" == true ]]; then
+            sha256sum apps/mobile/outbox-dispatch-proof.ts scripts/android-pairing-fixture.ts \
+              >> "$RUNNER_TEMP/outbox-runtime-proof/inputs.sha256"
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t12-outbox-runtime-normal-pair-dispatch-* ]]; then
+              pnpm --dir apps/mobile run typecheck
+              pnpm --dir apps/mobile exec vp test run --project unit --maxWorkers 2 \
+                src/state/thread-outbox.test.ts src/state/threadOutboxDelivery.test.ts \
+                src/state/threadOutboxDelivery.permissions.test.ts
+            fi
+          fi
+          pnpm --dir apps/mobile exec expo prebuild --platform android --no-install
+          apps/mobile/android/gradlew -p apps/mobile/android --no-daemon --max-workers=2 :app:assembleRelease
+          apk=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          cp "$apk" "$RUNNER_TEMP/outbox-runtime-positive.apk"
+          rm "$staging"
+          apps/mobile/android/gradlew -p apps/mobile/android --no-daemon --max-workers=2 :app:assembleRelease
+          cp "$apk" "$RUNNER_TEMP/outbox-runtime-missing-library.apk"
+          packages=(outbox-runtime-positive.apk outbox-runtime-missing-library.apk)
+          if [[ "$NORMAL_APP_PROOF" == true ]]; then
+            cp apps/mobile/android/app/debug.keystore "$fixture_keystore"
+            install -Dm644 "$library" "$staging"
+            T3_ANDROID_OUTBOX_RUNTIME_PROOF=0 pnpm --dir apps/mobile exec expo prebuild --clean --platform android --no-install
+            if grep -F 'T3 installed outbox proof entry' apps/mobile/android/app/build.gradle ||
+              grep -F 't3OutboxRuntimeProof' apps/mobile/android/gradle.properties; then
+              exit 1
+            fi
+            node -e 'if (require("./apps/mobile/package.json").main !== "index.ts") process.exit(1)'
+            apps/mobile/android/gradlew -p apps/mobile/android --no-daemon --max-workers=2 \
+              -Pandroid.injected.signing.store.file="$fixture_keystore" \
+              -Pandroid.injected.signing.store.password=android \
+              -Pandroid.injected.signing.key.alias=androiddebugkey \
+              -Pandroid.injected.signing.key.password=android :app:assembleRelease
+            cp "$apk" "$RUNNER_TEMP/outbox-runtime-normal.apk"
+            packages+=(outbox-runtime-normal.apk)
+            sha256sum apps/mobile/index.ts apps/mobile/src/App.tsx apps/mobile/app.config.ts \
+              >> "$RUNNER_TEMP/outbox-runtime-proof/inputs.sha256"
+          fi
+          (cd "$RUNNER_TEMP" && sha256sum "${packages[@]}") \
+            > "$RUNNER_TEMP/outbox-runtime-proof/packages.sha256"
+      - name: Build the isolated Android preference recovery package
+        if: env.PREFERENCES_PROOF == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          export PATH="$JAVA_HOME/bin:$PATH"
+          export GRADLE_USER_HOME="$RUNNER_TEMP/outbox-preferences-gradle"
+          export T3_ANDROID_PREFERENCES_RUNTIME_PROOF=1
+          unset T3_ANDROID_OUTBOX_RUNTIME_PROOF
+          test ! -e apps/mobile/android
+          test ! -e "$RUNNER_TEMP/outbox-runtime-preferences.apk"
+          trap 'rm -rf -- apps/mobile/android "$GRADLE_USER_HOME"' EXIT
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+          node --test apps/mobile/plugins/withAndroidPreferencesProof.test.cjs
+          pnpm --dir apps/mobile exec vp test run --project unit --maxWorkers 2 \
+            src/persistence/mobile-database.test.ts src/lib/storage.test.ts src/state/preferences.test.ts
+          pnpm --dir apps/mobile exec expo prebuild --platform android --no-install
+          apps/mobile/android/gradlew -p apps/mobile/android --no-daemon --max-workers=2 :app:assembleRelease
+          apk=apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          aapt="$ANDROID_HOME/build-tools/37.0.0/aapt2"
+          test -x "$aapt"
+          package_id="$("$aapt" dump badging "$apk" | sed -n "s/^package: name='\([^']*\)'.*/\1/p")"
+          test "$package_id" = com.t3tools.t3code.dev.preferencesproof
+          cp "$apk" "$RUNNER_TEMP/outbox-runtime-preferences.apk"
+          proof="$RUNNER_TEMP/outbox-runtime-proof"
+          git show -s --format='%H %T' > "$proof/preferences-source.txt"
+          (cd "$RUNNER_TEMP" && sha256sum outbox-runtime-preferences.apk) > "$proof/preferences-package.sha256"
+      - name: Stage the retained Android packages from the same application source
+        id: retained-runtime-packages
+        if: env.RETAINED_APK_PROOF == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          producer=066c2c68118a45d0dfd7737981752d0a75dfbca3
+          producer_tree=6b4f7fea3dcb3a870b4710c0a98473f2205226e4
+          producer_run=45237394555
+          git fetch --no-tags --depth=1 origin "$producer"
+          test "$(git rev-parse 'FETCH_HEAD^{tree}')" = "$producer_tree"
+          git diff --exit-code "$producer" HEAD -- . \
+            ':(exclude).github/workflows/thread-recovery.yml' ':(exclude)scripts/android-pairing-fixture.ts' \
+            ':(exclude)scripts/verify-android-outbox-runtime.ts'
+          sha256sum scripts/android-pairing-fixture.ts scripts/verify-android-outbox-runtime.ts \
+            > "$RUNNER_TEMP/outbox-runtime-proof/host-verifier.sha256"
+          scratch=$(mktemp -d "$RUNNER_TEMP/retained-outbox.XXXXXXXX")
+          trap 'rm -rf -- "$scratch"' EXIT
+          proof="$RUNNER_TEMP/outbox-runtime-proof"
+          download() {
+            local id="$1" digest="$2" destination="$3"
+            local endpoint="repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
+            gh api "$endpoint" | jq -e --arg sha "$producer" --arg digest "sha256:$digest" \
+              --argjson run "$producer_run" --argjson id "$id" '
+              .id == $id and .expired == false and .digest == $digest and
+              .workflow_run.id == $run and .workflow_run.head_sha == $sha' >/dev/null
+            gh api "$endpoint/zip" > "$destination"
+            printf '%s  %s\n' "$digest" "$destination" | sha256sum --check
+          }
+          download 14854360571 8f864b267caa02142868f51a3b2c40b247fffb9b5852784a2a9997993e0615b7 "$scratch/apks.zip"
+          download 14854375458 ca48dd7ee9d8c1a395fac1f37d9279c0b252d5cf08015219ba8cda3d89b557da "$scratch/receipt.zip"
+          unzip -p "$scratch/receipt.zip" source.txt > "$proof/apk-source.txt"
+          grep -Fx "$producer $producer_tree" "$proof/apk-source.txt"
+          unzip -p "$scratch/receipt.zip" packages.sha256 > "$proof/packages.sha256"
+          packages=(outbox-runtime-missing-library.apk outbox-runtime-normal.apk outbox-runtime-positive.apk)
+          cmp <(unzip -Z1 "$scratch/apks.zip" | LC_ALL=C sort) <(printf '%s\n' "${packages[@]}")
+          cmp <(awk '{print $2}' "$proof/packages.sha256" | LC_ALL=C sort) <(printf '%s\n' "${packages[@]}")
+          for package in "${packages[@]}"; do
+            test ! -e "$RUNNER_TEMP/$package"
+            unzip -p "$scratch/apks.zip" "$package" > "$RUNNER_TEMP/$package"
+          done
+          (cd "$RUNNER_TEMP" && sha256sum --strict --check "$proof/packages.sha256")
+          git show -s --format='%H %T' > "$proof/source.txt"
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+      - name: Stage the isolated native server for Android pairing
+        if: env.PAIR_RECONNECT_PROOF == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CARGO_HOME="$RUNNER_TEMP/outbox-server-cargo"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-server-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 T3_CODE_LS_IMPLEMENTATION=native
+          toolchain_root="$RUNNER_TEMP/outbox-server-toolchain"
+          cleanup() {
+            if [[ -d "$toolchain_root" ]]; then
+              find "$toolchain_root" -type d ! -perm -u+w -exec chmod u+w '{}' +
+            fi
+            rm -rf -- "$CARGO_HOME" "$CARGO_TARGET_DIR" "$RUNNER_TEMP/outbox-server-components" "$toolchain_root"
+          }
+          trap cleanup EXIT
+          T3_CODE_LS_TOOLCHAIN=$(node tools/install-toolchain.mjs --destination "$toolchain_root")
+          export T3_CODE_LS_TOOLCHAIN
+          test -x "$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+          test -d "$T3_CODE_LS_TOOLCHAIN/lib/rustlib/x86_64-unknown-linux-gnu/lib"
+          test -s "$toolchain_root/installation-proof.json"
+          pnpm --dir apps/web run build
+          node tools/build-native.mjs "$RUNNER_TEMP/outbox-server-components"
+          # Keep filesystem-loaded externals reachable through the server package's node_modules.
+          server="$GITHUB_WORKSPACE/apps/server/dist"
+          test ! -e "$server"
+          touch "$RUNNER_TEMP/outbox-runtime-server-owned"
+          T3_CODE_LS_NATIVE_DIR="$RUNNER_TEMP/outbox-server-components" pnpm --dir apps/server run build:bundle
+          test -f "$server/bin.mjs" && test -f "$server/client/index.html" && test -x "$server/native-bin/t3-code-ls-db"
+          node --input-type=module - "$server/bin.mjs" <<'JS'
+          import { createRequire } from "node:module";
+          const resolve = createRequire(process.argv[2]).resolve;
+          for (const dependency of ["playwright-core", "undici"]) resolve(dependency);
+          JS
+          proof="$RUNNER_TEMP/outbox-runtime-proof"
+          cp "$toolchain_root/installation-proof.json" "$proof/server-toolchain.json"
+          git rev-parse HEAD HEAD^{tree} > "$proof/server-source.txt"
+          (cd "$server" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) > "$proof/server-package.sha256"
+      - name: Reject absent JNI and verify outbox persistence across process restarts
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            proof_args=(run "$3/outbox-runtime-proof")
+            if [[ "$7" == true ]]; then proof_args+=(--normal-app); fi
+            if [[ "$8" == true ]]; then proof_args+=(--pair-reconnect); fi
+            if [[ "$9" == true ]]; then proof_args+=(--preferences); fi
+            exec runuser -u "$1" -g "$6" -G kvm -- env GITHUB_ACTIONS=true RUNNER_TEMP="$3" ANDROID_HOME="$4" ANDROID_SDK_ROOT="$4" JAVA_HOME="$5" \
+              "$2" scripts/verify-android-outbox-runtime.ts "${proof_args[@]}"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP" "$RUNNER_TEMP/outbox-runtime-sdk" "$JAVA_HOME" "$(id -gn)" "$NORMAL_APP_PROOF" "$PAIR_RECONNECT_PROOF" "$PREFERENCES_PROOF"
+      - name: Retain Android execution or the first admission blocker
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: outbox-android-runtime-proof
+          path: ${{ runner.temp }}/outbox-runtime-proof/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain the exact executed positive package
+        if: success() && env.PREFERENCES_PROOF != 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: outbox-android-runtime-apk
+          path: |
+            ${{ runner.temp }}/outbox-runtime-positive.apk
+            ${{ runner.temp }}/outbox-runtime-normal.apk
+          retention-days: 3
+      - name: Retain built fixtures for runtime failure diagnosis
+        if: failure() && (steps.build-runtime-packages.outcome == 'success' || steps.retained-runtime-packages.outcome == 'success')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: outbox-android-runtime-failed-install-apks
+          path: |
+            ${{ runner.temp }}/outbox-runtime-positive.apk
+            ${{ runner.temp }}/outbox-runtime-missing-library.apk
+            ${{ runner.temp }}/outbox-runtime-normal.apk
+          if-no-files-found: error
+          retention-days: 3
+      - name: Retain the executed preference recovery package
+        if: success() && env.PREFERENCES_PROOF == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: android-preference-recovery-apk
+          path: ${{ runner.temp }}/outbox-runtime-preferences.apk
+          if-no-files-found: error
+          retention-days: 3
+      - name: Remove owned packages and SDK staging
+        if: always()
+        shell: bash
+        run: |
+          rm -f -- "$RUNNER_TEMP/outbox-runtime-positive.apk" "$RUNNER_TEMP/outbox-runtime-missing-library.apk" \
+            "$RUNNER_TEMP/outbox-runtime-normal.apk" "$RUNNER_TEMP/outbox-runtime-preferences.apk"
+          rm -rf -- "$RUNNER_TEMP/outbox-runtime-sdk" "$RUNNER_TEMP/outbox-runtime-sdk-user"
+          if [[ -f "$RUNNER_TEMP/outbox-runtime-server-owned" ]]; then
+            rm -rf -- "$GITHUB_WORKSPACE/apps/server/dist"
+            rm -f -- "$RUNNER_TEMP/outbox-runtime-server-owned"
+          fi
+
+  maintenance-snapshot:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t15-maintenance-snapshot-')
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install the pinned compiler for the snapshot proof
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/maintenance-toolchain"
+      - name: Qualify the stored snapshot against the foreground transaction
+        run: |
+          export T3_CODE_LS_TEST_RUNTIME="$RUNNER_TEMP/maintenance-runtime"
+          export CARGO_HOME="$RUNNER_TEMP/maintenance-cargo"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/maintenance-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          node tools/install-server-tests.mjs
+          node tools/fetch-migration-sources.mjs
+          node tools/check-acceptance.mjs --tests '["tools/check-redb-storage-maintenance.mjs"]' \
+            --proof-directory "$RUNNER_TEMP/maintenance-proof"
+      - name: Retain snapshot qualification
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: maintenance-proof
+          path: ${{ runner.temp }}/maintenance-proof/
+          if-no-files-found: warn
+          retention-days: 14
+
+  native-migration-witness:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t16-migration-witness-')
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install the pinned compiler
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/migration-toolchain"
+      - name: Exercise native bootstrap and descriptors during a refused second inspection
+        run: |
+          export T3_CODE_LS_TEST_RUNTIME="$RUNNER_TEMP/migration-runtime"
+          export CARGO_HOME="$RUNNER_TEMP/migration-cargo"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/migration-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          node tools/install-server-tests.mjs
+          node tools/check-acceptance.mjs --tests '["tools/check-omdb-startup.mjs"]' \
+            --proof-directory "$RUNNER_TEMP/migration-proof"
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t16-migration-witness-startup-inspection-* ]]; then
+            "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              test --locked -j 2 -p t3-code-ls-storage --lib \
+              application_bootstrap::upgrade::tests::isolated_trial_upgrades_88_without_changing_the_stopped_source \
+              -- --exact --nocapture | tee "$RUNNER_TEMP/migration-proof/sealed-inspection.log"
+            grep -F 'test result: ok. 1 passed' "$RUNNER_TEMP/migration-proof/sealed-inspection.log"
+          fi
+      - name: Retain native startup evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: native-migration-witness
+          path: ${{ runner.temp }}/migration-proof/
+          if-no-files-found: warn
+          retention-days: 14
+
+  ordered-application:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t04-ordered-application-')
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 25
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install the pinned Linux storage compiler
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/ordered-application-toolchain"
+      - name: Reopen application state and resolve lost commit acknowledgements on both engines
+        shell: bash
+        run: |
+          set -euo pipefail
+          proof="$RUNNER_TEMP/ordered-application-proof"
+          scratch="$(mktemp -d "$RUNNER_TEMP/ordered-application.XXXXXX")"
+          trap 'rm -rf -- "$scratch"' EXIT
+          mkdir "$proof" "$scratch/fixtures"
+          export CARGO_HOME="$scratch/cargo" CARGO_TARGET_DIR="$scratch/target" TMPDIR="$scratch/fixtures"
+          git rev-parse HEAD "HEAD^{tree}" > "$proof/source.txt"
+          sha256sum Cargo.lock database.lock.json toolchain.lock.json > "$proof/inputs.sha256"
+          cp "$RUNNER_TEMP/ordered-application-toolchain/installation-proof.json" "$proof/"
+          lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked --release \
+            -p t3-code-ls-storage --features ordered-engine-fixture --lib \
+            ordered_engine_fixture:: -- --test-threads=1 2>&1 | tee "$proof/ordered-application.log"
+          for name in \
+            ordered_engines_preserve_a_fresh_application_generation \
+            ordered_engines_apply_an_uncommitted_application_command \
+            ordered_engines_decode_application_reads_from_a_held_candidate_snapshot \
+            ordered_engines_commit_directly_from_an_application_writer_reservation; do
+            grep -F "ordered_engine_fixture::$name ... ok" "$proof/ordered-application.log"
+          done
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t04-ordered-application-wire-* ]]; then
+            export T3_CODE_LS_TEST_RUNTIME="$scratch/test-runtime"
+            node tools/install-server-tests.mjs
+            node tools/fetch-migration-sources.mjs
+            "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --locked --release \
+              -p t3-code-ls-storage --features ordered-engine-fixture --bin t3-code-ls-db
+            helper="$CARGO_TARGET_DIR/release/t3-code-ls-db"
+            sha256sum "$helper" > "$proof/ordered-helper.sha256"
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              for engine in direct-redb fjall; do
+                runuser -u "$1" -- env TMPDIR="$2" "$3" tools/check-ordered-event-sink.mjs \
+                  "$4" "$5/ordered-event-sink-$engine.json" "$engine"
+                grep -F "lost-ack-exact-receipt-after-reopen" "$5/ordered-event-sink-$engine.json"
+                grep -F "lost-ack-no-duplicate-publication" "$5/ordered-event-sink-$engine.json"
+              done
+            ' _ "$(id -un)" "$TMPDIR" "$(command -v node)" "$helper" "$proof"
+          fi
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked --release \
+            -p t3-code-ls-storage --lib application_events::tests \
+            -- --test-threads=1 2>&1 | tee "$proof/default-events.log"
+          grep -Eq 'test result: ok[.] [1-9][0-9]* passed;' "$proof/default-events.log"
+          "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked --release \
+            -p t3-code-ls-storage --lib backend::tests -- --test-threads=1 2>&1 | tee "$proof/default-backend.log"
+          grep -Eq 'test result: ok[.] [1-9][0-9]* passed;' "$proof/default-backend.log"
+      - name: Retain source, lock and storage test receipts
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: ordered-application-proof
+          path: ${{ runner.temp }}/ordered-application-proof/
+          if-no-files-found: error
+          retention-days: 14
+
+  server-acceptance-types:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-acceptance-types-')
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Check the native persistence project's TypeScript surface
+        run: |
+          export T3_CODE_LS_TEST_RUNTIME="$RUNNER_TEMP/acceptance-test-runtime"
+          node tools/install-server-tests.mjs
+          status=0
+          "$T3_CODE_LS_TEST_RUNTIME/node_modules/.bin/effect-tsgo" tsrs --noEmit \
+            -p tools/omdb-production-tsconfig.json > "$RUNNER_TEMP/omdb-types.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/omdb-types.log"
+          exit "$status"
+      - name: Retain the full TypeScript diagnostics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: omdb-types
+          path: ${{ runner.temp }}/omdb-types.log
+          if-no-files-found: warn
+          retention-days: 14
+
+  mobile-outbox-ios:
+    if: startsWith(github.ref_name, 'candidate/t3code-ls-t12-outbox-native-')
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Build device and simulator libraries and link a Swift caller
+        run: |
+          test "$(uname -m)" = arm64
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/outbox-target"
+          export IPHONEOS_DEPLOYMENT_TARGET=18.0
+          export CARGO_PROFILE_RELEASE_LTO=false
+          export RUSTFLAGS="-Cembed-bitcode=no"
+          rustup toolchain install 1.99.1 --profile minimal \
+            --target aarch64-apple-ios,aarch64-apple-ios-sim --component llvm-tools-preview
+          rust_sysroot=$(rustc +1.99.1 --print sysroot)
+          llvm_nm="$rust_sysroot/lib/rustlib/aarch64-apple-darwin/bin/llvm-nm"
+          headers=apps/mobile/modules/t3-native-controls/rust/include
+          for target in aarch64-apple-ios aarch64-apple-ios-sim; do
+            cargo +1.99.1 rustc --locked --release --target "$target" \
+              -p t3-code-ls-mobile-outbox --crate-type staticlib
+            library="$CARGO_TARGET_DIR/$target/release/libt3_outbox.a"
+            "$llvm_nm" --extern-only --defined-only "$library" > "$RUNNER_TEMP/$target-symbols.txt"
+            grep -F '_t3_outbox_delivery_v1' "$RUNNER_TEMP/$target-symbols.txt"
+            shasum -a 256 "$library"
+          done
+          xcodebuild -create-xcframework \
+            -library "$CARGO_TARGET_DIR/aarch64-apple-ios/release/libt3_outbox.a" -headers "$headers" \
+            -library "$CARGO_TARGET_DIR/aarch64-apple-ios-sim/release/libt3_outbox.a" -headers "$headers" \
+            -output "$RUNNER_TEMP/T3Outbox.xcframework"
+          swift_probe="$RUNNER_TEMP/OutboxProbe.swift"
+          printf 'import T3Outbox\npublic func fixtureAction() -> Int32 { t3_outbox_delivery_v1(62) }\n' > "$swift_probe"
+          xcrun --sdk iphonesimulator swiftc -emit-library -target arm64-apple-ios18.0-simulator \
+            -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" -I "$headers" "$swift_probe" \
+            "$CARGO_TARGET_DIR/aarch64-apple-ios-sim/release/libt3_outbox.a" \
+            -o "$RUNNER_TEMP/libOutboxProbe.dylib"

@@ -11,19 +11,24 @@ import * as Cache from "./Cache.ts";
 import * as Cleanup from "./Cleanup.ts";
 import * as NativeClients from "./NativeClients.ts";
 import * as Savings from "./Savings.ts";
+import * as SavingsRuntime from "./SavingsRuntime.ts";
+import { savingsBuild } from "./SavingsBuild.ts";
 import type { ProtocolBindings } from "./protocolTypes.ts";
 import * as Resources from "./resources.ts";
 
 export class Worker extends Cloudflare.Worker<Worker, {}>()("Cache") {}
 
 export const layer = Worker.make(
-  Resources.cacheName.pipe(
-    Effect.map((name) => ({
+  Effect.gen(function* () {
+    const name = yield* Resources.cacheName;
+    const build = yield* savingsBuild;
+    return {
       name,
       main: import.meta.filename,
       compatibility: { date: "2026-09-11", flags: ["nodejs_compat"] },
-    })),
-  ),
+      ...(build === undefined ? {} : { build }),
+    };
+  }),
   Effect.gen(function* () {
     const savings = yield* Cloudflare.D1.QueryDatabase(yield* Resources.Savings);
     const database = yield* Cloudflare.D1.QueryDatabase(yield* Resources.Index);
@@ -67,7 +72,7 @@ export const layer = Worker.make(
       ),
     );
     const admission = yield* Admission.Admission.pipe(Effect.provide(Admission.layer));
-    const savingsLayer = Savings.layer.pipe(
+    const savingsLayer = SavingsRuntime.layer.pipe(
       Layer.provide(Layer.effect(Savings.Database, savings.raw)),
     );
     const runtime = Cache.layer.pipe(

@@ -3,18 +3,26 @@
 /**
  * A free ACP agent for dev servers. It plays recorded ACP transcripts with simulated
  * streaming, so the real adapter, orchestration, and UI run without a paid model.
- * Each scenario is a "model"; each prompt plays the next recorded turn.
+ * Each scenario is a "model"; each prompt plays the next recorded turn, except
+ * the controlled HTML scenario, which publishes through its own local MCP session.
  * Unlike acp-replay-agent.ts, it does not assert the client's frames.
  */
 import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeReadline from "node:readline";
 
+interface ReplayError {
+  readonly code: number;
+  readonly message: string;
+  readonly data?: unknown;
+}
+
 interface LogicalFrame {
   readonly kind: "notification" | "request" | "response";
   readonly method: string;
   readonly params?: unknown;
   readonly result?: unknown;
+  readonly error?: ReplayError;
 }
 
 interface ReplayEntry {
@@ -36,6 +44,7 @@ export interface ReplayTurn {
   /** Frames the agent sends: session updates and agent-to-client requests. */
   readonly frames: ReadonlyArray<{ readonly frame: LogicalFrame; readonly afterMs?: number }>;
   readonly stopReason: string;
+  readonly error?: ReplayError;
 }
 
 const FIXTURES = "../src/orchestration-v2/testkit/fixtures";
@@ -44,7 +53,15 @@ const FIXTURES = "../src/orchestration-v2/testkit/fixtures";
 // Use acpRegistry transcripts: vendor transcripts carry state in frames this agent drops.
 export const SCENARIOS = [
   { id: "showcase", name: "Showcase", file: "./dev-replay/showcase_transcript.ndjson" },
+  { id: "html-interaction", name: "Interactive HTML", file: null },
+  { id: "thread-navigation", name: "Thread navigation", file: null },
   { id: "text-appends", name: "Text appends", file: "./dev-replay/text_appends_transcript.ndjson" },
+  { id: "text-splices", name: "Text splices", file: "./dev-replay/text_splices_transcript.ndjson" },
+  {
+    id: "formatted-text",
+    name: "Formatted text",
+    file: "./dev-replay/formatted_text_transcript.ndjson",
+  },
   {
     id: "todo-list",
     name: "Plan and reads",
@@ -65,11 +82,17 @@ export const SCENARIOS = [
     name: "Multi turn",
     file: `${FIXTURES}/multi_turn/registry_transcript.ndjson`,
   },
+  {
+    id: "failed-turn",
+    name: "Failed turn",
+    file: `${FIXTURES}/stop_background_work_after_failed_turn/registry_transcript.ndjson`,
+  },
 ] as const;
 
 // Session setup and vendor state stay out: they would replace the replay agent's own models.
 const REPLAYED_UPDATES = new Set([
   "agent_message_chunk",
+  "agent_message",
   "agent_thought_chunk",
   "tool_call",
   "tool_call_update",
@@ -88,6 +111,8 @@ const FRAME_DELAY_MS = 250;
 const MAX_RECORDED_DELAY_MS = 2_000;
 const WORDS_PER_CHUNK = 3;
 
+export const durableTextPrefix = `${"雪🐟".repeat(512)} `;
+
 function isReplayedFrame(frame: LogicalFrame): boolean {
   if (frame.kind === "request") return REPLAYED_REQUESTS.has(frame.method);
   if (frame.kind !== "notification" || frame.method !== "session/update") return false;
@@ -97,7 +122,11 @@ function isReplayedFrame(frame: LogicalFrame): boolean {
 
 /** Splits a recorded transcript into the turns that follow each `session/prompt`. */
 export function parseReplayTurns(ndjson: string): ReadonlyArray<ReplayTurn> {
-  const turns: Array<{ frames: Array<ReplayTurn["frames"][number]>; stopReason: string }> = [];
+  const turns: Array<{
+    frames: Array<ReplayTurn["frames"][number]>;
+    stopReason: string;
+    error?: ReplayError;
+  }> = [];
   // Frames after a prompt's response belong to background work, not to that turn.
   let turn: (typeof turns)[number] | undefined;
   for (const line of ndjson.split("\n")) {
@@ -118,6 +147,7 @@ export function parseReplayTurns(ndjson: string): ReadonlyArray<ReplayTurn> {
     if (frame.kind === "response" && frame.method === "session/prompt") {
       const stopReason = (frame.result as { stopReason?: unknown } | undefined)?.stopReason;
       if (typeof stopReason === "string") turn.stopReason = stopReason;
+      if (frame.error !== undefined) turn.error = frame.error;
       turn = undefined;
       continue;
     }
@@ -173,11 +203,22 @@ function permissionRejectedToolCallId(request: LogicalFrame, answer: unknown): s
 }
 
 function runAgent(): void {
+  const holdForInterrupt = process.argv.includes("--hold-for-interrupt");
+  // A composed browser proof can hold its Stop model while other replay models
+  // still complete. The original flag alone retains its all-model behavior.
+  const holdModelArgument = process.argv.find((argument) => argument.startsWith("--hold-for-interrupt-model="));
+  const holdForInterruptModel = holdModelArgument?.slice("--hold-for-interrupt-model=".length);
+  if (holdModelArgument !== undefined && (!holdForInterrupt || !holdForInterruptModel ||
+      !SCENARIOS.some((model) => model.id === holdForInterruptModel))) {
+    throw new Error("A held replay model requires --hold-for-interrupt and a known model");
+  }
+  const extendTextAppends = process.argv.includes("--extend-text-appends");
   const turnsByScenario = new Map<string, ReadonlyArray<ReplayTurn>>();
   const loadTurns = (scenarioId: string) => {
     const cached = turnsByScenario.get(scenarioId);
     if (cached !== undefined) return cached;
     const scenario = SCENARIOS.find((candidate) => candidate.id === scenarioId) ?? SCENARIOS[0];
+    if (scenario.file === null) throw new Error("The HTML scenario uses the real local publisher.");
     const turns = parseReplayTurns(
       NodeFS.readFileSync(new URL(scenario.file, import.meta.url), "utf8"),
     );
@@ -219,6 +260,7 @@ function runAgent(): void {
     const session = sessions.get(sessionId)!;
     // Random, so a session loaded after a restart cannot reuse earlier tool rows.
     const live = { sessionId, workspace: session.cwd, turnKey: NodeCrypto.randomUUID() };
+    let prefixNextAppend = extendTextAppends && session.model === "text-appends";
     for (const recorded of turn.frames) {
       const frame = materialize(recorded.frame, live) as LogicalFrame;
       if (frame.kind === "request") {
@@ -257,7 +299,9 @@ function runAgent(): void {
           : undefined;
       // Live recordings hold one frame per token, so text defaults to the chunk pace.
       const firstDelay = recorded.afterMs ?? (text === undefined ? FRAME_DELAY_MS : CHUNK_DELAY_MS);
-      const chunks = text === undefined ? [undefined] : streamChunks(text);
+      const extend = prefixNextAppend && params.update.sessionUpdate === "agent_message_chunk" && text !== undefined;
+      if (extend) prefixNextAppend = false;
+      const chunks = text === undefined ? [undefined] : streamChunks(extend ? durableTextPrefix + text : text);
       for (const [index, chunk] of chunks.entries()) {
         await sleep(index === 0 ? firstDelay : CHUNK_DELAY_MS, signal);
         if (signal.aborted) return;
@@ -268,6 +312,15 @@ function runAgent(): void {
               ? params
               : { ...params, update: { ...params.update, content: { ...content, text: chunk } } },
         });
+      }
+      if (holdForInterrupt && (holdForInterruptModel === undefined || session.model === holdForInterruptModel) &&
+          params.update.sessionUpdate === "agent_message_chunk") {
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve(), { once: true }),
+          );
+        }
+        return "cancelled";
       }
     }
   };
@@ -321,23 +374,41 @@ function runAgent(): void {
         const sessionId = String(params.sessionId);
         const session = sessions.get(sessionId);
         if (session === undefined) throw new Error(`Unknown session ${sessionId}`);
-        const turns = loadTurns(session.model);
+        const turns = ["html-interaction", "thread-navigation"].includes(session.model) ? [] : loadTurns(session.model);
         const turn = turns[session.promptCount % Math.max(turns.length, 1)];
         session.promptCount += 1;
         const controller = new AbortController();
         session.cancel = () => controller.abort();
         let ended: "cancelled" | undefined;
         try {
-          if (turn !== undefined) ended = await playTurn(sessionId, turn, controller.signal);
+          if (session.model === "thread-navigation") {
+            // Synthetic wire input only, never an actual MCP call. The packaged
+            // verifier supplies a thread it just created in its isolated profile.
+            const target = JSON.stringify(params.prompt).match(/Navigation target: ([A-Za-z0-9-]+)/u)?.[1];
+            if (!target) throw new Error("Thread navigation replay requires a synthetic target");
+            const toolCallId = NodeCrypto.randomUUID();
+            const update = (value: Record<string, unknown>) => send({ method: "session/update", params: { sessionId, update: value } });
+            update({ sessionUpdate: "tool_call", toolCallId, kind: "other", title: "Read a T3 thread", status: "in_progress",
+              rawInput: { threadId: target },
+              _meta: { toolName: "mcp::t3-code::t3_thread_read", serverId: "t3-code", provenance: "mcp" } });
+            update({ sessionUpdate: "tool_call_update", toolCallId, status: "completed", rawOutput: { threadId: target } });
+            update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Synthetic navigation ready." } });
+          } else if (session.model === "html-interaction") {
+            const { publishInteractiveHtml } = await import("./dev-replay-html.ts");
+            try {
+              await publishInteractiveHtml({ signal: controller.signal,
+                sendUpdate: (update) => { send({ method: "session/update", params: { sessionId, update } }); } });
+            } catch (cause) {
+              if (controller.signal.aborted) ended = "cancelled";
+              else throw cause;
+            }
+          } else if (turn !== undefined) ended = await playTurn(sessionId, turn, controller.signal);
         } finally {
           session.cancel = undefined;
         }
-        return {
-          stopReason:
-            controller.signal.aborted || ended === "cancelled"
-              ? "cancelled"
-              : (turn?.stopReason ?? "end_turn"),
-        };
+        if (controller.signal.aborted || ended === "cancelled") return { stopReason: "cancelled" };
+        if (turn?.error !== undefined) throw Object.assign(new Error(turn.error.message), turn.error);
+        return { stopReason: turn?.stopReason ?? "end_turn" };
       }
       case "session/close":
         sessions.get(String(params.sessionId))?.cancel?.();
@@ -376,8 +447,8 @@ function runAgent(): void {
     const id = message.id;
     handleRequest(message).then(
       (result) => send({ id, result }),
-      (error: Error & { code?: number }) =>
-        send({ id, error: { code: error.code ?? -32603, message: error.message } }),
+      (error: Error & { code?: number; data?: unknown }) =>
+        send({ id, error: { code: error.code ?? -32603, message: error.message, data: error.data } }),
     );
   });
 }

@@ -4,10 +4,12 @@
 //! Scan cursors order encoded storage keys; they do not imply SQL primary-key ordering.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::backend::{Transaction, TransactionCheckpoint};
 use crate::{Error, MAX_BATCH_BYTES, Result, Store, request_digest, store_key};
@@ -20,6 +22,7 @@ const MAX_PAGE_ROWS: u32 = 4096;
 const MAX_IDLE: Duration = Duration::from_secs(300);
 const MAX_SAVEPOINTS: usize = 64;
 const DEFAULT_LOCK_TIMEOUT_MS: u64 = 5000;
+pub(crate) const OMDB_REVISION: &str = "b2ff031398b1f0a793a352db7a699575b5d4d3d4";
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -63,6 +66,177 @@ pub struct ApplicationPage {
 pub(crate) struct ApplicationCatalog {
     pub(crate) schema: ApplicationSchema,
     pub(crate) generation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) event_layout: Option<ApplicationEventLayout>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) prepared_service_activation_v1: Option<PreparedServiceActivation>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "ForwardServiceActivation::deserialize_present"
+    )]
+    pub(crate) forward_service_activation_v1: Option<ForwardServiceActivation>,
+}
+
+impl ApplicationCatalog {
+    fn has_service_fence(&self) -> bool {
+        self.prepared_service_activation_v1.is_some()
+            || self.forward_service_activation_v1.is_some()
+    }
+
+    pub(crate) fn ensure_serving(&self) -> Result<()> {
+        if self.has_service_fence() {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    }
+}
+
+/// Installed-runtime identity sealed into a private trial's native catalog.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PreparedServiceActivation {
+    pub update_id: String,
+    pub from_version: String,
+    pub target_version: String,
+    pub target_entry_sha256: String,
+    pub target_helper_sha256: String,
+    pub target_schema_sha256: String,
+}
+
+/// Binds the forward catalog to the exact selection bytes, including its receipt digest.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ForwardServiceActivation {
+    pub(crate) update_id: String,
+    pub(crate) forward_selection_sha256: String,
+}
+
+impl ForwardServiceActivation {
+    fn deserialize_present<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Option<Self>, D::Error> {
+        Self::deserialize(deserializer).map(Some)
+    }
+}
+
+pub(crate) fn exact_service_version(value: &str) -> bool {
+    static GRAMMAR: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(
+            r"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:(?:0|[1-9][0-9]*)|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$",
+        )
+        .expect("service version grammar")
+    });
+    value.len() <= 256 && GRAMMAR.is_match(value)
+}
+
+impl PreparedServiceActivation {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if !crate::application_storage::valid_update_id(&self.update_id)
+            || !exact_service_version(&self.from_version)
+            || !exact_service_version(&self.target_version)
+            || self.from_version == self.target_version
+            || !digest(&self.target_entry_sha256)
+            || !digest(&self.target_helper_sha256)
+            || !digest(&self.target_schema_sha256)
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplicationEventLayout {
+    AssistantTextRevisionsV1,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ApplicationGenerationIdentity {
+    pub generation: String,
+    pub engine: String,
+    pub engine_version: String,
+    pub engine_revision: String,
+    pub layout: String,
+    pub schema_version: u32,
+    pub catalog_sha256: String,
+}
+
+fn generation_identity(
+    catalog: &ApplicationCatalog,
+    encoded_catalog: &[u8],
+) -> ApplicationGenerationIdentity {
+    ApplicationGenerationIdentity {
+        generation: catalog.generation.clone(),
+        engine: "omdb".into(),
+        engine_version: "4.5.0".into(),
+        engine_revision: OMDB_REVISION.into(),
+        layout: match catalog.event_layout {
+            None => "t3-application-keyspace-v1",
+            Some(ApplicationEventLayout::AssistantTextRevisionsV1) => {
+                "t3-application-keyspace-v1+assistant-text-revisions-v1"
+            }
+        }
+        .into(),
+        schema_version: catalog.schema.version,
+        catalog_sha256: Sha256::digest(encoded_catalog)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    }
+}
+
+fn generation_identity_key(catalog: &ApplicationCatalog) -> Vec<u8> {
+    store_key(&format!(
+        "application/generation/{}/metadata/engine-layout",
+        catalog.generation
+    ))
+}
+
+pub(crate) async fn record_generation_identity(
+    transaction: &mut Transaction,
+    catalog: &ApplicationCatalog,
+    encoded_catalog: &[u8],
+) -> Result<()> {
+    let bytes = bounded_encode(&generation_identity(catalog, encoded_catalog))?;
+    transaction
+        .put(generation_identity_key(catalog), bytes)
+        .await
+}
+
+pub(crate) async fn read_generation_identity(
+    transaction: &mut Transaction,
+    catalog: &ApplicationCatalog,
+    encoded_catalog: &[u8],
+) -> Result<Option<ApplicationGenerationIdentity>> {
+    verify_generation_identity(
+        transaction,
+        catalog,
+        &generation_identity(catalog, encoded_catalog),
+    )
+    .await
+}
+
+async fn verify_generation_identity(
+    transaction: &mut Transaction,
+    catalog: &ApplicationCatalog,
+    expected: &ApplicationGenerationIdentity,
+) -> Result<Option<ApplicationGenerationIdentity>> {
+    let Some(bytes) = transaction.get(&generation_identity_key(catalog)).await? else {
+        if catalog.event_layout.is_some() || catalog.has_service_fence() {
+            return Err(Error::IncompatibleStore);
+        }
+        // Older generations have a validated catalog without an engine record.
+        return Ok(None);
+    };
+    let identity: ApplicationGenerationIdentity =
+        serde_json::from_slice(&bytes).map_err(|_| Error::IncompatibleStore)?;
+    if &identity != expected {
+        return Err(Error::IncompatibleStore);
+    }
+    Ok(Some(identity))
 }
 
 fn invalid(message: &str) -> Error {
@@ -187,6 +361,19 @@ fn validate_catalog(catalog: &ApplicationCatalog) -> Result<()> {
     if catalog.generation != "native" && !digest(&catalog.generation) {
         return Err(invalid("invalid application generation"));
     }
+    if catalog.event_layout.is_some() && catalog.generation != "native" {
+        return Err(invalid("event layout requires a fresh native generation"));
+    }
+    if let Some(binding) = &catalog.prepared_service_activation_v1 {
+        binding.validate()?;
+    }
+    if let Some(binding) = &catalog.forward_service_activation_v1
+        && (catalog.prepared_service_activation_v1.is_some()
+            || !crate::application_storage::valid_update_id(&binding.update_id)
+            || !digest(&binding.forward_selection_sha256))
+    {
+        return Err(Error::IncompatibleStore);
+    }
     Ok(())
 }
 
@@ -243,11 +430,21 @@ pub(crate) fn decode_row(
 ) -> Result<ApplicationRow> {
     let value: ApplicationRow =
         serde_json::from_slice(bytes).map_err(|_| Error::IncompatibleStore)?;
+    validate_row_identity(catalog, table, encoded_key, &value)?;
+    Ok(value)
+}
+
+pub(crate) fn validate_row_identity(
+    catalog: &ApplicationCatalog,
+    table: &ApplicationTable,
+    encoded_key: &[u8],
+    value: &ApplicationRow,
+) -> Result<()> {
     validate_row(table, &value.key, &value.row).map_err(|_| Error::IncompatibleStore)?;
     if row_key(&catalog.generation, &table.name, &value.key)? != encoded_key {
         return Err(Error::IncompatibleStore);
     }
-    Ok(value)
+    Ok(())
 }
 
 struct Savepoint {
@@ -259,10 +456,16 @@ struct Savepoint {
 
 pub(crate) struct Session {
     pub(crate) transaction: Transaction,
-    pub(crate) catalog: ApplicationCatalog,
+    pub(crate) catalog: Arc<ApplicationCatalog>,
     touched: Instant,
     savepoints: Vec<Savepoint>,
     savepoint_bytes: usize,
+}
+
+struct ValidatedCatalog {
+    bytes: Vec<u8>,
+    catalog: Arc<ApplicationCatalog>,
+    identity: ApplicationGenerationIdentity,
 }
 
 /// A helper owns these sessions. Dropping the helper drops every uncommitted write.
@@ -271,6 +474,9 @@ pub(crate) struct Session {
 pub struct ApplicationTransactions {
     store: Store,
     sessions: BTreeMap<String, Session>,
+    validated_catalog: Option<ValidatedCatalog>,
+    #[cfg(feature = "ordered-engine-fixture")]
+    ordered_fixture: Option<Arc<redb_bench_compare::ordered::Database>>,
 }
 
 impl ApplicationTransactions {
@@ -278,7 +484,121 @@ impl ApplicationTransactions {
         Self {
             store,
             sessions: BTreeMap::new(),
+            validated_catalog: None,
+            #[cfg(feature = "ordered-engine-fixture")]
+            ordered_fixture: None,
         }
+    }
+
+    /// Isolated helper fixture only. This copies a bounded empty application
+    /// schema, never an existing user's rows and never an engine migration.
+    #[cfg(feature = "ordered-engine-fixture")]
+    pub async fn select_ordered_fixture(
+        &mut self,
+        profile: &str,
+        directory: &std::path::Path,
+        initialize: bool,
+    ) -> Result<()> {
+        use redb_bench_compare::ordered::{Database, Engine};
+        // Validate before touching either the candidate path or session state.
+        if !directory.is_absolute() || !self.sessions.is_empty() || self.ordered_fixture.is_some() {
+            return Err(invalid("ordered fixture selection rejected"));
+        }
+        let (engine, name, marker): (Engine, &str, &[u8]) = match profile {
+            "t04-direct-redb-efaf649-v1" => (
+                Engine::DirectRedb,
+                "state.redb",
+                b"t3-t04-isolated/1/direct-redb/efaf649fb270ce70257e53862295cc10e4bddab0/t3-application-keyspace-v1",
+            ),
+            "t04-fjall-efaf649-v1" => (
+                Engine::Fjall,
+                "state.fjall",
+                b"t3-t04-isolated/1/fjall/efaf649fb270ce70257e53862295cc10e4bddab0/t3-application-keyspace-v1",
+            ),
+            _ => return Err(invalid("ordered fixture selection rejected")),
+        };
+        let path = directory.join(name);
+        let profile_file = directory.join("profile");
+        let marker_key = store_key("ordered-fixture/identity");
+        let database = if initialize {
+            let mut source = self.store.db.begin_read_only().await?;
+            let catalog_bytes = source
+                .get(&schema_key())
+                .await?
+                .ok_or(Error::IncompatibleStore)?;
+            let catalog = decode_catalog(&catalog_bytes)?;
+            catalog.ensure_serving()?;
+            if catalog.generation != "native" || catalog.prepared_service_activation_v1.is_some() {
+                return Err(Error::IncompatibleStore);
+            }
+            read_generation_identity(&mut source, &catalog, &catalog_bytes)
+                .await?
+                .ok_or(Error::IncompatibleStore)?;
+            for table in &catalog.schema.tables {
+                if table.name == "effect_sql_migrations" {
+                    continue;
+                }
+                let prefix = row_prefix(&catalog.generation, &table.name)?;
+                let mut end = prefix.clone();
+                *end.last_mut().ok_or(Error::IncompatibleStore)? += 1;
+                if !source.scan(&prefix, &end, 1).await?.is_empty() {
+                    return Err(invalid("ordered fixture requires an empty application"));
+                }
+            }
+            let (start, end) = crate::prefix_range("");
+            let rows = source.scan(&start, &end, 4097).await?;
+            if rows.len() > 4096
+                || rows.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() > MAX_BATCH_BYTES / 2
+            {
+                return Err(invalid("ordered fixture seed budget exceeded"));
+            }
+            source.rollback().await?;
+            // Exclusive directory creation protects existing files/profiles.
+            std::fs::create_dir(directory)
+                .map_err(|_| invalid("ordered fixture directory must be new"))?;
+            let database = Database::open(engine, &path)?;
+            database.write(|tx| {
+                for (key, value) in &rows {
+                    tx.put(key, value)?;
+                }
+                tx.put(&marker_key, marker)?;
+                Ok::<_, redb_bench_compare::ordered::Error>(())
+            })?;
+            // An interrupted initialization stays unselectable; no automatic retry.
+            std::fs::write(&profile_file, marker)
+                .map_err(|_| invalid("ordered fixture marker write failed"))?;
+            database
+        } else {
+            let metadata = std::fs::symlink_metadata(directory)
+                .map_err(|_| invalid("ordered fixture directory missing"))?;
+            if !metadata.is_dir()
+                || !std::fs::symlink_metadata(&profile_file)
+                    .is_ok_and(|metadata| metadata.is_file())
+                || std::fs::read(&profile_file).ok().as_deref() != Some(marker)
+                || !std::fs::symlink_metadata(&path).is_ok_and(|metadata| match engine {
+                    Engine::DirectRedb => metadata.is_file(),
+                    _ => metadata.is_dir(),
+                })
+            {
+                return Err(Error::IncompatibleStore);
+            }
+            Database::open(engine, &path)?
+        };
+        if database.snapshot()?.get(&marker_key)?.as_deref() != Some(marker) {
+            return Err(Error::IncompatibleStore);
+        }
+        // Validate the copied catalog and generation before admitting sessions.
+        let transaction = Transaction::comparison_read_only(database.snapshot()?);
+        let session = self.session_from_transaction(transaction).await?;
+        drop(session);
+        self.ordered_fixture = Some(Arc::new(database));
+        self.validated_catalog = None;
+        Ok(())
+    }
+
+    #[cfg(feature = "ordered-engine-fixture")]
+    pub fn has_ordered_fixture(&self) -> bool {
+        self.ordered_fixture.is_some()
     }
 
     pub fn discard_all(&mut self) {
@@ -298,13 +618,149 @@ impl ApplicationTransactions {
         });
     }
 
+    pub(crate) async fn catalog_and_identity(
+        &self,
+    ) -> Result<Option<(ApplicationCatalog, Option<ApplicationGenerationIdentity>)>> {
+        let mut transaction = self.store.db.begin_read_only().await?;
+        let found = if let Some(bytes) = transaction.get(&schema_key()).await? {
+            let catalog = decode_catalog(&bytes)?;
+            let identity = read_generation_identity(&mut transaction, &catalog, &bytes).await?;
+            Some((catalog, identity))
+        } else {
+            None
+        };
+        transaction.rollback().await?;
+        Ok(found)
+    }
+
     pub async fn schema(&self) -> Result<Option<ApplicationSchema>> {
-        self.store
-            .db
-            .read(&schema_key())
+        let Some((catalog, _)) = self.catalog_and_identity().await? else {
+            return Ok(None);
+        };
+        catalog.ensure_serving()?;
+        Ok(Some(catalog.schema))
+    }
+
+    pub async fn generation_identity(&self) -> Result<Option<ApplicationGenerationIdentity>> {
+        Ok(self
+            .catalog_and_identity()
             .await?
-            .map(|bytes| decode_catalog(&bytes).map(|catalog| catalog.schema))
-            .transpose()
+            .and_then(|(_, identity)| identity))
+    }
+
+    pub async fn prepared_service_activation(&self) -> Result<Option<PreparedServiceActivation>> {
+        Ok(self
+            .catalog_and_identity()
+            .await?
+            .and_then(|(catalog, _)| catalog.prepared_service_activation_v1))
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) async fn seal_service_trial(
+        &self,
+        binding: PreparedServiceActivation,
+    ) -> Result<()> {
+        self.store.db.require_exclusive()?;
+        let mut transaction = self.store.db.begin().await?;
+        let bytes = transaction
+            .get(&schema_key())
+            .await?
+            .ok_or(Error::IncompatibleStore)?;
+        let mut catalog = decode_catalog(&bytes)?;
+        read_generation_identity(&mut transaction, &catalog, &bytes).await?;
+        catalog.ensure_serving()?;
+        catalog.prepared_service_activation_v1 = Some(binding);
+        let bytes = encode_catalog(&catalog)?;
+        record_generation_identity(&mut transaction, &catalog, &bytes).await?;
+        transaction.put(schema_key(), bytes).await?;
+        transaction.commit().await
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) async fn verify_forward_catalog(
+        &self,
+        prepared: &PreparedServiceActivation,
+        marker: &ForwardServiceActivation,
+        expected: &crate::application_storage::TrialSnapshot,
+    ) -> Result<bool> {
+        let mut tx = self.store.db.begin_read_only().await?;
+        let bytes = tx
+            .get(&schema_key())
+            .await?
+            .ok_or(Error::IncompatibleStore)?;
+        let mut catalog = decode_catalog(&bytes)?;
+        read_generation_identity(&mut tx, &catalog, &bytes).await?;
+        if encode_catalog(&catalog)? != bytes {
+            return Err(Error::IncompatibleStore);
+        }
+        tx.rollback().await?;
+
+        let reused = match (
+            &catalog.prepared_service_activation_v1,
+            &catalog.forward_service_activation_v1,
+        ) {
+            (Some(binding), None) if binding == prepared => false,
+            (None, Some(binding)) if binding == marker => true,
+            _ => return Err(Error::IncompatibleStore),
+        };
+        if reused {
+            // Project the two changed values back to their exact sealed
+            // encoding so the original receipt still covers every record.
+            catalog.forward_service_activation_v1 = None;
+            catalog.prepared_service_activation_v1 = Some(prepared.clone());
+        }
+        let sealed = encode_catalog(&catalog)?;
+        let identity = generation_identity(&catalog, &sealed);
+        let replacements = if reused {
+            vec![
+                (schema_key(), sealed),
+                (
+                    generation_identity_key(&catalog),
+                    bounded_encode(&identity)?,
+                ),
+            ]
+        } else {
+            Vec::new()
+        };
+        let fingerprint = self
+            .store
+            .db
+            .bounded_storage_fingerprint_with(replacements)
+            .await?;
+        if identity.catalog_sha256 != expected.catalog_sha256
+            || fingerprint.rows != expected.rows
+            || fingerprint.checksum != expected.checksum
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(reused)
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) async fn mark_forward_catalog(
+        &self,
+        prepared: &PreparedServiceActivation,
+        marker: ForwardServiceActivation,
+        verify: impl FnOnce() -> Result<()>,
+    ) -> Result<()> {
+        self.store.db.require_exclusive()?;
+        let mut tx = self.store.db.begin().await?;
+        let bytes = tx
+            .get(&schema_key())
+            .await?
+            .ok_or(Error::IncompatibleStore)?;
+        let mut catalog = decode_catalog(&bytes)?;
+        read_generation_identity(&mut tx, &catalog, &bytes).await?;
+        if catalog.prepared_service_activation_v1.as_ref() != Some(prepared) {
+            return Err(Error::IncompatibleStore);
+        }
+        catalog.prepared_service_activation_v1 = None;
+        catalog.forward_service_activation_v1 = Some(marker);
+        let encoded = encode_catalog(&catalog)?;
+        record_generation_identity(&mut tx, &catalog, &encoded).await?;
+        tx.put(schema_key(), encoded).await?;
+        verify()?;
+        tx.commit().await
     }
 
     pub async fn initialize(&mut self, schema: ApplicationSchema) -> Result<bool> {
@@ -312,6 +768,8 @@ impl ApplicationTransactions {
         let mut transaction = self.store.db.begin().await?;
         if let Some(bytes) = transaction.get(&schema_key()).await? {
             let existing = decode_catalog(&bytes)?;
+            read_generation_identity(&mut transaction, &existing, &bytes).await?;
+            existing.ensure_serving()?;
             if existing.schema != schema {
                 return Err(invalid(
                     "application schema is already initialized differently",
@@ -323,10 +781,13 @@ impl ApplicationTransactions {
         let catalog = ApplicationCatalog {
             schema,
             generation: "native".into(),
+            event_layout: None,
+            prepared_service_activation_v1: None,
+            forward_service_activation_v1: None,
         };
-        transaction
-            .insert(schema_key(), encode_catalog(&catalog)?)
-            .await?;
+        let bytes = encode_catalog(&catalog)?;
+        record_generation_identity(&mut transaction, &catalog, &bytes).await?;
+        transaction.insert(schema_key(), bytes).await?;
         transaction.commit().await?;
         Ok(true)
     }
@@ -349,6 +810,14 @@ impl ApplicationTransactions {
                 "writer acquisition timeout must be between 1 and 30000 milliseconds",
             ));
         }
+        self.check_new_session(transaction_id)?;
+        let session = self.open_session(mode, lock_timeout_ms).await?;
+        self.sessions.insert(transaction_id.into(), session);
+        Ok(())
+    }
+
+    fn check_new_session(&mut self, transaction_id: &str) -> Result<()> {
+        validate_transaction_id(transaction_id)?;
         self.expire();
         if self.sessions.contains_key(transaction_id) {
             return Err(invalid("application transaction already exists"));
@@ -356,7 +825,73 @@ impl ApplicationTransactions {
         if self.sessions.len() >= MAX_SESSIONS {
             return Err(invalid("too many application transactions"));
         }
-        let mut transaction = match mode {
+        Ok(())
+    }
+
+    /// Decode comparison bytes with the real application read APIs. This does
+    /// not validate or activate the candidate as a production storage engine.
+    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    pub(crate) async fn begin_comparison_read(
+        &mut self,
+        transaction_id: &str,
+        snapshot: redb_bench_compare::ordered::Snapshot,
+    ) -> Result<()> {
+        self.check_new_session(transaction_id)?;
+        let transaction = Transaction::comparison_read_only(snapshot);
+        let session = self.session_from_transaction(transaction).await?;
+        self.sessions.insert(transaction_id.into(), session);
+        Ok(())
+    }
+
+    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    pub(crate) async fn begin_comparison_write(
+        &mut self,
+        transaction_id: &str,
+        database: Arc<redb_bench_compare::ordered::Database>,
+        discard_commit_ack: bool,
+    ) -> Result<()> {
+        self.check_new_session(transaction_id)?;
+        let transaction = Transaction::comparison_reserved(
+            database,
+            Duration::from_millis(DEFAULT_LOCK_TIMEOUT_MS),
+            MAX_IDLE,
+            discard_commit_ack,
+        )
+        .await?;
+        let session = self.session_from_transaction(transaction).await?;
+        self.sessions.insert(transaction_id.into(), session);
+        Ok(())
+    }
+
+    pub(crate) async fn open_read_session(&mut self) -> Result<Session> {
+        self.open_session(ApplicationTransactionMode::Read, DEFAULT_LOCK_TIMEOUT_MS)
+            .await
+    }
+
+    async fn open_session(
+        &mut self,
+        mode: ApplicationTransactionMode,
+        lock_timeout_ms: u64,
+    ) -> Result<Session> {
+        #[cfg(feature = "ordered-engine-fixture")]
+        if let Some(database) = &self.ordered_fixture {
+            let transaction = match mode {
+                ApplicationTransactionMode::Read => {
+                    Transaction::comparison_read_only(database.snapshot()?)
+                }
+                ApplicationTransactionMode::Write => {
+                    Transaction::comparison_reserved(
+                        Arc::clone(database),
+                        Duration::from_millis(lock_timeout_ms),
+                        MAX_IDLE,
+                        false,
+                    )
+                    .await?
+                }
+            };
+            return self.session_from_transaction(transaction).await;
+        }
+        let transaction = match mode {
             ApplicationTransactionMode::Read => self.store.db.begin_read_only().await?,
             ApplicationTransactionMode::Write => {
                 self.store
@@ -365,21 +900,37 @@ impl ApplicationTransactions {
                     .await?
             }
         };
+        self.session_from_transaction(transaction).await
+    }
+
+    async fn session_from_transaction(&mut self, mut transaction: Transaction) -> Result<Session> {
         let bytes = transaction
             .get(&schema_key())
             .await?
             .ok_or_else(|| invalid("application schema is not initialized"))?;
-        self.sessions.insert(
-            transaction_id.into(),
-            Session {
-                transaction,
-                catalog: decode_catalog(&bytes)?,
-                touched: Instant::now(),
-                savepoints: Vec::new(),
-                savepoint_bytes: 0,
-            },
-        );
-        Ok(())
+        // Bind the cache to the exact catalog bytes visible to this snapshot.
+        // The engine record is read from the transaction even on a cache hit.
+        let cached = match &mut self.validated_catalog {
+            Some(cached) if cached.bytes == bytes => cached,
+            slot => {
+                let catalog = Arc::new(decode_catalog(&bytes)?);
+                catalog.ensure_serving()?;
+                let identity = generation_identity(&catalog, &bytes);
+                slot.insert(ValidatedCatalog {
+                    bytes,
+                    catalog,
+                    identity,
+                })
+            }
+        };
+        verify_generation_identity(&mut transaction, &cached.catalog, &cached.identity).await?;
+        Ok(Session {
+            transaction,
+            catalog: Arc::clone(&cached.catalog),
+            touched: Instant::now(),
+            savepoints: Vec::new(),
+            savepoint_bytes: 0,
+        })
     }
 
     fn take_control(&mut self, transaction_id: &str) -> Result<Session> {
@@ -459,7 +1010,14 @@ impl ApplicationTransactions {
             let Some(bytes) = session.transaction.get(&encoded_key).await? else {
                 return Ok(None);
             };
-            let value = decode_row(&session.catalog, table, &encoded_key, &bytes)?;
+            let value = crate::application_events::decode_transaction_row(
+                &mut session.transaction,
+                &session.catalog,
+                table,
+                &encoded_key,
+                &bytes,
+            )
+            .await?;
             if value.key != key {
                 return Err(Error::IncompatibleStore);
             }
@@ -558,8 +1116,26 @@ impl ApplicationTransactions {
             }
             let mut rows = Vec::with_capacity(found.len());
             let mut cursor = None;
+            let mut payload_bytes = 0;
             for (encoded_key, bytes) in found {
-                rows.push(decode_row(&session.catalog, table, &encoded_key, &bytes)?);
+                let row = crate::application_events::decode_transaction_row(
+                    &mut session.transaction,
+                    &session.catalog,
+                    table,
+                    &encoded_key,
+                    &bytes,
+                )
+                .await?;
+                if session.catalog.event_layout.is_some()
+                    && name == crate::application_events::EVENTS
+                    && let Some(payload) = row
+                        .row
+                        .get("payload_json")
+                        .and_then(|cell| cell["value"].as_str())
+                {
+                    crate::application_events::account_payload_bytes(&mut payload_bytes, payload)?;
+                }
+                rows.push(row);
                 let suffix = encoded_key
                     .strip_prefix(prefix.as_slice())
                     .and_then(|bytes| std::str::from_utf8(bytes).ok())
@@ -576,6 +1152,24 @@ impl ApplicationTransactions {
         }
         .await;
         self.finish(transaction_id, session, result).await
+    }
+
+    #[cfg(all(test, feature = "ordered-engine-fixture"))]
+    pub(crate) async fn stage_for_comparison(
+        &mut self,
+        transaction_id: &str,
+    ) -> Result<crate::backend::StagedCommit> {
+        let session = self.take(transaction_id)?;
+        if !session.savepoints.is_empty() {
+            return self
+                .finish(
+                    transaction_id,
+                    session,
+                    Err(invalid("unreleased savepoints")),
+                )
+                .await;
+        }
+        session.transaction.stage_for_comparison().await
     }
 
     pub async fn commit(&mut self, transaction_id: &str) -> Result<()> {

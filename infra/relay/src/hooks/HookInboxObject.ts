@@ -8,6 +8,7 @@ import * as Result from "effect/Result";
 import * as FetchHttpClient from "effect/http/FetchHttpClient";
 
 import * as HookInboxStore from "./HookInboxStore.ts";
+import * as HookInboxTransaction from "./HookInboxTransaction.ts";
 import { sendUpstream, TUNNEL_OFFLINE_STATUS } from "./upstream.ts";
 
 const UNREACHABLE_STATUSES = new Set([502, 503, 504, TUNNEL_OFFLINE_STATUS]);
@@ -82,36 +83,46 @@ export const layer = HookInboxObject.make(
         effect.pipe(Effect.provide(layerSql), Effect.orDie);
       yield* run(HookInboxStore.migrate);
 
-      const scheduleBy = Effect.fn("HookInboxObject.scheduleBy")(function* (at: number) {
-        const current = yield* state.storage.getAlarm();
-        if (current === null || current > at) yield* state.storage.setAlarm(at);
-      });
+      // External delivery remains outside the storage transaction.
+      const commitStorage = <A>(effect: Call<A>) =>
+        HookInboxTransaction.commitStorage(state.raw.storage, effect);
+
+      const alarm = {
+        get: () => state.storage.getAlarm(),
+        set: (at: number) => state.storage.setAlarm(at),
+      };
+      const scheduleBy = (at: number) => HookInboxTransaction.scheduleBy(alarm, at);
 
       // withInboxSpan supplies each method's root span; avoid a second wrapper span.
       return {
         hold: Effect.fnUntraced(
           function* (hook: HookInboxStore.HeldHook, baseUrl: string) {
-            const dueAt = yield* run(HookInboxStore.hold(hook, baseUrl));
-            yield* Effect.annotateCurrentSpan({ "relay.inbox.stored": dueAt !== null });
-            if (dueAt === null) return false;
-            yield* scheduleBy(dueAt);
-            return true;
+            return yield* HookInboxTransaction.commitHold(
+              state.raw.storage,
+              run(HookInboxStore.hold(hook, baseUrl)),
+              alarm,
+            );
           },
           withInboxSpan("relay.inbox.hold", inboxId),
         ),
         wake: Effect.fnUntraced(
           function* (baseUrl: string) {
-            const pending = yield* run(HookInboxStore.wake(baseUrl));
-            yield* Effect.annotateCurrentSpan({ "relay.inbox.pending": pending });
-            if (pending) yield* state.storage.setAlarm(yield* Clock.currentTimeMillis);
-            return pending;
+            return yield* commitStorage(
+              Effect.gen(function* () {
+                const pending = yield* run(HookInboxStore.wake(baseUrl));
+                yield* Effect.annotateCurrentSpan({ "relay.inbox.pending": pending });
+                if (pending) yield* state.storage.setAlarm(yield* Clock.currentTimeMillis);
+                return pending;
+              }),
+            );
           },
           withInboxSpan("relay.inbox.wake", inboxId),
         ),
         clear: Effect.fnUntraced(
           function* () {
-            yield* run(HookInboxStore.clear);
-            yield* state.storage.deleteAlarm();
+            yield* commitStorage(
+              run(HookInboxStore.clear).pipe(Effect.andThen(state.storage.deleteAlarm())),
+            );
           },
           withInboxSpan("relay.inbox.clear", inboxId),
         ),

@@ -75,7 +75,12 @@ export const isPdfPreviewFile = (path: string): boolean =>
 const PdfViewer = lazy(() => import("./PdfViewer"));
 
 // The document stays mounted while each revision gets a fresh PDF.js document.
-function PdfDocument(props: { src: string; title: string; documentKey: string }) {
+function PdfDocument(props: {
+  src: string;
+  title: string;
+  documentKey: string;
+  threadRef: ScopedThreadRef | undefined;
+}) {
   const [view, setView] = useState<PdfViewState>({ page: 0, offset: 0, zoom: null, left: 0 });
   return (
     <PdfDocumentRevision
@@ -85,6 +90,7 @@ function PdfDocument(props: { src: string; title: string; documentKey: string })
       positionKey={props.documentKey}
       initialView={view}
       onViewChange={setView}
+      threadRef={props.threadRef}
     />
   );
 }
@@ -96,8 +102,10 @@ function PdfDocumentRevision(props: {
   positionKey: string;
   initialView: PdfViewState;
   onViewChange: (view: PdfViewState) => void;
+  threadRef: ScopedThreadRef | undefined;
 }) {
   const [src] = useState(props.src);
+  const openLink = useOpenLink(props.threadRef);
   // The Electron shell does not enable PDF plugins. WebKit embeds on iOS
   // expose only the first page, even when pdfViewerEnabled reports support.
   const native =
@@ -120,6 +128,9 @@ function PdfDocumentRevision(props: {
         positionKey={props.positionKey}
         initialView={props.initialView}
         onViewChange={props.onViewChange}
+        onOpenLink={(url, event) => {
+          void openLink(url, { event }).catch((cause: unknown) => console.error(cause));
+        }}
       />
     </Suspense>
   );
@@ -147,6 +158,7 @@ export function BrowserDocumentFrame(props: {
       documentKey={key}
       src={props.src}
       title={props.title}
+      threadRef={props.threadRef}
     />
   ) : props.htmlRender ? (
     <HtmlRenderDocument

@@ -99,6 +99,7 @@ jobs:
       - name: Validate source retention and upstream provenance
         if: inputs.source_guards
         run: |
+          T3_CODE_LS_VERIFY_OMDB_GRAPH=1 node --test tools/omdb-source.test.mjs
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" run --locked -p t3code-ls-tools -- check-source
           "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" run --locked -p t3code-ls-tools -- check-upstream-readme
       - name: Cache component test dependency downloads

@@ -5,6 +5,7 @@ import * as FS from "node:fs/promises";
 import * as Module from "node:module";
 import * as Path from "node:path";
 import { pathToFileURL } from "node:url";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
@@ -32,8 +33,8 @@ export function nativeRequest(executable, fixture, mode, request) {
   return response.result;
 }
 
-export function loadUpstream(path, imports, exports) {
-  const original = upstreamSource(path);
+export function loadUpstream(path, imports, exports, oracle) {
+  const original = upstreamSource(path, oracle);
   const source = Module.stripTypeScriptTypes(original, { mode: "strip" })
     .replace(/^import\s[\s\S]*?;\s*$/gm, "")
     .replace(/^export (?=(?:function|const|class) )/gm, "");
@@ -67,7 +68,13 @@ export async function loadUpstreamModule(path, dependencies = {}) {
   return { module, url, source: { path, sha256: hash(original) } };
 }
 
-export async function withNative(executable, fixture, use, wrap = (database) => database) {
+export async function withNative(
+  executable,
+  fixture,
+  use,
+  wrap = (database) => database,
+  { durableRelayWebhooks = false, singleProjectionReads = false } = {},
+) {
   return Effect.runPromise(
     Effect.gen(function* () {
       const database = yield* NativeDatabase.make({
@@ -76,11 +83,18 @@ export async function withNative(executable, fixture, use, wrap = (database) => 
       });
       const client = yield* RedbClient.make.pipe(
         Effect.provideService(NativeDatabase.NativeDatabase, wrap(database)),
+        Effect.provideService(RedbClient.DurableRelayWebhooks, durableRelayWebhooks),
+        Effect.provideService(RedbClient.SingleProjectionReads, singleProjectionReads),
       );
       return yield* use(client, database).pipe(
         Effect.provideService(RedbClient.RedbClient, client),
       );
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), Effect.provide(Logger.layer([]))),
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(NodeCrypto.layer),
+      Effect.provide(NodeServices.layer),
+      Effect.provide(Logger.layer([])),
+    ),
   );
 }
 
@@ -115,6 +129,7 @@ export async function finishProof({
   proofPath,
   checks,
   oracles,
+  oracleCommit,
   sourceHash,
   sourcePaths,
 }) {
@@ -128,7 +143,7 @@ export async function finishProof({
     schema: 1,
     engine: fixture.engineLabel,
     checks,
-    oracle: { commit: upstream.upstream.commit, sources: oracles },
+    oracle: { commit: oracleCommit ?? upstream.upstream.commit, sources: oracles },
     executable_sha256: hash(await FS.readFile(executable)),
     sqlite_source_sha256: sourceHash,
     sources,

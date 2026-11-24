@@ -1,0 +1,66 @@
+name: Workspace file editing
+
+on:
+  push:
+    branches:
+      - "candidate/t3code-ls-t06-file-revisions-*"
+      - "candidate/t3code-ls-t06-repository-paths-*"
+      - "candidate/t3code-ls-t06-gix-*"
+      - "candidate/t3code-ls-t02-bundled-native-integrated-*"
+      - "candidate/t3code-ls-t08-compressed-rollouts-*"
+
+permissions:
+  contents: read
+
+jobs:
+  workspace-edits:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: 10
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      VP_REMOTE_CACHE: "off"
+      VP_REMOTE_CACHE_URL: ""
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Install locked test dependencies
+        run: |
+          npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile
+      - name: Exercise the workspace owner and editor save coordination
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-')
+        run: |
+          pnpm exec vp test run --maxWorkers 2 \
+            apps/server/src/workspace/WorkspaceFileSystem.test.ts \
+            apps/web/src/components/files/fileSaveCoordinator.test.ts \
+            apps/web/src/components/files/fileSaveSessions.test.ts \
+            apps/web/src/components/files/projectFilesQueryState.test.ts
+      - name: Exercise repository paths and linked worktrees through Git
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t06-repository-paths-')
+        run: |
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 \
+            src/vcs/GitVcsDriver.test.ts src/vcs/GitVcsDriverCore.test.ts
+      - name: Exercise bounded provider rollout discovery and import
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t08-compressed-rollouts-')
+        run: |
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 \
+            src/project/AgentSessionScanner.test.ts src/project/AgentSessionImporter.test.ts
+      - name: Install the pinned compiler for native repository discovery
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t06-gix-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/git-workspace-toolchain"
+      - name: Compare the gix adapter with Git through the repository service
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t06-gix-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-')
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/git-workspace-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/git-workspace-target"
+          export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
+            --locked --release --manifest-path apps/server/rust/git-workspace/Cargo.toml
+          export T3_CODE_LS_GIX_FIXTURE="$CARGO_TARGET_DIR/release/t3-code-ls-git-workspace"
+          sha256sum "$T3_CODE_LS_GIX_FIXTURE" apps/server/rust/git-workspace/Cargo.lock
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 \
+            "$GITHUB_WORKSPACE/apps/server/src/vcs/GitVcsDriverCore.test.ts" -t 'through the selected gix helper'

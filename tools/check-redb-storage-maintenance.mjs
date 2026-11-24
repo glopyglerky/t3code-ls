@@ -8,8 +8,10 @@ import * as Readline from "node:readline";
 import * as Sqlite from "node:sqlite";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Logger from "effect/Logger";
 import * as Schema from "effect/Schema";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -20,6 +22,7 @@ import * as NativeMaintenance from "../apps/server/src/persistence/NativeDatabas
 import * as NativeOwnership from "../apps/server/src/persistence/NativeServerOwnershipLock.ts";
 import * as ServerOwnership from "../apps/server/src/serverOwnership.ts";
 import * as ProcessRunner from "../apps/server/src/processRunner.ts";
+import { verifyAgedRetention } from "./redb-aged-retention-fixture.mjs";
 import { createFixture } from "./database-fixture.mjs";
 import { exportSqliteState } from "./export-sqlite-state.mjs";
 import {
@@ -271,11 +274,58 @@ try {
           client.get("maintenance_fixture", [{ type: "text", value: `row:${index}` }]),
         ),
       );
-      yield* database.request(
+      if (process.platform === "linux" || process.platform === "darwin") {
+        yield* Effect.promise(async () => {
+          const filesBefore = (await FS.readdir(fixture.root)).sort();
+          const databaseBefore = hash(await FS.readFile(fixture.databasePath));
+          // Limit only the backup process so real writes fail without filling the disk.
+          const limited = ChildProcess.spawnSync(
+            "/bin/sh",
+            [
+              "-c",
+              "trap '' XFSZ && ulimit -f 1 && exec \"$@\"",
+              "storage-backup-limit",
+              executable,
+              "read-only-local",
+              fixture.databasePath,
+            ],
+            {
+              env: {},
+              input:
+                JSON.stringify({ operation: "snapshot" }) + "\n" +
+                JSON.stringify({ operation: "storage_backup", destination: manualBackup }) + "\n",
+              encoding: "utf8",
+              timeout: 30_000,
+            },
+          );
+          if (limited.error) throw limited.error;
+          Assert.equal(limited.status, 0, limited.stderr || String(limited.signal));
+          const replies = limited.stdout.trim().split("\n").map((line) => JSON.parse(line));
+          Assert.equal(replies.length, 2, limited.stdout);
+          const [snapshot, reply] = replies;
+          Assert.equal(snapshot.ok, true, limited.stdout);
+          Assert.equal(reply.ok, false, limited.stdout);
+          Assert.equal(reply.error.kind, "database_error", limited.stdout);
+          Assert.deepEqual(
+            (await FS.readdir(fixture.root)).sort(),
+            filesBefore,
+            "A failed backup must leave the destination free for retry and remove its staging file",
+          );
+          Assert.equal(hash(await FS.readFile(fixture.databasePath)), databaseBefore);
+        });
+        checks.push(
+          "An OS file-size limit forces a real backup write failure, preserving live bytes and leaving the same destination available for the verified retry",
+        );
+      }
+      const backup = yield* database.request(
         { operation: "storage_backup", destination: manualBackup },
-        Schema.Unknown,
+        Schema.Struct({ rows: Schema.Number, bytes: Schema.Number, checksum: Schema.String }),
       );
-      const backupHash = yield* Effect.promise(async () => hash(await FS.readFile(manualBackup)));
+      Assert.ok(backup.rows > 0);
+      Assert.match(backup.checksum, /^[a-f0-9]{64}$/u);
+      const backupBytes = yield* Effect.promise(() => FS.readFile(manualBackup));
+      Assert.equal(backup.bytes, backupBytes.byteLength);
+      const backupHash = hash(backupBytes);
       yield* failed(
         database.request(
           { operation: "storage_backup", destination: manualBackup },
@@ -359,12 +409,68 @@ try {
       }),
     );
   }
+  const concurrentBackup = Path.join(fixture.root, "backup-during-write.omdb");
+  const existingKey = [{ type: "text", value: "row:160" }];
+  const unchangedKey = [{ type: "text", value: "row:191" }];
+  await withNative(executable, fixture, (client) =>
+    Effect.gen(function* () {
+      // Match the selected live reader's startup. Opening a second engine handle itself
+      // can be refused while another helper owns an active write transaction.
+      const reader = yield* NativeDatabase.make({
+        executable, databasePath: fixture.databasePath, mode: "current-read-local",
+      });
+      yield* reader.request({ operation: "application_schema" }, Schema.Unknown);
+      const staged = yield* Deferred.make();
+      const release = yield* Deferred.make();
+      const writer = yield* Effect.forkScoped(client.withTransaction(
+        Effect.gen(function* () {
+          Assert.equal(yield* client.delete("maintenance_fixture", existingKey), true);
+          Assert.equal(yield* client.get("maintenance_fixture", existingKey), null);
+          yield* Deferred.succeed(staged, undefined);
+          yield* Deferred.await(release);
+        }),
+      ));
+      yield* Effect.gen(function* () {
+        yield* Deferred.await(staged);
+        const backup = yield* reader.request(
+          { operation: "storage_backup", destination: concurrentBackup },
+          Schema.Struct({ rows: Schema.Number, bytes: Schema.Number, checksum: Schema.String }),
+        );
+        Assert.ok(backup.rows > 0);
+        Assert.match(backup.checksum, /^[a-f0-9]{64}$/u);
+      }).pipe(
+        Effect.timeout("10 seconds"),
+        Effect.ensuring(Deferred.succeed(release, undefined)),
+      );
+      yield* Fiber.join(writer);
+    }),
+  );
+  for (const [databasePath, expected] of [
+    [fixture.databasePath, null],
+    [concurrentBackup, liveRows[2]],
+  ]) {
+    await withNative(executable, { ...fixture, databasePath }, (client) =>
+      Effect.gen(function* () {
+        Assert.deepEqual(
+          normalized(yield* client.get("maintenance_fixture", existingKey)),
+          normalized(expected),
+        );
+        Assert.deepEqual(
+          normalized(yield* client.get("maintenance_fixture", unchangedKey)),
+          normalized(liveRows[3]),
+        );
+      }),
+    );
+  }
+  checks.push("A logical snapshot completes alongside a staged foreground deletion, reopens the prior committed rows, and preserves the later live commit");
   Assert.equal(hash(await FS.readFile(source)), sourceHash);
   Assert.equal(hash(await FS.readFile(legacy)), sourceHash);
   checks.push(
     "Actual native maintenance makes a verified restorable backup before pruning/compaction, reopens the compacted store, preserves values and all legacy SQLite bytes, and classifies missing stores correctly",
   );
-  console.log(JSON.stringify({ storage: result }, null, 2));
+  const retention = await verifyAgedRetention(executable);
+  checks.push(...retention.checks);
+  console.log(JSON.stringify({ storage: result, retention }, null, 2));
   await finishProof({
     executable,
     fixture,
@@ -385,8 +491,17 @@ try {
       "apps/server/src/persistence/NativeDatabaseMaintenance.ts",
       "apps/server/src/persistence/redb_database_storage.rs",
       "apps/server/src/persistence/redb_server_ownership.rs",
+      "crates/storage/Cargo.toml",
       "crates/storage/src/backend.rs",
       "tools/check-redb-storage-maintenance.mjs",
+      "tools/redb-aged-retention-fixture.mjs",
+      "tools/redb-event-sink-fixtures.mjs",
+      "apps/server/src/orchestration-v2/NativeEventSink.ts",
+      "apps/server/src/orchestration-v2/EventSink.ts",
+      "apps/server/src/orchestration-v2/NativeProjectionStore.ts",
+      "apps/server/src/orchestration-v2/ProjectionMaintenance.ts",
+      "apps/server/src/orchestration-v2/NativeProjectionMaintenance.ts",
+      "apps/server/src/persistence/redb_projection_maintenance.rs",
     ],
   });
 } finally {

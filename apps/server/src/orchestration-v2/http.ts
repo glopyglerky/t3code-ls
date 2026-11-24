@@ -156,6 +156,7 @@ export const layer = HttpApiBuilder.group(
         return yield* threadManagement
           .getThreadSnapshotWindow(threadId, {
             rowLimit: THREAD_HISTORY_SNAPSHOT_ROW_LIMIT,
+            includeHistoryViewRevision: true,
             deferWork,
             userTurnLimit:
               anchorItemId === undefined
@@ -252,6 +253,9 @@ export const layer = HttpApiBuilder.group(
           });
           return {
             snapshotSequence: snapshot.snapshotSequence,
+            ...(snapshot.historyViewRevision === undefined
+              ? {}
+              : { historyViewRevision: snapshot.historyViewRevision }),
             ...boundedSnapshotResponseFields({
               bounded,
               compactTurnItems: args.query.compactTurnItems === "1",
@@ -284,6 +288,7 @@ export const layer = HttpApiBuilder.group(
                 : args.query.deferWork === "1"
                   ? "deferred"
                   : undefined,
+              { includeHistoryViewRevision: true },
             )
             .pipe(
               Effect.map((page) =>

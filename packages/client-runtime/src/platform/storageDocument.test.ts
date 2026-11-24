@@ -73,6 +73,24 @@ const REMOTE_TOKEN = new TokenStore.RemoteDpopAccessToken({
 });
 
 describe("ConnectionCatalogDocument", () => {
+  it.effect("round trips pending mobile removals while preserving unrelated catalog edits", () =>
+    Effect.gen(function* () {
+      const document = {
+        ...EMPTY_CONNECTION_CATALOG_DOCUMENT,
+        environmentRemovals: { sequence: 3, pending: [{ environmentId: ENVIRONMENT_ID, sequence: 3 }] },
+      };
+      const jsonSchema = Schema.fromJsonString(ConnectionCatalogDocument);
+      const encoded = yield* Schema.encodeEffect(jsonSchema)(document);
+      const reopened = yield* Schema.decodeEffect(jsonSchema)(encoded);
+      const unrelated = EnvironmentId.make("unrelated-fixture");
+      const registered = registerConnectionInCatalog(reopened, new RelayConnectionRegistration({
+        target: new RelayConnectionTarget({ environmentId: unrelated, label: "Fixture" }),
+      }));
+      expect(removeConnectionFromCatalog(registered, unrelated).environmentRemovals).toEqual(document.environmentRemovals);
+      expect(decodeCatalogDocument(EMPTY_CONNECTION_CATALOG_DOCUMENT).environmentRemovals).toBeUndefined();
+    }),
+  );
+
   it.effect("persists explicit GitHub trust and forgets it when a connection is removed", () =>
     Effect.gen(function* () {
       let document = EMPTY_CONNECTION_CATALOG_DOCUMENT;

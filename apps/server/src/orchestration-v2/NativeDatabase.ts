@@ -45,6 +45,7 @@ export class NativeDatabaseUnavailable extends Schema.TaggedError<NativeDatabase
 const RejectionKind = Schema.Literals([
   "invalid_request",
   "incompatible_store",
+  "recovery_required",
   "stale_revision",
   "command_conflict",
   "duplicate_record",
@@ -172,8 +173,10 @@ export const make = Effect.fn("NativeDatabase.make")(function* (config: {
     | "local"
     | "initialize-local"
     | "read-only-local"
+    | "current-read-local"
     | "exclusive-local"
-    | "owner-lock";
+    | "owner-lock"
+    | "ordered-fixture-local";
   /** Ownership handles must never silently reacquire a lost lifetime lock. */
   readonly reconnect?: boolean;
   readonly requestTimeout?: Duration.Input;
@@ -181,9 +184,15 @@ export const make = Effect.fn("NativeDatabase.make")(function* (config: {
   const { executable, databasePath } = config;
   const mode = config.mode ?? "local";
   if (
-    !["local", "initialize-local", "read-only-local", "exclusive-local", "owner-lock"].includes(
-      mode,
-    )
+    ![
+      "local",
+      "initialize-local",
+      "read-only-local",
+      "current-read-local",
+      "exclusive-local",
+      "owner-lock",
+      "ordered-fixture-local",
+    ].includes(mode)
   ) {
     return yield* new NativeDatabaseInputError({ stage: "configuration" });
   }

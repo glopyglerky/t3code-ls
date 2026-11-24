@@ -11,6 +11,7 @@ import {
   ProviderTurnId,
   RunAttemptId,
   RunId,
+  ScheduledTaskId,
   RuntimeRequestId,
   ThreadId,
   TurnItemId,
@@ -1125,6 +1126,18 @@ it.effect("does not continue a run the user asked to stop before the restart", (
     const texts = yield* continuationTexts({
       ...cutMidTurn(),
       turnItems: [{ id: "turn-item:interrupt", runId, type: "run_interrupt_request" }],
+    } as unknown as OrchestrationV2ThreadProjection);
+    assert.deepEqual(texts, []);
+  }),
+);
+
+it.effect("does not dispatch a retained restart effect for a relay webhook", () =>
+  Effect.gen(function* () {
+    const scheduledTaskId = ScheduledTaskId.make("fixture-relay-task");
+    const messageId = MessageId.make(`scheduled-task-message:${scheduledTaskId}:webhook:delivery:relay:fixture`);
+    const texts = yield* continuationTexts({
+      ...cutMidTurn({ userMessageId: messageId }),
+      messages: [{ id: messageId, scheduledTaskId, text: "Admitted prompt", attachments: [] }],
     } as unknown as OrchestrationV2ThreadProjection);
     assert.deepEqual(texts, []);
   }),

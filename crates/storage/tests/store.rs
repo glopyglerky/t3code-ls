@@ -443,6 +443,463 @@ async fn acknowledged_batch_survives_process_kill_and_reopens() {
     assert_eq!(lines[1]["result"], acknowledgement["result"]["receipt"]);
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn service_trial_restore_cli_reports_one_result_and_prepares_reopenable_stage() {
+    use std::fs;
+    use t3_code_ls_storage::application::ApplicationTransactions;
+    use t3_code_ls_storage::application_server_ownership::OwnerLock;
+
+    const UPDATE_ID: &str = "aa212c2b-63d4-4b28-97e4-1c1d6dc6d281";
+    let fixture = test_support::TestFixture::start().await;
+    let home = fs::canonicalize(fixture.path().parent().unwrap()).unwrap();
+    let state = home.join("userdata");
+    fs::create_dir(&state).unwrap();
+    fs::create_dir(home.join("runtime")).unwrap();
+    let owner = OwnerLock::acquire(&state.join("server-owner.sqlite")).unwrap();
+    let database = state.join("statev2.omdb");
+    let store = Store::initialize_local(&database).await.unwrap();
+    store.bootstrap_application().await.unwrap();
+    store.commit(&batch("before", 0)).await.unwrap();
+    let identity = ApplicationTransactions::new(store.clone())
+        .generation_identity()
+        .await
+        .unwrap()
+        .unwrap();
+    store.shutdown().await.unwrap();
+    owner.activate_native().unwrap();
+    drop(owner);
+
+    let executable = env!("CARGO_BIN_EXE_t3-code-ls-db");
+    let output = Command::new(executable)
+        .arg("trial-backup")
+        .arg(&home)
+        .args([UPDATE_ID, &identity.catalog_sha256])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let backup: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(backup["ok"], true);
+    let snapshot = json!({
+        "catalog_sha256": identity.catalog_sha256,
+        "rows": backup["result"]["backup"]["rows"],
+        "checksum": backup["result"]["backup"]["checksum"],
+    });
+    let mut request = json!({
+        "update_id": UPDATE_ID,
+        "phase": "committed",
+        "database": backup["result"]["database"],
+        "checkpoint": snapshot,
+        "target": snapshot,
+    });
+    let run_restore = |mode, request: &Value| {
+        let mut child = Command::new(executable)
+            .arg(mode)
+            .arg(&home)
+            .arg(UPDATE_ID)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        serde_json::to_writer(child.stdin.take().unwrap(), request).unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        assert_eq!(
+            output.stdout.iter().filter(|byte| **byte == b'\n').count(),
+            1
+        );
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    let prepare = |request: &Value| run_restore("trial-prepare-restore", request);
+
+    let stage = state.join(format!(".statev2-restore-{UPDATE_ID}.omdb"));
+    let live_bytes = fs::read(&database).unwrap();
+    assert_eq!(prepare(&request)["error"]["kind"], "invalid_request");
+    assert!(!stage.exists());
+    request["phase"] = json!("failed-before-activation");
+    let preparation = prepare(&request)["result"].clone();
+    assert_eq!(preparation["reused"], false);
+    assert_eq!(prepare(&request)["result"]["reused"], true);
+    let reopened = Store::open_read_only(&stage).await.unwrap();
+    assert!(reopened.read_receipt("before").await.unwrap().is_some());
+    reopened.shutdown().await.unwrap();
+    assert_eq!(fs::read(&database).unwrap(), live_bytes);
+
+    #[cfg(target_os = "linux")]
+    {
+        use sha2::{Digest, Sha256};
+
+        let publish = |request: &Value| run_restore("trial-publish-restore-offline", request);
+        let checkpoint = home.join(format!("runtime/native-db-backup/{UPDATE_ID}.omdb"));
+        let checkpoint_bytes = fs::read(&checkpoint).unwrap();
+        let stage_bytes = fs::read(&stage).unwrap();
+        let preserved = state.join(format!(".statev2-failed-{UPDATE_ID}.omdb"));
+        let mut publication = json!({"restore": request, "preparation": preparation});
+        assert_eq!(publish(&publication)["error"]["kind"], "invalid_request");
+        assert!(!preserved.exists());
+        let target_digest: String = Sha256::digest(&live_bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        publication["witness"] = json!({
+            "kind": "offline-pre-activation",
+            "target_file_sha256": target_digest,
+        });
+        let published = publish(&publication);
+        assert_eq!(published["ok"], true, "{published}");
+        assert_eq!(published["result"]["reused"], false);
+        assert_eq!(
+            published["result"]["database"],
+            preparation["staged_database"]
+        );
+        assert_eq!(publish(&publication)["result"]["reused"], true);
+        assert!(!stage.exists());
+        assert_eq!(fs::read(&database).unwrap(), stage_bytes);
+        assert_eq!(fs::read(&preserved).unwrap(), live_bytes);
+        assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);
+        let reopened = Store::open_read_only(&database).await.unwrap();
+        assert!(reopened.read_receipt("before").await.unwrap().is_some());
+        reopened.shutdown().await.unwrap();
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn isolated_trial_cli_restarts_from_checkpoint_after_interruption() {
+    use sha2::{Digest, Sha256};
+    use std::fs;
+    use t3_code_ls_storage::application::ApplicationTransactions;
+    use t3_code_ls_storage::application_server_ownership::OwnerLock;
+
+    const UPDATE: &str = "aa212c2b-63d4-4b28-97e4-1c1d6dc6d281";
+    let fixture = test_support::TestFixture::start().await;
+    let home = fs::canonicalize(fixture.path().parent().unwrap()).unwrap();
+    let state = home.join("userdata");
+    let runtime = home.join("runtime");
+    fs::create_dir(&state).unwrap();
+    fs::create_dir(&runtime).unwrap();
+    let selection = runtime.join("service-state.json");
+    fs::write(&selection, b"existing runtime selection").unwrap();
+    let owner_path = state.join("server-owner.sqlite");
+    let owner = OwnerLock::acquire(&owner_path).unwrap();
+    let live = state.join("statev2.omdb");
+    let store = Store::initialize_local(&live).await.unwrap();
+    store.bootstrap_application().await.unwrap();
+    store.commit(&batch("original", 0)).await.unwrap();
+    let identity = ApplicationTransactions::new(store.clone())
+        .generation_identity()
+        .await
+        .unwrap()
+        .unwrap();
+    store.shutdown().await.unwrap();
+    owner.activate_native().unwrap();
+    drop(owner);
+
+    let executable = env!("CARGO_BIN_EXE_t3-code-ls-db");
+    let backup = Command::new(executable)
+        .arg("trial-backup")
+        .arg(&home)
+        .args([UPDATE, &identity.catalog_sha256])
+        .output()
+        .unwrap();
+    assert!(backup.status.success());
+    let backup: Value = serde_json::from_slice(&backup.stdout).unwrap();
+    assert_eq!(backup["ok"], true, "{backup}");
+    let sha256 = |bytes: &[u8]| -> String {
+        Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    };
+    let definition = include_bytes!("../../../apps/server/src/persistence/omdb-schema.json");
+    let capabilities = Command::new(executable)
+        .arg("trial-capabilities")
+        .output()
+        .unwrap();
+    assert!(capabilities.status.success());
+    assert!(capabilities.stderr.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&capabilities.stdout).unwrap(),
+        json!({
+            "ok": true,
+            "result": {
+                "version": 1,
+                "engine": identity.engine,
+                "engineRevision": identity.engine_revision,
+                "targetSchemaSha256": sha256(definition),
+                "sealedTrialRollback": 1,
+                "promotionIntent": 1,
+                "sealedIntentPublication": 1,
+                "sealedGenericRestoreFence": 1,
+            },
+        })
+    );
+    let mut request = json!({
+        "update_id": UPDATE,
+        "database": backup["result"]["database"],
+        "checkpoint": {
+            "catalog_sha256": identity.catalog_sha256,
+            "rows": backup["result"]["backup"]["rows"],
+            "checksum": backup["result"]["backup"]["checksum"],
+        },
+        "target_schema_sha256": sha256(definition),
+    });
+    let run_trial = |operation: &str, request: &Value| {
+        let mut child = Command::new(executable)
+            .arg(operation)
+            .arg(&home)
+            .arg(UPDATE)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        serde_json::to_writer(child.stdin.take().unwrap(), request).unwrap();
+        let output = child.wait_with_output().unwrap();
+        assert!(output.status.success());
+        assert_eq!(
+            output.stdout.iter().filter(|byte| **byte == b'\n').count(),
+            1
+        );
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    let prepare = |request: &Value| run_trial("trial-prepare-isolated", request);
+    let verify = |request: &Value, preparation: &Value| {
+        run_trial(
+            "trial-verify-isolated",
+            &json!({"request": request, "preparation": preparation}),
+        )
+    };
+    let checkpoint = runtime.join(format!("native-db-backup/{UPDATE}.omdb"));
+    let trial = state.join(format!(".statev2-trial-{UPDATE}.omdb"));
+    let working = trial.with_extension("staging");
+    let receipt_path = trial.with_extension("receipt-v1.json");
+    let before = fs::read(&live).unwrap();
+    let original_checkpoint = fs::read(&checkpoint).unwrap();
+
+    let backup_receipt = checkpoint.with_extension("backup-receipt-v1.json");
+    let held_receipt = backup_receipt.with_extension("held");
+    fs::rename(&backup_receipt, &held_receipt).unwrap();
+    assert_eq!(prepare(&request)["error"]["kind"], "incompatible_store");
+    assert_eq!(fs::read(&checkpoint).unwrap(), original_checkpoint);
+    assert!(!trial.exists());
+    fs::rename(&held_receipt, &backup_receipt).unwrap();
+
+    let target_digest = request["target_schema_sha256"].clone();
+    request["target_schema_sha256"] = json!("0".repeat(64));
+    assert_eq!(prepare(&request)["error"]["kind"], "incompatible_store");
+    request["target_schema_sha256"] = target_digest;
+    let source_identity = request["database"].clone();
+    request["database"]["inode"] = json!("0000000000000000");
+    assert_eq!(prepare(&request)["error"]["kind"], "incompatible_store");
+    request["database"] = source_identity;
+    let owner = OwnerLock::acquire(&owner_path).unwrap();
+    assert_eq!(prepare(&request)["error"]["kind"], "writer_busy");
+    drop(owner);
+    fs::hard_link(&checkpoint, &working).unwrap();
+    assert_eq!(prepare(&request)["error"]["kind"], "incompatible_store");
+    fs::remove_file(&working).unwrap();
+    std::os::unix::fs::symlink(&live, &working).unwrap();
+    assert_eq!(prepare(&request)["error"]["kind"], "incompatible_store");
+    fs::remove_file(&working).unwrap();
+    assert!(!trial.exists());
+
+    // Model a process killed after a durable write to the working database.
+    fs::copy(&checkpoint, &working).unwrap();
+    let mut interrupted = Command::new(executable)
+        .arg("exclusive-local")
+        .arg(&working)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let command = json!({"operation": "commit", "batch": batch("interrupted", 1)});
+    writeln!(interrupted.stdin.as_mut().unwrap(), "{command}").unwrap();
+    let mut response = String::new();
+    BufReader::new(interrupted.stdout.take().unwrap())
+        .read_line(&mut response)
+        .unwrap();
+    interrupted.kill().unwrap();
+    interrupted.wait().unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&response).unwrap()["ok"],
+        true
+    );
+    assert!(!trial.exists());
+
+    // A previous helper may have published the candidate just before it stopped.
+    fs::copy(&checkpoint, &trial).unwrap();
+    assert!(!receipt_path.exists());
+    let mut previous_preparation = None;
+    for _ in 0..2 {
+        let prepared = prepare(&request);
+        assert_eq!(prepared["ok"], true, "{prepared}");
+        assert_ne!(prepared["result"]["database"], request["database"]);
+        assert_eq!(prepared["result"]["snapshot"], request["checkpoint"]);
+        let trial_bytes = fs::read(&trial).unwrap();
+        assert_eq!(prepared["result"]["file_sha256"], sha256(&trial_bytes));
+        let receipt = &prepared["result"];
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(&receipt_path).unwrap()).unwrap(),
+            json!({ "request": request, "preparation": receipt })
+        );
+        assert_eq!(
+            verify(&request, receipt),
+            json!({"ok": true, "result": {"verified": true}})
+        );
+        assert_eq!(fs::read(&trial).unwrap(), trial_bytes);
+        let mut broken = receipt.clone();
+        broken["file_sha256"] = json!("0".repeat(64));
+        assert_eq!(
+            verify(&request, &broken)["error"]["kind"],
+            "incompatible_store"
+        );
+        if let Some(previous) = previous_preparation.replace(receipt.clone()) {
+            assert_eq!(
+                previous, *receipt,
+                "Retry must return the same durable trial"
+            );
+        }
+        let owner = OwnerLock::acquire(&owner_path).unwrap();
+        assert_eq!(verify(&request, receipt)["error"]["kind"], "writer_busy");
+        assert_eq!(prepare(&request)["error"]["kind"], "writer_busy");
+        drop(owner);
+        let reopened = Store::open_read_only(&trial).await.unwrap();
+        assert!(reopened.read_receipt("original").await.unwrap().is_some());
+        assert!(
+            reopened
+                .read_receipt("interrupted")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        reopened.shutdown().await.unwrap();
+        assert_eq!(fs::read(&live).unwrap(), before);
+        assert_eq!(fs::read(&checkpoint).unwrap(), original_checkpoint);
+        assert!(!working.exists());
+    }
+
+    let old_result = fs::read(&trial).unwrap();
+    let old_receipt = fs::read(&receipt_path).unwrap();
+    let selection_path = runtime.join("service-state.json");
+    let original_selection = fs::read(&selection_path).unwrap();
+    let inspect_selection = || {
+        let output = Command::new(executable)
+            .arg("trial-inspect-selection")
+            .arg(&home)
+            .args([UPDATE, "1.0.0", "1.1.0"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(output.stderr.is_empty());
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    fs::remove_file(&selection_path).unwrap();
+    assert_eq!(inspect_selection()["error"]["kind"], "incompatible_store");
+    let pending_selection = json!({
+        "protocol": 4,
+        "activeVersion": "1.0.0",
+        "update": {
+            "id": UPDATE,
+            "fromVersion": "1.0.0",
+            "targetVersion": "1.1.0",
+            "dbPath": live,
+            "status": "pending",
+        },
+    });
+    fs::write(
+        &selection_path,
+        serde_json::to_vec(&pending_selection).unwrap(),
+    )
+    .unwrap();
+    let observed = inspect_selection();
+    assert_eq!(observed["ok"], true, "{observed}");
+    assert_eq!(observed["result"]["update_id"], UPDATE);
+    assert_eq!(observed["result"]["source_database"], request["database"]);
+    assert_eq!(
+        observed["result"]["prepared_database"],
+        previous_preparation.as_ref().unwrap()["database"]
+    );
+    let saved_selection = fs::read(&selection_path).unwrap();
+    for (field, value) in [
+        ("activeVersion", json!("1.1.0")),
+        ("protocol", json!(2)),
+        ("update", json!({"status": "committed"})),
+    ] {
+        let mut changed = pending_selection.clone();
+        changed[field] = value;
+        fs::write(&selection_path, serde_json::to_vec(&changed).unwrap()).unwrap();
+        assert_eq!(inspect_selection()["error"]["kind"], "incompatible_store");
+    }
+    for (field, value) in [
+        ("id", json!("aa212c2b-63d4-4b28-97e4-1c1d6dc6d282")),
+        ("fromVersion", json!("0.9.0")),
+        ("targetVersion", json!("1.2.0")),
+        ("status", json!("committed")),
+        ("dbPath", json!(trial)),
+    ] {
+        let mut changed = pending_selection.clone();
+        changed["update"][field] = value;
+        fs::write(&selection_path, serde_json::to_vec(&changed).unwrap()).unwrap();
+        assert_eq!(inspect_selection()["error"]["kind"], "incompatible_store");
+    }
+    fs::write(&selection_path, &saved_selection).unwrap();
+    let held_selection = runtime.join("selection-held.json");
+    fs::rename(&selection_path, &held_selection).unwrap();
+    std::os::unix::fs::symlink(&held_selection, &selection_path).unwrap();
+    assert_eq!(inspect_selection()["error"]["kind"], "incompatible_store");
+    fs::remove_file(&selection_path).unwrap();
+    fs::rename(&held_selection, &selection_path).unwrap();
+    let owner = OwnerLock::acquire(&owner_path).unwrap();
+    assert_eq!(inspect_selection()["error"]["kind"], "writer_busy");
+    drop(owner);
+    fs::rename(&receipt_path, &held_receipt).unwrap();
+    assert_eq!(inspect_selection()["error"]["kind"], "incompatible_store");
+    fs::rename(&held_receipt, &receipt_path).unwrap();
+    let unsealed = Command::new(executable)
+        .arg("trial-publish-sealed")
+        .arg(&home)
+        .arg(UPDATE)
+        .output()
+        .unwrap();
+    assert!(unsealed.status.success());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&unsealed.stdout).unwrap()["error"]["kind"],
+        "incompatible_store"
+    );
+    assert_eq!(fs::read(&live).unwrap(), before);
+    assert_eq!(fs::read(&trial).unwrap(), old_result);
+    assert_eq!(fs::read(&checkpoint).unwrap(), original_checkpoint);
+    assert_eq!(fs::read(&receipt_path).unwrap(), old_receipt);
+    assert_eq!(fs::read(&selection_path).unwrap(), saved_selection);
+    fs::write(&selection_path, &original_selection).unwrap();
+
+    fs::write(&receipt_path, vec![b' '; 8 * 1024 + 1]).unwrap();
+    assert_eq!(prepare(&request)["error"]["kind"], "incompatible_store");
+    assert_eq!(fs::read(&trial).unwrap(), old_result);
+    fs::write(&receipt_path, &old_receipt).unwrap();
+
+    let displaced = trial.with_extension("displaced");
+    fs::rename(&trial, &displaced).unwrap();
+    fs::copy(&displaced, &trial).unwrap();
+    assert_eq!(prepare(&request)["error"]["kind"], "incompatible_store");
+    assert_eq!(fs::read(&receipt_path).unwrap(), old_receipt);
+    fs::rename(&displaced, &trial).unwrap();
+    assert_eq!(prepare(&request)["ok"], true);
+
+    let store = Store::open_local(&live).await.unwrap();
+    store.commit(&batch("later", 1)).await.unwrap();
+    store.shutdown().await.unwrap();
+    let later = fs::read(&live).unwrap();
+    assert_eq!(prepare(&request)["error"]["kind"], "incompatible_store");
+    assert_eq!(fs::read(&live).unwrap(), later);
+    assert_eq!(fs::read(&checkpoint).unwrap(), original_checkpoint);
+    assert_eq!(fs::read(&trial).unwrap(), old_result);
+    assert_eq!(fs::read(&receipt_path).unwrap(), old_receipt);
+    assert_eq!(fs::read(&selection).unwrap(), b"existing runtime selection");
+}
+
 #[tokio::test]
 async fn concurrent_helpers_reopen_after_crash_without_reading_unrecovered_state() {
     let executable = env!("CARGO_BIN_EXE_t3-code-ls-db");
@@ -498,4 +955,64 @@ async fn concurrent_helpers_reopen_after_crash_without_reading_unrecovered_state
             );
         }
     }
+}
+
+#[tokio::test]
+async fn ordinary_owner_startup_preflight_uses_existing_native_catalog() {
+    use t3_code_ls_storage::application_server_ownership::OwnerLock;
+    let fixture = test_support::TestFixture::start().await;
+    let state = fixture.path().parent().unwrap().join("userdata");
+    std::fs::create_dir(&state).unwrap();
+    let lock_path = state.join("server-owner.sqlite");
+    let owner = OwnerLock::acquire(&lock_path).unwrap();
+    // First-run initialization remains the ordinary bootstrap owner's job.
+    owner.check_server_startup().await.unwrap();
+    assert!(!state.join("statev2.omdb").exists());
+    let store = Store::initialize_local(state.join("statev2.omdb"))
+        .await
+        .unwrap();
+    store.bootstrap_application().await.unwrap();
+    store.shutdown().await.unwrap();
+    let before = std::fs::read(state.join("statev2.omdb")).unwrap();
+    owner.check_server_startup().await.unwrap();
+    assert_eq!(std::fs::read(state.join("statev2.omdb")).unwrap(), before);
+    #[cfg(unix)]
+    {
+        let held = state.join("held-owner");
+        std::fs::rename(&lock_path, &held).unwrap();
+        std::fs::write(&lock_path, b"foreign owner").unwrap();
+        assert!(matches!(
+            owner.check_server_startup().await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert_eq!(std::fs::read(state.join("statev2.omdb")).unwrap(), before);
+        std::fs::remove_file(&lock_path).unwrap();
+        std::fs::rename(held, &lock_path).unwrap();
+    }
+    drop(owner);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_t3-code-ls-db"))
+        .arg("owner-lock")
+        .arg(&lock_path)
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(
+        b"{\"operation\":\"owner_check_startup\"}\n{\"operation\":\"owner_acquire\"}\n{\"operation\":\"owner_check_startup\"}\n"
+    ).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let replies: Vec<Value> = std::str::from_utf8(&output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(replies.len(), 3);
+    assert_eq!(replies[0]["error"]["kind"], "invalid_request");
+    assert_eq!(replies[1]["ok"], true);
+    assert_eq!(replies[2]["result"]["checked"], true);
+    assert_eq!(std::fs::read(state.join("statev2.omdb")).unwrap(), before);
 }

@@ -4,6 +4,7 @@ export {
   MICROPHONE_PERMISSION_ERROR,
   voiceInputBlocksSubmission,
   type VoiceDraftSnapshot,
+  type VoiceDraftSelectionMapper,
   type VoiceInputControllerDependencies,
   type VoiceInputPhase,
   type VoiceInputState,

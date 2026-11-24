@@ -55,6 +55,9 @@ fn target_89(source: &ApplicationCatalog, current: &Definition) -> ApplicationCa
             current.schema
         ])),
         schema: current.schema.clone(),
+        event_layout: None,
+        prepared_service_activation_v1: source.prepared_service_activation_v1.clone(),
+        forward_service_activation_v1: source.forward_service_activation_v1.clone(),
     }
 }
 
@@ -173,9 +176,22 @@ pub(crate) async fn validate_import_lineage(
         serde_json::from_slice(&bytes).map_err(|_| Error::IncompatibleStore)?;
     let previous = definition_88()?;
     let current = definition()?;
+    let mut target = target_89(&lineage.source, &current);
+    // Activation can change after the import upgrade. The active generation
+    // identity verifies that change independently of the historical lineage.
+    if let Some(binding) = &catalog.forward_service_activation_v1
+        && target.forward_service_activation_v1.is_none()
+        && target
+            .prepared_service_activation_v1
+            .as_ref()
+            .is_none_or(|seal| seal.update_id == binding.update_id)
+    {
+        target.prepared_service_activation_v1 = None;
+        target.forward_service_activation_v1 = Some(binding.clone());
+    }
     if lineage.version != 1
         || lineage.source.schema != previous.schema
-        || *catalog != target_89(&lineage.source, &current)
+        || *catalog != target
         || lineage.source.generation == catalog.generation
     {
         return Err(Error::IncompatibleStore);
@@ -415,6 +431,9 @@ impl Store {
                 current.schema
             ])),
             schema: current.schema.clone(),
+            event_layout: None,
+            prepared_service_activation_v1: source.prepared_service_activation_v1.clone(),
+            forward_service_activation_v1: source.forward_service_activation_v1.clone(),
         };
         for stage in [
             Stage::Clear,
@@ -528,7 +547,9 @@ impl Store {
             .await?;
         // The sole publish point: canonical rows, index backfills and migration
         // history become visible together. The source generation stays intact.
-        tx.put(schema_key(), encode_catalog(&target)?).await?;
+        let bytes = encode_catalog(&target)?;
+        record_generation_identity(&mut tx, &target, &bytes).await?;
+        tx.put(schema_key(), bytes).await?;
         tx.commit().await?;
         Ok(BootstrapResult {
             initialized: false,

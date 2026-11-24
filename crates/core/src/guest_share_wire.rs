@@ -80,7 +80,12 @@ fn code_units(value: &Value) -> WireResult<Vec<u16>> {
 fn inspected_upload(value: &Value) -> WireResult<InspectedUpload> {
     allowed_fields(
         value,
-        &["nameUnits", "contentTypeLowercaseUnits", "sizeBytes", "header"],
+        &[
+            "nameUnits",
+            "contentTypeLowercaseUnits",
+            "sizeBytes",
+            "header",
+        ],
     )?;
     Ok(InspectedUpload {
         name_units: code_units(field(value, "nameUnits")?)?,
@@ -588,9 +593,71 @@ pub fn evaluate(input: &Value) -> WireResult<Value> {
         "release" => &["version", "operation", "before", "after", "parsedDates"],
         "strip" => &["version", "operation", "context"],
         "classify-uploads" => &["version", "operation", "uploads"],
+        "authorize-session" => &[
+            "version",
+            "operation",
+            "shareId",
+            "sessionShareId",
+            "threadId",
+            "sessionThreadId",
+            "activeThread",
+            "claimedGuest",
+            "expiresAt",
+            "now",
+        ],
+        "authorize-invite" => &[
+            "version",
+            "operation",
+            "shareId",
+            "inviteShareId",
+            "activeThread",
+            "expiresAt",
+            "now",
+        ],
         _ => return Err(Error::InvalidRequest),
     };
     allowed_fields(input, keys)?;
+    if operation == "authorize-session" {
+        let eligible = guest_share::session_is_live(guest_share::SessionEligibility {
+            share_id: field(input, "shareId")?
+                .as_str()
+                .ok_or(Error::InvalidRequest)?,
+            session_share_id: field(input, "sessionShareId")?
+                .as_str()
+                .ok_or(Error::InvalidRequest)?,
+            thread_id: field(input, "threadId")?
+                .as_str()
+                .ok_or(Error::InvalidRequest)?,
+            session_thread_id: field(input, "sessionThreadId")?
+                .as_str()
+                .ok_or(Error::InvalidRequest)?,
+            active_thread: field(input, "activeThread")?
+                .as_bool()
+                .ok_or(Error::InvalidRequest)?,
+            claimed_guest: field(input, "claimedGuest")?
+                .as_bool()
+                .ok_or(Error::InvalidRequest)?,
+            expires_at: nullable_timestamp(field(input, "expiresAt")?)?,
+            now: timestamp(field(input, "now")?)?,
+        });
+        return Ok(success(Value::Bool(eligible), None));
+    }
+    if operation == "authorize-invite" {
+        let eligible = guest_share::invite_is_live(
+            field(input, "shareId")?
+                .as_str()
+                .ok_or(Error::InvalidRequest)?,
+            field(input, "inviteShareId")?
+                .as_str()
+                .ok_or(Error::InvalidRequest)?,
+            field(input, "activeThread")?
+                .as_bool()
+                .ok_or(Error::InvalidRequest)?,
+            nullable_timestamp(field(input, "expiresAt")?)?,
+            timestamp(field(input, "now")?)?,
+        );
+        return Ok(success(Value::Bool(eligible), None));
+    }
     if operation == "classify-uploads" {
         return classify_uploads(input);
     }
@@ -735,6 +802,66 @@ pub fn respond(frame: &str) -> WireResult<String> {
     let mut encoded = json::stringify(&response);
     encoded.push('\n');
     Ok(encoded)
+}
+
+#[cfg(test)]
+mod authorization_tests {
+    use super::*;
+
+    #[test]
+    fn session_operation_requires_typed_complete_facts() {
+        let input = object(vec![
+            ("version", Value::Number("1".to_string())),
+            ("operation", Value::String("authorize-session".to_string())),
+            ("shareId", Value::String("share".to_string())),
+            ("sessionShareId", Value::String("share".to_string())),
+            ("threadId", Value::String("thread".to_string())),
+            ("sessionThreadId", Value::String("thread".to_string())),
+            ("activeThread", Value::Bool(true)),
+            ("claimedGuest", Value::Bool(true)),
+            ("expiresAt", Value::Number("100".to_string())),
+            ("now", Value::Number("99".to_string())),
+        ]);
+        assert_eq!(
+            evaluate(&input).unwrap().get("ok"),
+            Some(&Value::Bool(true))
+        );
+        for key in [
+            "shareId",
+            "sessionShareId",
+            "threadId",
+            "sessionThreadId",
+            "activeThread",
+            "claimedGuest",
+            "expiresAt",
+            "now",
+        ] {
+            assert_eq!(
+                evaluate(&object_without(&input, &[key]).unwrap()),
+                Err(Error::InvalidRequest),
+            );
+        }
+        let mut unclaimed = input.clone();
+        set(&mut unclaimed, "claimedGuest", Value::Bool(false));
+        assert_eq!(
+            evaluate(&unclaimed).unwrap().get("ok"),
+            Some(&Value::Bool(false))
+        );
+        let mut malformed = input.clone();
+        set(
+            &mut malformed,
+            "claimedGuest",
+            Value::String("true".to_string()),
+        );
+        assert_eq!(evaluate(&malformed), Err(Error::InvalidRequest));
+        let mut extra = input;
+        set(
+            &mut extra,
+            "sessionToken",
+            Value::String("never-sent".to_string()),
+        );
+        assert_eq!(evaluate(&extra), Err(Error::InvalidRequest));
+    }
 }
 
 #[cfg(test)]

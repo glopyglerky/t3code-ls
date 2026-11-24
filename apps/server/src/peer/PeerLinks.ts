@@ -76,7 +76,7 @@ export const certificateErrorCode = (error: unknown) => {
 /** A usable link: where to reach the peer and the token to send there. */
 export interface ResolvedPeerLink {
   readonly link: PeerLink;
-  /** The first address that answered as this peer. */
+  /** The first address that answered as this peer and supports the link's limits. */
   readonly url: string;
   readonly token: string;
 }
@@ -626,39 +626,30 @@ export const make = Effect.gen(function* () {
           message: `The link to ${link.label} lost its credential. Link it again.`,
         });
       }
-      // The token goes only to an address that still answers as this peer,
-      // so one that now answers as another machine never receives it.
-      let fenced = true;
-      let label = link.label;
-      const url = yield* Effect.findFirst(link.urls, (candidate) =>
-        answersAs(candidate, environmentId).pipe(
-          Effect.map((found) => {
-            if (Option.isNone(found)) return false;
-            fenced = linkLimitsHold(found.value);
-            label = found.value.label;
-            return true;
-          }),
-        ),
-      );
-      if (Option.isNone(url)) {
-        return yield* new PeerLinkError({
-          reason: "unreachable",
-          message: `${link.label} did not answer at ${link.urls.join(", ")}.`,
-        });
+      // Check identity and permission limits at each address before choosing where to send the token.
+      let foundIncompatible = false;
+      for (const url of link.urls) {
+        const found = yield* answersAs(url, environmentId);
+        if (Option.isNone(found)) continue;
+        if (linkLimitsHold(found.value)) {
+          return {
+            link: yield* withLabel(link, found.value.label),
+            url,
+            token: new TextDecoder().decode(stored.value),
+          };
+        }
+        foundIncompatible = true;
       }
-      // A link made before the peer had to fence linked work, or a peer moved
-      // back to such a version, would carry work past those limits.
-      if (!fenced) {
+      if (foundIncompatible) {
         return yield* new PeerLinkError({
           reason: "incompatible",
           message: `${link.label} runs a T3 Code version that cannot keep a linked agent's limits. Update it, then link again.`,
         });
       }
-      return {
-        link: yield* withLabel(link, label),
-        url: url.value,
-        token: new TextDecoder().decode(stored.value),
-      };
+      return yield* new PeerLinkError({
+        reason: "unreachable",
+        message: `${link.label} did not answer at ${link.urls.join(", ")}.`,
+      });
     },
   );
 

@@ -2,11 +2,11 @@ use std::collections::HashSet;
 use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Map, Value, json};
 use t3_code_ls_core::json as core_json;
 use t3_code_ls_storage::application::{
-    ApplicationSchema, ApplicationTransactionMode, ApplicationTransactions,
+    ApplicationEventLayout, ApplicationSchema, ApplicationTransactionMode, ApplicationTransactions,
 };
 use t3_code_ls_storage::application_auth::AuthOperation;
 use t3_code_ls_storage::application_auxiliary_reads::AuxiliaryRead;
@@ -29,6 +29,15 @@ use t3_code_ls_storage::application_receipts::ReceiptRow;
 use t3_code_ls_storage::application_runtime_state::RuntimeStateOperation;
 use t3_code_ls_storage::application_scheduled::{ScheduledRead, ScheduledWrite};
 use t3_code_ls_storage::application_search::ThreadSearchQuery;
+use t3_code_ls_storage::application_storage::{
+    CandidatePreparationObservation, IsolatedTrialRequest, IsolatedTrialVerification,
+    NativePromotionIntent, TrialRestorePublicationRequest, TrialRestoreRequest,
+    backup_service_trial, inspect_isolated_service_trial_selection, prepare_isolated_service_trial,
+    prepare_service_trial_restore, publish_intended_isolated_service_trial,
+    publish_isolated_service_trial, publish_service_trial_restore,
+    record_isolated_candidate_preparation, record_native_promotion_intent,
+    rollback_isolated_service_trial, service_trial_capabilities, verify_isolated_service_trial,
+};
 use t3_code_ls_storage::application_thread_find::ThreadFindQuery;
 use t3_code_ls_storage::outbox::{self, EnqueueEffect};
 use t3_code_ls_storage::project_service::{ProjectRequest, execute_project};
@@ -39,6 +48,13 @@ use t3_code_ls_storage::{CommitBatch, Error, MAX_BATCH_BYTES, OutboxBatch, Store
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 enum Request {
     Shutdown {},
+    #[cfg(feature = "ordered-engine-fixture")]
+    ApplicationOrderedFixtureSelect {
+        profile: String,
+        directory: PathBuf,
+        #[serde(default)]
+        initialize: bool,
+    },
     ApplicationProjectionsContext {
         transaction_id: String,
         query: ProjectionContextQuery,
@@ -55,8 +71,11 @@ enum Request {
         transaction_id: String,
         query: ThreadSearchQuery,
     },
-    ApplicationBootstrap {},
+    ApplicationBootstrap {
+        event_layout: Option<ApplicationEventLayout>,
+    },
     ApplicationMigrations {},
+    ApplicationStartupMigrations {},
     ApplicationProjectionWindowQuery {
         transaction_id: String,
         query: ProjectionWindowQuery,
@@ -105,14 +124,17 @@ enum Request {
     },
     ApplicationProjectionReadsPrepare {},
     ApplicationProjectionsLookup {
-        transaction_id: String,
+        transaction_id: Option<String>,
         query: ProjectionLookup,
     },
     ApplicationProjectionsRecords {
-        transaction_id: String,
+        transaction_id: Option<String>,
         query: ProjectionRecordsQuery,
     },
-    ApplicationScheduledPrepare {},
+    ApplicationScheduledPrepare {
+        #[serde(default)]
+        durable_relay: bool,
+    },
     ApplicationScheduledRead {
         transaction_id: String,
         query: ScheduledRead,
@@ -149,6 +171,8 @@ enum Request {
         request: RuntimeStateOperation,
     },
     ApplicationSchema {},
+    ApplicationGenerationIdentity {},
+    ApplicationPreparedServiceActivation {},
     ApplicationInit {
         schema: ApplicationSchema,
     },
@@ -434,7 +458,9 @@ enum Request {
         #[serde(default)]
         max_running_title_generations: Option<f64>,
     },
-    OutboxNextClaimableAt { max_running_title_generations: Option<f64> },
+    OutboxNextClaimableAt {
+        max_running_title_generations: Option<f64>,
+    },
     OutboxSucceed {
         effect_id: String,
         worker_id: String,
@@ -491,6 +517,8 @@ enum Request {
 impl Request {
     fn is_unscoped_mutation(&self) -> bool {
         match self {
+            #[cfg(feature = "ordered-engine-fixture")]
+            Self::ApplicationOrderedFixtureSelect { .. } => true,
             Self::ApplicationInit { .. }
             | Self::ApplicationAuthPrepare { .. }
             | Self::ApplicationPeersPrepare { .. }
@@ -528,11 +556,14 @@ impl Request {
             | Self::ArchiveSqlite { .. } => true,
             Self::Shutdown { .. }
             | Self::ApplicationSchema { .. }
+            | Self::ApplicationGenerationIdentity { .. }
+            | Self::ApplicationPreparedServiceActivation { .. }
             | Self::ApplicationProjectionsContext { .. }
             | Self::ApplicationProjectionsRecovery { .. }
             | Self::ApplicationProjectionsShell { .. }
             | Self::ApplicationThreadSearchRead { .. }
             | Self::ApplicationMigrations { .. }
+            | Self::ApplicationStartupMigrations { .. }
             | Self::ApplicationProjectionWindowQuery { .. }
             | Self::StorageStatistics { .. }
             | Self::ApplicationLegacyV1Read { .. }
@@ -617,11 +648,77 @@ async fn evaluate(
     transactions: &mut ApplicationTransactions,
     planner: Option<&Path>,
     request: Request,
+    #[cfg(feature = "ordered-engine-fixture")] ordered_fixture_mode: bool,
 ) -> Result<Value, Error> {
+    #[cfg(feature = "ordered-engine-fixture")]
+    if ordered_fixture_mode {
+        if let Request::ApplicationOrderedFixtureSelect {
+            profile,
+            directory,
+            initialize,
+        } = &request
+        {
+            transactions
+                .select_ordered_fixture(profile, directory, *initialize)
+                .await?;
+            return Ok(json!({"selected": true, "profile": profile}));
+        }
+        // This mode has a read-only seed handle. No bootstrap, migration,
+        // maintenance, identity query or unscoped read may reach that seed.
+        if !matches!(
+            &request,
+            Request::ApplicationBegin { .. }
+                | Request::ApplicationSavepoint { .. }
+                | Request::ApplicationRelease { .. }
+                | Request::ApplicationRollbackTo { .. }
+                | Request::ApplicationGet { .. }
+                | Request::ApplicationScan { .. }
+                | Request::ApplicationPut { .. }
+                | Request::ApplicationDelete { .. }
+                | Request::ApplicationCommit { .. }
+                | Request::ApplicationRollback { .. }
+                | Request::ApplicationEventsAppend { .. }
+                | Request::ApplicationEventsRead { .. }
+                | Request::ApplicationEventsStats { .. }
+                | Request::ApplicationEventsLatest { .. }
+                | Request::ApplicationEventsPrunedThrough { .. }
+                | Request::ApplicationReceiptsInsert { .. }
+                | Request::ApplicationReceiptsUpsert { .. }
+                | Request::ApplicationReceiptsGet { .. }
+                | Request::ApplicationPositionsAllocate { .. }
+                | Request::ApplicationProjectsSelect { .. }
+                | Request::ApplicationProjectsUpsert { .. }
+                | Request::ApplicationProjectionsApply { .. }
+                | Request::ApplicationProjectionsApplyMany { .. }
+                | Request::ApplicationProjectionsNormalization { .. }
+                | Request::ApplicationProjectionsRead { .. }
+                | Request::ApplicationProjectionsGuard { .. }
+                | Request::ApplicationProjectionsUserInputCancellation { .. }
+                | Request::ApplicationProjectionsMarkApplied { .. }
+                | Request::ApplicationOutboxEnqueue { .. }
+                | Request::ApplicationOutboxGet { .. }
+                | Request::ApplicationOutboxList { .. }
+        ) {
+            return Err(Error::Invalid(
+                "operation unavailable in ordered fixture mode".into(),
+            ));
+        }
+        if !transactions.has_ordered_fixture() {
+            return Err(Error::Invalid(
+                "ordered fixture must be selected before sessions".into(),
+            ));
+        }
+    }
     if request.is_unscoped_mutation() && transactions.has_active_writer() {
         return Err(Error::WriterBusy);
     }
     match request {
+        #[cfg(feature = "ordered-engine-fixture")]
+        Request::ApplicationOrderedFixtureSelect { .. } => {
+            return Err(Error::Invalid(
+                "ordered fixture requires isolated helper mode".into(),
+            ));
+        }
         Request::Shutdown {} => {
             return Err(Error::Invalid(
                 "shutdown must be handled by the helper owner".into(),
@@ -649,11 +746,19 @@ async fn evaluate(
             transaction_id,
             query,
         } => Ok(transactions.thread_search(&transaction_id, query).await?),
-        Request::ApplicationBootstrap {} => {
-            serde_json::to_value(store.bootstrap_application().await?)
-        }
-        Request::ApplicationMigrations {} => {
-            serde_json::to_value(store.application_migrations().await?)
+        Request::ApplicationBootstrap { event_layout } => serde_json::to_value(
+            store
+                .bootstrap_application_with_event_layout(event_layout)
+                .await?,
+        ),
+        Request::ApplicationMigrations {} => serde_json::to_value(
+            store
+                .serving_startup_migrations()
+                .await?
+                .unwrap_or_default(),
+        ),
+        Request::ApplicationStartupMigrations {} => {
+            serde_json::to_value(store.serving_startup_migrations().await?)
         }
         Request::ApplicationProjectionWindowQuery {
             transaction_id,
@@ -711,6 +816,12 @@ async fn evaluate(
             .projections_control(&transaction_id, query)
             .await?),
         Request::ApplicationSchema {} => serde_json::to_value(transactions.schema().await?),
+        Request::ApplicationGenerationIdentity {} => {
+            serde_json::to_value(transactions.generation_identity().await?)
+        }
+        Request::ApplicationPreparedServiceActivation {} => {
+            serde_json::to_value(transactions.prepared_service_activation().await?)
+        }
         Request::ApplicationInit { schema } => {
             Ok(json!({"initialized": transactions.initialize(schema).await?}))
         }
@@ -939,8 +1050,8 @@ async fn evaluate(
         Request::ApplicationAuthPrepare {} => {
             serde_json::to_value(store.prepare_application_auth().await?)
         }
-        Request::ApplicationScheduledPrepare {} => {
-            serde_json::to_value(store.prepare_application_scheduled().await?)
+        Request::ApplicationScheduledPrepare { durable_relay } => {
+            serde_json::to_value(store.prepare_application_scheduled(durable_relay).await?)
         }
         Request::ApplicationProjectionReadsPrepare {} => {
             serde_json::to_value(store.prepare_application_projection_reads().await?)
@@ -961,17 +1072,17 @@ async fn evaluate(
         Request::ApplicationProjectionsLookup {
             transaction_id,
             query,
-        } => Ok(transactions
-            .projections_lookup(&transaction_id, query)
-            .await?),
+        } => match transaction_id {
+            Some(id) => Ok(transactions.projections_lookup(&id, query).await?),
+            None => Ok(transactions.projections_lookup_once(query).await?),
+        },
         Request::ApplicationProjectionsRecords {
             transaction_id,
             query,
-        } => serde_json::to_value(
-            transactions
-                .projection_records(&transaction_id, query)
-                .await?,
-        ),
+        } => serde_json::to_value(match transaction_id {
+            Some(id) => transactions.projection_records(&id, query).await?,
+            None => transactions.projection_records_once(query).await?,
+        }),
         Request::ApplicationScheduledRead {
             transaction_id,
             query,
@@ -1093,8 +1204,13 @@ async fn evaluate(
                 .await?;
             Ok(Value::Null)
         }
-        Request::ApplicationProjectionsApplyMany { transaction_id, events } => {
-            transactions.projections_apply_many(&transaction_id, events).await?;
+        Request::ApplicationProjectionsApplyMany {
+            transaction_id,
+            events,
+        } => {
+            transactions
+                .projections_apply_many(&transaction_id, events)
+                .await?;
             Ok(Value::Null)
         }
         Request::ApplicationProjectionsRead {
@@ -1229,7 +1345,10 @@ async fn evaluate(
                 )
                 .await?,
         ),
-        Request::ApplicationOutboxNextClaimableAt { transaction_id, max_running_title_generations } => serde_json::to_value(
+        Request::ApplicationOutboxNextClaimableAt {
+            transaction_id,
+            max_running_title_generations,
+        } => serde_json::to_value(
             transactions
                 .outbox_next_claimable_at_limited(&transaction_id, max_running_title_generations)
                 .await?,
@@ -1362,9 +1481,13 @@ async fn evaluate(
                 })
                 .await?,
         ),
-        Request::OutboxNextClaimableAt { max_running_title_generations } => {
-            serde_json::to_value(store.outbox_next_claimable_at_limited(max_running_title_generations).await?)
-        }
+        Request::OutboxNextClaimableAt {
+            max_running_title_generations,
+        } => serde_json::to_value(
+            store
+                .outbox_next_claimable_at_limited(max_running_title_generations)
+                .await?,
+        ),
         Request::OutboxSucceed {
             effect_id,
             worker_id,
@@ -1505,6 +1628,7 @@ fn error_response(error: &Error) -> Value {
     let kind = match error {
         Error::Invalid(_) | Error::ResourceLimit(_) => "invalid_request",
         Error::IncompatibleStore => "incompatible_store",
+        Error::RecoveryRequired => "recovery_required",
         Error::StaleRevision { .. } => "stale_revision",
         Error::CommandConflict => "command_conflict",
         Error::DuplicateRecord => "duplicate_record",
@@ -1516,22 +1640,225 @@ fn error_response(error: &Error) -> Value {
     json!({"ok": false, "error": {"kind": kind, "message": error.to_string()}})
 }
 
+fn read_trial_request<T: DeserializeOwned>(message: &str) -> io::Result<Result<T, Error>> {
+    const MAX_TRIAL_REQUEST_BYTES: usize = 4096;
+    let mut input = Vec::new();
+    io::stdin()
+        .lock()
+        .take((MAX_TRIAL_REQUEST_BYTES + 1) as u64)
+        .read_to_end(&mut input)?;
+    let invalid = || Error::Invalid(message.into());
+    if input.len() > MAX_TRIAL_REQUEST_BYTES {
+        return Ok(Err(invalid()));
+    }
+    Ok(serde_json::from_slice(&input).map_err(|_| invalid()))
+}
+
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    #[cfg(target_os = "linux")]
+    if let [mode, home, encoded] = args.as_slice() {
+        if mode == "forward-owner" {
+            if t3_code_ls_storage::application_storage::run_forward_owner(
+                PathBuf::from(home),
+                encoded.clone(),
+            )
+            .await
+            .is_err()
+            {
+                std::process::exit(78);
+            }
+            return Ok(());
+        }
+        if mode == "trial-commit-inherited-forward" {
+            if t3_code_ls_storage::forward_child_readiness::commit(Path::new(home), encoded)
+                .await
+                .is_err()
+            {
+                std::process::exit(78);
+            }
+            // Output failure is unknown delivery to the supervisor. Never
+            // fall through to the ordinary database protocol after commit.
+            let mut output = io::stdout().lock();
+            writeln!(output, r#"{{"ok":true,"syntheticForwardCommit":1}}"#)?;
+            output.flush()?;
+            return Ok(());
+        }
+        if mode == "trial-verify-inherited-readiness" {
+            if t3_code_ls_storage::forward_child_readiness::verify(Path::new(home), encoded)
+                .await
+                .is_err()
+            {
+                std::process::exit(78);
+            }
+            // Emit readiness only after every check. This mode always exits;
+            // it never falls through to the ordinary database protocol.
+            let mut output = io::stdout().lock();
+            writeln!(output, r#"{{"ok":true,"syntheticReadiness":1}}"#)?;
+            output.flush()?;
+            return Ok(());
+        }
+    }
+    let trial_response = match args.as_slice() {
+        [mode] if mode == "trial-capabilities" => Some(match service_trial_capabilities() {
+            Ok(capabilities) => json!({"ok": true, "result": capabilities}),
+            Err(error) => error_response(&error),
+        }),
+        [mode, home, update_id, catalog_sha256] if mode == "trial-backup" => {
+            match backup_service_trial(home.into(), update_id.clone(), catalog_sha256.clone()).await
+            {
+                Ok(backup) => Some(json!({"ok": true, "result": backup})),
+                Err(error) => Some(error_response(&error)),
+            }
+        }
+        [mode, home, update_id] if mode == "trial-prepare-restore" => Some(
+            match read_trial_request::<TrialRestoreRequest>("invalid trial restore request")? {
+                Ok(request) => {
+                    match prepare_service_trial_restore(home.into(), update_id.clone(), request)
+                        .await
+                    {
+                        Ok(stage) => json!({"ok": true, "result": stage}),
+                        Err(error) => error_response(&error),
+                    }
+                }
+                Err(error) => error_response(&error),
+            },
+        ),
+        [mode, home, update_id] if mode == "trial-prepare-isolated" => Some(
+            match read_trial_request::<IsolatedTrialRequest>("invalid isolated trial request")? {
+                Ok(request) => {
+                    match prepare_isolated_service_trial(home.into(), update_id.clone(), request)
+                        .await
+                    {
+                        Ok(preparation) => json!({"ok": true, "result": preparation}),
+                        Err(error) => error_response(&error),
+                    }
+                }
+                Err(error) => error_response(&error),
+            },
+        ),
+        [mode, home, update_id, from_version, target_version]
+            if mode == "trial-inspect-selection" =>
+        {
+            Some(
+                match inspect_isolated_service_trial_selection(
+                    home.into(),
+                    update_id.clone(),
+                    from_version.clone(),
+                    target_version.clone(),
+                )
+                .await
+                {
+                    Ok(selection) => json!({"ok": true, "result": selection}),
+                    Err(error) => error_response(&error),
+                },
+            )
+        }
+        [mode, home, update_id] if mode == "trial-record-promotion" => Some(
+            match read_trial_request::<NativePromotionIntent>("invalid native promotion intent")? {
+                Ok(intent) => {
+                    match record_native_promotion_intent(home.into(), update_id.clone(), intent)
+                        .await
+                    {
+                        Ok(result) => json!({"ok": true, "result": result}),
+                        Err(error) => error_response(&error),
+                    }
+                }
+                Err(error) => error_response(&error),
+            },
+        ),
+        [mode, home, update_id] if mode == "trial-record-prepared" => Some(
+            match read_trial_request::<CandidatePreparationObservation>(
+                "invalid candidate observation",
+            )? {
+                Ok(observation) => match record_isolated_candidate_preparation(
+                    home.into(),
+                    update_id.clone(),
+                    observation,
+                )
+                .await
+                {
+                    Ok(result) => json!({"ok": true, "result": result}),
+                    Err(error) => error_response(&error),
+                },
+                Err(error) => error_response(&error),
+            },
+        ),
+        [mode, home, update_id] if mode == "trial-verify-isolated" => Some(
+            match read_trial_request::<IsolatedTrialVerification>(
+                "invalid isolated trial verification",
+            )? {
+                Ok(request) => {
+                    match verify_isolated_service_trial(home.into(), update_id.clone(), request)
+                        .await
+                    {
+                        Ok(()) => json!({"ok": true, "result": {"verified": true}}),
+                        Err(error) => error_response(&error),
+                    }
+                }
+                Err(error) => error_response(&error),
+            },
+        ),
+        [mode, home, update_id] if mode == "trial-publish-sealed" => Some(
+            match publish_isolated_service_trial(home.into(), update_id.clone()).await {
+                Ok(publication) => json!({"ok": true, "result": publication}),
+                Err(error) => error_response(&error),
+            },
+        ),
+        [mode, home, update_id] if mode == "trial-publish-intended-sealed" => Some(
+            match publish_intended_isolated_service_trial(home.into(), update_id.clone()).await {
+                Ok(publication) => json!({"ok": true, "result": publication}),
+                Err(error) => error_response(&error),
+            },
+        ),
+        [mode, home, update_id] if mode == "trial-rollback-sealed" => Some(
+            match rollback_isolated_service_trial(home.into(), update_id.clone()).await {
+                Ok(publication) => json!({"ok": true, "result": publication}),
+                Err(error) => error_response(&error),
+            },
+        ),
+        [mode, home, update_id] if mode == "trial-publish-restore-offline" => Some(
+            match read_trial_request::<TrialRestorePublicationRequest>(
+                "invalid trial restore request",
+            )? {
+                Ok(request) => {
+                    match publish_service_trial_restore(home.into(), update_id.clone(), request)
+                        .await
+                    {
+                        Ok(publication) => json!({"ok": true, "result": publication}),
+                        Err(error) => error_response(&error),
+                    }
+                }
+                Err(error) => error_response(&error),
+            },
+        ),
+        _ => None,
+    };
+    if let Some(response) = trial_response {
+        let mut output = io::stdout().lock();
+        serde_json::to_writer(&mut output, &response)?;
+        writeln!(output)?;
+        output.flush()?;
+        return Ok(());
+    }
     if let [mode, path] = args.as_slice() {
         if mode == "owner-lock" {
             return t3_code_ls_storage::application_server_ownership::run(Path::new(path))
+                .await
                 .map_err(Into::into);
         }
     }
     let opened = match args.as_slice() {
+        #[cfg(feature = "ordered-engine-fixture")]
+        [mode, path] if mode == "ordered-fixture-local" => Store::open_read_only(path).await,
         [mode, path] if mode == "initialize-local" => Store::initialize_local(path).await,
         [mode, path] if mode == "local" => Store::open_local(path).await,
         [mode, path] if mode == "read-only-local" => Store::open_read_only(path).await,
+        [mode, path] if mode == "current-read-local" => Store::open_current_reader(path).await,
         [mode, path] if mode == "exclusive-local" => Store::open_exclusive(path).await,
         _ => {
             return Err(Error::Invalid(
-                "usage: t3-code-ls-db initialize-local PATH | local PATH | read-only-local PATH | exclusive-local PATH | owner-lock PATH".into(),
+                "usage: t3-code-ls-db initialize-local PATH | local PATH | read-only-local PATH | current-read-local PATH | exclusive-local PATH | owner-lock PATH | trial-backup HOME UPDATE_ID CATALOG_SHA256 | trial-prepare-isolated HOME UPDATE_ID < REQUEST_JSON | trial-record-promotion HOME UPDATE_ID < INTENT_JSON | trial-record-prepared HOME UPDATE_ID < OBSERVATION_JSON | trial-verify-isolated HOME UPDATE_ID < RECEIPT_JSON | trial-inspect-selection HOME UPDATE_ID FROM_VERSION TARGET_VERSION | trial-publish-sealed HOME UPDATE_ID | trial-publish-intended-sealed HOME UPDATE_ID | trial-rollback-sealed HOME UPDATE_ID | trial-prepare-restore HOME UPDATE_ID < REQUEST_JSON | trial-publish-restore-offline HOME UPDATE_ID < WITNESSED_REQUEST_JSON".into(),
             )
             .into());
         }
@@ -1603,7 +1930,17 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
             Ok(request) => {
-                match evaluate(&store, &mut transactions, planner.as_deref(), request).await {
+                match evaluate(
+                    &store,
+                    &mut transactions,
+                    planner.as_deref(),
+                    request,
+                    #[cfg(feature = "ordered-engine-fixture")]
+                    args.first()
+                        .is_some_and(|mode| mode == "ordered-fixture-local"),
+                )
+                .await
+                {
                     Ok(result) => json!({"ok": true, "result": result}),
                     Err(error) => error_response(&error),
                 }

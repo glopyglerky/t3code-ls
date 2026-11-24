@@ -88,6 +88,124 @@ fn stats(
 }
 
 #[tokio::test]
+#[ignore = "records physical storage use for a fixed assistant stream"]
+async fn assistant_text_layout_preserves_logical_replay_with_less_retained_storage() {
+    use crate::application::{ApplicationEventLayout, ApplicationTransactionMode};
+
+    async fn measure(
+        expected: &[EventAppendRow],
+        layout: Option<ApplicationEventLayout>,
+    ) -> (u64, usize, usize) {
+        let fixture = TestFixture::start().await;
+        let store = fixture.initialize().await;
+        assert!(
+            store
+                .bootstrap_application_with_event_layout(layout)
+                .await
+                .unwrap()
+                .initialized
+        );
+        prepare(&store).await;
+        let mut app = ApplicationTransactions::new(store.clone());
+        for (index, event) in expected.iter().enumerate() {
+            app.begin("append").await.unwrap();
+            assert_eq!(
+                app.events_append("append", event.clone(), None)
+                    .await
+                    .unwrap()
+                    .sequence,
+                index as u64 + 1,
+            );
+            app.commit("append").await.unwrap();
+        }
+        drop(app);
+        store.shutdown().await.unwrap();
+        let file_bytes = std::fs::metadata(fixture.path()).unwrap().len();
+
+        let store = fixture.connect().await;
+        let mut app = ApplicationTransactions::new(store.clone());
+        app.begin_mode("read", ApplicationTransactionMode::Read, None)
+            .await
+            .unwrap();
+        let replay = app.events_read("read", read_all()).await.unwrap();
+        assert_eq!(replay.len(), expected.len());
+        for (decoded, original) in replay.iter().zip(expected) {
+            assert_eq!(decoded.event_id, original.event_id);
+            assert_eq!(decoded.payload_json, original.payload_json);
+        }
+        app.rollback("read").await.unwrap();
+        drop(app);
+
+        // Count all keys and values in the physical table, including indexes and revision witnesses.
+        let mut raw = store.db.begin_read_only().await.unwrap();
+        let mut start = Vec::new();
+        let mut key_count = 0;
+        let mut key_value_bytes = 0;
+        loop {
+            let page = raw.scan(&start, &[u8::MAX], 64).await.unwrap();
+            let Some((last, _)) = page.last() else { break };
+            key_count += page.len();
+            key_value_bytes += page
+                .iter()
+                .map(|(key, value)| key.len() + value.len())
+                .sum::<usize>();
+            start.clone_from(last);
+            start.push(0);
+        }
+        raw.rollback().await.unwrap();
+        store.shutdown().await.unwrap();
+        (file_bytes, key_count, key_value_bytes)
+    }
+
+    let mut events = Vec::new();
+    for turn in 0..6 {
+        let thread = format!("thread-{turn}");
+        let mut text = "Synthetic opening paragraph café. ".repeat(280);
+        for revision in 0..64 {
+            text.push_str("追加 🐟 bounded stream update\n");
+            let mut event = row(&format!("assistant-{turn}-{revision}"), &thread);
+            event.actor_kind = "provider".into();
+            event.event_type = "message.updated".into();
+            event.payload_json = json!({
+                "threadId": thread, "id": "assistant-message", "text": text,
+                "role": "assistant", "createdBy": "agent", "creationSource": "provider",
+                "streaming": revision != 63, "runId": "run", "nodeId": "node",
+                "createdAt": "2026-11-10T00:00:00.000Z", "updatedAt": "2026-11-10T00:00:01.000Z",
+                "attachments": [],
+            })
+            .to_string();
+            events.push(event);
+        }
+    }
+    let full = measure(&events, None).await;
+    let revisions = measure(
+        &events,
+        Some(ApplicationEventLayout::AssistantTextRevisionsV1),
+    )
+    .await;
+    let sample = |(file_bytes, key_count, key_value_bytes)| {
+        json!({
+            "fileBytesAfterShutdown": file_bytes,
+            "keyCount": key_count,
+            "keyValueBytes": key_value_bytes,
+        })
+    };
+    println!(
+        "{}",
+        json!({
+            "scope": "assistant event log and indexes",
+            "durability": "omdb Immediate",
+            "rootCommits": events.len(),
+            "logicalPayloadBytes": events.iter().map(|row| row.payload_json.len()).sum::<usize>(),
+            "fullLayout": sample(full),
+            "revisionLayout": sample(revisions),
+        })
+    );
+    assert!(revisions.2 < full.2);
+    assert!(revisions.0 < full.0);
+}
+
+#[tokio::test]
 async fn event_append_joins_savepoint_rollback_and_preserves_typed_row_identity() {
     let fixture = TestFixture::start().await;
     let store = fixture.initialize().await;
@@ -491,4 +609,312 @@ async fn restored_non_string_prompts_keep_sqlite_types_or_fail_without_coercing_
         store.prepare_application_events().await,
         Err(Error::IncompatibleStore)
     ));
+}
+
+#[tokio::test]
+async fn assistant_text_revisions_store_suffixes_and_replay_exactly_after_rollback_reopen_and_prune()
+ {
+    use crate::application::{ApplicationEventLayout, ApplicationTransactionMode};
+
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    let layout = Some(ApplicationEventLayout::AssistantTextRevisionsV1);
+    assert!(
+        store
+            .bootstrap_application_with_event_layout(layout)
+            .await
+            .unwrap()
+            .initialized
+    );
+    let mut app = ApplicationTransactions::new(store.clone());
+    let identity = app.generation_identity().await.unwrap().unwrap();
+    assert_eq!(
+        identity.layout,
+        "t3-application-keyspace-v1+assistant-text-revisions-v1"
+    );
+    prepare(&store).await;
+    while !store
+        .prepare_application_maintenance()
+        .await
+        .unwrap()
+        .prepared
+    {}
+
+    let marker = "synthetic checkpoint prefix".repeat(48);
+    let token = format!(r"{marker}\u0061");
+    let message = |id: &str, text_token: &str, streaming: bool| {
+        let mut event = row(id, "thread");
+        event.event_type = "message.updated".into();
+        event.actor_kind = "provider".into();
+        event.payload_json = format!(
+            r#"{{"threadId":"thread","id":"message","text":"{text_token}","context":{{"variant":1e+21}},"role":"assistant","createdBy":"agent","creationSource":"provider","streaming":{streaming},"runId":"run","nodeId":"node","createdAt":"2026-11-10T00:00:00.000Z","updatedAt":"2026-11-10T00:00:01.000Z","attachments":[]}}"#
+        );
+        event
+    };
+    let first = message("first", &token, true);
+    let second = message("second", &format!(r"{token}雪\n"), true);
+    let third = message("third", &format!(r"{token}雪\nmore"), true);
+    let rewrite = message("rewrite", &format!("new {token}"), true);
+    let completion = message("completion", &format!("new {token} done"), false);
+
+    app.begin("write").await.unwrap();
+    app.events_append("write", first.clone(), None)
+        .await
+        .unwrap();
+    app.savepoint("write", "attempt").await.unwrap();
+    app.events_append(
+        "write",
+        message("discarded", &format!("{token} discarded"), true),
+        None,
+    )
+    .await
+    .unwrap();
+    app.rollback_to("write", "attempt").await.unwrap();
+    app.release("write", "attempt").await.unwrap();
+    for event in [&second, &third, &rewrite, &completion] {
+        app.events_append("write", event.clone(), None)
+            .await
+            .unwrap();
+    }
+    app.commit("write").await.unwrap();
+    drop(app);
+    store.shutdown().await.unwrap();
+
+    let store = fixture.connect().await;
+    assert!(!store.bootstrap_application().await.unwrap().initialized);
+    let mut raw = store.db.begin_read_only().await.unwrap();
+    let catalog = decode_catalog(&raw.get(&schema_key()).await.unwrap().unwrap()).unwrap();
+    let plain_catalog: Value =
+        serde_json::from_slice(&raw.get(&schema_key()).await.unwrap().unwrap()).unwrap();
+    assert_eq!(plain_catalog["event_layout"], "assistant_text_revisions_v1");
+    let mut physical = Vec::new();
+    for sequence in 1..=5 {
+        physical.push(
+            raw.get(&event_key(&catalog, sequence).unwrap())
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+    }
+    raw.rollback().await.unwrap();
+    for (index, (predecessor, suffix)) in [(1, r"雪\n"), (2, "more")].into_iter().enumerate() {
+        let bytes = &physical[index + 1];
+        let stored: Value = serde_json::from_slice(bytes).unwrap();
+        let revision = &stored["text_revision"];
+        assert_eq!(revision["previous"]["sequence"], predecessor);
+        assert_eq!(revision["suffix"], suffix);
+        assert!(!std::str::from_utf8(bytes).unwrap().contains(&marker));
+    }
+    for index in [0, 3, 4] {
+        let stored: ApplicationRow = serde_json::from_slice(&physical[index]).unwrap();
+        assert!(text(&stored.row, "payload_json").unwrap().contains(&marker));
+    }
+
+    let mut app = ApplicationTransactions::new(store.clone());
+    app.begin_mode("read", ApplicationTransactionMode::Read, None)
+        .await
+        .unwrap();
+    let expected =
+        [&first, &second, &third, &rewrite, &completion].map(|r| r.payload_json.as_str());
+    let replay = app.events_read("read", read_all()).await.unwrap();
+    assert_eq!(
+        replay
+            .iter()
+            .map(|r| r.payload_json.as_str())
+            .collect::<Vec<_>>(),
+        expected
+    );
+    let page = app.scan("read", EVENTS, None, 10).await.unwrap();
+    for (index, payload) in expected.into_iter().enumerate() {
+        let key = [int_cell(index + 1)];
+        let row = app.get("read", EVENTS, &key).await.unwrap().unwrap();
+        assert_eq!(text(&row, "payload_json").unwrap(), payload);
+        assert!(
+            page.rows
+                .iter()
+                .any(|found| found.key == key && found.row == row)
+        );
+    }
+    assert_eq!(
+        app.events_stats("read", stats("application", None, 0, 5, None))
+            .await
+            .unwrap()
+            .raw_payload_bytes,
+        expected
+            .iter()
+            .map(|payload| payload.len() as u64)
+            .sum::<u64>()
+    );
+    app.rollback("read").await.unwrap();
+
+    let base_key = event_key(&catalog, 1).unwrap();
+    let suffix_key = event_key(&catalog, 2).unwrap();
+    let mut wrong_base: ApplicationRow = serde_json::from_slice(&physical[0]).unwrap();
+    wrong_base.row.insert(
+        "payload_json".into(),
+        text_cell(
+            &first
+                .payload_json
+                .replace(r#""id":"message""#, r#""id":"another""#),
+        ),
+    );
+    let mut forward: Value = serde_json::from_slice(&physical[1]).unwrap();
+    forward["text_revision"]["previous"]["sequence"] = json!(3);
+    for (key, replacement) in [
+        (base_key.clone(), None),
+        (base_key, Some(encode_row(&wrong_base).unwrap())),
+        (suffix_key, Some(encode(&forward).unwrap())),
+        (key(&catalog, "text-v1/dependent/1"), None),
+    ] {
+        for after_sequence in [None, Some(0), Some(1)] {
+            // Inject a fault inside a disposable transaction. An incompatible
+            // row must abort the read and leave the committed witness untouched.
+            app.begin("damaged").await.unwrap();
+            let mut session = app.take("damaged").unwrap();
+            if let Some(bytes) = &replacement {
+                session
+                    .transaction
+                    .put(key.clone(), bytes.clone())
+                    .await
+                    .unwrap();
+            } else {
+                session.transaction.delete(key.clone()).await.unwrap();
+            }
+            app.finish("damaged", session, Ok(())).await.unwrap();
+            let read = if let Some(after_sequence) = after_sequence {
+                app.events_read(
+                    "damaged",
+                    EventRead {
+                        after_sequence,
+                        ..read_all()
+                    },
+                )
+                .await
+                .map(|_| ())
+            } else {
+                app.get("damaged", EVENTS, &[int_cell(2)]).await.map(|_| ())
+            };
+            assert!(matches!(read, Err(Error::IncompatibleStore)), "{read:?}");
+        }
+    }
+
+    app.begin("prune").await.unwrap();
+    app.maintenance_write(
+        "prune",
+        MaintenanceWrite::DeleteEvents { sequences: vec![1] },
+    )
+    .await
+    .unwrap();
+    app.commit("prune").await.unwrap();
+    let mut raw = store.db.begin_read_only().await.unwrap();
+    let key = event_key(&catalog, 1).unwrap();
+    assert!(raw.get(&key).await.unwrap().is_none());
+    let key = event_key(&catalog, 2).unwrap();
+    let bytes = raw.get(&key).await.unwrap().unwrap();
+    let reanchored: ApplicationRow = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        text(&reanchored.row, "payload_json").unwrap(),
+        second.payload_json
+    );
+    raw.rollback().await.unwrap();
+    app.begin_mode("after-prune", ApplicationTransactionMode::Read, None)
+        .await
+        .unwrap();
+    let replay = app.events_read("after-prune", read_all()).await.unwrap();
+    assert_eq!(
+        replay
+            .iter()
+            .map(|r| r.payload_json.as_str())
+            .collect::<Vec<_>>(),
+        expected[1..]
+    );
+    app.rollback("after-prune").await.unwrap();
+    store.shutdown().await.unwrap();
+}
+
+#[tokio::test]
+async fn preparation_metadata_pair_revalidates_completed_state_and_fails_closed() {
+    let state = |version, ready, indexed_rows| {
+        encode(&Preparation {
+            version,
+            ready,
+            after: None,
+            indexed_rows,
+        })
+        .unwrap()
+    };
+    let valid_marker = || Some(encode(&"event-index-v1").unwrap());
+    let cases = [
+        ("fresh", None, None, Some(0)),
+        (
+            "completed",
+            Some(state(1, true, 73)),
+            valid_marker(),
+            Some(73),
+        ),
+        (
+            "unfinished",
+            Some(state(1, false, 0)),
+            valid_marker(),
+            Some(0),
+        ),
+        ("orphan marker", None, valid_marker(), None),
+        ("missing marker", Some(state(1, true, 73)), None, None),
+        (
+            "wrong marker",
+            Some(state(1, true, 73)),
+            Some(encode(&"wrong").unwrap()),
+            None,
+        ),
+        (
+            "malformed marker",
+            Some(state(1, true, 73)),
+            Some(b"{".to_vec()),
+            None,
+        ),
+        (
+            "wrong version",
+            Some(state(2, true, 73)),
+            valid_marker(),
+            None,
+        ),
+        ("malformed state", Some(b"{".to_vec()), valid_marker(), None),
+    ];
+    for (name, stored, stored_marker, expected_rows) in cases {
+        let fixture = TestFixture::start().await;
+        let store = fixture.initialize().await;
+        let app = initialize(&store).await;
+        let mut seed = store.db.begin().await.unwrap();
+        let bytes = seed.get(&schema_key()).await.unwrap().unwrap();
+        let catalog = decode_catalog(&bytes).unwrap();
+        let keys = [key(&catalog, "preparation"), marker(&catalog)];
+        for (key, value) in keys.iter().zip([&stored, &stored_marker]) {
+            if let Some(value) = value {
+                seed.put(key.clone(), value.clone()).await.unwrap();
+            }
+        }
+        seed.commit().await.unwrap();
+        for _ in 0..2 {
+            let result = store.prepare_application_events().await;
+            match expected_rows {
+                Some(expected) => {
+                    let result = result.unwrap();
+                    assert!(result.prepared, "{name}");
+                    assert_eq!(result.indexed_rows, expected, "{name}");
+                }
+                None => {
+                    assert!(matches!(result, Err(Error::IncompatibleStore)), "{name}");
+                    let mut check = store.db.begin_read_only().await.unwrap();
+                    assert_eq!(
+                        check.get_many(&keys).await.unwrap(),
+                        [stored.clone(), stored_marker.clone()],
+                        "{name}"
+                    );
+                    check.rollback().await.unwrap();
+                }
+            }
+        }
+        drop(app);
+        store.shutdown().await.unwrap();
+    }
 }

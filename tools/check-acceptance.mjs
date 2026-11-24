@@ -210,12 +210,22 @@ function main() {
   };
   const reportPath = Path.join(proof, "acceptance.json");
   const save = () => FS.writeFileSync(reportPath, JSON.stringify(report, null, 2) + "\n");
-  function run(records, details, program, args, env) {
+  function run(records, details, program, args, env, diagnostics) {
     const check = { ...details, program: Path.basename(program), arguments: args, status: "running" };
     records.push(check);
     save();
     console.log(`\n${details.script ?? `Build ${details.package} acceptance executables`}`);
-    const result = ChildProcess.spawnSync(program, args, { cwd: root, env, stdio: "inherit" });
+    const outputPath = diagnostics === undefined ? undefined : Path.join(proof, diagnostics);
+    const output = outputPath === undefined ? undefined : FS.openSync(outputPath, "w");
+    let result;
+    try {
+      result = ChildProcess.spawnSync(program, args, {
+        cwd: root, env, stdio: output === undefined ? "inherit" : ["ignore", output, output],
+      });
+    } finally {
+      if (output !== undefined) FS.closeSync(output);
+    }
+    if (outputPath !== undefined) process.stdout.write(FS.readFileSync(outputPath, "utf8"));
     check.status = result.status === 0 && !result.error ? "passed" : "failed";
     check.exit_code = result.status;
     if (result.signal) check.signal = result.signal;
@@ -254,7 +264,9 @@ function main() {
       run(report.builds, { package: build.package }, build.program, build.arguments, env);
     }
     for (const check of typechecks) {
-      run(report.typechecks, { script: check.project }, check.program, check.arguments, env);
+      // The checker can exit before queued writes to a pipe are flushed.
+      run(report.typechecks, { script: check.project }, check.program, check.arguments, env,
+        Path.basename(check.project, ".json") + ".log");
     }
     // Always supply the selected executable: legacy scripts must never enter their Cargo fallback.
     for (const check of checks) {

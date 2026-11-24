@@ -12,7 +12,13 @@ import { AsyncResult, type Atom } from "effect/reactivity";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import type { QueuedThreadMessage } from "./thread-outbox-model";
 
+type TestConnections = ReadonlyArray<{
+  environmentId: string;
+  connectionState: "connected" | "disconnected";
+}>;
+
 const state = vi.hoisted(() => ({
+  connections: null as unknown as Atom.Writable<TestConnections>,
   draftText: "Keep this draft separate",
   cleanups: [] as Array<() => void>,
   delivery: null as {
@@ -20,6 +26,7 @@ const state = vi.hoisted(() => ({
     readonly dispose: () => void;
   } | null,
   start: vi.fn(),
+  remove: vi.fn(async () => {}),
   metadata: vi.fn(),
   runtime: vi.fn(),
   interaction: vi.fn(),
@@ -71,11 +78,8 @@ vi.mock("./projects", async () => {
 });
 vi.mock("./workspace", async () => {
   const { Atom } = await import("effect/reactivity");
-  return {
-    workspaceConnections: {
-      environmentsAtom: Atom.make([{ environmentId: "secondary", connectionState: "connected" }]),
-    },
-  };
+  state.connections = Atom.make<TestConnections>([{ environmentId: "secondary", connectionState: "connected" }]);
+  return { workspaceConnections: { environmentsAtom: state.connections } };
 });
 vi.mock("./server", async () => {
   const { Atom } = await import("effect/reactivity");
@@ -115,7 +119,7 @@ vi.mock("./thread-outbox", async () => {
     storage: {
       load: async () => ({ messages: [], errors: [] }),
       write: async () => {},
-      remove: async () => {},
+      remove: () => state.remove(),
     },
   });
   return {
@@ -161,6 +165,7 @@ vi.mock("./use-composer-drafts", async () => {
 
 import { appAtomRegistry } from "./atom-registry";
 import { environmentSession } from "./session";
+import { threadOutboxRetryDelayMs } from "./thread-outbox-model";
 import { dispatchingQueuedMessageIdAtom, editingQueuedMessageIdsAtom } from "./use-thread-outbox";
 import { createThreadOutboxDelivery } from "./threadOutboxDelivery";
 
@@ -209,6 +214,10 @@ function startDelivery(): void {
 beforeEach(() => {
   setOperateGrant("primary", true);
   setOperateGrant("secondary", false);
+  state.remove.mockReset().mockResolvedValue(undefined);
+  appAtomRegistry.set(state.connections, [
+    { environmentId: "secondary", connectionState: "connected" },
+  ]);
   state.draftText = "Keep this draft separate";
   state.config.shellThreadFamilies = false;
   state.modelUnavailable.mockReset().mockReturnValue(false);
@@ -325,6 +334,7 @@ describe("queued PR checkout", () => {
 });
 afterEach(() => {
   state.cleanups.splice(0).forEach((cleanup) => cleanup());
+  vi.useRealTimers();
 });
 
 describe("queued task operation access", () => {
@@ -547,5 +557,159 @@ describe("compaction before a queued send", () => {
     expect(state.start).toHaveBeenCalledOnce();
     expect(state.start.mock.calls[0]?.[0].input).toMatchObject(compactTurn);
     expect(remaining()).toEqual([queued]);
+  });
+});
+
+
+// These controls exercise the production drain subscription. Sessions, transport,
+// uploads and disk are test doubles; this is not an authenticated Android proof.
+describe("outbox reconnect convergence control", () => {
+  const setConnected = (connected: boolean) => {
+    appAtomRegistry.set(state.connections, [
+      { environmentId: "secondary", connectionState: connected ? "connected" : "disconnected" },
+    ]);
+  };
+
+  function nextSettlement() {
+    const settled = Promise.withResolvers<void>();
+    let dispatched = false;
+    const release = appAtomRegistry.subscribe(dispatchingQueuedMessageIdAtom, (id) => {
+      if (id !== null) dispatched = true;
+      else if (dispatched) settled.resolve();
+    });
+    state.cleanups.push(release);
+    return settled.promise;
+  }
+
+  it("starts a pending creation once after connection and scope wake the real drain", async () => {
+    setConnected(false);
+    const queued = message({
+      threadId: ThreadId.make("new-offline-thread"),
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+      creation: {
+        projectId: ProjectId.make("fixture-project"),
+        projectCwd: "/fixture",
+        workspaceMode: "local",
+        branch: null,
+        worktreePath: null,
+      },
+    });
+    await state.manager.enqueue(queued);
+    startDelivery();
+    expect(remaining()).toEqual([queued]);
+    expect(state.start).not.toHaveBeenCalled();
+    setConnected(true);
+    expect(state.prepare).not.toHaveBeenCalled();
+    expect(state.start).not.toHaveBeenCalled();
+
+    const started = Promise.withResolvers<void>();
+    const accepted = Promise.withResolvers<AsyncResult.AsyncResult<{}, never>>();
+    state.start.mockImplementationOnce(() => {
+      started.resolve();
+      return accepted.promise;
+    });
+    const settled = nextSettlement();
+    setOperateGrant("secondary", true);
+    await started.promise;
+    const expected = {
+      environmentId: queued.environmentId,
+      input: expect.objectContaining({
+        commandId: queued.commandId,
+        threadId: queued.threadId,
+        message: expect.objectContaining({ messageId: queued.messageId, text: queued.text }),
+        bootstrap: expect.objectContaining({
+          createThread: expect.objectContaining({ projectId: queued.creation!.projectId }),
+        }),
+      }),
+    };
+    expect(state.start).toHaveBeenCalledExactlyOnceWith(expected);
+    expect(state.remove).not.toHaveBeenCalled();
+    expect(remaining()).toHaveLength(1);
+    // Changes arriving while startTurn is unresolved must not launch a second turn.
+    setConnected(false);
+    setOperateGrant("secondary", false);
+    setConnected(true);
+    setOperateGrant("secondary", true);
+    state.delivery!.drain();
+    expect(state.start).toHaveBeenCalledOnce();
+    accepted.resolve(AsyncResult.success({}));
+    await settled;
+    expect(state.remove).toHaveBeenCalledOnce();
+    expect(remaining()).toEqual([]);
+    setConnected(false);
+    setConnected(true);
+    state.delivery!.drain();
+    expect(state.start).toHaveBeenCalledOnce();
+  });
+
+  it("retries only cleanup after an accepted reconnect send, retaining attachment and IDs", async () => {
+    vi.useFakeTimers();
+    setConnected(false);
+    setOperateGrant("secondary", true);
+    const queued = message({
+      attachments: [{
+        id: "offline-file", type: "file", name: "offline.txt", mimeType: "text/plain",
+        sizeBytes: 7, fileUri: "file:///fixture/offline.txt",
+      }],
+    });
+    const uploaded = {
+      id: "uploaded-file", type: "file", name: "offline.txt", mimeType: "text/plain", sizeBytes: 7,
+    };
+    state.config.environment.capabilities = { fileAttachments: { maxUploadBytes: 128 } } as never;
+    state.cleanups.push(() => { state.config.environment.capabilities = {}; });
+    state.prepare.mockImplementation(async ({ attachments, persistUploadedReferences }) => {
+      const draftAttachments = attachments.map((attachment: QueuedThreadMessage["attachments"][number]) => ({
+        ...attachment, uploadedAttachmentId: uploaded.id, uploadEnvironmentId: queued.environmentId,
+      }));
+      expect(await persistUploadedReferences(draftAttachments)).toBe("persisted");
+      return {
+        status: "ready", attachments: [uploaded], draftAttachments, pendingAttachmentIds: [],
+      };
+    });
+    const accepted: unknown[] = [];
+    state.start.mockImplementation(async (input) => {
+      expect(state.remove).not.toHaveBeenCalled();
+      accepted.push(input);
+      return AsyncResult.success({ sequence: 7 });
+    });
+    state.remove.mockRejectedValueOnce(new Error("fixture unlink unavailable"));
+    await state.manager.enqueue(queued);
+    startDelivery();
+    expect(state.prepare).not.toHaveBeenCalled();
+    const settled = nextSettlement();
+    setConnected(true);
+    await settled;
+    expect(accepted).toEqual([{
+      environmentId: queued.environmentId,
+      input: expect.objectContaining({
+        commandId: queued.commandId, threadId: queued.threadId, resendAfterSocketLoss: false,
+        message: expect.objectContaining({
+          messageId: queued.messageId, text: queued.text, attachments: [uploaded],
+        }),
+      }),
+    }]);
+    expect(remaining()).toEqual([{
+      ...queued,
+      attachments: [{
+        ...queued.attachments[0], uploadedAttachmentId: uploaded.id,
+        uploadEnvironmentId: queued.environmentId,
+      }],
+    }]);
+    expect(state.remove).toHaveBeenCalledOnce();
+    setConnected(false);
+    setConnected(true);
+    state.delivery!.drain();
+    expect(state.start).toHaveBeenCalledOnce();
+    const cleaned = nextSettlement();
+    await vi.advanceTimersByTimeAsync(threadOutboxRetryDelayMs(1));
+    await cleaned;
+    expect(state.remove).toHaveBeenCalledTimes(2);
+    expect(state.prepare).toHaveBeenCalledOnce();
+    expect(state.start).toHaveBeenCalledOnce();
+    expect(remaining()).toEqual([]);
+    setConnected(false);
+    setConnected(true);
+    state.delivery!.drain();
+    expect(state.start).toHaveBeenCalledOnce();
   });
 });

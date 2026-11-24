@@ -66,6 +66,7 @@ import {
   type OrchestrationV2ShellSnapshot,
   type OrchestrationV2ShellStreamItem,
   type OrchestrationV2ThreadStreamItem,
+  type OrchestrationV2SubscribeThreadInput,
   type ApplicationStoredEvent,
   type ProjectEntriesFailure,
   type ProjectFileFailure,
@@ -700,6 +701,8 @@ function projectFileFailureContext(
       return { failure: "path_not_file", resolvedPath: error.resolvedPath };
     case "WorkspaceBinaryFileError":
       return { failure: "binary_file", resolvedPath: error.resolvedPath };
+    case "WorkspaceFileChangedError":
+      return { failure: "file_changed", resolvedPath: error.resolvedPath };
     default:
       return unexpectedCompatibilityError(error);
   }
@@ -891,30 +894,8 @@ const enrichProjectShells = Effect.fn("ws.orchestrationV2.enrichProjectShells")(
 );
 
 export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subscribeThread")(
-  function* (input: {
-    readonly threadId: ThreadId;
-    readonly afterSequence?: number;
-    readonly requestCompletionMarker?: boolean;
-    readonly acceptBoundedSnapshot?: boolean;
-    readonly acceptDeferredWork?: boolean;
-    readonly acceptCompactTurnItems?: boolean;
-    readonly acceptDedupedBodies?: boolean;
-    readonly acceptCompactIds?: boolean;
-    readonly messageTextAppends?: number;
-  }) {
+  function* (input: OrchestrationV2SubscribeThreadInput) {
     const threadManagement = yield* ThreadManagementService.ThreadManagementService;
-    const dedupeBodies = input.acceptDedupedBodies === true;
-    // Replay, snapshot, and live tail share one deduper: it must see every delivered record.
-    const withLiveDedupe = <E, R>(stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>) =>
-      dedupeBodies ? Stream.suspend(() => Stream.map(stream, makeLiveBodyDeduper())) : stream;
-    const withMessageTextAppends = <E, R>(
-      stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>,
-    ) =>
-      input.messageTextAppends === 1
-        ? Stream.suspend(() => Stream.map(stream, makeMessageTextAppendEncoder()))
-        : stream;
-    const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
-
     yield* Effect.annotateCurrentSpan({
       "orchestration_v2.thread_id": input.threadId,
     });
@@ -929,24 +910,74 @@ export const subscribeOrchestrationV2Thread = Effect.fn("ws.orchestrationV2.subs
       ),
     );
 
-    const eventStreamFrom = (afterSequence: number) =>
-      threadManagement
+    if (!shouldUseBoundedThreadSnapshot(input) || input.acceptHistoryInvalidation !== true) {
+      return yield* openThreadSubscription(input, threadManagement, null);
+    }
+    // Register before the opening snapshot or replay. A commit during either
+    // read remains pending until the stream enters its live tail.
+    return Stream.unwrap(
+      threadManagement.watchForkHistory(input.threadId).pipe(
+        Effect.mapError(
+          (cause) =>
+            new OrchestrationV2GetThreadProjectionError({
+              threadId: input.threadId,
+              message: `Failed to observe history for orchestration V2 thread ${input.threadId}`,
+              cause,
+            }),
+        ),
+        Effect.flatMap((invalidations) =>
+          openThreadSubscription(input, threadManagement, invalidations),
+        ),
+      ),
+    );
+  },
+);
+
+const openThreadSubscription = Effect.fnUntraced(
+  function* (
+    input: OrchestrationV2SubscribeThreadInput,
+    threadManagement: ThreadManagementService.ThreadManagementService["Service"],
+    invalidations: Effect.Success<ReturnType<typeof threadManagement.watchForkHistory>>,
+  ) {
+    const dedupeBodies = input.acceptDedupedBodies === true;
+    // An out-of-band bounded refresh can evict a live dedupe base. Keep the
+    // self-contained snapshot codec, and send complete repeated bodies on watched streams.
+    const withLiveDedupe = <E, R>(stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>) =>
+      dedupeBodies && invalidations === null
+        ? Stream.suspend(() => Stream.map(stream, makeLiveBodyDeduper()))
+        : stream;
+    const withMessageTextAppends = <E, R>(
+      stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>,
+    ) =>
+      input.messageTextAppends === 1 || input.messageTextAppends === 2
+        ? Stream.suspend(() =>
+            Stream.map(stream, makeMessageTextAppendEncoder(input.messageTextAppends === 2)),
+          )
+        : stream;
+    const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
+
+    const eventStreamFrom = (afterSequence: number) => {
+      const events = threadManagement
         .streamStoredEventsFrom({
           threadId: input.threadId,
           afterSequence,
         })
-        .pipe(
-          Stream.map(threadStreamEventItem),
-          coalesceThreadLiveStream,
-          Stream.mapError(
-            (cause) =>
-              new OrchestrationV2GetThreadProjectionError({
-                threadId: input.threadId,
-                message: `Failed while streaming orchestration V2 thread ${input.threadId}`,
-                cause,
-              }),
-          ),
-        );
+        .pipe(Stream.map(threadStreamEventItem), coalesceThreadLiveStream);
+      return (
+        invalidations === null
+          ? events
+          : Stream.merge(events, invalidations, { haltStrategy: "left" })
+      ).pipe(
+        Stream.mapError(
+          (cause) =>
+            new OrchestrationV2GetThreadProjectionError({
+              threadId: input.threadId,
+              message: `Failed while streaming orchestration V2 thread ${input.threadId}`,
+              cause,
+            }),
+        ),
+      );
+    };
 
     const loadReplayThrough = (afterSequence: number, throughSequence: number) =>
       applicationEvents
@@ -1885,7 +1916,9 @@ export const layerWsRpc = (
           shellOlderSettled: true,
           threadResumeCompletionMarker: true,
           threadSnapshotPagination: true,
+          threadHistoryInvalidation: true,
           threadMessageTextAppends: 1 as const,
+          threadMessageTextSplices: 1 as const,
           threadFind: true,
           threadFindProgressive: true,
           secretProviderSettings: true,
@@ -2160,7 +2193,7 @@ export const layerWsRpc = (
                     })
                     .pipe(
                       Effect.andThen(
-                        ThreadMessageIntake.launchThread({
+                        ThreadMessageIntake.launchThreadForWire({
                           commandId: input.commandId,
                           ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
                           ...(input.reuseExistingThread === undefined
@@ -2191,7 +2224,7 @@ export const layerWsRpc = (
                               }),
                           createdBy: "user",
                           creationSource: input.creationSource ?? "web",
-                        }),
+                        }, input.responseMode),
                       ),
                       Effect.provide(intakeContext),
                     ),
@@ -2215,10 +2248,10 @@ export const layerWsRpc = (
                             Effect.ignore,
                           ),
                   ),
-                  Effect.map((result) => ({
+                  Effect.map((result) => "projection" in result ? {
                     ...result,
                     projection: projectThreadProjectionForWire(result.projection),
-                  })),
+                  } : result),
                   Effect.catchTags({
                     AttachmentClaimError: (cause) =>
                       new OrchestrationV2ThreadLaunchError({
@@ -3531,6 +3564,7 @@ export const layer = Layer.unwrap(
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
     const transactions = yield* PersistenceTransactions;
     const linkedThreads = yield* LinkedPullRequestThreads;
+    const agentSessionScanner = yield* AgentSessionScanner.AgentSessionScanner;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -3605,7 +3639,9 @@ export const layer = Layer.unwrap(
               Layer.provide(DefectReporter.layer),
               Layer.provide(Layer.succeed(PersistenceTransactions, transactions)),
               Layer.provide(Layer.succeed(LinkedPullRequestThreads, linkedThreads)),
-              Layer.provide(AgentSessionScanner.layer),
+              Layer.provide(
+                Layer.succeed(AgentSessionScanner.AgentSessionScanner, agentSessionScanner),
+              ),
               Layer.provide(AcpRegistrySessions.layer),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(Layer.succeed(NpmRelease.NpmRelease, npmRelease)),

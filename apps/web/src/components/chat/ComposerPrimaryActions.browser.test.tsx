@@ -1,6 +1,6 @@
 import "~/index.css";
 
-import type { ComponentProps } from "react";
+import type { ComponentProps, MouseEvent as ReactMouseEvent } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { act, fakeTimers, render } from "../../../test/render";
 
@@ -12,6 +12,30 @@ vi.mock("../SidebarStageBackdrop", () => ({
   StageBackdropButtonArt: () => null,
   useSidebarStageBackdropVariant: () => null,
 }));
+
+vi.mock("../../onboarding/dioxusBindings", () => {
+  function mountButton(type: "submit" | "button", name: "submit" | "stop") {
+    return (root: HTMLElement, className: string, label: string, disabled: boolean) => {
+      const button = document.createElement("button");
+      button.type = type;
+      button.setAttribute(`data-composer-${name}-renderer`, "dioxus-wasm");
+      const update = (className: string, label: string, disabled: boolean) => {
+        button.className = className;
+        button.setAttribute("aria-label", label);
+        button.disabled = disabled;
+      };
+      update(className, label, disabled);
+      root.append(button);
+      return { update, free: () => button.remove() };
+    };
+  }
+  return {
+    loadOnboardingBindings: async () => ({
+      mount_composer_submit: mountButton("submit", "submit"),
+      mount_composer_stop: mountButton("button", "stop"),
+    }),
+  };
+});
 
 import { CollapsedComposerStopAction, ComposerPrimaryActions } from "./ComposerPrimaryActions";
 
@@ -131,6 +155,74 @@ it("allows retry after ten seconds and protects a late stop", async () => {
   );
   expect(props.onInterrupt).toHaveBeenCalledTimes(2);
   expect(props.onResume).not.toHaveBeenCalled();
+});
+
+it("keeps Wasm Stop and Send independent across edits, a timeout, and a late stop", async () => {
+  const props = setup();
+  const submit = vi.fn();
+  const onSubmitMessage = vi.fn((event: ReactMouseEvent<HTMLElement>) => event.preventDefault());
+  const view = (running: boolean, hasSendableContent: boolean) => (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        submit();
+      }}
+    >
+      <ComposerPrimaryActions
+        {...props}
+        isRunning={running}
+        canInterrupt={running}
+        hasSendableContent={hasSendableContent}
+        onSubmitMessage={onSubmitMessage}
+        useDioxusSubmit
+      />
+    </form>
+  );
+  await using screen = await render(view(true, false));
+  const stop = screen.getByRole("button", { name: "Stop generation", exact: true });
+  await expect.element(stop).toBeEnabled();
+  const stopButton = stop.element() as HTMLButtonElement;
+  expect(stopButton.type).toBe("button");
+  expect(stopButton).toHaveAttribute("data-composer-stop-renderer", "dioxus-wasm");
+  await screen.rerender(view(true, true));
+  const send = screen.getByRole("button", { name: "Steer message", exact: true });
+  await expect.element(send).toBeEnabled();
+  const sendButton = send.element() as HTMLButtonElement;
+  expect(sendButton).toHaveAttribute("data-composer-submit-renderer", "dioxus-wasm");
+  expect(stop.element()).toBe(stopButton);
+
+  await act(() => {
+    sendButton.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true }),
+    );
+  });
+  expect(onSubmitMessage).toHaveBeenCalledTimes(1);
+  expect(onSubmitMessage.mock.calls[0]?.[0].ctrlKey).toBe(true);
+  expect(props.onInterrupt).not.toHaveBeenCalled();
+  expect(submit).not.toHaveBeenCalled();
+
+  using _timers = fakeTimers();
+  await act(() => {
+    stopButton.click();
+    stopButton.click();
+  });
+  expect(stopButton).toBeDisabled();
+  expect(props.onInterrupt).toHaveBeenCalledTimes(1);
+  await act(() => vi.advanceTimersByTime(10_000));
+  expect(stop.element()).toBe(stopButton);
+  await act(() => stopButton.click());
+  expect(props.onInterrupt).toHaveBeenCalledTimes(2);
+  await screen.rerender(view(false, true));
+  expect(stop.query()).toBeNull();
+  expect(screen.getByRole("button", { name: "Submit message", exact: true }).element()).toBe(
+    sendButton,
+  );
+  await act(() => sendButton.click());
+  expect(onSubmitMessage).toHaveBeenCalledTimes(1);
+  expect(submit).not.toHaveBeenCalled();
+  await act(() => vi.advanceTimersByTime(500));
+  await act(() => sendButton.click());
+  expect(submit).toHaveBeenCalledTimes(1);
 });
 
 it("keeps Stop pending across a permission failure", async () => {

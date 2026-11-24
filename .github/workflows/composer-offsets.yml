@@ -5,7 +5,10 @@ on:
     branches:
       - "candidate/t3code-ls-t01-offsets-*"
       - "candidate/t3code-ls-t01-built-composer-*"
+      - "candidate/t3code-ls-t01-dioxus-pairing-*"
+      - "candidate/t3code-ls-t11-dioxus-guest-*"
       - "candidate/t3code-ls-t02-bundled-native-*"
+      - "candidate/t3code-ls-t06-file-revisions-*"
 
 permissions:
   contents: read
@@ -13,7 +16,7 @@ permissions:
 jobs:
   composer-offsets:
     runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
-    timeout-minutes: 20
+    timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') && 30 || 20 }}
     env:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
@@ -24,7 +27,19 @@ jobs:
       VP_REMOTE_CACHE_URL: ""
       WASM_BINDGEN_VERSION: "0.2.130"
       WASM_BINDGEN_SHA256: 9687f3bb551b9f66f37ed32a40d7913a00f7962db653054e56857bc306c3227f
-      BUNDLED_NATIVE: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-') }}
+      BUNDLED_NATIVE: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-') || startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
+      DIOXUS_COMPOSITION_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-composed-') }}
+      INTEGRATED_NATIVE: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') }}
+      FORK_HISTORY_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t04-coherent-history-') }}
+      NATIVE_PTY_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-integrated-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-') }}
+      PAIRING_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t01-dioxus-pairing-') }}
+      GUEST_NAME_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t11-dioxus-guest-') }}
+      DIOXUS_SIDEBAR_NAVIGATION_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-sidebar-navigation-') }}
+      DIOXUS_NAVIGATION_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-navigation-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-sidebar-navigation-') }}
+      DIOXUS_TIMELINE_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-timeline-') }}
+      DIOXUS_STOP_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-stop-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-timeline-') }}
+      DIOXUS_SUBMIT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-send-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-stop-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-timeline-') }}
+      DIOXUS_APPROVAL_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-dioxus-approval-') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -38,24 +53,147 @@ jobs:
         run: |
           export CARGO_HOME="$RUNNER_TEMP/composer-cargo-home"
           export CARGO_TARGET_DIR="$RUNNER_TEMP/composer-target"
-          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
-            --release --locked --target wasm32-unknown-unknown -p t3-code-ls-client-text-web
           archive="wasm-bindgen-$WASM_BINDGEN_VERSION-x86_64-unknown-linux-musl"
           curl --fail --silent --show-error --location --output "$RUNNER_TEMP/$archive.tar.gz" \
             "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$WASM_BINDGEN_VERSION/$archive.tar.gz"
           printf '%s  %s\n' "$WASM_BINDGEN_SHA256" "$RUNNER_TEMP/$archive.tar.gz" | sha256sum --check
           tar -xzf "$RUNNER_TEMP/$archive.tar.gz" -O "$archive/wasm-bindgen" > "$RUNNER_TEMP/wasm-bindgen"
           chmod u+x "$RUNNER_TEMP/wasm-bindgen"
-          "$RUNNER_TEMP/wasm-bindgen" --target web --out-name composer_offsets \
-            --out-dir apps/web/public/client-text-wasm \
-            "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/t3_code_ls_client_text_web.wasm"
-          sha256sum apps/web/public/client-text-wasm/composer_offsets.js \
-            apps/web/public/client-text-wasm/composer_offsets_bg.wasm
+          build_binding() {
+            local package="$1" wasm="$2" binding="$3" bindings_dir="$4"
+            "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build \
+              --release --locked --target wasm32-unknown-unknown -p "$package"
+            "$RUNNER_TEMP/wasm-bindgen" --target web --out-name "$binding" \
+              --out-dir "$bindings_dir" \
+              "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/$wasm.wasm"
+            sha256sum "$bindings_dir/$binding.js" "$bindings_dir/${binding}_bg.wasm"
+          }
+          if [[ "$PAIRING_PROOF" != true ]]; then
+            build_binding t3-code-ls-client-text-web t3_code_ls_client_text_web \
+              composer_offsets apps/web/public/client-text-wasm
+          fi
+          if [[ "$DIOXUS_COMPOSITION_PROOF" == true || "$PAIRING_PROOF" == true || "$INTEGRATED_NATIVE" == true || "$GUEST_NAME_PROOF" == true || "$DIOXUS_SUBMIT_PROOF" == true || "$DIOXUS_APPROVAL_PROOF" == true || "$DIOXUS_NAVIGATION_PROOF" == true ]]; then
+            build_binding t3-code-ls-web-pairing t3_code_ls_web_pairing \
+              local_pairing "$RUNNER_TEMP/pairing-wasm"
+          fi
       - name: Install the locked web testing dependencies
         run: |
           npm install --global pnpm@12.14.0 --ignore-scripts --no-audit --no-fund
           pnpm install --frozen-lockfile
           node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+      - name: Exercise a blocked IndexedDB upgrade in Chromium
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-indexeddb-blocked-')
+        run: |
+          pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
+            src/connection/storage.blocked.browser.test.ts
+      - name: Install Chromium with microphone support
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-voice-')
+        run: node apps/web/node_modules/playwright/cli.js install --with-deps --no-shell chromium
+      - name: Compare Codex import canonicalization with the retained scanner behavior
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t08-import-compressed-rust-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/composer-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/composer-target"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+            -p t3-code-ls-core --lib codex_import
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 src/project/AgentSessionScanner.test.ts
+      - name: Verify root workspace release and pull request refresh
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t16-root-release-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 \
+            src/orchestration-v2/ThreadLaunchService.test.ts src/orchestration-v2/ThreadPullRequestService.test.ts
+      - name: Verify launch receipt negotiation and client compatibility
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t16-root-release-launch-ack-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm exec vp test run --maxWorkers 2 \
+            packages/contracts/src/orchestrationV2.test.ts packages/client-runtime/src/operations/commands.test.ts \
+            packages/client-runtime/src/connection/registry.test.ts packages/client-runtime/src/state/threadDetail.test.ts
+          pnpm --filter @t3tools/contracts run typecheck
+          pnpm --filter @t3tools/client-runtime run typecheck
+          node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/launch-receipt-tsconfig.json
+      - name: Type check the full server with the pinned Rust checker
+        id: server-types
+        if: env.INTEGRATED_NATIVE == 'true' || env.DIOXUS_TIMELINE_PROOF == 'true' || env.DIOXUS_COMPOSITION_PROOF == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t16-root-release-server-types-')
+        run: node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit --pretty false -p apps/server/tsconfig.json
+      - name: Compare a typecheck failure with the pinned Go checker and Effect diagnostics
+        if: failure() && steps.server-types.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          checker=node_modules/@effect/tsgo/dist/effect-tsgo.cjs
+          status=0
+          node "$checker" tsc --noEmit --pretty false -p apps/server/tsconfig.json || status=$?
+          echo "Go checker exit status $status"
+          node "$checker" diagnostics --project apps/server/tsconfig.json --format text --severity error,warning
+      - name: Exercise the selected runtime service graph
+        if: ${{ !cancelled() && (steps.server-types.outcome == 'success' || steps.server-types.outcome == 'failure') }}
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 \
+            src/cli/app.test.ts src/cli/connect.test.ts src/cli/deferredImports.test.ts src/cli/pair.test.ts \
+            src/ws.test.ts src/relay/AgentAwarenessRelay.test.ts src/workspace/WorkspaceFileSystem.test.ts
+      - name: Exercise local pairing in the retained and Dioxus browser builds
+        if: env.PAIRING_PROOF == 'true'
+        env:
+          T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
+        run: |
+          proof="$RUNNER_TEMP/built-composer-proof"
+          mkdir "$proof"
+          node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/hybrid-client-persistence-tsconfig.json
+          for renderer in retained dioxus; do
+            if [[ "$renderer" == dioxus ]]; then
+              cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
+              export VITE_T3_CODE_LS_PAIRING_RENDERER=dioxus
+            fi
+            pnpm --dir apps/web run build
+            env -u T3_CODE_LS_TOOLCHAIN -u T3_CODE_LS_SYSROOT T3_CODE_LS_IMPLEMENTATION=upstream \
+              pnpm --dir apps/server run build:bundle
+            sha256sum apps/web/dist/index.html apps/server/dist/bin.mjs > "$proof/$renderer.sha256"
+            if [[ "$renderer" == dioxus ]]; then
+              find apps/web/dist/pairing-wasm -type f -print0 | sort -z | xargs -0 sha256sum >> "$proof/$renderer.sha256"
+            fi
+            # apps/web/src/components/onboarding/WelcomePage.import.browser.test.tsx
+            pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
+              src/components/onboarding/WelcomePage.import.browser.test.tsx
+            mkdir "$proof/$renderer"
+            T3_CODE_LS_PAIRING_PROOF="$renderer" \
+              node apps/web/scripts/verify-hybrid-client.ts "$proof/$renderer" upstream
+          done
+          mkdir "$proof/dioxus-fallback"
+          T3_CODE_LS_PAIRING_PROOF=dioxus-fallback \
+            node apps/web/scripts/verify-hybrid-client.ts "$proof/dioxus-fallback" upstream
+      - name: Exercise guest name controls and packaged guest entry without live invites
+        if: env.GUEST_NAME_PROOF == 'true'
+        env:
+          T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+          proof="$RUNNER_TEMP/built-composer-proof"
+          mkdir "$proof"
+          test ! -e apps/web/public/pairing-wasm
+          cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
+          trap 'rm -rf -- apps/web/public/pairing-wasm' EXIT
+          for renderer in retained dioxus; do
+            if [[ "$renderer" == dioxus ]]; then export VITE_T3_CODE_LS_GUEST_NAME_RENDERER=dioxus; fi
+            # apps/web/src/components/guest/GuestNameForm.browser.test.tsx
+            pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
+              src/components/guest/GuestPage.browser.test.tsx src/components/guest/GuestNameForm.browser.test.tsx
+            pnpm --dir apps/web run build
+            env -u T3_CODE_LS_TOOLCHAIN -u T3_CODE_LS_SYSROOT T3_CODE_LS_IMPLEMENTATION=upstream \
+              pnpm --dir apps/server run build:bundle
+            mkdir "$proof/guest-$renderer"
+            T3_CODE_LS_GUEST_NAME_PROOF="$renderer" node apps/web/scripts/verify-hybrid-client.ts "$proof/guest-$renderer" upstream
+          done
+          mkdir "$proof/guest-dioxus-fallback"
+          T3_CODE_LS_GUEST_NAME_PROOF=dioxus-fallback node apps/web/scripts/verify-hybrid-client.ts "$proof/guest-dioxus-fallback" upstream
       - name: Exercise the composer with the retained offset mapper
         if: startsWith(github.ref_name, 'candidate/t3code-ls-t01-offsets-')
         working-directory: apps/web
@@ -66,26 +204,179 @@ jobs:
           VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
         working-directory: apps/web
         run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/ComposerPromptEditorTiptap.input.browser.test.tsx
+      - name: Exercise portable draft reconciliation and binding validation
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-')
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/composer-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/composer-target"
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked -p t3-code-ls-client-text --test draft
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked -p t3-code-ls-client-text-web --lib draft_binding_tests
+      - name: Exercise same-draft saves in both orders
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-')
+        working-directory: apps/web
+        run: pnpm exec vp test run --project unit --maxWorkers 2 src/composerDraftStore.test.ts
+      - name: Compare draft reconciliation with the retained oracle through real Wasm
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-')
+        env:
+          VITE_T3_CODE_LS_DRAFT_RECONCILIATION: rust
+        working-directory: apps/web
+        run: pnpm exec vp test run --project browser --maxWorkers 2 "$GITHUB_WORKSPACE/apps/web/src/composerDraftReconciliation.browser.test.ts"
+      - name: Exercise voice draft selection through the Rust browser binding
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-voice-')
+        env:
+          VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
+        working-directory: apps/web
+        run: pnpm exec vp test run --project browser --maxWorkers 2 src/speech/useEnvironmentSpeechInput.browser.test.tsx
+      - name: Exercise selection compatibility and invalid boundaries
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-voice-')
+        run: pnpm exec vp test run --maxWorkers 2 packages/client-runtime/src/voice-input/controller.test.ts
+      - name: Exercise the text splice encoder and legacy fallback
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-splice-')
+        working-directory: apps/server
+        run: pnpm exec vp test run --maxWorkers 2 src/orchestration-v2/WireProjection.test.ts
+      - name: Exercise fenced update and rollback selection
+        if: env.INTEGRATED_NATIVE == 'true'
+        run: node --test tools/service-launcher-trial.test.mjs
+      - name: Recover mobile preferences across database faults and reopen
+        if: env.INTEGRATED_NATIVE == 'true'
+        working-directory: apps/mobile
+        run: pnpm exec vp test run --project unit --maxWorkers 2 src/persistence/mobile-database.test.ts
+      - name: Exercise terminal attachment and parser continuity
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-')
+        working-directory: apps/server
+        run: |
+          # apps/server/src/terminal/Manager.test.ts
+          pnpm exec vp test run --maxWorkers 2 src/terminal/Manager.test.ts
+      - name: Exercise peer reconnect and task-cache recovery
+        if: env.INTEGRATED_NATIVE == 'true'
+        run: |
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 src/peer/PeerLinks.test.ts
+          pnpm --filter @t3tools/task-cache test src/Cleanup.test.ts src/Cache.test.ts \
+            src/NativeClients.test.ts src/Savings.test.ts
+      - name: Exercise restart recovery and persisted continuation effects
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t09-relay-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 \
+            src/orchestration-v2/RestartContinuation.test.ts src/orchestration-v2/ProviderRuntimeRecoveryService.test.ts
+      - name: Build the selected Rust PTY host
+        if: env.NATIVE_PTY_PROOF == 'true'
+        run: |
+          export CARGO_HOME="$RUNNER_TEMP/pty-cargo-home"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/pty-target"
+          # apps/server/rust/pty-host/tests/owner.rs
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            test --locked --manifest-path apps/server/rust/pty-host/Cargo.toml --test owner
+          "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            build --release --locked --manifest-path apps/server/rust/pty-host/Cargo.toml
+          sha256sum "$CARGO_TARGET_DIR/release/t3-code-ls-pty-host"
+          printf 'T3_CODE_LS_PTY_PROOF_EXECUTABLE=%s\n' \
+            "$CARGO_TARGET_DIR/release/t3-code-ls-pty-host" >> "$GITHUB_ENV"
+      - name: Exercise the native adapter's exit after terminal detach
+        if: env.NATIVE_PTY_PROOF == 'true'
+        run: |
+          # apps/server/src/terminal/NativePtyAdapter.integration.test.ts
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 src/terminal/NativePtyAdapter.integration.test.ts
+      - name: Type-check the selected terminal adapter through the server
+        if: env.NATIVE_PTY_PROOF == 'true'
+        run: |
+          export T3_CODE_LS_TEST_RUNTIME="$RUNNER_TEMP/pty-typecheck-runtime"
+          node tools/install-server-tests.mjs
+          status=0
+          "$T3_CODE_LS_TEST_RUNTIME/node_modules/.bin/effect-tsgo" tsrs --noEmit \
+            -p tools/omdb-production-tsconfig.json > "$RUNNER_TEMP/pty-typecheck.log" 2>&1 || status=$?
+          cat "$RUNNER_TEMP/pty-typecheck.log"
+          exit "$status"
+      - name: Check the dedicated external PDF component scope
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-external-')
+        working-directory: apps/web
+        run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/files/PdfViewer.browser.test.tsx
       - name: Build and open the application with the Rust composer binding
         if: env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-')
         env:
           T3_CODE_LS_BUNDLED_CLIENT_PROOF: "1"
+          T3_CODE_LS_BUNDLED_PTY_PROOF: ${{ env.NATIVE_PTY_PROOF }}
+          T3_CODE_LS_LAUNCH_RECEIPT_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t16-root-release-launch-ack-') }}
+          T3_CODE_LS_PTY_RESTART_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-restart-') }}
+          T3_CODE_LS_SPLICE_NEGOTIATION_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-splice-') }}
+          T3_CODE_LS_SPLIT_PTY_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-') }}
+          T3_CODE_LS_MULTI_TAB_DRAFT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-') }}
+          T3_CODE_LS_DRAFT_STORAGE_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-storage-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-') }}
+          T3_CODE_LS_FILE_EDITOR_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t06-file-revisions-') }}
+          T3_CODE_LS_DURABLE_TEXT_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-durable-') }}
+          DURABLE_BYTE_PROOF: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t03-byte-accounting-') }}
+          T3_CODE_LS_HTML_INTERACTION_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-html-') }}
+          T3_CODE_LS_PDF_LINK_PROOF: ${{ env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-') }}
           VITE_T3_CODE_LS_COMPOSER_OFFSETS: rust
+          VITE_T3_CODE_LS_DRAFT_RECONCILIATION: ${{ (env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t11-drafts-')) && 'rust' || '' }}
         run: |
           proof="$RUNNER_TEMP/built-composer-proof"
           mkdir "$proof"
+          if [[ -n "${T3_CODE_LS_PTY_PROOF_EXECUTABLE:-}" ]]; then
+            sha256sum "$T3_CODE_LS_PTY_PROOF_EXECUTABLE" > "$proof/pty-host.sha256"
+          fi
           node node_modules/@effect/tsgo/dist/effect-tsgo.cjs tsrs --noEmit -p tools/hybrid-client-persistence-tsconfig.json
+          if [[ "$DIOXUS_COMPOSITION_PROOF" == true ]]; then
+            cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
+            export VITE_T3_CODE_LS_PAIRING_RENDERER=dioxus
+            export VITE_T3_CODE_LS_THREAD_FIND_RENDERER=dioxus
+            export VITE_T3_CODE_LS_THREAD_LINK_RENDERER=dioxus
+            export VITE_T3_CODE_LS_COMPOSER_SUBMIT_RENDERER=dioxus
+            export VITE_T3_CODE_LS_APPROVAL_RENDERER=dioxus
+            export VITE_T3_CODE_LS_ASSISTANT_TEXT_RENDERER=dioxus
+            export VITE_T3_CODE_LS_DRAFT_RECONCILIATION=rust
+          fi
+          if [[ "$INTEGRATED_NATIVE" == true ]]; then
+            cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
+            export VITE_T3_CODE_LS_PAIRING_RENDERER=dioxus
+            export VITE_T3_CODE_LS_THREAD_FIND_RENDERER=dioxus
+          fi
+          if [[ "$DIOXUS_SUBMIT_PROOF" == true ]]; then
+            cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
+            export VITE_T3_CODE_LS_COMPOSER_SUBMIT_RENDERER=dioxus
+          fi
+          if [[ "$DIOXUS_APPROVAL_PROOF" == true ]]; then
+            cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
+            export VITE_T3_CODE_LS_APPROVAL_RENDERER=dioxus
+          fi
+          if [[ "$DIOXUS_NAVIGATION_PROOF" == true ]]; then
+            cp -R "$RUNNER_TEMP/pairing-wasm" apps/web/public/pairing-wasm
+            export VITE_T3_CODE_LS_THREAD_LINK_RENDERER=dioxus
+            if [[ "$DIOXUS_SIDEBAR_NAVIGATION_PROOF" == true ]]; then
+              export VITE_T3_CODE_LS_SIDEBAR_THREAD_LINK_RENDERER=dioxus
+            fi
+            # apps/web/src/components/chat/DioxusThreadLink.browser.test.tsx
+            # apps/web/src/components/chat/DioxusThreadLink.fallback.browser.test.tsx
+            pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
+              src/components/chat/DioxusThreadLink.browser.test.tsx \
+              src/components/chat/DioxusThreadLink.fallback.browser.test.tsx
+          fi
+          if [[ "$DIOXUS_TIMELINE_PROOF" == true ]]; then
+            export VITE_T3_CODE_LS_ASSISTANT_TEXT_RENDERER=dioxus
+          fi
+          if [[ "$DIOXUS_TIMELINE_PROOF" == true || "$DIOXUS_COMPOSITION_PROOF" == true || "$INTEGRATED_NATIVE" == true ]]; then
+            # packages/client-runtime/src/state/threadDetail.test.ts
+            pnpm --dir packages/client-runtime exec vp test run src/state/threadDetail.test.ts
+            # apps/web/src/components/chat/DioxusAssistantText.browser.test.tsx
+            pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
+                src/components/chat/DioxusAssistantText.browser.test.tsx
+          fi
           pnpm --dir apps/web run build
           implementation=upstream
           if [[ "$BUNDLED_NATIVE" == true ]]; then
             implementation=native
             export CARGO_HOME="$RUNNER_TEMP/bundled-cargo-home"
             export CARGO_TARGET_DIR="$RUNNER_TEMP/bundled-target"
+            if [[ "$NATIVE_PTY_PROOF" == true ]]; then export T3_CODE_LS_BUNDLE_PTY_HOST=1; fi
             T3_CODE_LS_IMPLEMENTATION=native node tools/build-native.mjs
             node tools/check-hybrid.mjs --verify-binaries
             T3_CODE_LS_IMPLEMENTATION=native T3_CODE_LS_NATIVE_DIR="$GITHUB_WORKSPACE/bin" \
               pnpm --dir apps/server run build:bundle
             sha256sum bin/manifest.json apps/server/dist/native-bin/manifest.json > "$proof/native.sha256"
+            if [[ "$NATIVE_PTY_PROOF" == true ]]; then
+              sha256sum apps/server/dist/native-bin/t3-code-ls-pty-host > "$proof/bundled-pty-host.sha256"
+            fi
           else
             env -u T3_CODE_LS_TOOLCHAIN -u T3_CODE_LS_SYSROOT T3_CODE_LS_IMPLEMENTATION=upstream \
               pnpm --dir apps/server run build:bundle
@@ -93,9 +384,309 @@ jobs:
           sha256sum apps/web/dist/client-text-wasm/composer_offsets.js \
             apps/web/dist/client-text-wasm/composer_offsets_bg.wasm apps/server/dist/bin.mjs \
             > "$proof/application.sha256"
-          node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
+          if [[ "$INTEGRATED_NATIVE" == true ]]; then
+            # apps/web/src/components/onboarding/WelcomePage.import.browser.test.tsx
+            pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
+              src/components/onboarding/WelcomePage.import.browser.test.tsx
+            for renderer in dioxus dioxus-fallback; do
+              mkdir "$proof/$renderer"
+              T3_CODE_LS_PAIRING_PROOF="$renderer" \
+                node apps/web/scripts/verify-hybrid-client.ts "$proof/$renderer" "$implementation"
+            done
+          fi
+          if [[ "$DIOXUS_COMPOSITION_PROOF" == true ]]; then
+            sha256sum apps/web/dist/pairing-wasm/local_pairing.js \
+              apps/web/dist/pairing-wasm/local_pairing_bg.wasm apps/server/dist/native-bin/manifest.json \
+              >> "$proof/application.sha256"
+            find apps/web/dist -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > "$proof/web-assets.sha256"
+            for renderer in dioxus dioxus-fallback; do
+              mkdir "$proof/composed-$renderer"
+              T3_CODE_LS_BROWSER_COMPOSITION_PROOF="$renderer" \
+              T3_CODE_LS_COMPOSER_SUBMIT_PROOF="$renderer" \
+              T3_CODE_LS_COMPOSER_STOP_PROOF=true \
+              T3_CODE_LS_APPROVAL_PROOF="$renderer" \
+              T3_CODE_LS_ASSISTANT_TEXT_PROOF=true \
+              T3_CODE_LS_ASSISTANT_INLINE_PROOF=true \
+                node apps/web/scripts/verify-hybrid-client.ts "$proof/composed-$renderer" native
+              jq -e --arg renderer "$renderer" '
+                .status == "passed" and .composition.renderer == $renderer and
+                (.composition.completeDioxusClient | not) and .composition.rustDrafts and
+                .composition.rustComposer and .composition.sameStoreRestart and
+                .composition.stoppedDraftReopened and .threadNavigation.back and
+                .threadNavigation.draftPreserved and .historyFind.draftPreserved and
+                (.composition.commands | length) == 3 and .approvalReceipt.engine == "omdb" and
+                .approvalReceipt.commandId == .composition.approvalCommandId and
+                .savedHistory.seed.messages == 200 and .savedHistory.seed.threads == 1 and
+                .savedHistory.reopened.draftPreserved and .savedHistory.reopened.searchFocusPreserved and
+                (.savedHistory.reopened.olderRows | length) > 0 and
+                [.savedHistory.reopened.jumps[].index] == [1, 199, 1] and
+                .savedHistory.reopened.jumps[0].messageId == .savedHistory.reopened.jumps[2].messageId and
+                .savedHistory.reopened.jumps[0].messageId != .savedHistory.reopened.jumps[1].messageId and
+                (if $renderer == "dioxus-fallback" then .composition.refusedWasmRequests > 0
+                 else .composerStop.timeline.streamingRow.streaming and
+                   (.composerStop.timeline.reopenedRow.streaming | not) end)
+              ' "$proof/composed-$renderer/native/proof.json"
+              sha256sum --check --quiet "$proof/application.sha256" "$proof/web-assets.sha256"
+            done
+          elif [[ "$DIOXUS_NAVIGATION_PROOF" == true ]]; then
+            sha256sum apps/web/dist/pairing-wasm/local_pairing.js \
+              apps/web/dist/pairing-wasm/local_pairing_bg.wasm >> "$proof/application.sha256"
+            for renderer in dioxus dioxus-fallback; do
+              mkdir "$proof/navigation-$renderer"
+              sidebar_renderer=""
+              if [[ "$DIOXUS_SIDEBAR_NAVIGATION_PROOF" == true ]]; then sidebar_renderer="$renderer"; fi
+              T3_CODE_LS_SIDEBAR_THREAD_LINK_PROOF="$sidebar_renderer" \
+              T3_CODE_LS_THREAD_LINK_PROOF="$renderer" \
+                node apps/web/scripts/verify-hybrid-client.ts "$proof/navigation-$renderer" "$implementation"
+              jq -e --arg renderer "$renderer" '
+                .status == "passed" and .threadNavigation.renderer == $renderer and
+                .threadNavigation.keyboard and .threadNavigation.reopened and
+                .threadNavigation.back and .threadNavigation.draftPreserved and
+                (if $renderer == "dioxus-fallback" then .threadNavigationWasmRefusals > 0 else true end)
+              ' "$proof/navigation-$renderer/$implementation/proof.json"
+              if [[ "$DIOXUS_SIDEBAR_NAVIGATION_PROOF" == true ]]; then
+                jq -e --arg renderer "$renderer" '
+                  .sidebarThreadNavigation.renderer == $renderer and
+                  .sidebarThreadNavigation.entry == "sidebar" and
+                  .sidebarThreadNavigation.keyboard and .sidebarThreadNavigation.pointer and
+                  .sidebarThreadNavigation.selectedThread and .sidebarThreadNavigation.draftPreserved
+                ' "$proof/navigation-$renderer/$implementation/proof.json"
+              fi
+            done
+          elif [[ "$DIOXUS_SUBMIT_PROOF" == true ]]; then
+            sha256sum apps/web/dist/pairing-wasm/local_pairing.js \
+              apps/web/dist/pairing-wasm/local_pairing_bg.wasm >> "$proof/application.sha256"
+            if [[ "$DIOXUS_STOP_PROOF" == true ]]; then
+              # apps/web/src/components/chat/ComposerPrimaryActions.browser.test.tsx
+              pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 \
+                src/components/chat/ComposerPrimaryActions.browser.test.tsx
+            fi
+            for renderer in dioxus dioxus-fallback; do
+              mkdir "$proof/submit-$renderer"
+              timeline=false
+              if [[ "$DIOXUS_TIMELINE_PROOF" == true ]]; then timeline=true; fi
+              inline=false
+              if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t02-bundled-native-t11-dioxus-timeline-inline-* ]]; then inline=true; fi
+              T3_CODE_LS_ASSISTANT_INLINE_PROOF="$inline" \
+              T3_CODE_LS_ASSISTANT_TEXT_PROOF="$timeline" \
+              T3_CODE_LS_COMPOSER_STOP_PROOF="$DIOXUS_STOP_PROOF" \
+              T3_CODE_LS_COMPOSER_SUBMIT_PROOF="$renderer" \
+                node apps/web/scripts/verify-hybrid-client.ts "$proof/submit-$renderer" "$implementation"
+              if [[ "$inline" == true ]]; then
+                jq -e --arg renderer "$renderer" '
+                  .status == "passed" and .composerStop.formattedAssistantText == "Bold calm 雪." and
+                  (if $renderer == "dioxus" then
+                    .composerStop.timeline.streamingRow.streaming and
+                    (.composerStop.timeline.reopenedRow.streaming | not)
+                  else .composerStop.timeline.retainedFallback end)
+                ' "$proof/submit-$renderer/$implementation/proof.json"
+              fi
+            done
+          elif [[ "$DIOXUS_APPROVAL_PROOF" == true ]]; then
+            sha256sum apps/web/dist/pairing-wasm/local_pairing.js \
+              apps/web/dist/pairing-wasm/local_pairing_bg.wasm >> "$proof/application.sha256"
+            for renderer in dioxus dioxus-fallback; do
+              mkdir "$proof/approval-$renderer"
+              T3_CODE_LS_APPROVAL_PROOF="$renderer" \
+                node apps/web/scripts/verify-hybrid-client.ts "$proof/approval-$renderer" native
+              jq -e --arg mode "$renderer" '
+                .status == "passed" and .client == "built" and
+                .capturedApproval.approvalAction.mode == $mode and
+                .capturedApproval.approvalAction.reopened and
+                (.capturedApproval.approvalAction.decisions | length) == 1 and
+                .approvalReceipt.engine == "omdb" and
+                .approvalReceipt.commandId == .capturedApproval.approvalAction.decisions[0].commandId
+              ' "$proof/approval-$renderer/native/proof.json"
+            done
+          elif [[ "$DURABLE_BYTE_PROOF" == true ]]; then
+            node --test apps/web/scripts/hybrid-client-database.test.ts
+            export CARGO_TARGET_DIR="$RUNNER_TEMP/packaged-event-accounting-target"
+            trap 'rm -rf -- "$RUNNER_TEMP/packaged-event-accounting-target"' EXIT
+            export CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0
+            "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked \
+              -p t3-code-ls-storage --features packaged-event-accounting-fixture --lib \
+              packaged_event_accounting::tests
+            "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --locked \
+              -p t3-code-ls-storage --features packaged-event-accounting-fixture \
+              --bin t3-code-ls-packaged-event-accounting
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- env T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 \
+                T3_CODE_LS_DURABLE_BYTE_PROOF=true T3_CODE_LS_PACKAGED_EVENT_ACCOUNTING="$4" \
+                VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
+                "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
+            ' _ "$(id -un)" "$(command -v node)" "$proof" "$CARGO_TARGET_DIR/debug/t3-code-ls-packaged-event-accounting"
+            test -s "$proof/durable-wire-predecessor.json"
+            rm -rf "$CARGO_TARGET_DIR"
+          elif [[ "$GITHUB_REF_NAME" != candidate/t3code-ls-t02-bundled-native-t13-pdf-external-* && "$FORK_HISTORY_PROOF" != true ]]; then
+            node apps/web/scripts/verify-hybrid-client.ts "$proof" "$implementation"
+          fi
+          if [[ "$INTEGRATED_NATIVE" == true || "$GITHUB_REF_NAME" == candidate/t3code-ls-t02-bundled-native-t13-pdf-external-* ]]; then
+            pdf_external_proof="$proof"
+            if [[ "$INTEGRATED_NATIVE" == true ]]; then
+              pdf_external_proof="$proof/pdf-external"
+              mkdir "$pdf_external_proof"
+            fi
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- env T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 \
+                T3_CODE_LS_PDF_LINK_PROOF=true T3_CODE_LS_PDF_EXTERNAL_LINK_PROOF=true \
+                T3_CODE_LS_PDF_EXTERNAL_ONLY_PROOF=true \
+                VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
+                "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
+            ' _ "$(id -un)" "$(command -v node)" "$pdf_external_proof"
+            jq -e '.status == "passed" and .pdfExternalOnly == true and .client == "built" and .composer == "rust-wasm" and .pdfLinks.signedAssetStatus == 200 and .pdfLinks.pointerDestination == 2 and .pdfLinks.keyboardDestination == 2 and .pdfLinks.external.pointerOpened and .pdfLinks.external.keyboardOpened and .pdfLinks.external.requests == 2 and .pdfLinks.external.noUnsolicitedRequests and .pdfLinks.external.openerIsolated' \
+              "$pdf_external_proof/native/proof.json"
+          fi
+          if [[ "$T3_CODE_LS_HTML_INTERACTION_PROOF" == true ]]; then
+            jq -e '.status == "passed" and .htmlInteraction.signedAssetStatus == 200 and .htmlInteraction.toolCalls == 1 and .htmlInteraction.opaqueOrigin and .htmlInteraction.ownFrameResize and .htmlInteraction.unrelatedFrameUnchanged and .htmlInteraction.modalDetached and .htmlInteraction.reopenedFresh' \
+              "$proof/native/proof.json"
+          fi
+          restart_proof="$proof"
+          if [[ "$INTEGRATED_NATIVE" == true ]]; then
+            jq -e '.status == "passed" and .terminalAlternate.alternateScreenRetained and .capturedApproval != null and .cancelledQuestion != null and .textRevisionProfile != null' \
+              "$proof/native/proof.json"
+            restart_proof="$proof/pty-restart"
+            mkdir "$restart_proof"
+            env T3_CODE_LS_PTY_RESTART_PROOF=true T3_CODE_LS_HTML_INTERACTION_PROOF=false \
+              T3_CODE_LS_PDF_LINK_PROOF=false T3_CODE_LS_FILE_EDITOR_PROOF=false \
+              T3_CODE_LS_MULTI_TAB_DRAFT_PROOF=false T3_CODE_LS_DRAFT_STORAGE_PROOF=false \
+              node apps/web/scripts/verify-hybrid-client.ts "$restart_proof" native
+          fi
+          if [[ "$INTEGRATED_NATIVE" == true || "$T3_CODE_LS_PTY_RESTART_PROOF" == true ]]; then
+            jq -e '.status == "passed" and .bundledNativePtyOwner and .terminalRestart.oldOwnerExited and .terminalRestart.foregroundExited and .terminalRestart.newShell and .terminalRestart.previousThreadReopened' \
+              "$restart_proof/native/proof.json"
+          fi
+          if [[ "$INTEGRATED_NATIVE" == true || "$GITHUB_REF_NAME" == candidate/t3code-ls-t02-bundled-native-t13-voice-* ]]; then
+            mkdir "$proof/voice"
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- env \
+                T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 T3_CODE_LS_VOICE_DRAFT_PROOF=true \
+                VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
+                "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
+            ' _ "$(id -un)" "$(command -v node)" "$proof/voice"
+            jq -e '.status == "passed" and .voiceDraft.rustSelection and .voiceDraft.draftPreserved and .voiceDraft.transcriptionRequests == 1 and .voiceDraft.cancellationPreservedDraft and .voiceDraft.remainedUnsent and
+              (.voiceDraft.failedDestination | .status == 503 and .pcmBytes > 0 and .transcriptionRequests == 1 and
+                .concurrentDraftPreserved and .errorDismissed and .editorRecovered and .durableDraftPreserved and
+                .reopenedDraft == .concurrentDraft and .noAutomaticRetry and .noAutomaticSubmission and
+                .alternateHostAttempts == [] and .alternateSocketHosts == [])' \
+              "$proof/voice/native/proof.json"
+          fi
+          if [[ "$INTEGRATED_NATIVE" == true || "$GITHUB_REF_NAME" == candidate/t3code-ls-t02-bundled-native-t16-parallel-* ]]; then
+            mkdir "$proof/parallel"
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- env T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 \
+                VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust T3_CODE_LS_PARALLEL_TURNS_PROOF=true \
+                "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
+            ' _ "$(id -un)" "$(command -v node)" "$proof/parallel"
+            jq -e '.status == "passed" and .composer == "rust-wasm" and .parallelTurns.stillPendingAfterOtherApproval and .parallelTurns.completedReopened and .parallelTurns.interruptedReopened' \
+              "$proof/parallel/native/proof.json"
+          fi
+      - name: Exercise the bundled Rust PTY during a separate browser replay turn
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t07-pty-host-contention-')
+        run: |
+          proof="$RUNNER_TEMP/built-composer-proof/pty-contention"
+          mkdir "$proof"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- env T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 \
+              T3_CODE_LS_BUNDLED_PTY_PROOF=true T3_CODE_LS_PTY_CONTENTION_PROOF=true \
+              VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
+              "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
+          ' _ "$(id -un)" "$(command -v node)" "$proof"
+          jq -e '.status == "passed" and .bundledNativePtyOwner and
+            (.terminalContention | .sameShell and .rowsPerBurst == 128 and
+              .orderedWireRows == 256 and .orderedRenderedRows == 256 and .inputEcho == "j45-echo:世界" and
+              .orderedRowsSha256 == "ad56e3b7b21ad9b478f23aa8ce0ca9026133ebe33d258d19e8502f0eb44e4570" and
+              .chatPendingAfterReattach and .chatCompletedBeforeForegroundExit and .chat.reopened and
+              .chat.exactReply == "Created the requested probe file.")' "$proof/native/proof.json"
+      - name: Exercise one live inherited-history view in the bundled native application
+        if: env.FORK_HISTORY_PROOF == 'true' || env.INTEGRATED_NATIVE == 'true'
+        run: |
+          proof="$RUNNER_TEMP/built-composer-proof/fork-history"
+          mkdir -p apps/server/dist/client
+          cp -R apps/web/dist/. apps/server/dist/client/
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- "$2" apps/web/scripts/verify-packaged-fork-history.mjs "$3"
+          ' _ "$(id -un)" "$(command -v node)" "$proof"
+          jq -e '.status == "passed" and (.live.childSequences | length) == 2 and
+            .live.olderRows > 0 and .live.scrollDelta <= 4 and .retained.identity.engine == "omdb" and
+            .live.refreshedHistoryViewRevision > .live.initialHistoryViewRevision and
+            .retained.historyViewRevision >= .live.refreshedHistoryViewRevision' "$proof/proof.json"
+      - name: Check the controlled HTML publisher and production MCP session
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-html-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 \
+            scripts/dev-replay-agent.test.ts src/mcp/AcpMcpStdioBridge.test.ts
+      - name: Prepare the source-pinned server preview browser
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-preview-')
+        run: |
+          timeout -k 5s 600s node apps/server/scripts/prepare-preview-fixture-browser.ts \
+            "$RUNNER_TEMP/preview-browser-home" > "$RUNNER_TEMP/preview-browser-install.json"
+      - name: Exercise owned preview navigation and viewer lifecycle in the packaged application
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-preview-')
+        run: |
+          proof="$RUNNER_TEMP/built-composer-proof/preview-lifetime"
+          mkdir "$proof"
+          cp "$RUNNER_TEMP/preview-browser-install.json" "$proof/browser-install.json"
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- env \
+              T3_CODE_LS_BUNDLED_CLIENT_PROOF=1 T3_CODE_LS_PREVIEW_LIFETIME_PROOF=true \
+              T3_CODE_LS_PREVIEW_BROWSER_HOME="$4" T3CODE_SERVER_BROWSER_SANDBOX=0 \
+              VITE_T3_CODE_LS_COMPOSER_OFFSETS=rust \
+              "$2" apps/web/scripts/verify-hybrid-client.ts "$3" native
+          ' _ "$(id -un)" "$(command -v node)" "$proof" "$RUNNER_TEMP/preview-browser-home"
+          jq -e '.status == "passed" and .previewLifetime.runtime == "server" and .previewLifetime.navigationOwned and .previewLifetime.pointerRoundTrip and .previewLifetime.floatingViewerRetained and .previewLifetime.hiddenViewerDetached and .previewLifetime.sameTabReconnected and .previewLifetime.closedViewerDetached and .previewLifetime.reopenedFresh and .previewLifetime.frames > 0' \
+            "$proof/native/proof.json"
+      - name: Check preview stream and surface lifecycle owners
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-preview-')
+        env:
+          T3_CODE_LS_IMPLEMENTATION: upstream
+        run: |
+          pnpm --dir apps/server exec vp test run --maxWorkers 2 src/preview/ServerBrowserStream.test.ts src/preview/SessionControl.test.ts
+          pnpm --dir apps/web exec vp test run --project browser --maxWorkers 2 src/browser/ServerBrowserSurface.browser.test.tsx
+      - name: Remove the owned preview installation
+        if: always() && (env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-preview-'))
+        run: |
+          rm -rf "$RUNNER_TEMP/preview-browser-home"
+      - name: Exercise PDF link handling in the browser
+        if: (env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-')) && !startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t13-pdf-external-')
+        working-directory: apps/web
+        run: pnpm exec vp test run --project browser --maxWorkers 2 src/components/files/PdfViewer.browser.test.tsx
+      - name: Recover a partial Codex import over the packaged WebSocket
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t08-import-') || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t09-relay-')
+        run: |
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- "$2" \
+              apps/server/scripts/verify-provider-import-recovery.ts "$3"
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/built-composer-proof/provider-import"
+      - name: Recover a compressed Codex import over the packaged WebSocket
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t08-import-compressed-')
+        run: |
+          sudo -n unshare --net -- bash -euc '
+            ip link set dev lo up
+            exec runuser -u "$1" -- "$2" \
+              apps/server/scripts/verify-provider-import-recovery.ts "$3" zstd
+          ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/built-composer-proof/provider-import-zstd"
+      - name: Verify recovery at relay admission, dispatch, and fresh start
+        if: env.INTEGRATED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t02-bundled-native-t09-relay-')
+        run: |
+          for boundary in before-claim after-claim after-dispatch after-provider-prompt after-fresh-message after-fresh-start; do
+            sudo -n unshare --net -- bash -euc '
+              ip link set dev lo up
+              exec runuser -u "$1" -- "$2" \
+                apps/server/scripts/verify-scheduled-relay-recovery.ts "$3" "$4"
+            ' _ "$(id -un)" "$(command -v node)" "$RUNNER_TEMP/built-composer-proof/scheduled-relay-$boundary" "$boundary"
+          done
       - name: Retain the bundled browser evidence
-        if: always() && (env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-'))
+        if: always() && (env.PAIRING_PROOF == 'true' || env.GUEST_NAME_PROOF == 'true' || env.BUNDLED_NATIVE == 'true' || startsWith(github.ref_name, 'candidate/t3code-ls-t01-built-composer-'))
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: built-composer-proof

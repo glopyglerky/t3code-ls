@@ -6,6 +6,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as HookInboxStore from "./HookInboxStore.ts";
 
@@ -76,6 +77,50 @@ describe("HookInboxStore", () => {
       ),
   );
 
+  it.effect.each(["delivered", "busy", "unreachable"] as const)(
+    "moves pending deliveries to the new route after an in-flight %s response",
+    (outcome) =>
+      withInbox(
+        Effect.gen(function* () {
+          const first = yield* hook("first");
+          const second = yield* hook("second");
+          yield* HookInboxStore.hold(first, BASE_URL);
+          yield* HookInboxStore.hold(second, BASE_URL);
+          const started = yield* Deferred.make<void>();
+          const released = yield* Deferred.make<void>();
+          const sent: Array<{ baseUrl: string; id: string }> = [];
+          const run = yield* HookInboxStore.deliverDue((baseUrl, held) =>
+            Effect.gen(function* () {
+              sent.push({ baseUrl, id: held.id });
+              if (held.id === first.id) {
+                yield* Deferred.succeed(started, undefined);
+                yield* Deferred.await(released);
+              }
+              return outcome;
+            }),
+          ).pipe(Effect.forkChild);
+          yield* Deferred.await(started);
+          const nextUrl = "https://reopened.example.test/";
+          expect(yield* HookInboxStore.wake(nextUrl)).toBe(true);
+          const now = yield* Clock.currentTimeMillis;
+          yield* Deferred.succeed(released, undefined);
+          expect(yield* Fiber.join(run)).toBe(now);
+          expect(sent).toEqual([{ baseUrl: BASE_URL, id: first.id }]);
+          const sql = yield* SqlClient.SqlClient;
+          expect(yield* sql`SELECT base_url, failures FROM held_hooks_target`).toEqual([
+            { base_url: nextUrl, failures: 0 },
+          ]);
+
+          const retry = deliverer(() => "delivered");
+          expect(yield* HookInboxStore.deliverDue(retry.send)).toBeNull();
+          expect(retry.sent).toEqual(
+            (outcome === "delivered" ? [second] : [first, second])
+              .map((held) => ({ baseUrl: nextUrl, hook: held })),
+          );
+        }),
+      ),
+  );
+
   it.effect("delivers held requests oldest first, byte for byte", () =>
     withInbox(
       Effect.gen(function* () {
@@ -88,6 +133,57 @@ describe("HookInboxStore", () => {
         expect(sent[0]).toEqual({ baseUrl: BASE_URL, hook: first });
         expect(yield* HookInboxStore.deliverDue(send)).toBeNull();
         expect(sent).toHaveLength(2);
+      }),
+    ),
+  );
+
+  it.effect("expires an unsent prefetched request during a slow drain", () =>
+    withInbox(
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const receivedAt = DateTime.formatIso(DateTime.makeUnsafe(now - 24 * 60 * 60 * 1_000));
+        yield* HookInboxStore.hold(yield* hook("first", { receivedAt }), BASE_URL);
+        yield* HookInboxStore.hold(yield* hook("expires-next", { receivedAt }), BASE_URL);
+        yield* HookInboxStore.hold(yield* hook("fresh"), BASE_URL);
+
+        const sent: string[] = [];
+        const nextAt = yield* HookInboxStore.deliverDue((_baseUrl, held) =>
+          Effect.gen(function* () {
+            sent.push(held.id);
+            if (held.id === "first") yield* TestClock.adjust("1 millis");
+            return "delivered" as const;
+          }),
+        );
+        expect(sent).toEqual(["first", "fresh"]);
+        expect(nextAt).toBeNull();
+        const sql = yield* SqlClient.SqlClient;
+        expect(yield* sql`SELECT id FROM held_hooks`).toEqual([]);
+      }),
+    ),
+  );
+
+  it.effect("keeps recoverable work when an older admission lost its target", () =>
+    withInbox(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const now = yield* Clock.currentTimeMillis;
+        const ttl = 24 * 60 * 60 * 1_000;
+        const fresh = yield* hook("fresh");
+        const receivedAt = DateTime.formatIso(DateTime.makeUnsafe(now - ttl - 1));
+        yield* HookInboxStore.hold(yield* hook("expired", { receivedAt }), BASE_URL);
+        yield* HookInboxStore.hold(fresh, BASE_URL);
+        // Recreate the state that could survive an interrupted older admission.
+        yield* sql`DELETE FROM held_hooks_target`;
+        const { sent, send } = deliverer(() => "delivered");
+        expect(yield* HookInboxStore.deliverDue(send)).toBe(now + ttl + 1);
+        expect(sent).toEqual([]);
+        expect(yield* sql`SELECT id FROM held_hooks`).toEqual([{ id: "fresh" }]);
+
+        const reopenedTarget = "https://reopened.example.test/";
+        expect(yield* HookInboxStore.wake(reopenedTarget)).toBe(true);
+        expect(yield* HookInboxStore.deliverDue(send)).toBeNull();
+        expect(sent).toEqual([{ baseUrl: reopenedTarget, hook: fresh }]);
+        expect(yield* sql`SELECT id FROM held_hooks`).toEqual([]);
       }),
     ),
   );

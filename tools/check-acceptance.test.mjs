@@ -21,19 +21,65 @@ const targetDirectory = Path.resolve("/tmp/acceptance-target");
 const proofDirectory = Path.resolve("/tmp/acceptance-proof");
 const toolchainDirectory = Path.resolve("/tmp/qualified-bluefe");
 
+const mapping = JSON.parse(FS.readFileSync(Path.join(root, "port-map.json"), "utf8"));
+const { workspacePackages, standalonePackages } = JSON.parse(ChildProcess.execFileSync("python3", ["-c", `
+import json, pathlib, tomllib
+
+workspace = tomllib.loads(pathlib.Path("Cargo.toml").read_text())
+members = workspace["workspace"]["members"]
+packages = {
+    member: tomllib.loads(pathlib.Path(member, "Cargo.toml").read_text())["package"]
+    for member in members
+}
+standalone = {}
+mapping = json.loads(pathlib.Path("port-map.json").read_text())
+for port in mapping["ports"]:
+    for directory in port.get("rust_crates", []):
+        if directory in packages:
+            continue
+        base = pathlib.Path(directory)
+        crate = tomllib.loads((base / "Cargo.toml").read_text())
+        if crate.get("workspace") == {} and (base / "Cargo.lock").is_file():
+            standalone[directory] = crate["package"]
+print(json.dumps({"workspacePackages": packages, "standalonePackages": standalone}))
+`], { cwd: root, encoding: "utf8" }));
+
 Test.test("every declared acceptance test has exactly one execution route", () => {
-  const mapping = JSON.parse(FS.readFileSync(Path.join(root, "port-map.json"), "utf8"));
   const declared = new Set(mapping.ports.flatMap((port) => port.acceptance_tests));
   const adapters = new Set(planAdapterChecks(adapterPortIds).map((check) => check.script));
   const components = new Set(Object.keys(acceptanceChecks));
+  const hosted = new Map();
+  for (const port of mapping.ports) {
+    for (const [script, workflow] of Object.entries(port.hosted_acceptance ?? {})) {
+      Assert.ok(port.acceptance_tests.includes(script), `Hosted test has no declared owner: ${script}`);
+      Assert.match(workflow, /^\.github\/workflows\/[a-z0-9-]+\.yml$/u);
+      Assert.ok(port.adapter_paths.includes(workflow), `Hosted workflow has no declared owner: ${workflow}`);
+      Assert.ok(!hosted.has(script) || hosted.get(script) === workflow, `Conflicting hosted workflows: ${script}`);
+      Assert.ok(FS.readFileSync(Path.join(root, workflow), "utf8").includes(script),
+        `Hosted workflow does not reference its declared test: ${script}`);
+      hosted.set(script, workflow);
+    }
+  }
   for (const script of declared) {
     Assert.ok(FS.existsSync(Path.join(root, script)), `Missing acceptance source: ${script}`);
     if (script.endsWith(".rs")) {
-      Assert.match(script, /^crates\/[a-z-]+\/tests\/[a-z_]+\.rs$/,
-        "Rust acceptance must be a Cargo integration test included by --all-targets");
+      const test = /^(.+)\/tests\/([a-z_]+)\.rs$/u.exec(script);
+      Assert.ok(test, `Invalid Rust integration test path: ${script}`);
+      const [, crate, target] = test;
+      const workflow = hosted.get(script);
+      if (workflow) {
+        Assert.ok(Object.hasOwn(standalonePackages, crate) && standalonePackages[crate].autotests !== false,
+          `Hosted Rust acceptance must be a discovered test in a declared standalone workspace: ${script}`);
+        const command = `--manifest-path ${crate}/Cargo.toml --test ${target}`;
+        Assert.ok(FS.readFileSync(Path.join(root, workflow), "utf8").includes(command),
+          `Hosted workflow must select the standalone Cargo integration test: ${script}`);
+      } else {
+        Assert.ok(Object.hasOwn(workspacePackages, crate) && workspacePackages[crate].autotests !== false,
+          `Rust acceptance must be a discovered integration test in a Cargo workspace member: ${script}`);
+      }
       Assert.equal(adapters.has(script) || components.has(script), false);
     } else {
-      Assert.equal(Number(adapters.has(script)) + Number(components.has(script)), 1,
+      Assert.equal(Number(adapters.has(script)) + Number(components.has(script)) + Number(hosted.has(script)), 1,
         `Acceptance script must have one explicit execution route: ${script}`);
     }
   }
@@ -43,14 +89,8 @@ Test.test("every declared acceptance test has exactly one execution route", () =
 });
 
 Test.test("manifest executables belong to existing Cargo package targets", () => {
-  const packages = new Map();
-  for (const entry of FS.readdirSync(Path.join(root, "crates"), { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const directory = Path.join(root, "crates", entry.name);
-    const source = FS.readFileSync(Path.join(directory, "Cargo.toml"), "utf8");
-    const name = source.match(/^name\s*=\s*"([^"]+)"/m)?.[1];
-    if (name) packages.set(name, directory);
-  }
+  const packages = new Map(Object.entries(workspacePackages).map(([member, config]) =>
+    [config.name, Path.join(root, member)]));
   for (const [script, check] of Object.entries(acceptanceChecks)) {
     Assert.ok(packages.has(check.package), `Unknown manifest Cargo package: ${script}`);
     for (const target of acceptanceExecutables(check)) {

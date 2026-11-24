@@ -35,8 +35,11 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import * as HttpApi from "effect/http-api/HttpApi";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { Etag, HttpRouter } from "effect/http";
@@ -47,9 +50,13 @@ import * as PersistenceTransactions from "../persistence/PersistenceTransactions
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as ProjectEnrichmentService from "../project/ProjectEnrichmentService.ts";
 import { subscribeOrchestrationV2Thread } from "../ws.ts";
+import * as EventSink from "./EventSink.ts";
+import * as EventStore from "./EventStore.ts";
+import { watchForkHistory } from "./ForkHistoryInvalidations.ts";
 import * as OrchestrationHttp from "./http.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import { encodeThreadHistoryCursor } from "./threadHistoryPaging.ts";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 
 const decodeBounded = Schema.decodeUnknownSync(
@@ -68,6 +75,7 @@ const modelSelection = { instanceId: provider, model: "gpt-5.4" };
 const projectId = ProjectId.make("project:compact-transport");
 const PARENT = ThreadId.make("thread:compact-transport:parent");
 const FORK = ThreadId.make("thread:compact-transport:fork");
+const GRANDCHILD = ThreadId.make("thread:compact-transport:grandchild");
 const LONG = ThreadId.make("thread:compact-transport:long");
 const BODIES = ThreadId.make("thread:compact-transport:bodies");
 const parentRun = RunId.make("run:compact-transport:parent");
@@ -78,20 +86,25 @@ const store = Layer.mergeAll(
   ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
   SqlitePersistence.layerMemory,
 );
+const events = EventSink.layer.pipe(
+  Layer.provide(EventStore.layerFromOrchestrationEventStore),
+  Layer.provideMerge(OrchestrationEventStore.layer),
+);
 const management = Layer.unwrap(
   Effect.gen(function* () {
     const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const eventSink = yield* EventSink.EventSinkV2;
     return Layer.mock(ThreadManagementService.ThreadManagementService)({
       ensureLegacyTranscript: () => Effect.void,
       getThreadSnapshot: (id) => projections.getThreadSnapshot(id).pipe(Effect.orDie),
       getThreadSnapshotWindow: (id, options) =>
         projections.getThreadSnapshotWindow(id, options).pipe(Effect.orDie),
-      getThreadHistoryPage: (id, cursor, throughEntryId, conversationOnly) =>
-        projections
-          .getThreadHistoryPage(id, cursor, throughEntryId, conversationOnly)
-          .pipe(Effect.orDie),
+      getThreadHistoryPage: (...args) => projections.getThreadHistoryPage(...args).pipe(Effect.orDie),
       streamStoredEventsFrom: (input) =>
-        input?.threadId === BODIES ? Stream.fromIterable(bodiesLiveTail()) : Stream.empty,
+        input?.threadId === BODIES
+          ? Stream.fromIterable(bodiesLiveTail())
+          : eventSink.stream({ ...input, bounded: true }).pipe(Stream.orDie),
+      watchForkHistory: (id) => watchForkHistory(id, projections, eventSink),
     });
   }),
 );
@@ -110,7 +123,12 @@ const auth = Layer.succeed(EnvironmentAuthenticatedAuth, (effect) =>
   ),
 );
 
-function threadCreated(id: ThreadId, at: DateTime.Utc, forkOf?: RunId): OrchestrationV2DomainEvent {
+function threadCreated(
+  id: ThreadId,
+  at: DateTime.Utc,
+  forkOf?: RunId,
+  sourceThreadId = PARENT,
+): OrchestrationV2DomainEvent {
   return {
     id: EventId.make(`event:${id}:created`),
     type: "thread.created",
@@ -132,8 +150,9 @@ function threadCreated(id: ThreadId, at: DateTime.Utc, forkOf?: RunId): Orchestr
       lineage:
         forkOf === undefined
           ? { parentThreadId: null, relationshipToParent: null, rootThreadId: id }
-          : { parentThreadId: PARENT, relationshipToParent: "fork", rootThreadId: PARENT },
-      forkedFrom: forkOf === undefined ? null : { type: "run", threadId: PARENT, runId: forkOf },
+          : { parentThreadId: sourceThreadId, relationshipToParent: "fork", rootThreadId: PARENT },
+      forkedFrom:
+        forkOf === undefined ? null : { type: "run", threadId: sourceThreadId, runId: forkOf },
       createdAt: at,
       updatedAt: at,
       archivedAt: null,
@@ -149,6 +168,7 @@ function runCreated(
   threadId: ThreadId,
   runId: RunId,
   at: DateTime.Utc,
+  ordinal = 1,
 ): OrchestrationV2DomainEvent {
   const rootNodeId = NodeId.make(`node:${runId}`);
   return {
@@ -162,7 +182,7 @@ function runCreated(
     payload: {
       id: runId,
       threadId,
-      ordinal: 1,
+      ordinal,
       providerInstanceId: provider,
       modelSelection,
       providerThreadId: null,
@@ -188,7 +208,8 @@ function itemUpdated(
   type:
     | "command_execution"
     | "run_interrupt_request"
-    | "run_interrupt_result" = "command_execution",
+    | "run_interrupt_result"
+    | "system_notice" = "command_execution",
 ): OrchestrationV2DomainEvent {
   const base = {
     id: TurnItemId.make(`turn-item:${threadId}:${key}`),
@@ -399,10 +420,9 @@ const TestLayer = Layer.mergeAll(
     getEnvironmentId: Effect.succeed(EnvironmentId.make("compact-transport")),
   }),
   Layer.effectDiscard(seed),
-  Layer.mock(OrchestrationEventStore.OrchestrationEventStore)({}),
   Layer.mock(ProjectStore.ProjectStoreV2)({}),
   Layer.mock(ProjectEnrichmentService.ProjectEnrichmentService)({}),
-).pipe(Layer.provideMerge(store));
+).pipe(Layer.provideMerge(events), Layer.provideMerge(store));
 
 const withHttp = <A>(use: (get: (path: string) => Promise<Response>) => Promise<A>) =>
   Effect.gen(function* () {
@@ -449,6 +469,230 @@ function itemIds(projection: OrchestrationV2ThreadProjection): string[] {
 }
 
 it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
+  it.effect("WS: an open run-fork grandchild refreshes inherited text at its child watermark", () =>
+    Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      const at = yield* DateTime.now;
+      const forkRun = RunId.make("run:compact-transport:fork");
+      const laterRun = RunId.make("run:compact-transport:after-fork");
+      const original = itemUpdated(PARENT, parentRun, "inherited-notice", 4, at, "system_notice");
+      if (original.type !== "turn-item.updated" || original.payload.type !== "system_notice") {
+        throw new Error("Expected an inherited notice fixture");
+      }
+      const seeded = yield* eventSink.write({
+        events: [
+          original,
+          runCreated(FORK, forkRun, at),
+          threadCreated(GRANDCHILD, at, forkRun, FORK),
+          itemUpdated(GRANDCHILD, null, "initial-child-output", 1, at),
+        ],
+      });
+      const childSequence = seeded.at(-1)!.sequence;
+      const amended = {
+        ...original,
+        id: EventId.make("event:compact-transport:ancestor-edit"),
+        payload: { ...original.payload, message: "Amended inherited notice" },
+      };
+      const inheritedText = (projection: OrchestrationV2ThreadProjection) => {
+        const row = projection.visibleTurnItems.find(
+          (item) =>
+            item.visibility === "inherited" &&
+            item.sourceThreadId === PARENT &&
+            item.sourceItemId === original.payload.id,
+        );
+        return row?.item.type === "system_notice" ? row.item.message : undefined;
+      };
+
+      const input = {
+        threadId: GRANDCHILD,
+        acceptBoundedSnapshot: true,
+        acceptCompactTurnItems: true,
+        acceptCompactIds: true,
+        requestCompletionMarker: true,
+      };
+      const open = Effect.fnUntraced(function* (profile: typeof input & {
+        acceptHistoryInvalidation?: boolean;
+      }) {
+        const received = yield* Queue.unbounded<OrchestrationV2ThreadStreamItem>();
+        const stream = yield* subscribeOrchestrationV2Thread(profile);
+        yield* stream.pipe(
+          Stream.map((item) => decodeStreamItem(JSON.parse(JSON.stringify(encodeStreamItem(item))))),
+          Stream.runForEach((item) => Queue.offer(received, item)),
+          Effect.forkScoped,
+        );
+        const opening = yield* Queue.take(received);
+        if (opening.kind !== "snapshot") throw new Error("Expected the opening snapshot");
+        assert.deepStrictEqual(yield* Queue.take(received), { kind: "synchronized" });
+        return { opening, received };
+      });
+      const { opening, received } = yield* open({ ...input, acceptHistoryInvalidation: true });
+      const legacy = yield* open(input);
+      const full = yield* open({
+        ...input,
+        acceptBoundedSnapshot: false,
+        acceptHistoryInvalidation: true,
+      });
+      assert.equal(opening.snapshotSequence, childSequence);
+      assert.isTrue(opening.turnItemsOmitLocalVisible);
+      assert.equal(inheritedText(boundedSnapshotProjection(opening)), original.payload.message);
+
+      yield* eventSink.write({
+        events: [
+          runCreated(PARENT, laterRun, at, 2),
+          itemUpdated(PARENT, laterRun, "outside-fork-history", 5, at),
+          itemUpdated(LONG, longRun, "unrelated-history", 95, at),
+        ],
+      });
+      yield* TestClock.adjust("1 second");
+      assert.isTrue(Option.isNone(yield* Queue.poll(received)));
+
+      yield* eventSink.write({
+        events: [
+          {
+            ...amended,
+            id: EventId.make("event:compact-transport:ancestor-edit-interim"),
+            payload: { ...amended.payload, message: "Interim inherited notice" },
+          },
+          amended,
+        ],
+      });
+      const current = yield* projections.getThreadSnapshotWindow(GRANDCHILD, { rowLimit: 20 });
+      assert.equal(inheritedText(current.projection), amended.payload.message);
+      assert.equal(current.snapshotSequence, childSequence);
+      assert.notInclude(JSON.stringify(current.projection), "outside-fork-history");
+
+      yield* TestClock.adjust("1 second");
+      const refresh = Option.getOrUndefined(yield* Queue.poll(received));
+      assert.deepStrictEqual(
+        refresh,
+        { kind: "history-invalidated" },
+        "The open stream missed the ancestor-only edit",
+      );
+      assert.deepStrictEqual(encodeStreamItem({ kind: "history-invalidated" }), { kind: "history-invalidated" });
+      assert.isTrue(Option.isNone(yield* Queue.poll(received)));
+      assert.isTrue(Option.isNone(yield* Queue.poll(legacy.received)));
+      assert.isTrue(Option.isNone(yield* Queue.poll(full.received)));
+
+      const childEvents = yield* eventSink.write({
+        events: [
+          itemUpdated(GRANDCHILD, null, "child-live-output", 2, at),
+          itemUpdated(GRANDCHILD, null, "child-next-output", 3, at),
+        ],
+      });
+      yield* TestClock.adjust("1 second");
+      for (const childEvent of childEvents) {
+        const next = Option.getOrUndefined(yield* Queue.poll(received));
+        if (next?.kind !== "event") throw new Error("Expected an ordered child event");
+        assert.equal(next.sequence, childEvent.sequence);
+        assert.equal(next.event.threadId, GRANDCHILD);
+        if (
+          next.event.type !== "turn-item.updated" ||
+          next.event.payload.type !== "command_execution"
+        ) {
+          throw new Error("Expected the child command update");
+        }
+        assert.isUndefined(next.event.payload.output);
+        assert.isTrue(next.event.payload.outputOmitted);
+      }
+      assert.isTrue(Option.isNone(yield* Queue.poll(received)));
+
+      const replay = yield* subscribeOrchestrationV2Thread({
+        ...input,
+        acceptHistoryInvalidation: true,
+        afterSequence: childSequence,
+      });
+      const catchup = yield* replay.pipe(Stream.take(childEvents.length + 1), Stream.runCollect);
+      assert.deepStrictEqual(
+        catchup.map((item) => (item.kind === "event" ? item.sequence : item.kind)),
+        [...childEvents.map((event) => event.sequence), "synchronized"],
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("HTTP: fork history view revision changes across an ancestor-only commit", () =>
+    Effect.gen(function* () {
+      const eventSink = yield* EventSink.EventSinkV2;
+      const at = yield* DateTime.now;
+      const parent = ThreadId.make("thread:compact-transport:http-parent");
+      const child = ThreadId.make("thread:compact-transport:http-child");
+      const cutoff = RunId.make("run:compact-transport:http-cutoff");
+      const edit = itemUpdated(parent, cutoff, "inherited-notice", 1, at, "system_notice");
+      if (edit.type !== "turn-item.updated" || edit.payload.type !== "system_notice") {
+        throw new Error("Expected an inherited notice fixture");
+      }
+      yield* eventSink.write({
+        events: [
+          threadCreated(parent, at),
+          runCreated(parent, cutoff, at),
+          edit,
+          threadCreated(child, at, cutoff, parent),
+        ],
+      });
+      const laterRun = RunId.make("run:compact-transport:http-after-fork");
+      const base = `/api/orchestration/threads/${encodeURIComponent(child)}`;
+      const bounded = () =>
+        withHttp(async (get) => {
+          const response = await get(`${base}/bounded?compactIds=1`);
+          assert.equal(response.status, 200);
+          return decodeBounded(await response.text());
+        });
+      const page = (cursor: string) =>
+        withHttp(async (get) => {
+          const response = await get(
+            `${base}/history?cursor=${encodeURIComponent(cursor)}&compactIds=1`,
+          );
+          assert.equal(response.status, 200);
+          return decodeHistoryPage(await response.text());
+        });
+      const before = yield* bounded();
+      const cursor = encodeThreadHistoryCursor({
+        snapshotSequence: before.snapshotSequence,
+        sourceThreadId: parent,
+        sourceItemId: edit.payload.id,
+        position: 0,
+        inclusive: true,
+      });
+      const firstPage = yield* page(cursor);
+      assert.isNumber(before.historyViewRevision);
+      assert.equal(firstPage.historyViewRevision, before.historyViewRevision);
+      assert.include(JSON.stringify(firstPage.items), '"message":"inherited-notice"');
+
+      const [stored] = yield* eventSink.write({
+        events: [
+          {
+            ...edit,
+            id: EventId.make("event:compact-transport:http-ancestor-edit"),
+            payload: { ...edit.payload, message: "Ancestor revised for HTTP" },
+          },
+        ],
+      });
+      const secondPage = yield* page(cursor);
+      assert.equal(secondPage.snapshotSequence, before.snapshotSequence);
+      assert.notEqual(secondPage.historyViewRevision, before.historyViewRevision);
+      assert.equal(secondPage.historyViewRevision, stored!.sequence);
+      assert.include(JSON.stringify(secondPage.items), "Ancestor revised for HTTP");
+      const after = yield* bounded();
+      assert.equal(after.historyViewRevision, secondPage.historyViewRevision);
+      assert.equal(after.snapshotSequence, before.snapshotSequence);
+
+      yield* eventSink.write({
+        events: [
+          runCreated(parent, laterRun, at, 2),
+          itemUpdated(parent, laterRun, "http-outside-cutoff", 100, at),
+        ],
+      });
+      const outside = yield* bounded();
+      const outsidePage = yield* page(cursor);
+      assert.deepStrictEqual(outside.projection, after.projection);
+      assert.deepStrictEqual(outsidePage.items, secondPage.items);
+      // The ancestry watermark is conservative even when the cutoff excludes new rows.
+      assert.notEqual(outside.historyViewRevision, after.historyViewRevision);
+      assert.equal(outsidePage.historyViewRevision, outside.historyViewRevision);
+      assert.equal(outsidePage.snapshotSequence, before.snapshotSequence);
+    }),
+  );
+
   describe.each([
     ["fork", FORK],
     ["long run with a retained interrupt request", LONG],
@@ -515,6 +759,7 @@ it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
         assert.isNumber(wire.projection.thread.id);
         assert.isBelow(tableBody.length, plainBody.length);
         const decoded = decodeBounded(tableBody);
+        if (threadId === LONG) assert.notProperty(wire, "historyViewRevision");
         assert.deepStrictEqual(decoded, decodeBounded(plainBody));
 
         // Only the long thread has older history to page.
@@ -525,6 +770,7 @@ it.layer(TestLayer)("compact bounded snapshot transport", (it) => {
         const tablePage = await (await get(`${history}&compactIds=1`)).text();
         assert.isArray(JSON.parse(tablePage).ids);
         const page = decodeHistoryPage(tablePage);
+        assert.notProperty(JSON.parse(tablePage), "historyViewRevision");
         assert.isAbove(page.items.length, 0);
         assert.deepStrictEqual(page, decodeHistoryPage(plainPage));
       }),

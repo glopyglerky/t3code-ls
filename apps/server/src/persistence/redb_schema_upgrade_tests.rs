@@ -11,6 +11,9 @@ async fn fixture_80() -> (TestFixture, Store, ApplicationCatalog) {
     let store = fixture.initialize().await;
     let previous: Definition = serde_json::from_str(include_str!("omdb-schema-80.json")).unwrap();
     let source = ApplicationCatalog {
+        event_layout: None,
+        prepared_service_activation_v1: None,
+        forward_service_activation_v1: None,
         schema: previous.schema,
         generation: "native".into(),
     };
@@ -238,6 +241,9 @@ async fn interrupted_staging_retries_from_current_source_and_removes_stale_candi
     let store = Store::open_exclusive(fixture.path()).await.unwrap();
     let current = definition().unwrap();
     let target = ApplicationCatalog {
+        event_layout: None,
+        prepared_service_activation_v1: None,
+        forward_service_activation_v1: None,
         generation: request_digest(&json!([
             "native-schema-upgrade",
             source.generation,
@@ -574,6 +580,451 @@ async fn fixture_88() -> (TestFixture, Store, ApplicationCatalog) {
     (fixture, store, source)
 }
 
+#[cfg(target_os = "linux")]
+const ISOLATED_UPDATE: &str = "aa212c2b-63d4-4b28-97e4-1c1d6dc6d281";
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn isolated_trial_publish_interrupt_fixture() {
+    use crate::application_storage::{
+        publish_isolated_service_trial, rollback_isolated_service_trial,
+    };
+    let Some(home) = std::env::var_os("T3_TEST_ISOLATED_TRIAL_HOME").map(std::path::PathBuf::from)
+    else {
+        return;
+    };
+    assert!(
+        home.file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("t3-redb-test-"))
+    );
+    let boundary = std::env::var("T3_TEST_INTERRUPT_TRIAL_PUBLICATION").unwrap();
+    if let Ok(action) = std::env::var("T3_TEST_INTENDED_MOVE") {
+        if action == "publish" {
+            crate::application_storage::publish_intended_isolated_service_trial(
+                home,
+                ISOLATED_UPDATE.into(),
+            )
+            .await
+            .unwrap();
+        } else {
+            assert_eq!(action, "rollback");
+            rollback_isolated_service_trial(home, ISOLATED_UPDATE.into())
+                .await
+                .unwrap();
+        }
+    } else if boundary.starts_with("forward-readiness-") {
+        crate::application_storage::probe_fixture_forward_activation(
+            home,
+            ISOLATED_UPDATE.into(),
+            |_| Ok(()),
+        )
+        .await
+        .unwrap();
+    } else if boundary.starts_with("forward-catalog-") {
+        crate::application_storage::record_fixture_forward_catalog(home, ISOLATED_UPDATE.into())
+            .await
+            .unwrap();
+    } else if boundary.starts_with("forward-selection-") {
+        crate::application_storage::record_fixture_forward_selection(home, ISOLATED_UPDATE.into())
+            .await
+            .unwrap();
+    } else if boundary.starts_with("forward-commit-") {
+        crate::application_storage::record_fixture_forward_commit(home, ISOLATED_UPDATE.into())
+            .await
+            .unwrap();
+    } else if boundary.starts_with("promotion-intent-") {
+        let intent =
+            serde_json::from_slice(&std::fs::read(home.join("promotion-intent.json")).unwrap())
+                .unwrap();
+        crate::application_storage::record_native_promotion_intent(
+            home,
+            ISOLATED_UPDATE.into(),
+            intent,
+        )
+        .await
+        .unwrap();
+    } else if boundary.starts_with("candidate-observation-") {
+        let observation = serde_json::from_slice(
+            &std::fs::read(home.join("candidate-observation.json")).unwrap(),
+        )
+        .unwrap();
+        crate::application_storage::record_isolated_candidate_preparation(
+            home,
+            ISOLATED_UPDATE.into(),
+            observation,
+        )
+        .await
+        .unwrap();
+    } else if boundary.starts_with("isolated-rollback-") {
+        rollback_isolated_service_trial(home, ISOLATED_UPDATE.into())
+            .await
+            .unwrap();
+    } else {
+        publish_isolated_service_trial(home, ISOLATED_UPDATE.into())
+            .await
+            .unwrap();
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn isolated_trial_upgrades_88_without_changing_the_stopped_source() {
+    use crate::application::PreparedServiceActivation;
+    use crate::application_bootstrap::bootstrap_schema_sha256;
+    use crate::application_server_ownership::OwnerLock;
+    use crate::application_storage::{
+        IsolatedTrialRequest, TrialSnapshot, backup_service_trial,
+        inspect_isolated_service_trial_selection, prepare_isolated_service_trial,
+        publish_isolated_service_trial, rollback_isolated_service_trial,
+    };
+    use sha2::{Digest, Sha256};
+    use std::fs;
+
+    const UPDATE: &str = ISOLATED_UPDATE;
+    let hash = |bytes: &[u8]| -> String {
+        Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    };
+    for (unsupported, bind_runtime) in [(false, false), (true, false), (false, true)] {
+        let (fixture, store, catalog) = fixture_88().await;
+        if unsupported {
+            let mut tx = store.db.begin().await.unwrap();
+            write_row(
+                &mut tx,
+                &catalog,
+                "effect_sql_migrations",
+                Map::from_iter([
+                    ("migration_id".into(), int_cell(88)),
+                    ("name".into(), text_cell("unsupported migration")),
+                    ("created_at".into(), text_cell(NOW)),
+                ]),
+            )
+            .await
+            .unwrap();
+            tx.commit().await.unwrap();
+        }
+        let identity = ApplicationTransactions::new(store.clone())
+            .generation_identity()
+            .await
+            .unwrap()
+            .unwrap();
+        let original_rows = generation_bytes(&store, &catalog).await;
+        store.shutdown().await.unwrap();
+        let home = fs::canonicalize(fixture.path().parent().unwrap()).unwrap();
+        let state = home.join("userdata");
+        let live = state.join("statev2.omdb");
+        fs::create_dir(&state).unwrap();
+        fs::create_dir(home.join("runtime")).unwrap();
+        fs::rename(fixture.path(), &live).unwrap();
+        OwnerLock::acquire(&state.join("server-owner.sqlite"))
+            .unwrap()
+            .activate_native()
+            .unwrap();
+        let backup =
+            backup_service_trial(home.clone(), UPDATE.into(), identity.catalog_sha256.clone())
+                .await
+                .unwrap();
+        let checkpoint = home.join(format!("runtime/native-db-backup/{UPDATE}.omdb"));
+        let live_bytes = fs::read(&live).unwrap();
+        let checkpoint_bytes = fs::read(&checkpoint).unwrap();
+        let target_schema_sha256 = bootstrap_schema_sha256();
+        let helper = home.join("runtime/versions/1.2.4/native-bin/t3-code-ls-db");
+        let selection_file = home.join("runtime/service-state.json");
+        let write_selection = |protocol| {
+            let selection = json!({
+                "protocol": protocol, "activeVersion": "1.2.3", "update": {
+                    "id": UPDATE, "fromVersion": "1.2.3", "targetVersion": "1.2.4",
+                    "dbPath": live, "status": "pending"
+                }
+            });
+            fs::write(&selection_file, selection.to_string()).unwrap();
+        };
+        let activation = if bind_runtime {
+            let version_dir = home.join("runtime/versions/1.2.4");
+            fs::create_dir_all(helper.parent().unwrap()).unwrap();
+            fs::write(&helper, b"fixture helper").unwrap();
+            fs::write(version_dir.join("t3"), b"fixture runtime").unwrap();
+            fs::write(version_dir.join(".install-complete"), b"1.2.4\n").unwrap();
+            write_selection(4);
+            Some(PreparedServiceActivation {
+                update_id: UPDATE.into(),
+                from_version: "1.2.3".into(),
+                target_version: "1.2.4".into(),
+                target_entry_sha256: hash(b"fixture runtime"),
+                target_helper_sha256: hash(b"fixture helper"),
+                target_schema_sha256: target_schema_sha256.clone(),
+            })
+        } else {
+            None
+        };
+        let request = || IsolatedTrialRequest {
+            update_id: UPDATE.into(),
+            database: backup.database.clone(),
+            checkpoint: TrialSnapshot {
+                catalog_sha256: identity.catalog_sha256.clone(),
+                rows: backup.backup.rows,
+                checksum: backup.backup.checksum.clone(),
+            },
+            target_schema_sha256: target_schema_sha256.clone(),
+            activation: activation.clone(),
+        };
+        let trial = state.join(format!(".statev2-trial-{UPDATE}.omdb"));
+        if bind_runtime {
+            assert!(matches!(
+                prepare_isolated_service_trial(home.clone(), UPDATE.into(), request()).await,
+                Err(Error::IncompatibleStore)
+            ));
+            assert!(!trial.exists());
+            write_selection(5);
+        }
+        let result = prepare_isolated_service_trial(home.clone(), UPDATE.into(), request()).await;
+        if unsupported {
+            assert!(matches!(result, Err(Error::Invalid(_))), "{result:?}");
+            assert!(!trial.exists());
+        } else {
+            let prepared = result.unwrap();
+            let candidate = Store::open_read_only(&trial).await.unwrap();
+            let upgraded =
+                decode_catalog(&candidate.db.read(&schema_key()).await.unwrap().unwrap()).unwrap();
+            let expected = definition().unwrap();
+            let mut expected_catalog = target_89(&catalog, &expected);
+            expected_catalog.prepared_service_activation_v1 = activation.clone();
+            assert_eq!(upgraded, expected_catalog);
+            assert_eq!(
+                candidate.application_migrations().await.unwrap().len(),
+                expected.migrations.len()
+            );
+            assert_eq!(generation_bytes(&candidate, &catalog).await, original_rows);
+            if bind_runtime {
+                assert!(matches!(
+                    candidate.serving_startup_migrations().await,
+                    Err(Error::IncompatibleStore)
+                ));
+                let mut application = ApplicationTransactions::new(candidate.clone());
+                assert_eq!(
+                    application.prepared_service_activation().await.unwrap(),
+                    activation
+                );
+                assert!(matches!(
+                    application.schema().await,
+                    Err(Error::IncompatibleStore)
+                ));
+                assert!(matches!(
+                    application.open_read_session().await,
+                    Err(Error::IncompatibleStore)
+                ));
+            }
+            assert_eq!(
+                ApplicationTransactions::new(candidate.clone())
+                    .generation_identity()
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .catalog_sha256,
+                prepared.snapshot.catalog_sha256
+            );
+            candidate.shutdown().await.unwrap();
+            if bind_runtime {
+                assert_eq!(
+                    prepare_isolated_service_trial(home.clone(), UPDATE.into(), request())
+                        .await
+                        .unwrap(),
+                    prepared
+                );
+                let inspect = || {
+                    inspect_isolated_service_trial_selection(
+                        home.clone(),
+                        UPDATE.into(),
+                        "1.2.3".into(),
+                        "1.2.4".into(),
+                    )
+                };
+                assert_eq!(
+                    inspect().await.unwrap().prepared_database,
+                    prepared.database
+                );
+                let trial_bytes = fs::read(&trial).unwrap();
+                fs::write(&helper, b"replacement helper").unwrap();
+                assert!(matches!(inspect().await, Err(Error::IncompatibleStore)));
+                assert!(matches!(
+                    prepare_isolated_service_trial(home.clone(), UPDATE.into(), request()).await,
+                    Err(Error::IncompatibleStore)
+                ));
+                assert_eq!(fs::read(&trial).unwrap(), trial_bytes);
+                assert!(matches!(
+                    rollback_isolated_service_trial(home.clone(), UPDATE.into()).await,
+                    Err(Error::IncompatibleStore)
+                ));
+                assert!(matches!(
+                    publish_isolated_service_trial(home.clone(), UPDATE.into()).await,
+                    Err(Error::IncompatibleStore)
+                ));
+                assert_eq!(fs::read(&live).unwrap(), live_bytes);
+                fs::write(&helper, b"fixture helper").unwrap();
+                let interrupt = |boundary: &str| {
+                    let child = std::process::Command::new(std::env::current_exe().unwrap())
+                        .arg("isolated_trial_publish_interrupt_fixture")
+                        .env("T3_TEST_ISOLATED_TRIAL_HOME", &home)
+                        .env("T3_TEST_INTERRUPT_TRIAL_PUBLICATION", boundary)
+                        .output()
+                        .unwrap();
+                    assert_eq!(
+                        child.status.code(),
+                        Some(73),
+                        "{}",
+                        String::from_utf8_lossy(&child.stdout)
+                    );
+                };
+                let verification_json = serde_json::to_string(&serde_json::json!({
+                    "request": request(), "preparation": prepared,
+                }))
+                .unwrap();
+                let bound = activation.as_ref().unwrap();
+                let observation = serde_json::json!({
+                    "verification_json": verification_json,
+                    "witness": {
+                        "protocol": 1, "status": "prepared-isolated", "updateId": UPDATE,
+                        "targetVersion": bound.target_version,
+                        "entrySha256": bound.target_entry_sha256,
+                        "helperSha256": bound.target_helper_sha256,
+                        "verificationSha256": hash(verification_json.as_bytes()),
+                    },
+                });
+                fs::write(
+                    home.join("candidate-observation.json"),
+                    serde_json::to_vec(&observation).unwrap(),
+                )
+                .unwrap();
+                let receipt = trial.with_extension("receipt-v1.json");
+                let original_receipt = fs::read(&receipt).unwrap();
+                interrupt("candidate-observation-written");
+                assert_eq!(fs::read(&receipt).unwrap(), original_receipt);
+                assert_eq!(fs::read(&live).unwrap(), live_bytes);
+                interrupt("candidate-observation-durable");
+                let durable_receipt = fs::read(&receipt).unwrap();
+                assert_ne!(durable_receipt, original_receipt);
+                let record = || {
+                    crate::application_storage::record_isolated_candidate_preparation(
+                        home.clone(),
+                        UPDATE.into(),
+                        serde_json::from_value(observation.clone()).unwrap(),
+                    )
+                };
+                assert_eq!(record().await.unwrap()["reused"], true);
+                assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+                let mut stale = observation.clone();
+                let alternate = format!(" {}", verification_json);
+                stale["verification_json"] = serde_json::json!(alternate);
+                stale["witness"]["verificationSha256"] =
+                    serde_json::json!(hash(alternate.as_bytes()));
+                assert!(matches!(
+                    crate::application_storage::record_isolated_candidate_preparation(
+                        home.clone(),
+                        UPDATE.into(),
+                        serde_json::from_value(stale).unwrap()
+                    )
+                    .await,
+                    Err(Error::IncompatibleStore)
+                ));
+                assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+                let mut corrupt: serde_json::Value =
+                    serde_json::from_slice(&durable_receipt).unwrap();
+                corrupt["candidate_observation"]["witness"]["verificationSha256"] =
+                    serde_json::json!("0".repeat(64));
+                let corrupt_bytes = serde_json::to_vec(&corrupt).unwrap();
+                fs::write(&receipt, &corrupt_bytes).unwrap();
+                assert!(matches!(inspect().await, Err(Error::IncompatibleStore)));
+                assert!(matches!(record().await, Err(Error::IncompatibleStore)));
+                assert_eq!(fs::read(&receipt).unwrap(), corrupt_bytes);
+                fs::write(&receipt, &durable_receipt).unwrap();
+                fs::write(&helper, b"changed after observation").unwrap();
+                assert!(matches!(record().await, Err(Error::IncompatibleStore)));
+                assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+                fs::write(&helper, b"fixture helper").unwrap();
+                assert_eq!(
+                    inspect().await.unwrap().prepared_database,
+                    prepared.database
+                );
+                assert_eq!(fs::read(&live).unwrap(), live_bytes);
+                assert_eq!(fs::read(&trial).unwrap(), trial_bytes);
+                let preserved = state.join(format!(".statev2-source-{UPDATE}.omdb"));
+                interrupt("isolated-preserved");
+                assert_eq!(fs::read(&live).unwrap(), live_bytes);
+                assert_eq!(fs::read(&preserved).unwrap(), live_bytes);
+                assert_eq!(fs::read(&trial).unwrap(), trial_bytes);
+                interrupt("isolated-renamed");
+                assert!(!trial.exists());
+                assert_eq!(fs::read(&live).unwrap(), trial_bytes);
+                let recovered = publish_isolated_service_trial(home.clone(), UPDATE.into())
+                    .await
+                    .unwrap();
+                assert!(recovered.reused);
+                assert_eq!(recovered.database, prepared.database);
+                assert_eq!(recovered.preserved_database, backup.database);
+                assert_eq!(Some(recovered.activation), activation);
+                assert_eq!(fs::read(&preserved).unwrap(), live_bytes);
+                let canonical = Store::open_read_only(&live).await.unwrap();
+                let candidate = ApplicationTransactions::new(canonical);
+                assert!(matches!(
+                    candidate.schema().await,
+                    Err(Error::IncompatibleStore)
+                ));
+                assert_eq!(
+                    candidate.prepared_service_activation().await.unwrap(),
+                    activation
+                );
+                drop(candidate);
+                if let Some(helper) = std::env::var_os("T3_TEST_RETAINED_TRIAL_HELPER") {
+                    use std::io::Write;
+                    use std::process::{Command, Stdio};
+
+                    let mut retained = Command::new(helper)
+                        .arg("read-only-local")
+                        .arg(&live)
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .spawn()
+                        .unwrap();
+                    retained
+                        .stdin
+                        .take()
+                        .unwrap()
+                        .write_all(b"{\"operation\":\"application_schema\"}\n")
+                        .unwrap();
+                    let refused = retained.wait_with_output().unwrap();
+                    assert!(refused.status.success());
+                    let receipt: Value = serde_json::from_slice(&refused.stdout).unwrap();
+                    assert_eq!(receipt["error"]["kind"], "incompatible_store", "{receipt}");
+                    assert_eq!(fs::read(&live).unwrap(), trial_bytes);
+                }
+                let failed = state.join(format!(".statev2-failed-sealed-{UPDATE}.omdb"));
+                fs::remove_file(&helper).unwrap();
+                interrupt("isolated-rollback-preserved");
+                assert_eq!(fs::read(&live).unwrap(), trial_bytes);
+                assert_eq!(fs::read(&failed).unwrap(), trial_bytes);
+                assert_eq!(fs::read(&preserved).unwrap(), live_bytes);
+                interrupt("isolated-rollback-renamed");
+                assert!(!preserved.exists());
+                let rollback = rollback_isolated_service_trial(home.clone(), UPDATE.into())
+                    .await
+                    .unwrap();
+                assert!(rollback.reused);
+                assert_eq!(rollback.database, backup.database);
+                assert_eq!(rollback.preserved_database, prepared.database);
+                assert_eq!(fs::read(&failed).unwrap(), trial_bytes);
+                let reopened = Store::open_read_only(&live).await.unwrap();
+                let source = ApplicationTransactions::new(reopened);
+                assert_eq!(source.schema().await.unwrap(), Some(catalog.schema.clone()));
+                assert_eq!(source.prepared_service_activation().await.unwrap(), None);
+            }
+        }
+        assert_eq!(fs::read(&live).unwrap(), live_bytes);
+        assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);
+    }
+}
+
 async fn selected_thread_ids(
     app: &mut ApplicationTransactions,
     transaction: &str,
@@ -836,7 +1287,56 @@ async fn direct_88_import_and_80_88_89_chain_retain_the_original_receipt_and_exa
                 .unwrap(),
             receipt
         );
+
+        let mut marked = serde_json::to_value(&active).unwrap();
+        marked["forward_service_activation_v1"] = json!({
+            "update_id": "aa212c2b-63d4-4b28-97e4-1c1d6dc6d281",
+            "forward_selection_sha256": "a".repeat(64),
+        });
+        let marked = encode(&marked).unwrap();
+        let mut tx = reopened.db.begin().await.unwrap();
+        tx.put(schema_key(), marked.clone()).await.unwrap();
+        tx.commit().await.unwrap();
+        assert!(matches!(
+            reopened.application_import().await,
+            Err(Error::IncompatibleStore)
+        ));
+        let mut tx = reopened.db.begin().await.unwrap();
+        record_generation_identity(&mut tx, &active, &marked)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+        assert_eq!(
+            reopened.application_import().await.unwrap().unwrap(),
+            receipt
+        );
+
+        for (field, value) in [
+            ("forward_selection_sha256", json!("b".repeat(64))),
+            ("update_id", json!("ba212c2b-63d4-4b28-97e4-1c1d6dc6d281")),
+        ] {
+            let mut tampered: Value = serde_json::from_slice(&marked).unwrap();
+            tampered["forward_service_activation_v1"][field] = value;
+            let mut tx = reopened.db.begin().await.unwrap();
+            tx.put(schema_key(), encode(&tampered).unwrap())
+                .await
+                .unwrap();
+            tx.commit().await.unwrap();
+            assert!(matches!(
+                reopened.application_import().await,
+                Err(Error::IncompatibleStore)
+            ));
+        }
+        let mut tx = reopened.db.begin().await.unwrap();
+        tx.put(schema_key(), marked).await.unwrap();
+        tx.commit().await.unwrap();
         reopened.shutdown().await.unwrap();
+        let readonly = Store::open_read_only(fixture.path()).await.unwrap();
+        assert_eq!(
+            readonly.application_import().await.unwrap().unwrap(),
+            receipt
+        );
+        readonly.shutdown().await.unwrap();
     }
 }
 
@@ -891,4 +1391,2322 @@ async fn exact_88_history_is_required_and_read_only_future_or_damaged_histories_
         );
         store.shutdown().await.unwrap();
     }
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn service_promotion_intent_is_durable_exact_and_keeps_publication_fenced() {
+    promotion_intent_fixture(PromotionFixture::Intent).await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn service_intended_sealed_publication_recovers_without_activation() {
+    for case in [
+        ("sealed-phase-publishing-written", false),
+        ("sealed-phase-publishing-durable", true),
+        ("intended-preserved", true),
+        ("intended-renamed", false),
+        ("sealed-phase-published-durable", false),
+    ] {
+        println!("T05 checking sealed publication interruption at {}", case.0);
+        promotion_intent_fixture(PromotionFixture::Publication(Some(case.0), case.1)).await;
+        println!(
+            "T05 recovered sealed publication interruption at {}",
+            case.0
+        );
+    }
+    println!(
+        "T05 intended sealed publication recovered exact phases and rollback without selecting or serving"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn service_intent_only_cancellation_recovers_before_publication() {
+    promotion_intent_fixture(PromotionFixture::Publication(None, true)).await;
+    println!("T05 intent-only cancellation recovered without moving the source or the stage");
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy)]
+enum PromotionFixture {
+    Intent,
+    Publication(Option<&'static str>, bool),
+    ForwardCommit(ForwardCommitCase),
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug)]
+enum ForwardCommitCase {
+    RefuseSourceWithoutFence,
+    RefuseTargetWithoutFence,
+    InterruptBeforeWrite,
+    InterruptAfterDurable,
+    CatalogFences,
+    ProcessHandoff,
+    ProcessHandoffUnknown,
+    PackagedHandoff,
+    PackagedHandoffUnknown,
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "requires the pinned Rust helper in T3_TEST_PROMOTION_HELPER"]
+async fn service_forward_commit_refuses_rollback_without_unsealing() {
+    assert!(std::env::var_os("T3_TEST_PROMOTION_HELPER").is_some());
+    for case in [
+        ForwardCommitCase::RefuseSourceWithoutFence,
+        ForwardCommitCase::RefuseTargetWithoutFence,
+        ForwardCommitCase::InterruptBeforeWrite,
+        ForwardCommitCase::InterruptAfterDurable,
+    ] {
+        println!("T05 forward decision: {case:?}");
+        promotion_intent_fixture(PromotionFixture::ForwardCommit(case)).await;
+    }
+    println!(
+        "T05 forward decision interruption and rollback refusal verified with installed helpers"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "requires the exact-base and compatible pinned Rust helpers"]
+async fn service_forward_catalog_fences_generic_restore() {
+    assert!(std::env::var_os("T3_TEST_PROMOTION_HELPER").is_some());
+    assert!(std::env::var_os("T3_TEST_PRIOR_PROMOTION_HELPER").is_some());
+    promotion_intent_fixture(PromotionFixture::ForwardCommit(
+        ForwardCommitCase::CatalogFences,
+    ))
+    .await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "requires the pinned helper; disposable Linux process handoff"]
+async fn service_forward_process_handoff() {
+    assert!(std::env::var_os("T3_TEST_PROMOTION_HELPER").is_some());
+    promotion_intent_fixture(PromotionFixture::ForwardCommit(
+        ForwardCommitCase::ProcessHandoff,
+    ))
+    .await;
+    promotion_intent_fixture(PromotionFixture::ForwardCommit(
+        ForwardCommitCase::ProcessHandoffUnknown,
+    ))
+    .await;
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[ignore = "requires the exact-source packaged helper and executable sealed memfd policy"]
+async fn service_forward_packaged_handoff() {
+    assert!(std::env::var_os("T3_TEST_PROMOTION_HELPER").is_some());
+    for case in [
+        ForwardCommitCase::PackagedHandoff,
+        ForwardCommitCase::PackagedHandoffUnknown,
+    ] {
+        promotion_intent_fixture(PromotionFixture::ForwardCommit(case)).await;
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn promotion_intent_fixture(case: PromotionFixture) {
+    use crate::application::PreparedServiceActivation;
+    use crate::application_bootstrap::bootstrap_schema_sha256;
+    use crate::application_server_ownership::OwnerLock;
+    use crate::application_storage::{
+        CandidatePreparationObservation, IsolatedTrialRequest, NativePromotionIntent,
+        TrialSnapshot, backup_service_trial, prepare_isolated_service_trial,
+        publish_isolated_service_trial, record_isolated_candidate_preparation,
+        record_native_promotion_intent,
+    };
+    use sha2::{Digest, Sha256};
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    const UPDATE: &str = ISOLATED_UPDATE;
+    let hash = |bytes: &[u8]| -> String {
+        Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    };
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    assert!(store.bootstrap_application().await.unwrap().initialized);
+    let identity = ApplicationTransactions::new(store.clone())
+        .generation_identity()
+        .await
+        .unwrap()
+        .unwrap();
+    store.shutdown().await.unwrap();
+    let home = fs::canonicalize(fixture.path().parent().unwrap()).unwrap();
+    let state = home.join("userdata");
+    fs::create_dir(&state).unwrap();
+    fs::create_dir(home.join("runtime")).unwrap();
+    let live = state.join("statev2.omdb");
+    fs::rename(fixture.path(), &live).unwrap();
+    OwnerLock::acquire(&state.join("server-owner.sqlite"))
+        .unwrap()
+        .activate_native()
+        .unwrap();
+    let backup = backup_service_trial(home.clone(), UPDATE.into(), identity.catalog_sha256.clone())
+        .await
+        .unwrap();
+    let source_bytes = fs::read(&live).unwrap();
+    let checkpoint = home.join(format!("runtime/native-db-backup/{UPDATE}.omdb"));
+    let checkpoint_bytes = fs::read(&checkpoint).unwrap();
+    let capabilities = crate::application_storage::service_trial_capabilities().unwrap();
+    let helper_bytes = if let Some(path) = std::env::var_os("T3_TEST_PROMOTION_HELPER") {
+        let path = std::path::PathBuf::from(path);
+        assert!(path.is_absolute());
+        assert!(fs::metadata(&path).unwrap().len() <= 128 * 1024 * 1024);
+        println!("T05 promotion intent uses the pinned built Rust helper");
+        fs::read(path).unwrap()
+    } else {
+        println!("T05 promotion intent uses a controlled read-only capability peer");
+        format!(
+            "#!/bin/sh\n[ \"$1\" = trial-capabilities ] || exit 99\nprintf '%s\\n' '{}'\n",
+            json!({"ok": true, "result": capabilities})
+        )
+        .into_bytes()
+    };
+    let mut predecessor_capabilities = capabilities.clone();
+    predecessor_capabilities
+        .as_object_mut()
+        .unwrap()
+        .remove("sealedGenericRestoreFence");
+    let predecessor = format!(
+        "#!/bin/sh\n[ \"$1\" = trial-capabilities ] || exit 99\nprintf '%s\\n' '{}'\n",
+        json!({"ok": true, "result": predecessor_capabilities})
+    );
+    let prior_helper_bytes;
+    let source_bytes_for_helper = match case {
+        PromotionFixture::ForwardCommit(ForwardCommitCase::RefuseSourceWithoutFence) => {
+            predecessor.as_bytes()
+        }
+        PromotionFixture::ForwardCommit(ForwardCommitCase::CatalogFences) => {
+            let path = std::path::PathBuf::from(
+                std::env::var_os("T3_TEST_PRIOR_PROMOTION_HELPER").unwrap(),
+            );
+            assert!(path.is_absolute());
+            assert!(fs::metadata(&path).unwrap().len() <= 128 * 1024 * 1024);
+            prior_helper_bytes = fs::read(path).unwrap();
+            assert_ne!(hash(&prior_helper_bytes), hash(&helper_bytes));
+            println!("T05 prior helper SHA-256 {}", hash(&prior_helper_bytes));
+            println!("T05 compatible helper SHA-256 {}", hash(&helper_bytes));
+            &prior_helper_bytes
+        }
+        _ => &helper_bytes,
+    };
+    let target_bytes_for_helper = if matches!(
+        case,
+        PromotionFixture::ForwardCommit(ForwardCommitCase::RefuseTargetWithoutFence)
+    ) {
+        predecessor.as_bytes()
+    } else {
+        &helper_bytes
+    };
+    let install = |version: &str, entry: &[u8], helper_bytes: &[u8]| {
+        let directory = home.join("runtime/versions").join(version);
+        fs::create_dir_all(directory.join("native-bin")).unwrap();
+        fs::write(directory.join(".install-complete"), format!("{version}\n")).unwrap();
+        fs::write(directory.join("t3"), entry).unwrap();
+        fs::set_permissions(directory.join("t3"), fs::Permissions::from_mode(0o700)).unwrap();
+        let helper = directory.join("native-bin/t3-code-ls-db");
+        fs::write(&helper, helper_bytes).unwrap();
+        fs::set_permissions(&helper, fs::Permissions::from_mode(0o700)).unwrap();
+        helper
+    };
+    let source_helper = install("1.2.3", b"synthetic source entry", source_bytes_for_helper);
+    let target_helper = install(
+        "1.2.4",
+        b"synthetic candidate entry",
+        target_bytes_for_helper,
+    );
+    let source_entry = home.join("runtime/versions/1.2.3/t3");
+    let target_schema = bootstrap_schema_sha256();
+    let activation = PreparedServiceActivation {
+        update_id: UPDATE.into(),
+        from_version: "1.2.3".into(),
+        target_version: "1.2.4".into(),
+        target_entry_sha256: hash(b"synthetic candidate entry"),
+        target_helper_sha256: hash(target_bytes_for_helper),
+        target_schema_sha256: target_schema.clone(),
+    };
+    let selection = home.join("runtime/service-state.json");
+    let selection_bytes = serde_json::to_vec(&json!({ "protocol": 5, "activeVersion": "1.2.3", "update": {
+        "id": UPDATE, "fromVersion": "1.2.3", "targetVersion": "1.2.4", "dbPath": live, "status": "pending",
+    }})).unwrap();
+    fs::write(&selection, &selection_bytes).unwrap();
+    let request = IsolatedTrialRequest {
+        update_id: UPDATE.into(),
+        database: backup.database,
+        checkpoint: TrialSnapshot {
+            catalog_sha256: identity.catalog_sha256,
+            rows: backup.backup.rows,
+            checksum: backup.backup.checksum,
+        },
+        target_schema_sha256: target_schema.clone(),
+        activation: Some(activation.clone()),
+    };
+    let prepared = prepare_isolated_service_trial(home.clone(), UPDATE.into(), request.clone())
+        .await
+        .unwrap();
+    let verification_json =
+        serde_json::to_string(&json!({"request": request, "preparation": prepared})).unwrap();
+    let observation: CandidatePreparationObservation = serde_json::from_value(json!({
+        "verification_json": verification_json, "witness": {
+            "protocol": 1, "status": "prepared-isolated", "updateId": UPDATE, "targetVersion": "1.2.4",
+            "entrySha256": activation.target_entry_sha256, "helperSha256": activation.target_helper_sha256,
+            "verificationSha256": hash(verification_json.as_bytes()),
+        },
+    })).unwrap();
+    let intent = NativePromotionIntent {
+        version: 1,
+        verification_sha256: hash(verification_json.as_bytes()),
+        source_entry_sha256: hash(b"synthetic source entry"),
+        source_helper_sha256: hash(source_bytes_for_helper),
+        source_helper_schema_sha256: target_schema,
+    };
+    let record = || record_native_promotion_intent(home.clone(), UPDATE.into(), intent.clone());
+    assert!(
+        matches!(record().await, Err(Error::IncompatibleStore)),
+        "no intent before earned observation"
+    );
+    record_isolated_candidate_preparation(home.clone(), UPDATE.into(), observation.clone())
+        .await
+        .unwrap();
+    let receipt = state.join(format!(".statev2-trial-{UPDATE}.receipt-v1.json"));
+    let trial = state.join(format!(".statev2-trial-{UPDATE}.omdb"));
+    let prepared_receipt = fs::read(&receipt).unwrap();
+    let trial_bytes = fs::read(&trial).unwrap();
+    let trial_identity = fs::metadata(&trial).unwrap();
+    let mut stale = intent.clone();
+    stale.verification_sha256 = "0".repeat(64);
+    assert!(matches!(
+        record_native_promotion_intent(home.clone(), UPDATE.into(), stale).await,
+        Err(Error::IncompatibleStore)
+    ));
+    let mut old_capabilities = capabilities.clone();
+    old_capabilities
+        .as_object_mut()
+        .unwrap()
+        .remove("promotionIntent");
+    let old_helper = format!(
+        "#!/bin/sh\nprintf '%s\\n' '{}'\n",
+        json!({"ok": true, "result": old_capabilities})
+    );
+    fs::write(&source_helper, old_helper.as_bytes()).unwrap();
+    let mut unsupported = intent.clone();
+    unsupported.source_helper_sha256 = hash(old_helper.as_bytes());
+    assert!(matches!(
+        record_native_promotion_intent(home.clone(), UPDATE.into(), unsupported).await,
+        Err(Error::IncompatibleStore)
+    ));
+    assert_eq!(fs::read(&receipt).unwrap(), prepared_receipt);
+    fs::write(&source_helper, source_bytes_for_helper).unwrap();
+    fs::write(
+        home.join("promotion-intent.json"),
+        serde_json::to_vec(&intent).unwrap(),
+    )
+    .unwrap();
+    let interrupt = |boundary: &str| {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("isolated_trial_publish_interrupt_fixture")
+            .env("T3_TEST_ISOLATED_TRIAL_HOME", &home)
+            .env("T3_TEST_INTERRUPT_TRIAL_PUBLICATION", boundary)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(73),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    };
+    interrupt("promotion-intent-written");
+    assert_eq!(fs::read(&receipt).unwrap(), prepared_receipt);
+    interrupt("promotion-intent-durable");
+    let durable_receipt = fs::read(&receipt).unwrap();
+    assert_ne!(durable_receipt, prepared_receipt);
+    assert_eq!(record().await.unwrap()["reused"], true);
+    assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+    if let Some(executable) = std::env::var_os("T3_TEST_PROMOTION_HELPER") {
+        use std::io::Write;
+        let mut child = std::process::Command::new(executable)
+            .arg("trial-record-promotion")
+            .arg(&home)
+            .arg(UPDATE)
+            .env_clear()
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(&intent).unwrap())
+            .unwrap();
+        let result = child.wait_with_output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let frame: Value = serde_json::from_slice(&result.stdout).unwrap();
+        assert_eq!(frame["ok"], true);
+        assert_eq!(frame["result"]["reused"], true);
+        assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+    }
+    if let PromotionFixture::ForwardCommit(case) = case {
+        forward_commit_fixture(&home, case).await;
+        return;
+    }
+    if let PromotionFixture::Publication(boundary, cancel_before_rename) = case {
+        use crate::application_storage::{
+            publish_intended_isolated_service_trial, rollback_isolated_service_trial,
+        };
+        use std::os::unix::fs::MetadataExt;
+        let original = state.join(format!(".statev2-source-{UPDATE}.omdb"));
+        let failed = state.join(format!(".statev2-failed-sealed-{UPDATE}.omdb"));
+        let source_inode = fs::metadata(&live).unwrap().ino();
+        let interrupt_move = |action: &str, boundary: &str| {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .arg("isolated_trial_publish_interrupt_fixture")
+                .env("T3_TEST_ISOLATED_TRIAL_HOME", &home)
+                .env("T3_TEST_INTENDED_MOVE", action)
+                .env("T3_TEST_INTERRUPT_TRIAL_PUBLICATION", boundary)
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(73),
+                "{} {}",
+                boundary,
+                String::from_utf8_lossy(&output.stdout)
+            );
+        };
+        if let Some(boundary) = boundary {
+            interrupt_move("publish", boundary);
+        }
+        assert_eq!(fs::read(&selection).unwrap(), selection_bytes);
+        assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);
+        assert!(matches!(
+            publish_isolated_service_trial(home.clone(), UPDATE.into()).await,
+            Err(Error::IncompatibleStore)
+        ));
+        let phase_receipt = fs::read(&receipt).unwrap();
+        if boundary.is_some_and(|value| value != "sealed-phase-publishing-written") {
+            let mut alternate_selection = selection_bytes.clone();
+            alternate_selection.push(b'\n');
+            fs::write(&selection, &alternate_selection).unwrap();
+            assert!(matches!(
+                publish_intended_isolated_service_trial(home.clone(), UPDATE.into()).await,
+                Err(Error::IncompatibleStore)
+            ));
+            assert_eq!(fs::read(&receipt).unwrap(), phase_receipt);
+            fs::write(&selection, &selection_bytes).unwrap();
+        }
+        if boundary.is_some_and(|value| value != "sealed-phase-publishing-written") {
+            let mut corrupted: Value = serde_json::from_slice(&phase_receipt).unwrap();
+            corrupted["sealed_publication"]["version"] = json!(2);
+            fs::write(&receipt, serde_json::to_vec(&corrupted).unwrap()).unwrap();
+            assert!(matches!(
+                publish_intended_isolated_service_trial(home.clone(), UPDATE.into()).await,
+                Err(Error::IncompatibleStore)
+            ));
+            fs::write(&receipt, &phase_receipt).unwrap();
+        }
+        for path in [&source_entry, &source_helper, &target_helper] {
+            let bytes = fs::read(path).unwrap();
+            fs::write(path, b"changed installed package").unwrap();
+            assert!(
+                publish_intended_isolated_service_trial(home.clone(), UPDATE.into())
+                    .await
+                    .is_err()
+            );
+            assert_eq!(fs::read(&receipt).unwrap(), phase_receipt);
+            fs::write(path, bytes).unwrap();
+        }
+        if cancel_before_rename {
+            interrupt_move("rollback", "sealed-phase-rolling-back-durable");
+            if boundary == Some("intended-preserved") {
+                interrupt_move("rollback", "intended-rollback-unlinked");
+            }
+            interrupt_move("rollback", "sealed-phase-rolled-back-durable");
+            assert_eq!(fs::read(&trial).unwrap(), trial_bytes);
+            assert_eq!(fs::metadata(&trial).unwrap().ino(), trial_identity.ino());
+            assert!(!original.exists());
+            assert!(!failed.exists());
+        } else {
+            let publication = publish_intended_isolated_service_trial(home.clone(), UPDATE.into())
+                .await
+                .unwrap();
+            assert_eq!(publication.database, prepared.database);
+            assert_eq!(fs::metadata(&live).unwrap().ino(), trial_identity.ino());
+            assert_eq!(fs::read(&live).unwrap(), trial_bytes);
+            assert_eq!(fs::read(&original).unwrap(), source_bytes);
+            assert_eq!(fs::metadata(&original).unwrap().ino(), source_inode);
+            let sealed = Store::open_read_only(&live).await.unwrap();
+            assert!(matches!(
+                ApplicationTransactions::new(sealed.clone()).schema().await,
+                Err(Error::IncompatibleStore)
+            ));
+            sealed.shutdown().await.unwrap();
+            assert!(
+                publish_intended_isolated_service_trial(home.clone(), UPDATE.into())
+                    .await
+                    .unwrap()
+                    .reused
+            );
+            if let Some(executable) = std::env::var_os("T3_TEST_PROMOTION_HELPER") {
+                let output = std::process::Command::new(executable)
+                    .arg("trial-publish-intended-sealed")
+                    .arg(&home)
+                    .arg(UPDATE)
+                    .env_clear()
+                    .output()
+                    .unwrap();
+                assert!(output.status.success());
+                let frame: Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(frame["ok"], true);
+                assert_eq!(frame["result"]["reused"], true);
+                assert!(output.stderr.is_empty());
+            }
+            interrupt_move("rollback", "isolated-rollback-preserved");
+            interrupt_move("rollback", "isolated-rollback-renamed");
+            interrupt_move("rollback", "sealed-phase-rolled-back-durable");
+            assert_eq!(fs::read(&failed).unwrap(), trial_bytes);
+            assert_eq!(fs::metadata(&failed).unwrap().ino(), trial_identity.ino());
+        }
+        assert!(
+            rollback_isolated_service_trial(home.clone(), UPDATE.into())
+                .await
+                .unwrap()
+                .reused
+        );
+        assert_eq!(fs::read(&live).unwrap(), source_bytes);
+        assert_eq!(fs::metadata(&live).unwrap().ino(), source_inode);
+        assert_eq!(fs::metadata(&live).unwrap().nlink(), 1);
+        assert_eq!(fs::read(&selection).unwrap(), selection_bytes);
+        assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);
+        let terminal: Value = serde_json::from_slice(&fs::read(&receipt).unwrap()).unwrap();
+        assert_eq!(terminal["sealed_publication"]["phase"], "rolled_back");
+        assert!(matches!(
+            publish_intended_isolated_service_trial(home.clone(), UPDATE.into()).await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert!(matches!(
+            publish_isolated_service_trial(home.clone(), UPDATE.into()).await,
+            Err(Error::IncompatibleStore)
+        ));
+        return;
+    }
+    record_isolated_candidate_preparation(home.clone(), UPDATE.into(), observation)
+        .await
+        .unwrap();
+    assert_eq!(
+        fs::read(&receipt).unwrap(),
+        durable_receipt,
+        "observation retry must preserve the intent"
+    );
+    assert!(matches!(
+        publish_isolated_service_trial(home.clone(), UPDATE.into()).await,
+        Err(Error::IncompatibleStore)
+    ));
+    let mut wrong = intent.clone();
+    wrong.source_helper_schema_sha256 = "0".repeat(64);
+    assert!(matches!(
+        record_native_promotion_intent(home.clone(), UPDATE.into(), wrong).await,
+        Err(Error::IncompatibleStore)
+    ));
+    for path in [&source_entry, &source_helper, &target_helper] {
+        let original = fs::read(path).unwrap();
+        fs::write(path, b"changed artifact").unwrap();
+        assert!(matches!(record().await, Err(Error::IncompatibleStore)));
+        assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+        fs::write(path, original).unwrap();
+    }
+    fs::set_permissions(&source_entry, fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(matches!(record().await, Err(Error::IncompatibleStore)));
+    assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+    fs::set_permissions(&source_entry, fs::Permissions::from_mode(0o700)).unwrap();
+    let mut corrupted: Value = serde_json::from_slice(&durable_receipt).unwrap();
+    corrupted["promotion_intent"]["version"] = json!(2);
+    let corrupted_bytes = serde_json::to_vec(&corrupted).unwrap();
+    fs::write(&receipt, &corrupted_bytes).unwrap();
+    assert!(matches!(record().await, Err(Error::IncompatibleStore)));
+    assert_eq!(fs::read(&receipt).unwrap(), corrupted_bytes);
+    fs::write(&receipt, &durable_receipt).unwrap();
+    let moved = state.join("held-stage.omdb");
+    fs::rename(&trial, &moved).unwrap();
+    assert!(record().await.is_err());
+    fs::rename(&moved, &trial).unwrap();
+    let mut changed_selection: Value = serde_json::from_slice(&selection_bytes).unwrap();
+    changed_selection["update"]["status"] = json!("committed");
+    fs::write(&selection, serde_json::to_vec(&changed_selection).unwrap()).unwrap();
+    assert!(matches!(record().await, Err(Error::IncompatibleStore)));
+    fs::write(&selection, &selection_bytes).unwrap();
+    assert_eq!(record().await.unwrap()["reused"], true);
+    assert_eq!(fs::read(&live).unwrap(), source_bytes);
+    assert_eq!(fs::read(&checkpoint).unwrap(), checkpoint_bytes);
+    assert_eq!(fs::read(&trial).unwrap(), trial_bytes);
+    assert_eq!(fs::read(&selection).unwrap(), selection_bytes);
+    assert_eq!(fs::read(&receipt).unwrap(), durable_receipt);
+    use std::os::unix::fs::MetadataExt;
+    assert_eq!(fs::metadata(&trial).unwrap().ino(), trial_identity.ino());
+    let sealed = Store::open_read_only(&trial).await.unwrap();
+    assert!(matches!(
+        ApplicationTransactions::new(sealed.clone()).schema().await,
+        Err(Error::IncompatibleStore)
+    ));
+    sealed.shutdown().await.unwrap();
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    #[allow(dead_code)]
+    struct PreviousReceipt {
+        request: serde_json::Value,
+        preparation: serde_json::Value,
+        candidate_observation: serde_json::Value,
+    }
+    assert!(serde_json::from_slice::<PreviousReceipt>(&durable_receipt).is_err());
+    println!(
+        "T05 promotion intent durable retry preserved source, checkpoint, stage and selection without publication"
+    );
+}
+
+#[cfg(target_os = "linux")]
+async fn forward_commit_fixture(home: &std::path::Path, case: ForwardCommitCase) {
+    use crate::application_storage::{
+        IsolatedTrialVerification, TrialRestorePhase, TrialRestoreRequest, backup_service_trial,
+        publish_intended_isolated_service_trial, record_fixture_forward_catalog,
+        record_fixture_forward_commit, record_fixture_forward_selection,
+    };
+    use std::fs;
+    use std::path::Path;
+    use std::process::Command;
+
+    let state = home.join("userdata");
+    let receipt = state.join(format!(".statev2-trial-{ISOLATED_UPDATE}.receipt-v1.json"));
+    let live = state.join("statev2.omdb");
+    let original = state.join(format!(".statev2-source-{ISOLATED_UPDATE}.omdb"));
+    let failed = state.join(format!(".statev2-failed-sealed-{ISOLATED_UPDATE}.omdb"));
+    let checkpoint = home.join(format!("runtime/native-db-backup/{ISOLATED_UPDATE}.omdb"));
+    let selection = home.join("runtime/service-state.json");
+    let helper_path = |version| {
+        home.join("runtime/versions")
+            .join(version)
+            .join("native-bin/t3-code-ls-db")
+    };
+    let source_helper = helper_path("1.2.3");
+    let target_helper = helper_path("1.2.4");
+    let catalog_case = matches!(
+        case,
+        ForwardCommitCase::CatalogFences
+            | ForwardCommitCase::ProcessHandoff
+            | ForwardCommitCase::ProcessHandoffUnknown
+            | ForwardCommitCase::PackagedHandoff
+            | ForwardCommitCase::PackagedHandoffUnknown
+    );
+    let generic_update = if catalog_case {
+        "ba212c2b-63d4-4b28-97e4-1c1d6dc6d281"
+    } else {
+        ISOLATED_UPDATE
+    };
+    let run = |helper: &Path, mode: &str, input: Option<Value>| {
+        let update = match mode {
+            "trial-prepare-restore" | "trial-publish-restore-offline" => generic_update,
+            _ => ISOLATED_UPDATE,
+        };
+        run_forward_helper(helper, home, update, mode, input.as_ref())
+    };
+    let capture = |path: &Path| capture_forward_file(path).unwrap();
+    let source = capture(&live);
+    let checkpoint_before = capture(&checkpoint);
+    let selection_before = capture(&selection);
+    let pending: IsolatedTrialVerification =
+        serde_json::from_slice(&fs::read(&receipt).unwrap()).unwrap();
+    if catalog_case {
+        backup_service_trial(
+            home.to_owned(),
+            generic_update.into(),
+            pending.request.checkpoint.catalog_sha256.clone(),
+        )
+        .await
+        .unwrap();
+    }
+    let mut legacy_request = TrialRestoreRequest {
+        update_id: generic_update.into(),
+        phase: TrialRestorePhase::FailedBeforeActivation,
+        database: pending.request.database,
+        target: pending.request.checkpoint.clone(),
+        checkpoint: pending.request.checkpoint,
+    };
+    let stage = state.join(format!(".statev2-restore-{generic_update}.omdb"));
+    let legacy_preparation = if matches!(
+        case,
+        ForwardCommitCase::InterruptAfterDurable
+            | ForwardCommitCase::CatalogFences
+            | ForwardCommitCase::ProcessHandoff
+            | ForwardCommitCase::ProcessHandoffUnknown
+            | ForwardCommitCase::PackagedHandoff
+            | ForwardCommitCase::PackagedHandoffUnknown
+    ) {
+        let frame = run(
+            &source_helper,
+            "trial-prepare-restore",
+            Some(json!(legacy_request)),
+        );
+        assert_eq!(frame["ok"], true, "{frame}");
+        Some((frame["result"].clone(), capture(&stage)))
+    } else {
+        None
+    };
+
+    publish_intended_isolated_service_trial(home.to_owned(), ISOLATED_UPDATE.into())
+        .await
+        .unwrap();
+    assert_eq!(capture(&original), source);
+    let sealed = capture(&live);
+    let published = capture(&receipt);
+    let decide = || record_fixture_forward_commit(home.to_owned(), ISOLATED_UPDATE.into());
+    let select = || record_fixture_forward_selection(home.to_owned(), ISOLATED_UPDATE.into());
+    let mark = || record_fixture_forward_catalog(home.to_owned(), ISOLATED_UPDATE.into());
+    assert!(matches!(select().await, Err(Error::IncompatibleStore)));
+    let boundary = match case {
+        ForwardCommitCase::RefuseSourceWithoutFence
+        | ForwardCommitCase::RefuseTargetWithoutFence => {
+            assert!(matches!(decide().await, Err(Error::IncompatibleStore)));
+            assert_eq!(capture(&receipt), published);
+            assert_eq!(capture(&live), sealed);
+            assert_eq!(capture(&original), source);
+            assert_eq!(capture(&checkpoint), checkpoint_before);
+            assert_eq!(capture(&selection), selection_before);
+            assert!(!failed.exists());
+            return;
+        }
+        ForwardCommitCase::InterruptBeforeWrite => "forward-commit-prewrite",
+        ForwardCommitCase::InterruptAfterDurable
+        | ForwardCommitCase::CatalogFences
+        | ForwardCommitCase::ProcessHandoff
+        | ForwardCommitCase::ProcessHandoffUnknown
+        | ForwardCommitCase::PackagedHandoff
+        | ForwardCommitCase::PackagedHandoffUnknown => "forward-commit-durable",
+    };
+    let interrupt = |boundary: &str, action: Option<&str>| {
+        let mut child = Command::new(std::env::current_exe().unwrap());
+        child
+            .arg("application_bootstrap::upgrade::tests::isolated_trial_publish_interrupt_fixture")
+            .arg("--exact")
+            .env("T3_TEST_ISOLATED_TRIAL_HOME", home)
+            .env("T3_TEST_INTERRUPT_TRIAL_PUBLICATION", boundary)
+            .env_remove("T3_TEST_INTENDED_MOVE");
+        if let Some(action) = action {
+            child.env("T3_TEST_INTENDED_MOVE", action);
+        }
+        let output = child.output().unwrap();
+        assert_eq!(output.status.code(), Some(73), "{boundary}: {output:?}");
+    };
+    interrupt(boundary, None);
+    if matches!(case, ForwardCommitCase::InterruptBeforeWrite) {
+        assert_eq!(capture(&receipt), published);
+        assert_eq!(capture(&live), sealed);
+        interrupt("isolated-rollback-preserved", Some("rollback"));
+        let rollback = run(&source_helper, "trial-rollback-sealed", None);
+        assert_eq!(rollback["ok"], true, "{rollback}");
+        assert_eq!(capture(&live), source);
+        assert_eq!(capture(&failed), sealed);
+        assert!(!original.exists());
+        assert!(matches!(decide().await, Err(Error::IncompatibleStore)));
+        assert_eq!(capture(&selection), selection_before);
+    } else {
+        let durable = capture(&receipt);
+        let decoded: Value = serde_json::from_slice(&durable.3).unwrap();
+        assert_eq!(decoded["sealed_publication"]["phase"], "forward_committed");
+        assert!(
+            decide().await.unwrap(),
+            "retry must report the existing decision"
+        );
+
+        let (preparation, stage_before) = legacy_preparation.unwrap();
+        legacy_request.database = pending.preparation.database;
+        legacy_request.target = pending.preparation.snapshot;
+        let generic_publication = json!({
+            "restore": legacy_request,
+            "preparation": preparation,
+            "witness": { "kind": "offline-pre-activation", "target_file_sha256": pending.preparation.file_sha256 }
+        });
+        let assert_restore_refused = || {
+            for helper in [&source_helper, &target_helper] {
+                for (command, input) in [
+                    ("trial-rollback-sealed", None),
+                    ("trial-prepare-restore", Some(json!(legacy_request))),
+                    (
+                        "trial-publish-restore-offline",
+                        Some(generic_publication.clone()),
+                    ),
+                    ("trial-publish-intended-sealed", None),
+                ] {
+                    let frame = run(helper, command, input);
+                    assert_eq!(frame["ok"], false, "{command}: {frame}");
+                    assert_eq!(
+                        frame["error"]["kind"], "incompatible_store",
+                        "{command}: {frame}"
+                    );
+                }
+            }
+        };
+        assert_restore_refused();
+        for helper in [&source_helper, &target_helper] {
+            let bytes = fs::read(helper).unwrap();
+            fs::write(helper, b"changed installed helper").unwrap();
+            assert!(matches!(decide().await, Err(Error::IncompatibleStore)));
+            assert!(matches!(select().await, Err(Error::IncompatibleStore)));
+            fs::write(helper, bytes).unwrap();
+        }
+        let mut changed_selection = selection_before.3.clone();
+        changed_selection.push(b'\n');
+        fs::write(&selection, changed_selection).unwrap();
+        assert!(matches!(decide().await, Err(Error::IncompatibleStore)));
+        assert!(matches!(select().await, Err(Error::IncompatibleStore)));
+        fs::write(&selection, &selection_before.3).unwrap();
+        let moved = state.join("fixture-held-candidate.omdb");
+        fs::rename(&live, &moved).unwrap();
+        fs::write(&live, &sealed.3).unwrap();
+        assert!(matches!(decide().await, Err(Error::IncompatibleStore)));
+        assert!(matches!(select().await, Err(Error::IncompatibleStore)));
+        fs::rename(moved, &live).unwrap();
+        assert!(decide().await.unwrap());
+
+        interrupt("forward-selection-written", None);
+        assert_eq!(capture(&selection), selection_before);
+        assert_eq!(capture(&receipt), durable);
+        interrupt("forward-selection-renamed", None);
+        let selected = capture(&selection);
+        assert_ne!(selected.1, selection_before.1);
+        let mut expected: Value = serde_json::from_slice(&selection_before.3).unwrap();
+        expected["activeVersion"] = json!("1.2.4");
+        expected["phase"] = json!("forward-selected");
+        expected["forwardReceiptSha256"] = json!(forward_fixture_sha256(&durable.3));
+        assert_eq!(
+            serde_json::from_slice::<Value>(&selected.3).unwrap(),
+            expected
+        );
+        interrupt("forward-selection-durable", None);
+        assert!(select().await.unwrap());
+        assert_eq!(capture(&selection), selected);
+        assert_restore_refused();
+
+        for changed in [
+            b"{".to_vec(),
+            [selected.3.as_slice(), b"\n"].concat(),
+            serde_json::to_vec(&{
+                let mut foreign = expected;
+                foreign["forwardReceiptSha256"] = json!("0".repeat(64));
+                foreign
+            })
+            .unwrap(),
+        ] {
+            fs::write(&selection, &changed).unwrap();
+            assert!(matches!(select().await, Err(Error::IncompatibleStore)));
+            assert_eq!(fs::read(&selection).unwrap(), changed);
+        }
+        fs::write(&selection, &selected.3).unwrap();
+        assert!(select().await.unwrap());
+        assert_eq!(capture(&selection), selected);
+
+        let store = Store::open_read_only(&live).await.unwrap();
+        assert!(matches!(
+            ApplicationTransactions::new(store.clone()).schema().await,
+            Err(Error::IncompatibleStore)
+        ));
+        store.shutdown().await.unwrap();
+        assert_eq!(capture(&receipt), durable);
+        assert_eq!(capture(&live), sealed);
+        assert_eq!(capture(&original), source);
+        assert_eq!(capture(&stage), stage_before);
+        assert_eq!(capture(&selection), selected);
+        assert!(!failed.exists());
+        assert!(
+            !state
+                .join(format!(".statev2-failed-{ISOLATED_UPDATE}.omdb"))
+                .exists()
+        );
+        println!("T05 forward selection recovered without unsealing or allowing restore");
+        if catalog_case {
+            let witness = state.join(format!(".statev2-forward-{ISOLATED_UPDATE}.json"));
+            for path in [&receipt, &selection] {
+                let bytes = fs::read(path).unwrap();
+                let mut changed = bytes.clone();
+                changed.push(b'\n');
+                fs::write(path, changed).unwrap();
+                assert!(matches!(mark().await, Err(Error::IncompatibleStore)));
+                fs::write(path, bytes).unwrap();
+            }
+            let held = Store::open_read_only(&live).await.unwrap();
+            assert!(matches!(mark().await, Err(Error::WriterBusy)));
+            held.shutdown().await.unwrap();
+            let moved_source = state.join("fixture-held-source.omdb");
+            fs::rename(&original, &moved_source).unwrap();
+            fs::write(&original, &source.3).unwrap();
+            assert!(matches!(mark().await, Err(Error::IncompatibleStore)));
+            fs::rename(moved_source, &original).unwrap();
+            let moved_candidate = state.join("fixture-held-canonical.omdb");
+            fs::rename(&live, &moved_candidate).unwrap();
+            fs::write(&live, &sealed.3).unwrap();
+            let replacement = capture(&live);
+            assert!(matches!(mark().await, Err(Error::IncompatibleStore)));
+            assert_eq!(capture(&live), replacement);
+            fs::rename(moved_candidate, &live).unwrap();
+            assert_eq!(capture(&live), sealed);
+            assert!(!witness.exists());
+
+            assert!(
+                crate::application_storage::probe_fixture_forward_activation(
+                    home.to_owned(),
+                    ISOLATED_UPDATE.into(),
+                    |_| panic!("unmarked readiness"),
+                )
+                .await
+                .is_err()
+            );
+            interrupt("forward-catalog-armed", None);
+            assert_eq!(capture(&live), sealed);
+            assert!(witness.exists());
+            if matches!(
+                case,
+                ForwardCommitCase::ProcessHandoff
+                    | ForwardCommitCase::ProcessHandoffUnknown
+                    | ForwardCommitCase::PackagedHandoff
+                    | ForwardCommitCase::PackagedHandoffUnknown
+            ) {
+                if matches!(
+                    case,
+                    ForwardCommitCase::PackagedHandoff | ForwardCommitCase::PackagedHandoffUnknown
+                ) {
+                    forward_packaged_writer_case(
+                        home,
+                        matches!(case, ForwardCommitCase::PackagedHandoffUnknown),
+                    )
+                    .await;
+                } else {
+                    forward_writer_process_cases(
+                        home,
+                        matches!(case, ForwardCommitCase::ProcessHandoffUnknown),
+                    )
+                    .await;
+                }
+                assert_restore_refused();
+                assert_eq!(capture(&receipt), durable);
+                assert_eq!(capture(&original), source);
+                assert_eq!(capture(&checkpoint), checkpoint_before);
+                assert_eq!(capture(&selection), selected);
+                return;
+            }
+            interrupt("forward-catalog-opened", None);
+            let dirty_old = capture(&live);
+            assert!(
+                crate::application_storage::probe_fixture_forward_activation(
+                    home.to_owned(),
+                    ISOLATED_UPDATE.into(),
+                    |_| panic!("unrecovered readiness"),
+                )
+                .await
+                .is_err()
+            );
+            assert_ne!(dirty_old.3, sealed.3);
+            let witness_bytes = fs::read(&witness).unwrap();
+            fs::write(&witness, b"foreign witness").unwrap();
+            assert!(matches!(mark().await, Err(Error::IncompatibleStore)));
+            assert_eq!(capture(&live), dirty_old);
+            fs::write(&witness, witness_bytes).unwrap();
+            interrupt("forward-catalog-committed", None);
+            let dirty_new = capture(&live);
+            assert_ne!(dirty_new.3, dirty_old.3);
+            fs::write(&selection, &selection_before.3).unwrap();
+            assert!(matches!(mark().await, Err(Error::IncompatibleStore)));
+            assert_eq!(capture(&live), dirty_new);
+            fs::write(&selection, &selected.3).unwrap();
+            assert!(
+                mark().await.unwrap(),
+                "recovered the already committed marker"
+            );
+            let marked = capture(&live);
+            assert!(mark().await.unwrap(), "verified the clean marked candidate");
+            assert_eq!(capture(&live), marked);
+            let probe = || {
+                crate::application_storage::probe_fixture_forward_activation(
+                    home.to_owned(),
+                    ISOLATED_UPDATE.into(),
+                    |_| Ok(()),
+                )
+            };
+            for path in [
+                receipt.clone(),
+                selection.clone(),
+                witness.clone(),
+                home.join("runtime/versions/1.2.4/.install-complete"),
+                home.join("runtime/versions/1.2.4/t3"),
+                target_helper.clone(),
+            ] {
+                let bytes = fs::read(&path).unwrap();
+                fs::write(&path, b"foreign activation input").unwrap();
+                let called = std::cell::Cell::new(false);
+                assert!(
+                    crate::application_storage::probe_fixture_forward_activation(
+                        home.to_owned(),
+                        ISOLATED_UPDATE.into(),
+                        |_| {
+                            called.set(true);
+                            Ok(())
+                        },
+                    )
+                    .await
+                    .is_err()
+                );
+                assert!(!called.get(), "unverified input reached readiness");
+                fs::write(&path, bytes).unwrap();
+                assert_eq!(capture(&live), marked);
+            }
+            assert!(matches!(
+                crate::application_storage::probe_fixture_forward_activation(
+                    home.to_owned(),
+                    ISOLATED_UPDATE.into(),
+                    |_| Err(Error::IncompatibleStore),
+                )
+                .await,
+                Err(Error::IncompatibleStore)
+            ));
+            for boundary in [
+                "forward-readiness-before-probe",
+                "forward-readiness-after-probe",
+            ] {
+                interrupt(boundary, None);
+                assert_eq!(capture(&live), marked);
+                assert_restore_refused();
+            }
+            assert!(matches!(
+                crate::application_storage::probe_fixture_forward_activation(
+                    home.to_owned(),
+                    ISOLATED_UPDATE.into(),
+                    |_| {
+                        fs::write(&selection, b"changed during readiness").unwrap();
+                        Ok(())
+                    },
+                )
+                .await,
+                Err(Error::IncompatibleStore)
+            ));
+            fs::write(&selection, &selected.3).unwrap();
+            let activation = probe().await.unwrap();
+            assert_eq!(activation.activation.target_version, "1.2.4");
+            assert_eq!(activation.database, legacy_request.database);
+            assert_eq!(
+                activation.receipt_sha256,
+                forward_fixture_sha256(&durable.3)
+            );
+            assert_eq!(
+                activation.selection_sha256,
+                forward_fixture_sha256(&selected.3)
+            );
+            assert_eq!(probe().await.unwrap(), activation);
+            assert_eq!(
+                crate::application_storage::probe_fixture_forward_child(
+                    home.to_owned(),
+                    ISOLATED_UPDATE.into(),
+                    |witness, candidate| {
+                        forward_inherited_child_cases(home, witness, candidate)?;
+                        forward_packaged_child_cases(home, witness, candidate, true)?;
+                        // Corruption is confined to independent synthetic copies.
+                        // These never represent live ownership or launcher acceptance.
+                        let home = home.to_owned();
+                        let encoded = serde_json::to_vec(witness).unwrap();
+                        std::thread::spawn(move || {
+                            tokio::runtime::Runtime::new()
+                                .unwrap()
+                                .block_on(forward_packaged_catalog_refusals(&home, &encoded))
+                        })
+                        .join()
+                        .unwrap()
+                    },
+                )
+                .await
+                .unwrap(),
+                activation
+            );
+            assert_restore_refused();
+            assert_eq!(capture(&receipt), durable);
+            assert_eq!(capture(&selection), selected);
+
+            assert_eq!(capture(&live), marked);
+            assert_restore_refused();
+            println!(
+                "T05 sealed readiness witness survived interruption and refused changed inputs"
+            );
+            println!(
+                "T05 native forward catalog recovered the interrupted sealed and marked states"
+            );
+            forward_catalog_fixture(
+                home,
+                &selected.3,
+                &legacy_request,
+                &generic_publication["preparation"],
+                [&source_helper, &target_helper],
+            )
+            .await;
+            assert_eq!(capture(&receipt), durable);
+            assert_eq!(capture(&original), source);
+            assert_eq!(capture(&selection), selected);
+            assert!(!failed.exists());
+        }
+    }
+    assert_eq!(capture(&checkpoint), checkpoint_before);
+}
+
+#[cfg(target_os = "linux")]
+fn run_forward_helper(
+    helper: &std::path::Path,
+    home: &std::path::Path,
+    update: &str,
+    mode: &str,
+    input: Option<&Value>,
+) -> Value {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let mut child = Command::new(helper)
+        .arg(mode)
+        .arg(home)
+        .arg(update)
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    if let Some(input) = input {
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(&serde_json::to_vec(input).unwrap())
+            .unwrap();
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{mode}: {:?}", output.status);
+    assert!(output.stderr.is_empty(), "{mode}: {:?}", output.stderr);
+    serde_json::from_slice(&output.stdout).unwrap()
+}
+
+#[cfg(target_os = "linux")]
+fn forward_fixture_sha256(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn capture_forward_file(path: &std::path::Path) -> Option<(u64, u64, u64, Vec<u8>)> {
+    use std::{fs, io::ErrorKind, os::unix::fs::MetadataExt};
+
+    match fs::metadata(path) {
+        Ok(metadata) => Some((
+            metadata.dev(),
+            metadata.ino(),
+            metadata.nlink(),
+            fs::read(path).unwrap(),
+        )),
+        Err(error) if error.kind() == ErrorKind::NotFound => None,
+        Err(error) => panic!("cannot capture {}: {error}", path.display()),
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn forward_catalog_fixture(
+    home: &std::path::Path,
+    selection: &[u8],
+    request: &crate::application_storage::TrialRestoreRequest,
+    preparation: &Value,
+    helpers: [&std::path::Path; 2],
+) {
+    use crate::application_rows::text_cell;
+    use crate::application_server_ownership::OwnerLock;
+    use crate::application_storage::{TrialRestorePreparation, TrialSnapshot};
+    use std::fs;
+
+    let state = home.join("userdata");
+    let live = state.join("statev2.omdb");
+    let update = &request.update_id;
+    let checkpoint = home.join(format!("runtime/native-db-backup/{update}.omdb"));
+    let stage = state.join(format!(".statev2-restore-{update}.omdb"));
+    let draft = stage.with_extension("staging");
+    let parked = stage.with_extension("saved");
+    let preserved = state.join(format!(".statev2-failed-{update}.omdb"));
+    let paths = [&live, &stage, &draft, &parked, &preserved, &checkpoint];
+    let capture = || paths.map(|path| capture_forward_file(path));
+    let sha256 = forward_fixture_sha256(selection);
+
+    let owner = OwnerLock::acquire_existing_native(&state.join("server-owner.sqlite")).unwrap();
+    let store = Store::open_exclusive(&live).await.unwrap();
+    let bytes = store.db.read(&schema_key()).await.unwrap().unwrap();
+    let catalog = decode_catalog(&bytes).unwrap();
+    assert!(catalog.prepared_service_activation_v1.is_none());
+    let marked = serde_json::to_value(&catalog).unwrap();
+    assert_eq!(
+        marked["forward_service_activation_v1"],
+        json!({
+            "update_id": ISOLATED_UPDATE,
+            "forward_selection_sha256": sha256,
+        })
+    );
+    assert!(matches!(
+        store.bootstrap_application().await,
+        Err(Error::IncompatibleStore)
+    ));
+    let mut transactions = ApplicationTransactions::new(store.clone());
+    assert!(matches!(
+        transactions.begin("serving").await,
+        Err(Error::IncompatibleStore)
+    ));
+    drop(transactions);
+
+    let table = "pull_request_review_guides";
+    let guide = [
+        text_cell("fixture.invalid"),
+        text_cell("fixture/review"),
+        int_cell(1),
+    ];
+    let key = row_key(&catalog.generation, table, &guide).unwrap();
+    let mut later = store.db.begin().await.unwrap();
+    write_row(
+        &mut later,
+        &catalog,
+        table,
+        Map::from_iter([
+            ("host".into(), guide[0].clone()),
+            ("repository".into(), guide[1].clone()),
+            ("number".into(), guide[2].clone()),
+            ("guide_json".into(), text_cell("{\"fixture\":\"later\"}")),
+        ]),
+    )
+    .await
+    .unwrap();
+    later.commit().await.unwrap();
+    owner.verify_native().unwrap();
+    store.shutdown().await.unwrap();
+    drop(owner);
+
+    let read = Store::open_read_only(&live).await.unwrap();
+    let (catalog, identity) = ApplicationTransactions::new(read.clone())
+        .catalog_and_identity()
+        .await
+        .expect("the compatible reader must reopen the forward catalog")
+        .unwrap();
+    assert_eq!(serde_json::to_value(&catalog).unwrap(), marked);
+    assert_eq!(
+        serde_json::to_value(target_89(&catalog, &definition().unwrap())).unwrap()["forward_service_activation_v1"],
+        marked["forward_service_activation_v1"]
+    );
+    let identity = identity.unwrap();
+    assert_eq!(identity.catalog_sha256, forward_fixture_sha256(&bytes));
+    assert!(catalog.ensure_serving().is_err());
+    let later_guide = read.db.read(&key).await.unwrap().unwrap();
+    let fingerprint = read.db.bounded_storage_fingerprint().await.unwrap();
+    read.shutdown().await.unwrap();
+    let marked_snapshot = TrialSnapshot {
+        catalog_sha256: identity.catalog_sha256,
+        rows: fingerprint.rows,
+        checksum: fingerprint.checksum,
+    };
+    let marked_file = capture_forward_file(&live).unwrap();
+    assert_eq!(format!("{:016x}", marked_file.0), request.database.device);
+    assert_eq!(format!("{:016x}", marked_file.1), request.database.inode);
+    assert_eq!(marked_file.2, 1);
+    let marked_sha256 = forward_fixture_sha256(&marked_file.3);
+    let mut marked_target = request.clone();
+    marked_target.target = marked_snapshot.clone();
+    let marked_target_publication = json!({
+        "restore": marked_target,
+        "preparation": preparation,
+        "witness": { "kind": "offline-pre-activation", "target_file_sha256": marked_sha256 },
+    });
+    let assert_refused = |mode, update, error, input: Option<&Value>| {
+        let before = capture();
+        for helper in helpers {
+            let frame = run_forward_helper(helper, home, update, mode, input);
+            assert_eq!(frame["ok"], false, "{helper:?} {mode}: {frame}");
+            assert_eq!(frame["error"]["kind"], error, "{helper:?} {mode}: {frame}");
+            assert_eq!(capture(), before, "{helper:?} {mode} changed fixture files");
+        }
+    };
+    let prepare = |input| {
+        assert_refused(
+            "trial-prepare-restore",
+            update,
+            "incompatible_store",
+            Some(input),
+        )
+    };
+    let publish =
+        |input, error| assert_refused("trial-publish-restore-offline", update, error, Some(input));
+    let prepare_request = json!(marked_target);
+    assert_refused(
+        "trial-rollback-sealed",
+        ISOLATED_UPDATE,
+        "incompatible_store",
+        None,
+    );
+    prepare(&prepare_request);
+    publish(&marked_target_publication, "incompatible_store");
+    fs::rename(&stage, &parked).unwrap();
+    prepare(&prepare_request);
+    fs::rename(&parked, &stage).unwrap();
+
+    // The first interrupted layout still has a stage and two links to the target.
+    fs::hard_link(&live, &preserved).unwrap();
+    publish(&marked_target_publication, "incompatible_store");
+    fs::remove_file(&live).unwrap();
+    fs::rename(&stage, &live).unwrap();
+    // After rename the marked failed target is read under its preserved name.
+    publish(&marked_target_publication, "unknown_commit");
+    fs::rename(&live, &stage).unwrap();
+    fs::rename(&preserved, &live).unwrap();
+
+    // In the alternate retry layout the preserved target is plain. The canonical
+    // prepared file and the independent checkpoint have the same marked snapshot.
+    let plain_preparation: TrialRestorePreparation =
+        serde_json::from_value(preparation.clone()).unwrap();
+    let plain_stage = capture_forward_file(&stage).unwrap();
+    assert_eq!(
+        forward_fixture_sha256(&plain_stage.3),
+        plain_preparation.staged_file_sha256
+    );
+    let plain_checkpoint = capture_forward_file(&checkpoint).unwrap();
+    fs::write(&checkpoint, &marked_file.3).unwrap();
+    let marked_prepared_publication = json!({
+        "restore": {
+            "update_id": update,
+            "phase": "failed-before-activation",
+            "database": plain_preparation.staged_database,
+            "checkpoint": marked_snapshot,
+            "target": request.checkpoint,
+        },
+        "preparation": {
+            "staged_database": request.database,
+            "staged_file_sha256": marked_sha256,
+            "reused": false,
+        },
+        "witness": {
+            "kind": "offline-pre-activation",
+            "target_file_sha256": plain_preparation.staged_file_sha256,
+        }
+    });
+    fs::rename(&stage, &preserved).unwrap();
+    publish(&marked_prepared_publication, "unknown_commit");
+    fs::rename(&live, &stage).unwrap();
+    fs::rename(&preserved, &live).unwrap();
+    publish(&marked_prepared_publication, "incompatible_store");
+    fs::rename(&stage, &parked).unwrap();
+    prepare(&marked_prepared_publication["restore"]);
+    fs::rename(&parked, &stage).unwrap();
+
+    // Restore the synthetic layout and confirm the later application row by key.
+    fs::rename(&live, &parked).unwrap();
+    fs::rename(&stage, &live).unwrap();
+    fs::rename(&parked, &stage).unwrap();
+    fs::write(&checkpoint, &plain_checkpoint.3).unwrap();
+    assert_eq!(capture_forward_file(&checkpoint).unwrap(), plain_checkpoint);
+    assert_eq!(capture_forward_file(&live).unwrap(), marked_file);
+    let read = Store::open_read_only(&live).await.unwrap();
+    assert_eq!(read.db.read(&key).await.unwrap().unwrap(), later_guide);
+    read.shutdown().await.unwrap();
+    println!("T05 forward catalog fenced both installed helpers across generic restore retries");
+}
+
+// Fixture subprocess entry only. It cannot open a serving database or unseal it.
+#[cfg(target_os = "linux")]
+#[test]
+fn forward_inherited_child_fixture() {
+    let Ok(home) = std::env::var("T3_TEST_FORWARD_CHILD_HOME") else {
+        return;
+    };
+    let verify = |check_digest: bool| -> crate::Result<()> {
+        use crate::application_storage::{
+            FixtureForwardActivationWitness, IsolatedTrialVerification,
+        };
+        let home = std::path::Path::new(&home);
+        if !home.is_absolute()
+            || !home
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with("t3-redb-test-"))
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        let witness: FixtureForwardActivationWitness =
+            serde_json::from_str(&std::env::var("T3_TEST_FORWARD_CHILD_WITNESS").unwrap())
+                .map_err(|_| Error::IncompatibleStore)?;
+        let read = |path| std::fs::read(path).map_err(|_| Error::IncompatibleStore);
+        let expected = |name| std::env::var(name).map_err(|_| Error::IncompatibleStore);
+        if expected("T3_TEST_FORWARD_CHILD_VERSION")? != env!("CARGO_PKG_VERSION")
+            || expected("T3_TEST_FORWARD_CHILD_EXE")?
+                != forward_fixture_sha256(&read(std::env::current_exe().unwrap())?)
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        let state = home.join("userdata");
+        let receipt = read(state.join(format!(
+            ".statev2-trial-{}.receipt-v1.json",
+            witness.activation.update_id
+        )))?;
+        let saved: IsolatedTrialVerification =
+            serde_json::from_slice(&receipt).map_err(|_| Error::IncompatibleStore)?;
+        if forward_fixture_sha256(&receipt) != witness.receipt_sha256
+            || saved.request.activation.as_ref() != Some(&witness.activation)
+            || saved.preparation.database != witness.database
+            || forward_fixture_sha256(&read(home.join("runtime/service-state.json"))?)
+                != witness.selection_sha256
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        let marker: Value = serde_json::from_slice(&read(state.join(format!(
+            ".statev2-forward-{}.json",
+            witness.activation.update_id
+        )))?)
+        .map_err(|_| Error::IncompatibleStore)?;
+        if marker["update_id"] != witness.activation.update_id
+            || marker["forward_selection_sha256"] != witness.selection_sha256
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        for (name, digest) in [
+            ("t3", &witness.activation.target_entry_sha256),
+            (
+                "native-bin/t3-code-ls-db",
+                &witness.activation.target_helper_sha256,
+            ),
+        ] {
+            if forward_fixture_sha256(&read(
+                home.join("runtime/versions")
+                    .join(&witness.activation.target_version)
+                    .join(name),
+            )?) != *digest
+            {
+                return Err(Error::IncompatibleStore);
+            }
+        }
+        // fdinfo reports locks attached to this open file description. A fresh
+        // open of the same inode does not inherit its OFD lock. Check the whole
+        // range, WRITE mode and OFD owner (-1), not an environment token.
+        let info =
+            std::fs::read_to_string("/proc/self/fdinfo/0").map_err(|_| Error::IncompatibleStore)?;
+        if !info.lines().any(|line| {
+            let fields: Vec<_> = line.split_whitespace().collect();
+            fields.len() == 9
+                && fields[0] == "lock:"
+                && fields[2] == "OFDLCK"
+                && fields[3] == "ADVISORY"
+                && fields[4] == "WRITE"
+                && fields[5] == "-1"
+                && fields[7] == "0"
+                && fields[8] == "EOF"
+        }) {
+            return Err(Error::IncompatibleStore);
+        }
+        use std::os::unix::fs::MetadataExt;
+        let inherited =
+            std::fs::File::open("/proc/self/fd/0").map_err(|_| Error::IncompatibleStore)?;
+        let named =
+            std::fs::metadata(state.join("statev2.omdb")).map_err(|_| Error::IncompatibleStore)?;
+        let held = inherited.metadata().map_err(|_| Error::IncompatibleStore)?;
+        let created = held
+            .created()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|time| time.as_nanos().to_string());
+        if created != witness.database.created
+            || held.dev() != named.dev()
+            || held.ino() != named.ino()
+            || held.nlink() != 1
+            || format!("{:016x}", held.dev()) != witness.database.device
+            || format!("{:016x}", held.ino()) != witness.database.inode
+            || (check_digest
+                && forward_fixture_sha256(&read(std::path::PathBuf::from("/proc/self/fd/0"))?)
+                    != expected("T3_TEST_FORWARD_CHILD_DB")?)
+        {
+            return Err(Error::IncompatibleStore);
+        }
+        if !matches!(
+            crate::application_server_ownership::OwnerLock::acquire_existing_native(
+                &state.join("server-owner.sqlite")
+            ),
+            Err(Error::WriterBusy)
+        ) {
+            return Err(Error::IncompatibleStore);
+        }
+        Ok(())
+    };
+    let writer = || -> crate::Result<()> {
+        verify(true)?;
+        if std::env::var("T3_TEST_FORWARD_WRITER").is_err() {
+            return Ok(());
+        }
+        let case = std::env::var("T3_TEST_FORWARD_WRITER").unwrap();
+        if case == "noop" {
+            return Ok(());
+        }
+        if case == "refuse" {
+            return Err(Error::IncompatibleStore);
+        }
+        if case == "timeout" {
+            let mut pid =
+                std::fs::File::create(std::path::Path::new(&home).join("writer-timeout.pid"))
+                    .map_err(|_| Error::IncompatibleStore)?;
+            use std::io::Write;
+            write!(pid, "{}", std::process::id()).map_err(|_| Error::IncompatibleStore)?;
+            pid.sync_all().map_err(|_| Error::IncompatibleStore)?;
+            loop {
+                std::thread::park();
+            }
+        }
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            use crate::application_storage::{
+                FixtureForwardActivationWitness, IsolatedTrialVerification,
+            };
+            use std::os::fd::AsFd;
+            let witness: FixtureForwardActivationWitness =
+                serde_json::from_str(&std::env::var("T3_TEST_FORWARD_CHILD_WITNESS").unwrap())
+                    .unwrap();
+            let state = std::path::Path::new(&home).join("userdata");
+            let saved: IsolatedTrialVerification = serde_json::from_slice(
+                &std::fs::read(state.join(format!(
+                    ".statev2-trial-{}.receipt-v1.json",
+                    witness.activation.update_id
+                )))
+                .unwrap(),
+            )
+            .unwrap();
+            if saved.sealed_publication.as_ref().map(|r| r.phase)
+                != Some(crate::application_storage::SealedPromotionPhase::ForwardCommitted)
+            {
+                return Err(Error::IncompatibleStore);
+            }
+            let marker = crate::application::ForwardServiceActivation {
+                update_id: witness.activation.update_id.clone(),
+                forward_selection_sha256: witness.selection_sha256.clone(),
+            };
+            let inherited = || {
+                std::io::stdin()
+                    .as_fd()
+                    .try_clone_to_owned()
+                    .map(std::fs::File::from)
+                    .map_err(|_| Error::IncompatibleStore)
+            };
+            let preview = Store {
+                db: crate::backend::Backend::inherited_trial_reader(
+                    inherited()?,
+                    128 * 1024 * 1024,
+                )
+                .await?,
+            };
+            let checked = ApplicationTransactions::new(preview.clone())
+                .verify_forward_catalog(&witness.activation, &marker, &saved.preparation.snapshot)
+                .await;
+            preview.db.shutdown_for_handoff().await?;
+            if checked? {
+                return Err(Error::IncompatibleStore);
+            }
+            verify(true)?;
+            if !matches!(
+                crate::backend::ExclusiveTrialFile::acquire(
+                    state.join("statev2.omdb"),
+                    128 * 1024 * 1024
+                ),
+                Err(Error::WriterBusy)
+            ) {
+                return Err(Error::IncompatibleStore);
+            }
+            let digest = std::env::var("T3_TEST_FORWARD_CHILD_DB").unwrap();
+            let store = Store {
+                db: crate::backend::Backend::inherited_trial_checked_writer(
+                    inherited()?,
+                    128 * 1024 * 1024,
+                    move |_| {
+                        if forward_fixture_sha256(
+                            &std::fs::read("/proc/self/fd/0")
+                                .map_err(|_| Error::IncompatibleStore)?,
+                        ) != digest
+                        {
+                            return Err(Error::IncompatibleStore);
+                        }
+                        Ok(())
+                    },
+                )
+                .await?,
+            };
+            let transactions = ApplicationTransactions::new(store.clone());
+            transactions
+                .mark_forward_catalog(&witness.activation, marker, || verify(false))
+                .await?;
+            if case == "committed-failure" {
+                // Model lost completion after a durable commit. Deliberately
+                // bypass engine shutdown; the parent must reap, report unknown,
+                // then use its existing recovery owner without replay.
+                std::process::exit(73);
+            }
+            drop(transactions);
+            store.db.shutdown_for_handoff().await?;
+            Ok(())
+        })
+    };
+    let code = if writer().is_err() {
+        78
+    } else if std::env::var("T3_TEST_FORWARD_CHILD_FAIL").is_ok() {
+        73
+    } else {
+        0
+    };
+    std::process::exit(code);
+}
+
+#[cfg(target_os = "linux")]
+fn forward_inherited_child_cases(
+    home: &std::path::Path,
+    witness: &crate::application_storage::FixtureForwardActivationWitness,
+    candidate: &crate::backend::ExclusiveTrialFile,
+) -> crate::Result<()> {
+    use std::process::{Command, Stdio};
+    let executable = std::env::current_exe().unwrap();
+    let executable_hash = forward_fixture_sha256(&std::fs::read(&executable).unwrap());
+    let database_hash =
+        forward_fixture_sha256(&std::fs::read(home.join("userdata/statev2.omdb")).unwrap());
+    for case in [
+        "valid",
+        "lost",
+        "reopened",
+        "foreign",
+        "stale",
+        "version",
+        "runtime",
+        "child-failure",
+    ] {
+        let input = match case {
+            "lost" => Stdio::null(),
+            "reopened" => {
+                Stdio::from(std::fs::File::open(home.join("userdata/statev2.omdb")).unwrap())
+            }
+            "foreign" => Stdio::from(std::fs::File::open(&executable).unwrap()),
+            _ => Stdio::from(candidate.inherited_file()?),
+        };
+        let mut encoded = serde_json::to_value(witness).unwrap();
+        if case == "stale" {
+            encoded["receipt_sha256"] = json!("0".repeat(64));
+        }
+        let mut command = Command::new(&executable);
+        command
+            .arg("application_bootstrap::upgrade::tests::forward_inherited_child_fixture")
+            .arg("--exact")
+            .env_clear()
+            .stdin(input)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .env("T3_TEST_FORWARD_CHILD_HOME", home)
+            .env("T3_TEST_FORWARD_CHILD_WITNESS", encoded.to_string())
+            .env(
+                "T3_TEST_FORWARD_CHILD_VERSION",
+                if case == "version" {
+                    "foreign"
+                } else {
+                    env!("CARGO_PKG_VERSION")
+                },
+            )
+            .env(
+                "T3_TEST_FORWARD_CHILD_EXE",
+                if case == "runtime" {
+                    "foreign"
+                } else {
+                    &executable_hash
+                },
+            )
+            .env("T3_TEST_FORWARD_CHILD_DB", &database_hash);
+        if case == "child-failure" {
+            command.env("T3_TEST_FORWARD_CHILD_FAIL", "1");
+        }
+        let mut child = command.spawn().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("inherited child timed out: {case}");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        let expected = match case {
+            "valid" => 0,
+            "child-failure" => 73,
+            _ => 78,
+        };
+        assert_eq!(status.code(), Some(expected), "inherited child {case}");
+        println!("T05 inherited child {case}: exit {expected}");
+        candidate.verified_file()?;
+        assert_eq!(
+            forward_fixture_sha256(&std::fs::read(home.join("userdata/statev2.omdb")).unwrap()),
+            database_hash
+        );
+    }
+    Ok(())
+}
+
+// Runs the actual staged package helper, while its parent retains every owner.
+#[cfg(target_os = "linux")]
+fn forward_packaged_child_cases(
+    home: &std::path::Path,
+    witness: &crate::application_storage::FixtureForwardActivationWitness,
+    candidate: &crate::backend::ExclusiveTrialFile,
+    coherent: bool,
+) -> crate::Result<()> {
+    use std::os::fd::AsRawFd;
+    use std::process::{Command, Stdio};
+    let helper = home
+        .join("runtime/versions")
+        .join(&witness.activation.target_version)
+        .join("native-bin/t3-code-ls-db");
+    // The immutable copy is held through every child exit. No installed source
+    // inode is executed, and no host-policy fallback is permitted.
+    let executable = crate::forward_child_readiness::stage_image(
+        &helper,
+        &witness.activation.target_helper_sha256,
+    )
+    .expect("synthetic readiness requires executable sealed memfd policy");
+    let pinned = format!("/proc/{}/fd/{}", std::process::id(), executable.as_raw_fd());
+    assert_eq!(
+        forward_fixture_sha256(&std::fs::read(&pinned).unwrap()),
+        witness.activation.target_helper_sha256
+    );
+    use std::io::Seek;
+    let mut cursor = candidate.inherited_file()?;
+    let original_offset = cursor.stream_position().unwrap();
+    let database_hash =
+        forward_fixture_sha256(&std::fs::read(home.join("userdata/statev2.omdb")).unwrap());
+    for (case, commit) in [
+        "valid",
+        "mutable-image",
+        "source-changed",
+        "lost",
+        "reopened",
+        "foreign",
+        "foreign-lease",
+        "stale",
+        "wrong-image",
+        "wrong-database",
+        "output-failure",
+        "parent-retry",
+    ]
+    .into_iter()
+    .filter(|case| coherent || *case == "valid")
+    .flat_map(|case| [(case, false), (case, true)])
+    {
+        // Change the original bytes only after staging. The sealed copy stays
+        // exact, while readiness refuses the now-mismatching installed package.
+        let original = if case == "source-changed" {
+            let bytes = std::fs::read(&helper).unwrap();
+            let mut changed = bytes.clone();
+            changed[0] ^= 1;
+            std::fs::write(&helper, changed).unwrap();
+            Some(bytes)
+        } else {
+            None
+        };
+        assert_eq!(
+            forward_fixture_sha256(&std::fs::read(&pinned).unwrap()),
+            witness.activation.target_helper_sha256
+        );
+        let mut request = serde_json::to_value(witness).unwrap();
+        request["database_sha256"] = json!(database_hash);
+        if case == "stale" {
+            request["receipt_sha256"] = json!("0".repeat(64));
+        }
+        if case == "wrong-image" {
+            request["activation"]["target_helper_sha256"] = json!("0".repeat(64));
+        }
+        if case == "wrong-database" {
+            request["database_sha256"] = json!("0".repeat(64));
+        }
+        let foreign_home = tempfile::tempdir().unwrap();
+        let foreign_path = foreign_home.path().join("foreign.omdb");
+        std::fs::copy(home.join("userdata/statev2.omdb"), &foreign_path).unwrap();
+        let foreign_lease = if case == "foreign-lease" {
+            Some(crate::backend::ExclusiveTrialFile::acquire(
+                foreign_path,
+                128 * 1024 * 1024,
+            )?)
+        } else {
+            None
+        };
+        let input = match case {
+            "foreign-lease" => Stdio::from(foreign_lease.as_ref().unwrap().inherited_file()?),
+            "lost" => Stdio::null(),
+            "reopened" => {
+                Stdio::from(std::fs::File::open(home.join("userdata/statev2.omdb")).unwrap())
+            }
+            "foreign" => Stdio::from(std::fs::File::open(&helper).unwrap()),
+            _ => Stdio::from(candidate.inherited_file()?),
+        };
+        let output_fd = if case == "output-failure" {
+            Stdio::from(
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open("/dev/full")
+                    .unwrap(),
+            )
+        } else {
+            Stdio::piped()
+        };
+        let launch = if case == "mutable-image" {
+            helper.as_os_str()
+        } else {
+            pinned.as_ref()
+        };
+        let mut child = Command::new(launch)
+            .args([
+                if commit {
+                    "trial-commit-inherited-forward"
+                } else {
+                    "trial-verify-inherited-readiness"
+                },
+                home.to_str().unwrap(),
+                &request.to_string(),
+            ])
+            .env_clear()
+            .stdin(input)
+            .stdout(output_fd)
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = child.try_wait().unwrap() {
+                break status;
+            }
+            if std::time::Instant::now() >= deadline {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("packaged readiness child timed out: {case}");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        use std::io::Read;
+        let mut output = Vec::new();
+        if let Some(stdout) = child.stdout.take() {
+            stdout.take(1024).read_to_end(&mut output).unwrap();
+        }
+        if let Some(original) = original {
+            std::fs::write(&helper, original).unwrap();
+            assert_eq!(
+                forward_fixture_sha256(&std::fs::read(&pinned).unwrap()),
+                witness.activation.target_helper_sha256
+            );
+        }
+        let valid = !commit && coherent && matches!(case, "valid" | "parent-retry");
+        assert_eq!(
+            status.code(),
+            Some(if valid {
+                0
+            } else if !commit && coherent && case == "output-failure" {
+                1
+            } else {
+                78
+            }),
+            "{case}"
+        );
+        if valid {
+            assert_eq!(
+                serde_json::from_slice::<Value>(&output).unwrap(),
+                json!({"ok": true, "syntheticReadiness": 1})
+            );
+        } else {
+            assert!(output.is_empty(), "refusal emitted readiness: {case}");
+        }
+        candidate.verified_file()?;
+        assert_eq!(
+            cursor.stream_position().unwrap(),
+            original_offset,
+            "child changed parent cursor: {case}"
+        );
+        let locks =
+            std::fs::read_to_string(format!("/proc/self/fdinfo/{}", cursor.as_raw_fd())).unwrap();
+        assert!(
+            locks.contains("OFDLCK"),
+            "child released parent OFD lease: {case}"
+        );
+        assert_eq!(
+            forward_fixture_sha256(&std::fs::read(home.join("userdata/statev2.omdb")).unwrap()),
+            database_hash
+        );
+        println!(
+            "T05 packaged observation {case}, commit refusal {commit}: exit {}",
+            status.code().unwrap()
+        );
+    }
+    Ok(())
+}
+
+// The copied corpus permits engine-level corruption without touching the
+// selected database. Only descriptor-read refusal is asserted on these copies.
+#[cfg(target_os = "linux")]
+async fn forward_packaged_catalog_refusals(
+    source: &std::path::Path,
+    encoded: &[u8],
+) -> crate::Result<()> {
+    use crate::application_storage::{FixtureForwardActivationWitness, IsolatedTrialVerification};
+    for case in ["coherent", "catalog", "generation", "marker", "snapshot"] {
+        let home = tempfile::Builder::new()
+            .prefix("t3-redb-test-")
+            .tempdir()
+            .unwrap();
+        let home = home.path();
+        let mut witness: FixtureForwardActivationWitness = serde_json::from_slice(encoded).unwrap();
+        let receipt = format!(
+            "userdata/.statev2-trial-{}.receipt-v1.json",
+            witness.activation.update_id
+        );
+        let marker = format!(
+            "userdata/.statev2-forward-{}.json",
+            witness.activation.update_id
+        );
+        let version = format!("runtime/versions/{}", witness.activation.target_version);
+        for name in [
+            "userdata/statev2.omdb".to_owned(),
+            "userdata/server-owner.sqlite".to_owned(),
+            "runtime/service-state.json".to_owned(),
+            receipt.clone(),
+            marker,
+            format!("{version}/t3"),
+            format!("{version}/native-bin/t3-code-ls-db"),
+        ] {
+            let path = home.join(&name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::copy(source.join(name), path).unwrap();
+        }
+        let path = home.join("userdata/statev2.omdb");
+        let store = Store::open_exclusive(&path).await?;
+        let mut tx = store.db.begin().await?;
+        let bytes = tx.get(&schema_key()).await?.unwrap();
+        let catalog = decode_catalog(&bytes)?;
+        match case {
+            "coherent" => {}
+            "marker" => {
+                let mut catalog = catalog.clone();
+                catalog
+                    .forward_service_activation_v1
+                    .as_mut()
+                    .unwrap()
+                    .forward_selection_sha256 =
+                    forward_fixture_sha256(b"another synthetic selection");
+                let bytes = encode_catalog(&catalog)?;
+                record_generation_identity(&mut tx, &catalog, &bytes).await?;
+                tx.put(schema_key(), bytes).await?;
+            }
+            "catalog" => tx.put(schema_key(), b"corrupted catalog".to_vec()).await?,
+            "generation" => {
+                tx.put(
+                    store_key(&format!(
+                        "application/generation/{}/metadata/engine-layout",
+                        catalog.generation
+                    )),
+                    b"corrupted generation".to_vec(),
+                )
+                .await?
+            }
+            "snapshot" => {
+                tx.put(b"synthetic-extra-record".to_vec(), b"changed".to_vec())
+                    .await?
+            }
+            _ => unreachable!(),
+        }
+        tx.commit().await?;
+        store.shutdown().await?;
+        let file = std::fs::File::open(&path).unwrap();
+        witness.database = crate::application_storage::trial_file_identity(&file)?.0;
+        let mut saved: IsolatedTrialVerification =
+            serde_json::from_slice(&std::fs::read(home.join(&receipt)).unwrap()).unwrap();
+        saved.preparation.database = witness.database.clone();
+        let bytes = serde_json::to_vec(&saved).unwrap();
+        std::fs::write(home.join(receipt), &bytes).unwrap();
+        witness.receipt_sha256 = forward_fixture_sha256(&bytes);
+        let owner = crate::application_server_ownership::OwnerLock::acquire_existing_native(
+            &home.join("userdata/server-owner.sqlite"),
+        )?;
+        let candidate = crate::backend::ExclusiveTrialFile::acquire(path, 128 * 1024 * 1024)?;
+        forward_packaged_child_cases(home, &witness, &candidate, case == "coherent")?;
+        owner.verify_native()?;
+        println!(
+            "T05 packaged inherited catalog corpus {case}: expected readiness {}",
+            case == "coherent"
+        );
+        drop(candidate);
+        drop(owner);
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+async fn forward_writer_process_cases(home: &std::path::Path, unknown: bool) {
+    use crate::application_storage::{
+        record_fixture_forward_catalog, record_fixture_forward_catalog_process,
+    };
+    use std::process::{Command, Stdio};
+    let executable = std::env::current_exe().unwrap();
+    let digest = forward_fixture_sha256(&std::fs::read(&executable).unwrap());
+    let live = home.join("userdata/statev2.omdb");
+    let before = capture_forward_file(&live).unwrap();
+    // Each refusal/timeout is observed and reaped by the lifecycle owner.
+    for case in [
+        "stale-exe",
+        "noop",
+        "refuse",
+        "timeout",
+        if unknown {
+            "committed-failure"
+        } else {
+            "valid"
+        },
+    ] {
+        let mut command = Command::new(&executable);
+        command
+            .arg("application_bootstrap::upgrade::tests::forward_inherited_child_fixture")
+            .arg("--exact")
+            .env_clear()
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .env("T3_TEST_FORWARD_CHILD_VERSION", env!("CARGO_PKG_VERSION"))
+            .env(
+                "T3_TEST_FORWARD_CHILD_EXE",
+                if case == "stale-exe" {
+                    "foreign"
+                } else {
+                    &digest
+                },
+            )
+            .env("T3_TEST_FORWARD_WRITER", case);
+        let result = record_fixture_forward_catalog_process(
+            home.to_owned(),
+            ISOLATED_UPDATE.into(),
+            command,
+        )
+        .await;
+        if case == "valid" {
+            assert!(!result.unwrap());
+        } else {
+            assert!(matches!(result, Err(Error::UnknownCommit)));
+        }
+        println!("T05 process handoff {case}: reaped and parent result checked");
+        if case == "timeout" {
+            let pid = std::fs::read_to_string(home.join("writer-timeout.pid")).unwrap();
+            let pid: u32 = pid.parse().unwrap();
+            assert!(
+                !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+                "timed out writer not reaped"
+            );
+            std::fs::remove_file(home.join("writer-timeout.pid")).unwrap();
+        }
+        if !matches!(case, "committed-failure" | "valid") {
+            assert_eq!(capture_forward_file(&live).unwrap(), before);
+        }
+    }
+    // Reconcile success or a committed-but-failed report through the existing
+    // owner. This observes the exact durable marker without replaying the child.
+    assert!(
+        record_fixture_forward_catalog(home.to_owned(), ISOLATED_UPDATE.into())
+            .await
+            .unwrap()
+    );
+    let marked = capture_forward_file(&live).unwrap();
+    assert_ne!(marked.3, before.3);
+    assert!(
+        record_fixture_forward_catalog(home.to_owned(), ISOLATED_UPDATE.into())
+            .await
+            .unwrap()
+    );
+    assert_eq!(capture_forward_file(&live).unwrap(), marked);
+}
+
+#[cfg(target_os = "linux")]
+async fn forward_packaged_writer_case(home: &std::path::Path, lose_output: bool) {
+    use crate::application_storage::{
+        record_fixture_forward_catalog, record_fixture_forward_catalog_packaged,
+    };
+    let live = home.join("userdata/statev2.omdb");
+    let before = capture_forward_file(&live).unwrap();
+    let result = record_fixture_forward_catalog_packaged(
+        home.to_owned(),
+        ISOLATED_UPDATE.into(),
+        lose_output,
+    )
+    .await;
+    if lose_output {
+        assert!(matches!(result, Err(Error::UnknownCommit)), "{result:?}");
+    } else {
+        assert!(!result.unwrap());
+    }
+    // Reconcile only after the owned process was reaped. A failed completion
+    // must not replay a writer or switch to a generic restore path.
+    assert!(
+        record_fixture_forward_catalog(home.to_owned(), ISOLATED_UPDATE.into())
+            .await
+            .unwrap()
+    );
+    let marked = capture_forward_file(&live).unwrap();
+    assert_ne!(marked.3, before.3);
+    // The existing owner returns before launch when it observes this exact
+    // durable outcome. Even a request to lose output cannot invoke another child.
+    assert!(
+        record_fixture_forward_catalog_packaged(home.to_owned(), ISOLATED_UPDATE.into(), true)
+            .await
+            .unwrap()
+    );
+    assert_eq!(capture_forward_file(&live).unwrap(), marked);
+    forward_owner_protocol_cases(home);
+    forward_server_startup_refused(home);
+    println!(
+        "T05 installed sealed helper committed exact catalog; lost output {lose_output}, reconciled without replay"
+    );
+}
+
+// Exercise the actual native startup protocol selected by the server adapter.
+// This owns only a disposable home; it does not grant serving or clear a fence.
+#[cfg(target_os = "linux")]
+fn forward_server_startup_refused(home: &std::path::Path) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let state = home.join("userdata");
+    let paths = [
+        state.join("statev2.omdb"),
+        state.join("server-owner.sqlite"),
+        state.join(format!(".statev2-trial-{ISOLATED_UPDATE}.receipt-v1.json")),
+        state.join(format!(".statev2-forward-{ISOLATED_UPDATE}.json")),
+        home.join("runtime/service-state.json"),
+    ];
+    let before = paths.each_ref().map(|path| capture_forward_file(path));
+    let helper = home.join("runtime/versions/1.2.4/native-bin/t3-code-ls-db");
+    let mut child = Command::new(helper)
+        .arg("owner-lock")
+        .arg(state.join("server-owner.sqlite"))
+        .env_clear()
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(
+        b"{\"operation\":\"owner_acquire\"}\n{\"operation\":\"owner_check_startup\"}\n{\"operation\":\"owner_check\"}\n"
+    ).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let replies: Vec<Value> = std::str::from_utf8(&output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(replies.len(), 3);
+    assert_eq!(replies[0]["ok"], true);
+    assert_eq!(replies[1]["ok"], false);
+    assert_eq!(replies[1]["error"]["kind"], "incompatible_store");
+    assert_eq!(replies[2]["result"]["owned"], true);
+    assert_eq!(
+        paths.each_ref().map(|path| capture_forward_file(path)),
+        before
+    );
+    // Reaped helper released the ordinary owner without changing trial authority.
+    let owner = crate::application_server_ownership::OwnerLock::acquire_existing_native(
+        &state.join("server-owner.sqlite"),
+    )
+    .unwrap();
+    owner.verify_native().unwrap();
+    println!("T05 native startup owner refused selected forward catalog; receipts unchanged");
+}
+
+#[cfg(target_os = "linux")]
+fn forward_owner_protocol_cases(home: &std::path::Path) {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::fd::AsRawFd;
+    use std::process::{Command, Stdio};
+    let state = home.join("userdata");
+    let helper = home.join("runtime/versions/1.2.4/native-bin/t3-code-ls-db");
+    let selection = home.join("runtime/service-state.json");
+    let paths = [
+        state.join("statev2.omdb"),
+        state.join("server-owner.sqlite"),
+        state.join(format!(".statev2-trial-{ISOLATED_UPDATE}.receipt-v1.json")),
+        state.join(format!(".statev2-forward-{ISOLATED_UPDATE}.json")),
+        selection.clone(),
+    ];
+    let before = paths.each_ref().map(|path| capture_forward_file(path));
+    let digest =
+        crate::application_storage::trial_executable_digest(&std::fs::File::open(&helper).unwrap())
+            .unwrap();
+    // Matching installed bytes without immutable executing-image seals refuse.
+    let refused = Command::new(&helper)
+        .arg("forward-owner")
+        .arg(home)
+        .arg(ISOLATED_UPDATE)
+        .env_clear()
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(78));
+    assert!(refused.stdout.is_empty());
+    let image = crate::forward_child_readiness::stage_image(&helper, &digest).unwrap();
+    let image_path = format!("/proc/{}/fd/{}", std::process::id(), image.as_raw_fd());
+    let launch = || {
+        Command::new(&image_path)
+            .arg("forward-owner")
+            .arg(home)
+            .arg(ISOLATED_UPDATE)
+            .env_clear()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap()
+    };
+    // A live ordinary owner cannot be displaced by the proof checker.
+    let owner = crate::application_server_ownership::OwnerLock::acquire_existing_native(
+        &state.join("server-owner.sqlite"),
+    )
+    .unwrap();
+    let refused = launch().wait_with_output().unwrap();
+    assert_eq!(refused.status.code(), Some(78));
+    assert!(refused.stdout.is_empty());
+    drop(owner);
+    let entry = home.join("runtime/versions/1.2.4/t3");
+    let entry_bytes = std::fs::read(&entry).unwrap();
+    let entry_digest = forward_fixture_sha256(&entry_bytes);
+    // Wrong selected bytes must refuse before an image can be bound. The
+    // helper is a real executable but cannot stand in for the selected entry.
+    std::fs::write(&entry, std::fs::read(&helper).unwrap()).unwrap();
+    let refused = launch().wait_with_output().unwrap();
+    assert_eq!(refused.status.code(), Some(78));
+    assert!(refused.stdout.is_empty());
+    std::fs::write(&entry, &entry_bytes).unwrap();
+    for change in ["selection", "entry", "helper", "none"] {
+        let mut child = launch();
+        let mut input = child.stdin.take().unwrap();
+        let mut output = BufReader::new(child.stdout.take().unwrap());
+        let request = b"{\"operation\":\"forward_owner_check\"}\n";
+        input.write_all(request).unwrap();
+        input.flush().unwrap();
+        let mut line = String::new();
+        output.read_line(&mut line).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&line).unwrap(),
+            json!({"ok":true,"result":{"checked":true,"serving":false}})
+        );
+        assert!(matches!(
+            crate::application_server_ownership::OwnerLock::acquire_existing_native(
+                &state.join("server-owner.sqlite")
+            ),
+            Err(Error::WriterBusy)
+        ));
+        // The existing proof installs synthetic entry bytes. Binding those
+        // bytes proves retention only, never SEA launch or installed readiness.
+        for _ in 0..2 {
+            input
+                .write_all(b"{\"operation\":\"forward_owner_bind_entry\"}\n")
+                .unwrap();
+            input.flush().unwrap();
+            line.clear();
+            output.read_line(&mut line).unwrap();
+            assert_eq!(
+                serde_json::from_str::<Value>(&line).unwrap(),
+                json!({
+                    "ok": true, "result": {"checked": true, "serving": false,
+                    "launched": false, "entryBound": true, "targetVersion": "1.2.4",
+                    "entrySha256": entry_digest}
+                })
+            );
+        }
+        let changed = match change {
+            "selection" => Some(&selection),
+            "entry" => Some(&entry),
+            "helper" => Some(&helper),
+            _ => None,
+        };
+        if let Some(path) = changed {
+            let original = std::fs::read(path).unwrap();
+            std::fs::write(path, b"foreign bytes").unwrap();
+            input.write_all(request).unwrap();
+            input.flush().unwrap();
+            drop(input);
+            let result = child.wait_with_output().unwrap();
+            assert_eq!(result.status.code(), Some(78));
+            line.clear();
+            assert_eq!(output.read_line(&mut line).unwrap(), 0);
+            std::fs::write(path, original).unwrap();
+        } else {
+            // EOF releases ownership and the image; reacquisition binds anew.
+            drop(input);
+            assert!(child.wait_with_output().unwrap().status.success());
+        }
+        assert_eq!(
+            paths.each_ref().map(|path| capture_forward_file(path)),
+            before
+        );
+    }
+    // Requests cannot replace receipt-bound identity. A failed output must
+    // release every owner and image without promoting readiness.
+    for lose_output in [false, true] {
+        let mut command = Command::new(&image_path);
+        command
+            .arg("forward-owner")
+            .arg(home)
+            .arg(ISOLATED_UPDATE)
+            .env_clear()
+            .stdin(Stdio::piped())
+            .stderr(Stdio::piped());
+        if lose_output {
+            command.stdout(Stdio::from(
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .open("/dev/full")
+                    .unwrap(),
+            ));
+        } else {
+            command.stdout(Stdio::piped());
+        }
+        let mut child = command.spawn().unwrap();
+        let mut input = child.stdin.take().unwrap();
+        input
+            .write_all(if lose_output {
+                b"{\"operation\":\"forward_owner_bind_entry\"}\n"
+            } else {
+                b"{\"operation\":\"forward_owner_bind_entry\",\"targetVersion\":\"foreign\"}\n"
+            })
+            .unwrap();
+        drop(input);
+        let result = child.wait_with_output().unwrap();
+        assert_eq!(result.status.code(), Some(78), "lose_output={lose_output}");
+        assert!(result.stdout.is_empty());
+        let owner = crate::application_server_ownership::OwnerLock::acquire_existing_native(
+            &state.join("server-owner.sqlite"),
+        )
+        .unwrap();
+        owner.verify_native().unwrap();
+        assert_eq!(
+            paths.each_ref().map(|path| capture_forward_file(path)),
+            before
+        );
+    }
+    println!(
+        "T05 forward owner: immutable helper and selected-entry binding, wrong-entry refusal, continuing selection/entry/helper checks, EOF release and reacquisition; no entry launch or serving"
+    );
 }

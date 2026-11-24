@@ -1,0 +1,87 @@
+export interface DioxusMount {
+  free(): void;
+}
+
+export interface ComposerSubmitMount extends DioxusMount {
+  update(className: string, label: string, disabled: boolean): void;
+}
+
+export interface WelcomeMount extends DioxusMount {
+  update(agentReady: boolean, isImporting: boolean, selectedCount: number, newCount: number): void;
+}
+
+export interface GuestNameMount extends DioxusMount {
+  update(pending: boolean, error: string): void;
+}
+
+export type ThreadFindAction = "query" | "next" | "previous" | "retry" | "close";
+
+export interface ThreadFindMount extends DioxusMount {
+  update(
+    query: string, count: string, status: string, busy: boolean, noResults: boolean,
+    navigationDisabled: boolean, focusRequestId: number,
+  ): void;
+}
+
+export interface AssistantTextMount extends DioxusMount {
+  update(text: string, sequence: string, updatedAt: string, streaming: boolean): void;
+}
+
+export interface ThreadLinkMount extends DioxusMount {
+  update(href: string, label: string, className: string): void;
+}
+
+interface OnboardingBindings {
+  mount_thread_link(root: HTMLSpanElement, href: string, label: string, className: string): ThreadLinkMount;
+  mount_assistant_text(
+    root: HTMLDivElement, text: string, sequence: string, updatedAt: string, streaming: boolean,
+  ): AssistantTextMount;
+  default(): Promise<unknown>;
+  mount_approval_action(
+    root: HTMLSpanElement,
+    className: string,
+    label: string,
+    disabled: boolean,
+  ): ComposerSubmitMount;
+  mount_composer_submit(
+    root: HTMLSpanElement,
+    className: string,
+    label: string,
+    disabled: boolean,
+  ): ComposerSubmitMount;
+  mount_composer_stop: OnboardingBindings["mount_composer_submit"];
+  mount_pairing_form(
+    root: HTMLDivElement,
+    token: string,
+    initialError: string,
+    submitCredential: (credential: string) => Promise<string | null>,
+    onAuthenticated: () => void,
+  ): DioxusMount;
+  mount_welcome_controls(
+    root: HTMLDivElement,
+    agentReady: boolean,
+    isImporting: boolean,
+    selectedCount: number,
+    newCount: number,
+    onStart: () => void,
+  ): WelcomeMount;
+  mount_guest_name(
+    root: HTMLDivElement, name: string, pending: boolean, error: string,
+    submit: (name: string) => void,
+  ): GuestNameMount;
+  mount_thread_find(
+    root: HTMLDivElement,
+    action: (action: ThreadFindAction, query?: string) => void,
+  ): ThreadFindMount;
+}
+
+async function initialize(): Promise<OnboardingBindings> {
+  const url = new URL(`${import.meta.env.BASE_URL}pairing-wasm/local_pairing.js`, window.location.origin);
+  const bindings: OnboardingBindings = await import(/* @vite-ignore */ url.href);
+  await bindings.default();
+  return bindings;
+}
+
+let bindings: Promise<OnboardingBindings> | undefined;
+
+export const loadOnboardingBindings = () => (bindings ??= initialize());

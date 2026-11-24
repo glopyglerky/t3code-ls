@@ -99,12 +99,14 @@ def committed_metadata(root: Path, fork: str, path: str) -> dict:
 
 
 def port_requirements(port: dict, targets: list[str]) -> dict:
+    # The source guard recognizes omdb only for the native storage port.
+    rust_routes = RUST_ROUTES | {"omdb"} if port["id"] == "redb-persistence" else RUST_ROUTES
     routes = {}
     compiler_routes = set()
     for route in port.get("platform_routes", []):
         if not isinstance(route, dict) or not isinstance(route.get("targets"), list):
             raise nightly.TrackingError("Invalid port platform route.")
-        if route.get("implementation") in RUST_ROUTES:
+        if route.get("implementation") in rust_routes:
             compiler_routes.add(route.get("compiler_route", "unspecified"))
         for target in route["targets"]:
             if target not in targets or target in routes:
@@ -113,7 +115,7 @@ def port_requirements(port: dict, targets: list[str]) -> dict:
     missing_rust, missing_receipts, unaccepted = [], [], []
     for target in targets:
         route = routes.get(target, {})
-        if route.get("implementation") not in RUST_ROUTES:
+        if route.get("implementation") not in rust_routes:
             missing_rust.append(target)
         if not route.get("acceptance_evidence", {}).get(target):
             missing_receipts.append(target)
@@ -267,6 +269,7 @@ def markdown_summary(plan: dict) -> str:
 
 
 def output_path(root: Path, path: Path) -> Path:
+    root = root.resolve()
     resolved = path.resolve()
     if resolved == root or root in resolved.parents:
         raise nightly.TrackingError("Porting reports must be outside the source checkout.")

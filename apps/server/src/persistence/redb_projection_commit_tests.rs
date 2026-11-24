@@ -230,6 +230,153 @@ async fn prepare_reads(store: &Store) {
 }
 
 #[tokio::test]
+async fn runtime_import_recovery_checks_committed_history_before_recording_source() {
+    use crate::application_runtime_state::RuntimeStateOperation;
+
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    let mut app = ApplicationTransactions::new(store.clone());
+    let mut schema = schema();
+    for (name, columns, primary) in [
+        (
+            "provider_session_runtime",
+            "thread_id provider_name provider_instance_id adapter_key runtime_mode status last_seen_at resume_cursor_json runtime_payload_json",
+            "thread_id",
+        ),
+        (
+            "mcp_app_model_context",
+            "thread_id item_id server tool text updated_at",
+            "thread_id item_id",
+        ),
+    ] {
+        schema.tables.push(ApplicationTable {
+            name: name.into(),
+            columns: columns.split_whitespace().map(str::to_owned).collect(),
+            primary_key: primary.split_whitespace().map(str::to_owned).collect(),
+        });
+    }
+    app.initialize(schema).await.unwrap();
+    prepare(&store).await;
+    prepare_reads(&store).await;
+    while !store
+        .prepare_application_runtime_state()
+        .await
+        .unwrap()
+        .prepared
+    {}
+
+    let thread_id = "import:codex:retry";
+    let mut imported = thread(thread_id);
+    imported["historyOrigin"] = json!("v1_import");
+    app.begin("projection").await.unwrap();
+    apply(
+        &mut app,
+        "projection",
+        event("thread.created", thread_id, imported),
+    )
+    .await
+    .unwrap();
+    let text = "Fix it\n\u{000b}✓";
+    let message_id = format!("{thread_id}:000000");
+    apply(
+        &mut app,
+        "projection",
+        event(
+            "message.updated",
+            thread_id,
+            json!({
+                "id":message_id,"threadId":thread_id,"runId":null,"nodeId":null,"role":"user",
+                "streaming":false,"createdAt":NOW,"updatedAt":NOW,"text":text,
+            }),
+        ),
+    )
+    .await
+    .unwrap();
+    let original = app
+        .get("projection", MESSAGES, &[text_cell(&message_id)])
+        .await
+        .unwrap();
+    app.commit("projection").await.unwrap();
+
+    let source = r#"{"providerInstanceId":"codex","filePath":"/fixture/retry.jsonl","size":100}"#;
+    let matching = json!({
+        "kind":"runtime_recover_import",
+        "project_id":"project",
+        "runtime":{
+            "threadId":thread_id,"providerName":"codex","providerInstanceId":"codex",
+            "adapterKey":"codex","runtimeMode":"full-access","status":"stopped","lastSeenAt":NOW,
+            "resumeCursor":"{\"threadId\":\"retry\"}","runtimePayload":"{\"cwd\":\"/fixture\"}",
+        },
+        "source":source,
+        "messages":[{
+            "role":"user",
+            // SHA-256 of the JSON.stringify output, including the escaped control character.
+            "text_sha256":"af04e65c52c4f9974ec5ef03db1248b20365f1c0baf1e20689cbc268706f0e8c",
+        }],
+    });
+    let mut changed = matching.clone();
+    changed["source"] = json!(source.replace("100", "101"));
+    changed["messages"][0]["text_sha256"] = json!(request_digest(&json!("Changed")));
+    let mut foreign = matching.clone();
+    foreign["project_id"] = json!("other");
+    let mut truncated = matching.clone();
+    truncated["messages"] = json!([]);
+    let mut role_changed = matching.clone();
+    role_changed["messages"][0]["role"] = json!("assistant");
+    let runtime_get = || RuntimeStateOperation::RuntimeGet {
+        thread_id: thread_id.into(),
+    };
+
+    app.begin("rejected").await.unwrap();
+    for request in [changed.clone(), foreign, truncated, role_changed] {
+        let operation = serde_json::from_value(request).unwrap();
+        assert_eq!(
+            app.runtime_state("rejected", operation).await.unwrap(),
+            json!({"recovered":false})
+        );
+        assert_eq!(
+            app.runtime_state("rejected", runtime_get()).await.unwrap(),
+            Value::Null
+        );
+    }
+    app.commit("rejected").await.unwrap();
+
+    app.begin("matching").await.unwrap();
+    assert_eq!(
+        app.runtime_state("matching", runtime_get()).await.unwrap(),
+        Value::Null
+    );
+    for _ in 0..2 {
+        let operation = serde_json::from_value(matching.clone()).unwrap();
+        assert_eq!(
+            app.runtime_state("matching", operation).await.unwrap(),
+            json!({"recovered":true})
+        );
+    }
+    app.commit("matching").await.unwrap();
+
+    app.begin("retained").await.unwrap();
+    let operation = serde_json::from_value(changed).unwrap();
+    assert_eq!(
+        app.runtime_state("retained", operation).await.unwrap(),
+        json!({"recovered":false})
+    );
+    let recovered = app.runtime_state("retained", runtime_get()).await.unwrap();
+    assert_eq!(recovered["resumeCursor"], r#"{"threadId":"retry"}"#);
+    assert_eq!(
+        recovered["runtimePayload"],
+        format!(r#"{{"cwd":"/fixture","importedTranscripts":[{source}]}}"#)
+    );
+    assert_eq!(
+        app.get("retained", MESSAGES, &[text_cell(&message_id)])
+            .await
+            .unwrap(),
+        original
+    );
+    app.commit("retained").await.unwrap();
+}
+
+#[tokio::test]
 async fn queued_and_explicit_run_reads_do_not_enumerate_completed_history() {
     use super::records::{
         ProjectionRecordField as F, ProjectionRecordFilter, ProjectionRecordsQuery,

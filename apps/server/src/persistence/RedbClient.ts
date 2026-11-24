@@ -163,6 +163,7 @@ export interface RedbClientShape {
   readonly preparePeers: Effect.Effect<PreparationResult, RedbClientError>;
   readonly prepareRuntimeState: Effect.Effect<PreparationResult, RedbClientError>;
   readonly prepareScheduled: Effect.Effect<PreparationResult, RedbClientError>;
+  readonly durableRelayWebhooks: boolean;
   readonly prepareProjectionReads: Effect.Effect<PreparationResult, RedbClientError>;
   readonly prepareAuxiliary: Effect.Effect<PreparationResult, RedbClientError>;
   readonly prepareMessageRowids: Effect.Effect<PreparationResult, RedbClientError>;
@@ -172,6 +173,21 @@ export interface RedbClientShape {
   readonly prepareProjections: Effect.Effect<PreparationResult, RedbClientError>;
   readonly prepareOutbox: Effect.Effect<PreparationResult, RedbClientError>;
 }
+
+export const DurableRelayWebhooks = Context.Reference<boolean>(
+  "t3/persistence/RedbClient/DurableRelayWebhooks",
+  { defaultValue: () => false },
+);
+
+export const SingleProjectionReads = Context.Reference<boolean>(
+  "t3/persistence/RedbClient/SingleProjectionReads",
+  { defaultValue: () => false },
+);
+
+export const ReadDatabase = Context.Reference<NativeDatabase.NativeDatabase["Service"] | undefined>(
+  "t3/persistence/RedbClient/ReadDatabase",
+  { defaultValue: () => undefined },
+);
 
 export interface PreparationResult {
   readonly prepared: boolean;
@@ -244,6 +260,9 @@ function terminal(error: RedbClientError): boolean {
 
 export const make = Effect.gen(function* () {
   const database = yield* NativeDatabase.NativeDatabase;
+  const readDatabase = (yield* ReadDatabase) ?? database;
+  const durableRelayWebhooks = yield* DurableRelayWebhooks;
+  const singleProjectionReads = yield* SingleProjectionReads;
   const constructionSql = yield* Effect.serviceOption(SqlClient.SqlClient);
   const clientIdentity = {};
   let transactionSequence = 0;
@@ -372,7 +391,7 @@ export const make = Effect.gen(function* () {
     }
     const publications: Array<Effect.Effect<void>> = [];
     const operation = Effect.uninterruptibleMask((restore) =>
-      database
+      (mode === "read" ? readDatabase : database)
         .withSession((session) =>
           Effect.gen(function* () {
             if (transactionSequence >= Number.MAX_SAFE_INTEGER)
@@ -560,9 +579,16 @@ export const make = Effect.gen(function* () {
       yield* outsideTransaction;
       return yield* database.request({ operation: "application_auth_prepare" }, Prepared);
     }),
+    durableRelayWebhooks,
     prepareScheduled: Effect.gen(function* () {
       yield* outsideTransaction;
-      return yield* database.request({ operation: "application_scheduled_prepare" }, Prepared);
+      return yield* database.request(
+        {
+          operation: "application_scheduled_prepare",
+          ...(durableRelayWebhooks ? { durable_relay: true } : {}),
+        },
+        Prepared,
+      );
     }),
     prepareProjectionReads: Effect.gen(function* () {
       yield* outsideTransaction;
@@ -630,6 +656,19 @@ export const make = Effect.gen(function* () {
       input: Readonly<Record<string, unknown>>,
       response: Schema.Decoder<A>,
     ) {
+      if (
+        singleProjectionReads &&
+        (operation === "application_projections_records" || operation === "application_projections_lookup") &&
+        (yield* CurrentTransaction) === undefined
+      ) {
+        yield* outsideSqlTransaction;
+        if (Object.hasOwn(input, "operation") || Object.hasOwn(input, "transaction_id"))
+          return yield* new NativeDatabase.NativeDatabaseInputError({ stage: "request" });
+        yield* decodeRequestJson(input).pipe(Effect.mapError(
+          (cause) => new NativeDatabase.NativeDatabaseInputError({ stage: "request", cause }),
+        ));
+        return yield* readDatabase.request({ ...input, operation }, response);
+      }
       return yield* inTransaction(
         (transaction) =>
           Effect.gen(function* () {

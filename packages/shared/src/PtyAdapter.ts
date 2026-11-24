@@ -23,9 +23,15 @@ export interface PtyExitEvent {
   signal: number | null;
 }
 
+export interface PtyWriteReceipt {
+  /** UTF-8 input bytes accepted by the PTY kernel, independent of shell execution. */
+  readonly acceptedBytes: number;
+}
+
 export interface PtyProcess {
   readonly pid: number;
-  write(data: string): void;
+  /** A partial or lost asynchronous receipt must never replay the original input. */
+  write(data: string): void | Promise<PtyWriteReceipt>;
   resize(cols: number, rows: number): void;
   kill(signal?: string): void;
   onData(callback: (data: string) => void): () => void;

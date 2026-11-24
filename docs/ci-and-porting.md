@@ -22,6 +22,14 @@ Full fork qualification covers the Rust workspace, production adapters, and the 
 
 Mapped component acceptance scripts have explicit executable requirements. CI builds those targets with the pinned compiler and runs changed scripts; a full qualification runs all mapped component checks. Unknown test mappings fail planning. Builds retain the verified compiler package and locked Cargo and pnpm dependency gates. Expensive jobs run only when selected.
 
+The CLI archive checks cover retained implementations on their target
+architectures. The Apple Silicon handoff builds and signs the archive on the
+Intel runner and retains the exact archive and smoke harness. The artifact
+from commit `ba8fdff9d` passed the retained smoke on arm64 macOS 27.0.
+It exercised session output, bundled HTTP and descriptor readiness, a Unicode
+prompt waiting for input with exit 2, and a failed turn with exit 1.
+[Apple Silicon archive build](https://github.com/glopyglerky/t3code-ls/actions/runs/45222227888)
+
 The `redb-persistence` port selects the native client flow when its mapped runtime changes. Its mapped storage checks still run in the native job. A platform acceptance receipt for an `omdb` route must record `"implementation": "omdb"` and satisfy the existing source, target, compiler and required-check rules.
 
 ## Reusing qualification
@@ -54,6 +62,27 @@ Detected, integrated, and qualified revisions remain separate. Discovering a new
 The integrated source can advance to an immutable default-branch commit before a nightly release contains it. Such a lock records `channel: "default-branch"`, the branch name, exact commit and tree, and a commit URL. Nightly tags and release identifiers belong to the separate `nightly_reference`, not that source identity.
 
 The nightly checker compares Git ancestry as well as trees. An equal revision is current; an ancestor nightly is already integrated and creates no reverse-import or removal work. A newer or divergent nightly requires review. Complete tree differences remain in the report, and missing shallow ancestry fails explicitly. Nightly source locks retain their moved-tag and publication rollback checks. None of these reports changes the source pin or qualification.
+
+## Browser assistant text
+
+The opt-in Dioxus row renders bounded strong and emphasis spans from the
+selected thread. In the packaged Linux x64 Chromium run, the Unicode text
+was visible at stream sequence 27 and had the same assistant message ID
+after interruption and reopen at sequence 44. The unsent draft survived.
+The blocked-Wasm run rendered the same formatted text through the retained
+client. The hosted component check also covers selection and citations,
+replacement, and whole-message fallback for unsupported syntax.
+[Formatted timeline run](https://github.com/glopyglerky/t3code-ls/actions/runs/45233550668)
+
+## Packaged peer-link recovery
+
+The Linux archive fixture starts two servers with disposable omdb stores on
+loopback. It reads the linked environment through OAuth/MCP, verifies both
+identities after process restart, and checks that revocation survives reopening
+both stores. An incompatible endpoint received one descriptor probe and zero
+credential requests. Live Connect edge and additional platform checks remain
+open.
+[Packaged peer-link run](https://github.com/glopyglerky/t3code-ls/actions/runs/45228554914)
 
 ## Generate plans locally
 

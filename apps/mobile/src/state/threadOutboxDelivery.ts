@@ -685,7 +685,9 @@ interface ThreadOutboxRetry {
  * backoff expires. `dispatchingQueuedMessageIdAtom` is the single in-flight slot; clearing
  * it re-runs the drain for the next message.
  */
-export function createThreadOutboxDelivery(): {
+export function createThreadOutboxDelivery(
+  resolveDeliveryAction = resolveThreadOutboxDeliveryAction,
+): {
   readonly drain: () => void;
   readonly dispose: () => void;
 } {
@@ -1290,7 +1292,7 @@ export function createThreadOutboxDelivery(): {
           );
         }
       }
-      const deliveryAction = resolveThreadOutboxDeliveryAction({
+      const deliveryAction = resolveDeliveryAction({
         isCreation: creation !== undefined,
         threadExists: thread !== undefined,
         shellStatus,
@@ -1385,7 +1387,7 @@ export function createThreadOutboxDelivery(): {
             appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
             nextQueuedMessage,
           );
-          const liveDeliveryAction = resolveThreadOutboxDeliveryAction({
+          const liveDeliveryAction = resolveDeliveryAction({
             isCreation: creation !== undefined,
             threadExists: liveThread !== undefined,
             shellStatus,
@@ -1454,10 +1456,12 @@ function loadThreadOutbox(isActive: () => boolean): void {
 }
 
 /** App-lifetime: loads the persisted outbox and delivers queued messages. */
-export function installThreadOutboxDelivery(): () => void {
+export function installThreadOutboxDelivery(
+  resolveDeliveryAction = resolveThreadOutboxDeliveryAction,
+): () => void {
   let active = true;
   loadThreadOutbox(() => active);
-  const delivery = createThreadOutboxDelivery();
+  const delivery = createThreadOutboxDelivery(resolveDeliveryAction);
   return () => {
     active = false;
     delivery.dispose();

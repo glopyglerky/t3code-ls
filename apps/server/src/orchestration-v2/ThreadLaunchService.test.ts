@@ -120,6 +120,8 @@ const claudeAdapter = {
 } as ProviderAdapter.ProviderAdapterV2["Service"];
 
 interface HarnessOptions {
+  readonly interruptAfterLaunchRead?: boolean;
+  readonly launchReads?: { full: number; runFilters: Array<ReadonlyArray<string>> };
   readonly closeTerminal?: TerminalManager.TerminalManager["Service"]["close"];
   readonly adapters?: ReadonlyArray<ProviderAdapter.ProviderAdapterV2["Service"]>;
   readonly managedFolders?: Layer.Layer<ManagedProjectFolders.ManagedProjectFolders>;
@@ -238,12 +240,56 @@ function makeHarness(options: HarnessOptions = {}) {
         folderForThread: () => Effect.succeedNone,
       }),
   );
+  const readLaunchReceipt = vi.fn<(commandId: CommandId) => void>();
+  const layerLaunchReceipts = Layer.effect(
+    CommandReceiptStore.CommandReceiptStoreV2,
+    Effect.gen(function* () {
+      const receipts = yield* CommandReceiptStore.CommandReceiptStoreV2;
+      return {
+        ...receipts,
+        getByCommandId: (commandId: CommandId) =>
+          Effect.sync(() => readLaunchReceipt(commandId)).pipe(
+            Effect.andThen(receipts.getByCommandId(commandId)),
+          ),
+      };
+    }),
+  ).pipe(Layer.provide(layerReceipts));
+  const layerLaunchThreads = Layer.effect(
+    ThreadManagement.ThreadManagementService,
+    Effect.gen(function* () {
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      let launchReadCount = 0;
+      const getThreadRecords: ThreadManagement.ThreadManagementService["Service"]["getThreadRecords"] =
+        (...args) => {
+          if (options.launchReads) options.launchReads.runFilters.push(args[2]?.runIds ?? []);
+          return threads.getThreadRecords(...args).pipe(Effect.tap(() => {
+            const runId = args[2]?.runIds?.[0];
+            return options.interruptAfterLaunchRead && runId !== undefined && ++launchReadCount === 1
+              ? threads.dispatch({
+                  type: "run.interrupt",
+                  commandId: CommandId.make("interrupt-before-reservation"),
+                  threadId: args[0],
+                  runId,
+                }).pipe(Effect.orDie, Effect.asVoid)
+              : Effect.void;
+          }));
+        };
+      return {
+        ...threads,
+        getThreadProjection: (threadId: ThreadId) => {
+          if (options.launchReads) options.launchReads.full++;
+          return threads.getThreadProjection(threadId);
+        },
+        getThreadRecords,
+      };
+    }),
+  ).pipe(Layer.provide(layerThreadManagement));
   const layerLaunch = ThreadLaunch.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
         layerExternalServices,
-        layerThreadManagement,
-        layerReceipts,
+        layerLaunchThreads,
+        layerLaunchReceipts,
         layerOrchestrator,
         IdAllocator.layer,
         options.getLaunchSettings === undefined
@@ -298,6 +344,7 @@ function makeHarness(options: HarnessOptions = {}) {
       layerDatabase,
       layerExternalServices,
     ),
+    readLaunchReceipt,
     createWorktree,
     removeWorktree,
     deleteLocalBranch,
@@ -337,6 +384,35 @@ function launchInput(input: {
     creationSource: "web" as const,
   };
 }
+
+it.effect("commits root workspace metadata with the prepared run release", () => {
+  let reads = 0;
+  const harness = makeHarness({
+    git: { currentBranch: () => Effect.sync(() => ++reads === 1 ? "before" : "current") },
+  });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const launched = yield* launches.launch(launchInput({
+      command: "root-launch",
+      thread: "root-launch-thread",
+      message: "Finish the root workspace task",
+    }));
+    const projection = yield* preparationSettled(launched.threadId);
+    assert.equal(projection.runs[0]?.status, "starting");
+    assert.equal(projection.thread.branch, "current");
+    const events = yield* threads.streamStoredEventsFrom({ threadId: launched.threadId }).pipe(
+      Stream.takeUntil((stored) => stored.commandId === "root-launch:release" &&
+        stored.event.type === "run.updated"),
+      Stream.runCollect,
+    );
+    assert.deepEqual(
+      events.filter((stored) => stored.event.type === "thread.metadata-updated")
+        .map((stored) => stored.commandId),
+      [CommandId.make("root-launch:initial-message"), CommandId.make("root-launch:release")],
+    );
+  }).pipe(Effect.provide(harness.layer));
+});
 
 it.effect.each(
   (["new", "existing"] as const).flatMap((target) =>
@@ -1685,6 +1761,8 @@ it.effect("replays a server-allocated launch", () =>
       assert.equal(first.threadId, retry.threadId);
       assert.isFalse(first.resumed);
       assert.isTrue(retry.resumed);
+      // The launch only reads its claim receipt. Dispatch validates the initial message receipt.
+      assert.deepEqual(harness.readLaunchReceipt.mock.calls, [[rest.commandId], [rest.commandId]]);
       // Clients drop their pending copy once the thread reaches the message's commit.
       assert.isNumber(first.sequence);
       assert.equal(retry.sequence, first.sequence);
@@ -1981,11 +2059,18 @@ it.effect("reports one concurrent same-command launch as new and the rest as res
       const input = launchInput({
         command: "command:launch:concurrent-resumed",
         thread: "thread:launch:concurrent-resumed",
+        message: "Only one concurrent initial message",
       });
       const results = yield* Effect.all([launches.launch(input), launches.launch(input)], {
         concurrency: "unbounded",
       });
       assert.deepEqual(results.map((result) => result.resumed).sort(), [false, true]);
+      assert.deepEqual(harness.readLaunchReceipt.mock.calls, [[input.commandId], [input.commandId]]);
+      assert.equal(results[0]?.sequence, results[1]?.sequence);
+      for (const result of results) {
+        assert.equal(result.projection.messages.length, 1);
+        assert.equal(result.projection.runs.length, 1);
+      }
     }).pipe(Effect.provide(harness.layer));
   }),
 );
@@ -2180,7 +2265,7 @@ it.effect("shared intake preserves durable attachment bytes after a lost launch 
         attachments: [attachment],
       },
     };
-    const failed = yield* ThreadMessageIntake.launchThread(input).pipe(
+    const failed = yield* ThreadMessageIntake.launchThreadForWire(input, "receipt").pipe(
       Effect.provideService(ThreadLaunch.ThreadLaunchService, {
         launch: (request) =>
           launches.launch(request).pipe(
@@ -2193,6 +2278,7 @@ it.effect("shared intake preserves durable attachment bytes after a lost launch 
               }),
             ),
           ),
+        launchReceipt: launches.launchReceipt,
         checkWorktreeBase: launches.checkWorktreeBase,
         retryPreparation: launches.retryPreparation,
         prepareRun: launches.prepareRun,
@@ -2222,7 +2308,8 @@ it.effect("shared intake preserves durable attachment bytes after a lost launch 
     assert.deepEqual(yield* fs.readFile(storedPath), new Uint8Array([1, 2, 3, 4]));
     assert.deepEqual(yield* fs.readFile(pendingPath), new Uint8Array([1, 2, 3, 4]));
 
-    const replayed = yield* ThreadMessageIntake.launchThread(input);
+    const replayed = yield* ThreadMessageIntake.launchThreadForWire(input, "receipt");
+    assert("projection" in replayed);
     assert.equal(replayed.projection.messages[0]?.id, stored.id);
     assert.deepEqual(replayed.projection.messages[0]?.attachments, stored.attachments);
     const claimedFiles = Effect.map(fs.readDirectory(config.attachmentsDir), (files) =>
@@ -2902,4 +2989,95 @@ it.effect("replays an accepted send after the project disables the instance", ()
       assert.fail(`expected ThreadManagementProviderInstanceDisabledError, got ${fresh._tag}`);
     }
   }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerFiles)));
+});
+
+const receiptFiles = ServerConfig.layerTest(process.cwd(), { prefix: "t3-launch-receipt-" }).pipe(
+  Layer.provideMerge(DocumentText.layer.pipe(Layer.provideMerge(NodeServices.layer))),
+);
+
+it.effect("returns an exact launch receipt without loading the full projection on first call or retry", () => {
+  const reads = { full: 0, runFilters: [] as Array<ReadonlyArray<string>> };
+  const harness = makeHarness({ launchReads: reads });
+  return Effect.gen(function* () {
+    const input = launchInput({ command: "receipt", thread: "receipt-thread", message: "Hello" });
+    const first = yield* ThreadMessageIntake.launchThreadForWire(input, "receipt");
+    assert.isFalse("projection" in first);
+    assert.equal(first.threadId, input.threadId);
+    assert.isFalse(first.resumed);
+    assert.isNumber(first.sequence);
+    const replay = yield* ThreadMessageIntake.launchThreadForWire(input, "receipt");
+    assert.isTrue(replay.resumed);
+    assert.equal(replay.sequence, first.sequence);
+    assert.equal(reads.full, 0);
+    assert.isTrue(reads.runFilters.length >= 2);
+    assert.isTrue(reads.runFilters.filter((ids) => ids.length === 1).length >= 2);
+    const legacy = yield* ThreadMessageIntake.launchThread(input);
+    assert.equal(legacy.sequence, first.sequence);
+    assert.equal(legacy.projection.messages.length, 1);
+    assert.equal(legacy.projection.runs.length, 1);
+    assert.equal(reads.full, 1);
+  }).pipe(Effect.provide(Layer.mergeAll(harness.layer, receiptFiles)));
+});
+
+it.effect("keeps the full legacy response for an opted-in launch without an initial message", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const result = yield* ThreadMessageIntake.launchThreadForWire(
+      launchInput({ command: "receipt-empty", thread: "receipt-empty-thread" }), "receipt",
+    );
+    assert.isTrue("projection" in result);
+    assert.isUndefined(result.sequence);
+  }).pipe(Effect.provide(Layer.mergeAll(harness.layer, receiptFiles)));
+});
+
+
+it.effect("schedules concurrent receipt retries once and preserves the accepted sequence", () =>
+  Effect.gen(function* () {
+    const setupEntered = yield* Deferred.make<void>();
+    const allowSetup = yield* Deferred.make<void>();
+    const harness = makeHarness({ runSetup: () =>
+      Deferred.succeed(setupEntered, undefined).pipe(
+        Effect.andThen(Deferred.await(allowSetup)), Effect.as({ status: "no-script" as const }),
+      ),
+    });
+    yield* Effect.gen(function* () {
+      const input = launchInput({ command: "receipt-race", thread: "receipt-race-thread",
+        message: "Once", workspace: { type: "worktree", baseRef: "main" } });
+      const results = yield* Effect.all([
+        ThreadMessageIntake.launchThreadForWire(input, "receipt"),
+        ThreadMessageIntake.launchThreadForWire(input, "receipt"),
+      ], { concurrency: "unbounded" });
+      yield* Deferred.await(setupEntered);
+      assert.deepEqual(results.map((result) => result.resumed).sort(), [false, true]);
+      assert.equal(results[0]?.sequence, results[1]?.sequence);
+      assert.isTrue(results.every((result) => !("projection" in result)));
+      assert.equal(harness.runSetup.mock.calls.length, 1);
+      const legacy = yield* ThreadMessageIntake.launchThread(input);
+      assert.equal(legacy.sequence, results[0]?.sequence);
+      assert.equal(legacy.projection.runs.length, 1);
+      assert.equal(legacy.projection.messages.length, 1);
+      yield* Deferred.succeed(allowSetup, undefined);
+    }).pipe(Effect.provide(Layer.mergeAll(harness.layer, receiptFiles)));
+  }),
+);
+
+
+it.effect("rechecks current state after reserving a receipt launch before starting preparation", () => {
+  const reads = { full: 0, runFilters: [] as Array<ReadonlyArray<string>> };
+  const harness = makeHarness({ launchReads: reads, interruptAfterLaunchRead: true });
+  return Effect.gen(function* () {
+    const input = launchInput({ command: "receipt-gate", thread: "receipt-gate-thread", message: "Hello" });
+    const result = yield* ThreadMessageIntake.launchThreadForWire(input, "receipt");
+    assert.isFalse("projection" in result);
+    assert.equal(reads.full, 0);
+    assert.equal(reads.runFilters.length, 2);
+    assert.equal(harness.runSetup.mock.calls.length, 0);
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const state = yield* threads.getThreadProjection(input.threadId);
+    assert.equal(state.runs[0]?.status, "interrupted");
+    const replay = yield* ThreadMessageIntake.launchThreadForWire(input, "receipt");
+    assert.equal(replay.sequence, result.sequence);
+    assert.isTrue(replay.resumed);
+    assert.equal(harness.runSetup.mock.calls.length, 0);
+  }).pipe(Effect.provide(Layer.mergeAll(harness.layer, receiptFiles)));
 });

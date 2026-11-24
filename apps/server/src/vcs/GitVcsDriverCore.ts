@@ -34,12 +34,14 @@ import {
 } from "@t3tools/contracts";
 import { dedupeRemoteBranchesWithLocalMatches } from "@t3tools/shared/git";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as NativeGitWorkspace from "./NativeGitWorkspace.ts";
 import { compactTraceAttributes } from "@t3tools/shared/observability";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 import { resolveSpawnCommand, runsGitWithoutConsole } from "@t3tools/shared/shell";
 import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { resolveProjectFileBackedSetting } from "@t3tools/shared/projectSettings";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
+import * as ProcessRunner from "../processRunner.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
 import { removeEmptyDirectory, type RemoveEmptyDirectoryError } from "./removeEmptyDirectory.ts";
 import {
@@ -189,6 +191,24 @@ interface GitRepositoryPaths {
   readonly isAtRepositoryRoot: boolean | undefined;
   readonly currentBranch: string | null;
 }
+
+const decodeGixRepositoryPaths = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.NullOr(
+  Schema.Struct({
+    gitCommonDir: Schema.String,
+    worktreeRoot: Schema.String,
+    isAtRepositoryRoot: Schema.Boolean,
+    currentBranch: Schema.NullOr(Schema.String),
+  }),
+)));
+const decodeGixRefPresence = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.NullOr(Schema.Boolean)),
+);
+const decodeGixString = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.NullOr(Schema.String)),
+);
+const decodeGixBranchNames = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.NullOr(Schema.Array(Schema.String))),
+);
 
 interface GitRefsSnapshot {
   readonly localBranches: ReadonlyArray<VcsRef>;
@@ -970,6 +990,38 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const isServerInternalPath = yield* makeIsServerInternalPath;
   const digest = yield* Digest.Digest;
   const hostPlatform = yield* HostProcess.Platform;
+  const environment = yield* HostProcess.Environment;
+  const gixExecutable = yield* NativeGitWorkspace.select;
+  const gitDiscoveryOverrides = Object.keys(environment).some((name) =>
+    name.startsWith("GIT_CONFIG") ||
+    name === "GIT_NAMESPACE" ||
+    name === "GIT_CEILING_DIRECTORIES" ||
+    name === "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+  );
+  const gixRunner = hostPlatform === "linux" && environment.T3_CODE_LS_IMPLEMENTATION !== "upstream" &&
+    gixExecutable !== undefined && path.isAbsolute(gixExecutable) && !gitDiscoveryOverrides
+    ? yield* ProcessRunner.make()
+    : undefined;
+  const runGix = Effect.fn("GitVcsDriver.runGix")(function* (
+    cwd: string,
+    args: ReadonlyArray<string>,
+    maxOutputBytes = 32_768,
+  ) {
+    if (gixRunner === undefined || gixExecutable === undefined) return null;
+    const native = yield* gixRunner.run({
+      command: gixExecutable,
+      args,
+      cwd,
+      env: {},
+      extendEnv: false,
+      timeout: "2 seconds",
+      maxOutputBytes,
+    }).pipe(Effect.option);
+    return Option.isSome(native) && native.value.code === 0 && !native.value.stdoutInvalidUtf8 &&
+      !native.value.stdoutTruncated
+      ? native.value.stdout
+      : null;
+  });
   const serviceScope = yield* Effect.scope;
   const statusFetches = new Map<string, Fiber.Fiber<void, GitCommandError>>();
   const statusFetchProcesses = yield* Semaphore.make(4);
@@ -1277,35 +1329,35 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       ),
     );
 
-  const branchExists = (cwd: string, refName: string): Effect.Effect<boolean, GitCommandError> =>
-    executeGit(
+  const branchExists = Effect.fn("GitVcsDriver.branchExists")(function* (cwd: string, refName: string) {
+    const name = `refs/heads/${refName}`;
+    const native = yield* runGix(cwd, ["has-local-ref", cwd, name]);
+    const exists = native === null ? null : Option.getOrNull(decodeGixRefPresence(native));
+    if (exists !== null) return exists;
+    const result = yield* executeGit(
       "GitVcsDriver.branchExists",
       cwd,
-      ["show-ref", "--verify", "--quiet", `refs/heads/${refName}`],
-      {
-        allowNonZeroExit: true,
-        timeoutMs: 5_000,
-      },
-    ).pipe(Effect.map((result) => result.exitCode === 0));
+      ["show-ref", "--verify", "--quiet", name],
+      { allowNonZeroExit: true, timeoutMs: 5_000 },
+    );
+    return result.exitCode === 0;
+  });
 
   const resolveAvailableBranchName = Effect.fn("resolveAvailableBranchName")(function* (
     cwd: string,
     requestedBranch: string,
   ) {
     // Exceeding the limit fails the command, so the set is never built from a partial list.
-    const { stdout } = yield* executeGit(
-      "GitVcsDriver.resolveAvailableBranchName",
-      cwd,
-      ["for-each-ref", "--format=%(refname:strip=2)", "refs/heads/"],
-      { maxOutputBytes: 16 * 1024 * 1024 },
-    );
+    const native = yield* runGix(cwd, ["local-branch-names", cwd], 16 * 1024 * 1024);
+    const nativeNames = native === null ? null : Option.getOrNull(decodeGixBranchNames(native));
+    const names = nativeNames ?? (yield* executeGit(
+        "GitVcsDriver.resolveAvailableBranchName",
+        cwd,
+        ["for-each-ref", "--format=%(refname:strip=2)", "refs/heads/"],
+        { maxOutputBytes: 16 * 1024 * 1024 },
+      ).pipe(Effect.map(({ stdout }) => stdout.split("\n").filter(Boolean))));
     // Reserve case variants too: loose refs can live on case-insensitive filesystems.
-    const branches = new Set(
-      stdout
-        .split("\n")
-        .filter(Boolean)
-        .map((name) => name.toLowerCase()),
-    );
+    const branches = new Set(names.map((name) => name.toLowerCase()));
     // A branch nested under a name (`t3-fix/child`) blocks it as surely as one with the name.
     const blockedNames = new Set(branches);
     for (const branch of branches) {
@@ -1498,6 +1550,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const resolveRepositoryPathsUncached = Effect.fn("resolveRepositoryPathsUncached")(function* (
     cwd: string,
   ) {
+    const native = yield* runGix(cwd, [cwd]);
+    const paths = native === null ? null : Option.getOrNull(decodeGixRepositoryPaths(native));
+    if (paths !== null && path.isAbsolute(paths.gitCommonDir) && path.isAbsolute(paths.worktreeRoot)) {
+      return paths;
+    }
     const gitCommonDir = yield* readGitCommonDir(cwd);
     if (gitCommonDir === null) return null;
     const [worktreeRoot, currentBranchResult] = yield* Effect.all(
@@ -1732,15 +1789,21 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }),
     );
 
-  const remoteBranchExists: GitVcsDriver.GitVcsDriver["Service"]["remoteBranchExists"] = (input) =>
-    executeGit(
-      "GitVcsDriver.remoteBranchExists",
-      input.cwd,
-      ["show-ref", "--verify", "--quiet", `refs/remotes/${input.remoteName}/${input.refName}`],
-      {
-        allowNonZeroExit: true,
-      },
-    ).pipe(Effect.map((result) => result.exitCode === 0));
+  const remoteBranchExists = Effect.fn("GitVcsDriver.remoteBranchExists")(
+    function* (input: GitVcsDriver.GitRemoteBranchExistsInput) {
+      const name = `refs/remotes/${input.remoteName}/${input.refName}`;
+      const native = yield* runGix(input.cwd, ["has-remote-ref", input.cwd, name]);
+      const exists = native === null ? null : Option.getOrNull(decodeGixRefPresence(native));
+      if (exists !== null) return exists;
+      const result = yield* executeGit(
+        "GitVcsDriver.remoteBranchExists",
+        input.cwd,
+        ["show-ref", "--verify", "--quiet", name],
+        { allowNonZeroExit: true },
+      );
+      return result.exitCode === 0;
+    },
+  );
 
   const remoteExists: GitVcsDriver.GitVcsDriver["Service"]["remoteExists"] = (input) =>
     executeGit(
@@ -2054,48 +2117,52 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   });
 
   const readStatusDetailsRemote = Effect.fn("readStatusDetailsRemote")(function* (cwd: string) {
-    const branchResult = yield* executeGitWithStableDiagnostics(
-      "GitVcsDriver.statusDetailsRemote.branch",
-      cwd,
-      ["rev-parse", "--symbolic-full-name", "HEAD"],
-      { allowNonZeroExit: true },
-    ).pipe(
-      Effect.catchTags({
-        GitCommandError: (error) =>
-          isMissingGitCwdError(error) ? Effect.succeed(null) : Effect.fail(error),
-      }),
-    );
+    const native = yield* runGix(cwd, ["branch-head", cwd]);
+    let branch = native === null ? null : Option.getOrNull(decodeGixString(native));
+    if (branch !== null) branch = branchNameFromHeadRef(branch);
+    if (branch === null) {
+      const branchResult = yield* executeGitWithStableDiagnostics(
+        "GitVcsDriver.statusDetailsRemote.branch",
+        cwd,
+        ["rev-parse", "--symbolic-full-name", "HEAD"],
+        { allowNonZeroExit: true },
+      ).pipe(
+        Effect.catchTags({
+          GitCommandError: (error) =>
+            isMissingGitCwdError(error) ? Effect.succeed(null) : Effect.fail(error),
+        }),
+      );
 
-    if (branchResult === null) {
-      return NON_REPOSITORY_REMOTE_STATUS_DETAILS;
-    }
-    let branch: string | null;
-    if (branchResult.exitCode !== 0) {
-      if (isNonRepositoryGitStderr(branchResult.stderr)) {
+      if (branchResult === null) {
         return NON_REPOSITORY_REMOTE_STATUS_DETAILS;
       }
-      if (!isUnbornHeadStderr(branchResult.stderr)) {
-        return yield* new GitCommandError({
-          ...gitCommandContext({
-            operation: "GitVcsDriver.statusDetailsRemote.branch",
-            cwd,
-            args: ["rev-parse", "--symbolic-full-name", "HEAD"],
-          }),
-          detail: "Git branch lookup failed.",
-          exitCode: branchResult.exitCode,
-          stdoutLength: branchResult.stdout.length,
-          stderrLength: branchResult.stderr.length,
-        });
-      }
+      if (branchResult.exitCode !== 0) {
+        if (isNonRepositoryGitStderr(branchResult.stderr)) {
+          return NON_REPOSITORY_REMOTE_STATUS_DETAILS;
+        }
+        if (!isUnbornHeadStderr(branchResult.stderr)) {
+          return yield* new GitCommandError({
+            ...gitCommandContext({
+              operation: "GitVcsDriver.statusDetailsRemote.branch",
+              cwd,
+              args: ["rev-parse", "--symbolic-full-name", "HEAD"],
+            }),
+            detail: "Git branch lookup failed.",
+            exitCode: branchResult.exitCode,
+            stdoutLength: branchResult.stdout.length,
+            stderrLength: branchResult.stderr.length,
+          });
+        }
 
-      const branchValue = yield* runGitStdout(
-        "GitVcsDriver.statusDetailsRemote.unbornBranch",
-        cwd,
-        ["symbolic-ref", "--quiet", "HEAD"],
-      );
-      branch = branchNameFromHeadRef(branchValue);
-    } else {
-      branch = branchNameFromHeadRef(branchResult.stdout);
+        const branchValue = yield* runGitStdout(
+          "GitVcsDriver.statusDetailsRemote.unbornBranch",
+          cwd,
+          ["symbolic-ref", "--quiet", "HEAD"],
+        );
+        branch = branchNameFromHeadRef(branchValue);
+      } else {
+        branch = branchNameFromHeadRef(branchResult.stdout);
+      }
     }
     const currentUpstreamRef = yield* readCurrentUpstreamRef(cwd);
     let upstreamRef = currentUpstreamRef;
@@ -3942,6 +4009,22 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     revision: string,
     relativePath: string,
   ) {
+    // Keep revision resolution and all errors with Git. This read never mutates
+    // the index and cannot supply working-tree content from another checkout.
+    if (
+      environment.GIT_REPLACE_REF_BASE === undefined &&
+      environment.GIT_OBJECT_DIRECTORY === undefined &&
+      environment.GIT_ALTERNATE_OBJECT_DIRECTORIES === undefined &&
+      /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(revision)
+    ) {
+      const raw = yield* runGix(
+        input.cwd,
+        ["review-blob", input.cwd, revision, relativePath],
+        REVIEW_DIFF_FILE_MAX_OUTPUT_BYTES * 6 + 2,
+      );
+      const contents = raw === null ? null : Option.getOrNull(decodeGixString(raw));
+      if (contents !== null && !contents.includes("\0")) return contents;
+    }
     const result = yield* executeGit(
       "GitVcsDriver.getReviewDiffFileContents.revision",
       input.cwd,

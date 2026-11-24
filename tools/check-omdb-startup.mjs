@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 import * as NodeAssert from "node:assert/strict";
+import * as NodeChildProcess from "node:child_process";
+import { once } from "node:events";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as NodeReadline from "node:readline";
 import * as Effect from "effect/Effect";
 import * as Logger from "effect/Logger";
+import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
@@ -11,6 +15,11 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as NativeOwnership from "../apps/server/src/persistence/NativeServerOwnershipLock.ts";
 import { persistServerRuntimeState } from "../apps/server/src/serverRuntimeState.ts";
 import * as Omdb from "../apps/server/src/persistence/Omdb.ts";
+import { BootstrappedDatabaseMigration } from "../apps/server/src/persistence/BootstrappedDatabaseMigration.ts";
+import * as ServerEnvironment from "../apps/server/src/environment/ServerEnvironment.ts";
+import * as ServerSecretStore from "../apps/server/src/auth/ServerSecretStore.ts";
+import * as ServerConfig from "../apps/server/src/config.ts";
+import { databaseMigrationHead } from "../apps/server/src/persistence/databaseMigrationHead.ts";
 import { createFixture } from "./database-fixture.mjs";
 import { createMigratedSqlite, hash, nativeRequest, withSqlite } from "./redb-domain-fixture.mjs";
 import { verifyNativeSchema88Upgrade } from "./omdb-schema-upgrade-fixture.mjs";
@@ -18,6 +27,24 @@ const [executable, proofPath] = process.argv.slice(2);
 NodeAssert.ok(executable && NodePath.isAbsolute(executable));
 const checks = [];
 const fixture = await createFixture();
+const generationIdentity = {
+  engine: "omdb",
+  engine_version: "4.5.0",
+  engine_revision: "b2ff031398b1f0a793a352db7a699575b5d4d3d4",
+  layout: "t3-application-keyspace-v1",
+  schema_version: 1,
+};
+const readIdentity = (profile) => {
+  const { catalog_sha256, generation, ...identity } = nativeRequest(
+    executable,
+    profile,
+    "connect",
+    { operation: "application_generation_identity" },
+  );
+  NodeAssert.deepEqual(identity, generationIdentity);
+  NodeAssert.match(catalog_sha256, /^[a-f0-9]{64}$/);
+  return { catalog_sha256, generation };
+};
 const isolated = (fixture, effect) =>
   effect.pipe(
     Effect.provideService(HostProcess.HomeDirectory, fixture.root),
@@ -54,6 +81,23 @@ const hasCauseMessage = (error, expected) => {
   }
   return false;
 };
+const uncataloged = await createFixture();
+try {
+  NodeAssert.equal(nativeRequest(executable, uncataloged, "initialize", {
+    operation: "application_schema",
+  }), null);
+  const beforeInspection = hash(await NodeFSP.readFile(uncataloged.databasePath));
+  NodeAssert.equal(nativeRequest(executable, uncataloged, "inspect", {
+    operation: "application_startup_migrations",
+  }), null);
+  NodeAssert.deepEqual(nativeRequest(executable, uncataloged, "inspect", {
+    operation: "application_migrations",
+  }), []);
+  NodeAssert.equal(hash(await NodeFSP.readFile(uncataloged.databasePath)), beforeInspection);
+  checks.push("Read-only startup inspection distinguishes an uncataloged file without writing it");
+} finally {
+  await uncataloged.close();
+}
 try {
   await run(({ database }) =>
     Effect.gen(function* () {
@@ -67,6 +111,61 @@ try {
       yield* locks.acquire(NodePath.join(fixture.root, "server-owner.sqlite"));
     }),
   );
+  const refusedInspector = NodePath.join(fixture.root, "refused-migration-inspector");
+  const refusalLog = NodePath.join(fixture.root, "refused-migration-inspections");
+  const quotedLog = "'" + refusalLog.replaceAll("'", "'\\''") + "'";
+  await NodeFSP.writeFile(refusedInspector, `#!/bin/sh\nprintf 'x\\n' >> ${quotedLog}\nexit 73\n`, { mode: 0o700 });
+  await run(({ client, migrationWitness }) =>
+    client.withTransaction(Effect.gen(function* () {
+      NodeAssert.deepEqual(migrationWitness, { databasePath: fixture.databasePath, head: 89 });
+      const refused = NodeChildProcess.spawnSync(refusedInspector, ["read-only-local", fixture.databasePath], {
+        input: JSON.stringify({ operation: "application_migrations" }) + "\n",
+        env: {}, encoding: "utf8", timeout: 5_000, maxBuffer: 8192, killSignal: "SIGKILL",
+      });
+      NodeAssert.equal(refused.error, undefined);
+      NodeAssert.equal(refused.status, 73);
+      const describe = Effect.gen(function* () {
+        const environment = yield* ServerEnvironment.ServerEnvironment;
+        const first = yield* environment.getDescriptor;
+        const second = yield* environment.getDescriptor;
+        NodeAssert.equal(first.databaseMigration, 89);
+        NodeAssert.deepEqual(second, first);
+      }).pipe(Effect.provide(ServerEnvironment.layerServing.pipe(
+        Layer.provide(Layer.succeed(BootstrappedDatabaseMigration, migrationWitness)),
+        Layer.provide(Layer.succeed(ServerSecretStore.ServerSecretStore, {
+          get: () => Effect.succeedNone, set: () => Effect.void, create: () => Effect.void,
+          getOrCreateRandom: () => Effect.succeed(new Uint8Array()), remove: () => Effect.void,
+        })),
+      )));
+      const config = yield* ServerConfig.ServerConfig;
+      yield* Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const prior = { executable: process.env.T3_CODE_LS_DB_EXECUTABLE, implementation: process.env.T3_CODE_LS_IMPLEMENTATION };
+          process.env.T3_CODE_LS_DB_EXECUTABLE = refusedInspector;
+          delete process.env.T3_CODE_LS_IMPLEMENTATION;
+          return prior;
+        }),
+        () => Effect.gen(function* () {
+          NodeAssert.equal(databaseMigrationHead(fixture.databasePath), undefined,
+            "The former serving probe must reproduce missing metadata under controlled inspector refusal");
+          const callsBeforeDescriptor = yield* Effect.promise(() => NodeFSP.readFile(refusalLog, "utf8"));
+          yield* describe.pipe(Effect.provideService(ServerConfig.ServerConfig, {
+            ...config, dbPath: fixture.databasePath,
+          }));
+          const callsAfterDescriptor = yield* Effect.promise(() => NodeFSP.readFile(refusalLog, "utf8"));
+          NodeAssert.equal(callsAfterDescriptor, callsBeforeDescriptor,
+            "Serving construction and repeated descriptor reads must not spawn another inspector");
+        }),
+        (prior) => Effect.sync(() => {
+          if (prior.executable === undefined) delete process.env.T3_CODE_LS_DB_EXECUTABLE;
+          else process.env.T3_CODE_LS_DB_EXECUTABLE = prior.executable;
+          if (prior.implementation === undefined) delete process.env.T3_CODE_LS_IMPLEMENTATION;
+          else process.env.T3_CODE_LS_IMPLEMENTATION = prior.implementation;
+        }),
+      );
+    }).pipe(Effect.provide(ServerConfig.layerTest(process.cwd(), fixture.root)))),
+  );
+  checks.push("Normal native environment descriptors retain the bootstrapped migration witness during a real write transaction and controlled independent-inspector refusal");
   NodeAssert.equal(
     await NodeFSP.readFile(NodePath.join(fixture.root, "server-owner.sqlite"), "utf8"),
     "t3code-omdb-owner-v1\n",
@@ -80,12 +179,25 @@ try {
   checks.push(
     "fresh native schema initializes without an application SQLite file, activates the old-server fence and releases its bootstrap lease while the database remains open",
   );
+  const initialIdentity = readIdentity(fixture);
+  NodeAssert.equal(initialIdentity.generation, "native");
   await run(({ database }) =>
     database
       .request({ operation: "application_bootstrap" }, Omdb.Bootstrap)
       .pipe(Effect.tap((value) => Effect.sync(() => NodeAssert.equal(value.initialized, false)))),
   );
+  NodeAssert.deepEqual(readIdentity(fixture), initialIdentity);
   checks.push("reopen verifies schema and migration identity without reinitializing state");
+  const beforeInspection = hash(await NodeFSP.readFile(fixture.databasePath));
+  const inspected = nativeRequest(executable, fixture, "inspect", {
+    operation: "application_startup_migrations",
+  });
+  NodeAssert.deepEqual(inspected, nativeRequest(executable, fixture, "inspect", {
+    operation: "application_migrations",
+  }));
+  NodeAssert.equal(inspected.at(-1).id, "89");
+  NodeAssert.equal(hash(await NodeFSP.readFile(fixture.databasePath)), beforeInspection);
+  checks.push("Read-only startup inspection returns the committed migration list without writing the file");
 } finally {
   await fixture.close();
 }
@@ -106,6 +218,10 @@ try {
     }).pipe((effect) => isolated(migrated, effect)),
   );
   NodeAssert.equal(hash(await NodeFSP.readFile(source)), before);
+  const imported = nativeRequest(executable, migrated, "connect", {
+    operation: "application_import",
+  });
+  NodeAssert.equal(readIdentity(migrated).generation, imported.generation);
   NodeAssert.equal(
     (await NodeFSP.readdir(migrated.root)).filter((path) => path.startsWith(".omdb-import-"))
       .length,
@@ -116,6 +232,87 @@ try {
   );
 } finally {
   await migrated.close();
+}
+const crashed = await createFixture();
+try {
+  const reopen = (use) =>
+    Effect.runPromise(
+      isolated(
+        crashed,
+        Effect.flatMap(Omdb.make({ executable, databasePath: crashed.databasePath }), use),
+      ),
+    );
+  await reopen(() => Effect.void);
+  const beforeCrash = readIdentity(crashed);
+  const writer = NodeChildProcess.spawn(executable, crashed.cliArgs(), {
+    env: {},
+    stdio: ["pipe", "pipe", "inherit"],
+    signal: AbortSignal.timeout(15_000),
+  });
+  const exited = once(writer, "exit");
+  const lines = NodeReadline.createInterface({ input: writer.stdout });
+  const replies = lines[Symbol.asyncIterator]();
+  const request = async (operation) => {
+    writer.stdin.write(JSON.stringify(operation) + "\n");
+    const response = await replies.next();
+    NodeAssert.equal(response.done, false);
+    const envelope = JSON.parse(response.value);
+    NodeAssert.equal(envelope.ok, true, JSON.stringify(envelope));
+  };
+  const guideKey = (number) => ({ host: "fixture.invalid", repository: "owner/repo", number });
+  const guideJson = JSON.stringify({ summary: "Fixture guide" });
+  const stage = async (name, number) => {
+    await request({ operation: "application_begin", transaction_id: name, mode: "write" });
+    await request({
+      operation: "application_guide_put",
+      transaction_id: name,
+      key: guideKey(number),
+      guide_json: guideJson,
+    });
+  };
+  try {
+    await stage("crash-committed", 1);
+    await request({ operation: "application_commit", transaction_id: "crash-committed" });
+    await stage("crash-uncommitted", 2);
+  } finally {
+    writer.kill("SIGKILL");
+    const [, signal] = await exited;
+    NodeAssert.equal(signal, "SIGKILL");
+    lines.close();
+  }
+  const dirtyHash = hash(await NodeFSP.readFile(crashed.databasePath));
+  await NodeAssert.rejects(
+    Effect.runPromise(
+      isolated(
+        crashed,
+        Effect.gen(function* () {
+          const owner = yield* NativeOwnership.make(executable);
+          yield* owner.acquire(NodePath.join(crashed.root, "server-owner.sqlite"));
+          yield* Omdb.make({ executable, databasePath: crashed.databasePath });
+        }),
+      ),
+    ),
+    (error) => error._tag === "OmdbStartupError" && error.cause?._tag === "ServerAlreadyRunningError",
+  );
+  NodeAssert.equal(hash(await NodeFSP.readFile(crashed.databasePath)), dirtyHash);
+  await reopen(({ client }) =>
+    Effect.gen(function* () {
+      const readGuide = (number) =>
+        client.request(
+          "application_guide_get",
+          { key: guideKey(number) },
+          Schema.NullOr(Schema.String),
+        );
+      NodeAssert.equal(yield* readGuide(1), guideJson);
+      NodeAssert.equal(yield* readGuide(2), null);
+    }),
+  );
+  NodeAssert.deepEqual(readIdentity(crashed), beforeCrash);
+  checks.push(
+    "Startup requires exclusive recovery ownership, then reopens the acknowledged generation after SIGKILL and discards uncommitted rows",
+  );
+} finally {
+  await crashed.close();
 }
 const liveLegacy = await createFixture();
 try {
@@ -188,9 +385,11 @@ for (const changed of [false, true]) {
       VALUES ('retry-row','original','[]','token','2026-01-01','2099-01-01')
     `.pipe(Effect.asVoid),
     );
-    await NodeAssert.rejects(Effect.runPromise(isolated(retry, failedActivation(retry))), (error) =>
-      hasCauseMessage(error, "injected activation failure"),
-    );
+    let failedWitness;
+    await NodeAssert.rejects(Effect.runPromise(isolated(retry, failedActivation(retry).pipe(
+      Effect.tap((runtime) => Effect.sync(() => { failedWitness = runtime.migrationWitness; })),
+    ))), (error) => hasCauseMessage(error, "injected activation failure"));
+    NodeAssert.equal(failedWitness, undefined, "Failed activation must not release a serving migration witness");
     NodeAssert.equal(
       await NodeFSP.readFile(NodePath.join(retry.root, "server-owner.sqlite"), "utf8"),
       "",
@@ -272,6 +471,30 @@ try {
   );
 } finally {
   await unwitnessed.close();
+}
+const otherHome = await createFixture();
+const linkedHome = await createFixture();
+try {
+  nativeRequest(executable, otherHome, "initialize", { operation: "application_bootstrap" });
+  const before = hash(await NodeFSP.readFile(otherHome.databasePath));
+  await NodeFSP.symlink(otherHome.databasePath, linkedHome.databasePath, "file");
+  await NodeAssert.rejects(
+    Effect.runPromise(isolated(
+      linkedHome,
+      Omdb.make({ executable, databasePath: linkedHome.databasePath }),
+    )),
+    (error) => error._tag === "OmdbStartupError",
+  );
+  NodeAssert.equal(hash(await NodeFSP.readFile(otherHome.databasePath)), before);
+  NodeAssert.equal(await NodeFSP.readlink(linkedHome.databasePath), otherHome.databasePath);
+  await NodeAssert.rejects(
+    NodeFSP.access(NodePath.join(linkedHome.root, "server-owner.sqlite")),
+    { code: "ENOENT" },
+  );
+  checks.push("Native startup rejects a symlinked database before activating its ownership fence");
+} finally {
+  await linkedHome.close();
+  await otherHome.close();
 }
 checks.push(await verifyNativeSchema88Upgrade(executable));
 console.log(JSON.stringify({ checks }, null, 2));

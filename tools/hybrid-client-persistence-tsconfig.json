@@ -10,7 +10,8 @@
     "../apps/web/scripts/hybrid-client-database.test.ts",
     "../apps/web/scripts/hybrid-client-turn.ts",
     "../apps/web/scripts/hybrid-client-turn.test.ts",
-    "../apps/web/scripts/verify-hybrid-client.ts"
+    "../apps/web/scripts/verify-hybrid-client.ts",
+    "../apps/web/scripts/hybrid-client-preview.ts"
   ],
   "exclude": []
 }

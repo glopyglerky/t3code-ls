@@ -71,6 +71,7 @@ const CONNECTED_STATE: SupervisorConnectionState = {
 const makeSupervisor = Effect.fn("TestEnvironmentCommands.makeSupervisor")(function* (input: {
   readonly commands: OrchestrationV2Command[];
   readonly projects: ProjectMutation[];
+  readonly receiptLaunch?: boolean;
   readonly launches?: OrchestrationV2ThreadLaunchInput[];
   readonly projection?: OrchestrationV2ThreadProjection;
   readonly projectionRequests?: ThreadId[];
@@ -91,7 +92,14 @@ const makeSupervisor = Effect.fn("TestEnvironmentCommands.makeSupervisor")(funct
       }),
     [ORCHESTRATION_V2_WS_METHODS.launchThread]: (launchInput: OrchestrationV2ThreadLaunchInput) =>
       Effect.sync(() => {
+
         input.launches?.push(launchInput);
+        if (input.receiptLaunch) return {
+          responseMode: "receipt" as const,
+          threadId: launchInput.threadId ?? v2ThreadId,
+          resumed: false,
+          sequence: 42,
+        };
         return {
           threadId: launchInput.threadId ?? v2ThreadId,
           projection: input.projection ?? v2Projection,
@@ -258,6 +266,7 @@ describe("V2 environment commands", () => {
       }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
 
       expect(launches[0]).toMatchObject({
+        responseMode: "receipt",
         threadId: v2ThreadId,
         title: "Continue here",
         generateTitle: true,
@@ -787,3 +796,28 @@ describe("V2 environment commands", () => {
     }).pipe(Effect.provide(layerTestRandom)),
   );
 });
+
+
+it.effect("uses a negotiated receipt for first-message launch without a projection request", () =>
+  Effect.gen(function* () {
+    const launches: OrchestrationV2ThreadLaunchInput[] = [];
+    const projectionRequests: ThreadId[] = [];
+    const supervisor = yield* makeSupervisor({ commands: [], projects: [], launches,
+      projectionRequests, receiptLaunch: true });
+    const result = yield* startThreadTurn({
+      commandId: CommandId.make("receipt-client"), threadId: v2ThreadId,
+      message: { messageId: MessageId.make("receipt-message"), role: "user", text: "Hello", attachments: [] },
+      runtimeMode: "full-access", interactionMode: "default",
+      bootstrap: { createThread: {
+        projectId: ProjectId.make("project-1"), title: "Thread",
+        modelSelection: v2Projection.thread.modelSelection,
+        runtimeMode: "full-access", interactionMode: "default",
+        branch: null, worktreePath: null, createdAt: "2026-06-20T00:00:00.000Z",
+      } },
+    }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+    expect(result).toMatchObject({ responseMode: "receipt", sequence: 42, threadId: v2ThreadId });
+    expect(launches).toHaveLength(1);
+    expect(launches[0]?.responseMode).toBe("receipt");
+    expect(projectionRequests).toEqual([]);
+  }).pipe(Effect.provide(layerTestRandom)),
+);

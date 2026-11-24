@@ -230,6 +230,11 @@ describe("environment voice input", () => {
 });
 
 describe("resolveTranscriptCommit", () => {
+  it("refuses a captured selection that splits a Unicode surrogate pair", () => {
+    const captured = draft({ text: "A🐟B", selection: { start: 2, end: 2 } });
+    expect(resolveTranscriptCommit(captured, captured, "voice", "en")).toEqual({ kind: "stale" });
+  });
+
   it.each([
     ["Hello", "world", "Hello world"],
     ["Hello", "世界", "Hello世界"],

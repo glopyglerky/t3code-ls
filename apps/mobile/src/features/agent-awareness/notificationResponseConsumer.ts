@@ -17,7 +17,7 @@ export class NotificationNavigationError extends Schema.TaggedError<Notification
 export async function consumeLastAgentNotificationResponse(input: {
   readonly getLastResponse: () => Promise<NotificationResponse | null>;
   readonly clearLastResponse: () => Promise<void>;
-  readonly handleResponse: (response: NotificationResponse) => void;
+  readonly handleResponse: (response: NotificationResponse) => void | Promise<void>;
 }): Promise<void> {
   let response: NotificationResponse | null;
   try {
@@ -32,7 +32,7 @@ export async function consumeLastAgentNotificationResponse(input: {
   }
 
   try {
-    input.handleResponse(response);
+    await input.handleResponse(response);
   } catch (cause) {
     console.error(
       new NotificationNavigationError({
@@ -45,6 +45,17 @@ export async function consumeLastAgentNotificationResponse(input: {
   }
 
   try {
+    // Navigation may wait for the root to mount. During that wait, the OS can
+    // replace the retained response with another tap that this call does not own.
+    const current = await input.getLastResponse();
+    if (
+      !current ||
+      current.notification.request.identifier !== response.notification.request.identifier ||
+      current.notification.date !== response.notification.date ||
+      current.actionIdentifier !== response.actionIdentifier
+    ) {
+      return;
+    }
     await input.clearLastResponse();
   } catch (cause) {
     console.error(

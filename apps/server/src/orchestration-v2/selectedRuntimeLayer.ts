@@ -17,6 +17,10 @@ export const layerEventSink = select(
   native(NativeRuntime.layerEventSink),
   sqlite(SqliteRuntime.layerEventSink),
 );
+export const layerGuestShare = select(
+  native(NativeRuntime.layerGuestShare),
+  sqlite(SqliteRuntime.layerGuestShare),
+);
 export const layerProjectService = select(
   native(NativeRuntime.layerProjectService),
   sqlite(SqliteRuntime.layerProjectService),

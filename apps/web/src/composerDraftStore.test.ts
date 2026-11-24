@@ -724,6 +724,34 @@ describe("composerDraftStore context persistence", () => {
     }
   });
 
+  it("keeps visible draft edits and stored bytes when a live merge read is denied", async () => {
+    const sharedStorage = createMemoryStorage();
+    const read = sharedStorage.getItem.bind(sharedStorage);
+    let denyReads = false;
+    vi.stubGlobal("localStorage", { ...sharedStorage, getItem: (key: string) => {
+      if (denyReads && key === COMPOSER_DRAFT_STORAGE_KEY) throw new DOMException("Synthetic denial", "SecurityError");
+      return read(key);
+    } });
+    vi.stubGlobal("window", new EventTarget());
+    vi.useFakeTimers();
+    vi.resetModules();
+    try {
+      const tab = await import("./composerDraftStore");
+      tab.useComposerDraftStore.getState().setPrompt(threadRef, "Saved before denial");
+      await vi.advanceTimersByTimeAsync(300);
+      const before = read(COMPOSER_DRAFT_STORAGE_KEY);
+      denyReads = true;
+      tab.useComposerDraftStore.getState().setPrompt(threadRef, "Unsaved text 雪🐟");
+      await vi.advanceTimersByTimeAsync(300);
+      expect(read(COMPOSER_DRAFT_STORAGE_KEY)).toBe(before);
+      expect(tab.useComposerDraftStorageStatus.getState()).toBe("unavailable");
+      expect(tab.useComposerDraftStore.getState().draftsByThreadKey[scopedThreadKey(threadRef)]?.prompt)
+        .toBe("Unsaved text 雪🐟");
+    } finally {
+      vi.useRealTimers(); vi.unstubAllGlobals(); vi.resetModules();
+    }
+  });
+
   // regression: #35010 typing a draft in one tab erased drafts another tab saved after it loaded
   it("keeps a draft another tab saved after this tab loaded", async () => {
     const sharedStorage = createMemoryStorage();
@@ -749,6 +777,113 @@ describe("composerDraftStore context persistence", () => {
       const saved = JSON.parse(sharedStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY) as string);
       expect(saved.state.draftsByThreadKey[scopedThreadKey(betaRef)]?.prompt).toBe("beta draft");
       expect(saved.state.draftsByThreadKey[scopedThreadKey(alphaRef)]?.prompt).toBe("alpha draft");
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      vi.resetModules();
+    }
+  });
+
+  it.each([
+    { firstSave: "editor", startsWithDraft: true },
+    { firstSave: "model picker", startsWithDraft: true },
+    { firstSave: "editor", startsWithDraft: false },
+    { firstSave: "model picker", startsWithDraft: false },
+  ])(
+    "merges edits to the same draft when the $firstSave saves first (existing draft: $startsWithDraft)",
+    async ({ firstSave, startsWithDraft }) => {
+      const sharedStorage = createMemoryStorage();
+      vi.stubGlobal("localStorage", sharedStorage);
+      vi.stubGlobal("window", new EventTarget());
+      vi.useFakeTimers();
+      vi.resetModules();
+      try {
+        const editorTab = await import("./composerDraftStore");
+        const threadKey = scopedThreadKey(threadRef);
+        const previousPick = modelSelection(CODEX_DRIVER, "gpt-5.4");
+        const nextPick = modelSelection(CLAUDE_AGENT_DRIVER, "claude-sonnet-4-6", {
+          effort: "medium",
+        });
+        if (startsWithDraft) {
+          const editor = editorTab.useComposerDraftStore.getState();
+          editor.setPrompt(threadRef, "Original draft");
+          editor.setModelSelection(threadRef, previousPick);
+          await vi.advanceTimersByTimeAsync(300);
+        }
+        vi.resetModules();
+        const modelTab = await import("./composerDraftStore");
+
+        const terminal = {
+          ...makeTerminalContext({ id: "retry-console" }),
+          threadId: threadRef.threadId,
+        };
+        const prompt = `Inspect ${formatTerminalContextReference(terminal)} before retrying`;
+        const editPrompt = () => {
+          const editor = editorTab.useComposerDraftStore.getState();
+          editor.setPrompt(threadRef, prompt);
+          editor.addTerminalContexts(threadRef, [terminal]);
+        };
+        const chooseModel = () => {
+          modelTab.useComposerDraftStore.getState().setModelSelection(threadRef, nextPick, {
+            explicit: true,
+          });
+        };
+
+        if (firstSave === "editor") editPrompt();
+        else chooseModel();
+        await vi.advanceTimersByTimeAsync(300);
+        if (firstSave === "editor") chooseModel();
+        else editPrompt();
+        await vi.advanceTimersByTimeAsync(300);
+
+        const saved = JSON.parse(sharedStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY) as string);
+        expect(saved.version).toBe(9);
+        expect(saved.state.draftsByThreadKey[threadKey]).toEqual({
+          prompt,
+          attachments: [],
+          terminalContexts: [terminal],
+          modelSelectionByProvider: {
+            ...(startsWithDraft ? { [previousPick.instanceId]: previousPick } : {}),
+            [nextPick.instanceId]: nextPick,
+          },
+          activeProvider: nextPick.instanceId,
+          modelSelectionExplicit: true,
+        });
+      } finally {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+        vi.resetModules();
+      }
+    },
+  );
+
+  it("keeps a cleared prompt empty when a stale tab changes its model", async () => {
+    const sharedStorage = createMemoryStorage();
+    vi.stubGlobal("localStorage", sharedStorage);
+    vi.stubGlobal("window", new EventTarget());
+    vi.useFakeTimers();
+    vi.resetModules();
+    try {
+      const editorTab = await import("./composerDraftStore");
+      const editor = editorTab.useComposerDraftStore.getState();
+      const threadKey = scopedThreadKey(threadRef);
+      const readDraft = () => JSON.parse(sharedStorage.getItem(COMPOSER_DRAFT_STORAGE_KEY) as string)
+        .state.draftsByThreadKey[threadKey];
+      editor.setPrompt(threadRef, "Clear this Unicode draft 雪");
+      await vi.advanceTimersByTimeAsync(300);
+      vi.resetModules();
+      const pickerTab = await import("./composerDraftStore");
+      expect(pickerTab.useComposerDraftStore.getState().draftsByThreadKey[threadKey]?.prompt)
+        .toBe("Clear this Unicode draft 雪");
+
+      editor.clearComposerContent(threadRef);
+      await vi.advanceTimersByTimeAsync(300);
+      expect(readDraft()).toBeUndefined();
+      const model = modelSelection(CLAUDE_AGENT_DRIVER, "claude-sonnet-4-6");
+      pickerTab.useComposerDraftStore.getState().setModelSelection(threadRef, model, { explicit: true });
+      await vi.advanceTimersByTimeAsync(300);
+
+      expect(readDraft()).toMatchObject({ prompt: "", attachments: [], activeProvider: model.instanceId });
     } finally {
       vi.useRealTimers();
       vi.unstubAllGlobals();

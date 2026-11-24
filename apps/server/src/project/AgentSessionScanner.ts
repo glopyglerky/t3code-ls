@@ -1,6 +1,6 @@
 import * as NodeOS from "node:os";
 import * as NodeSqlite from "node:sqlite";
-
+import * as NodeZlib from "node:zlib";
 import {
   AgentSessionImportSource,
   AgentSessionScanError,
@@ -14,6 +14,7 @@ import {
   type AgentSessionScanResult,
   type ProviderInstanceConfig,
 } from "@t3tools/contracts";
+import * as NodeStream from "@effect/platform-node/NodeStream";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -22,6 +23,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Pull from "effect/Pull";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
@@ -29,6 +31,7 @@ import * as Stream from "effect/Stream";
 import { isBareGitConfig, parseOriginUrlFromGitConfig } from "@t3tools/shared/git";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
+import { selectNativeExecutable } from "@t3tools/shared/nativeExecutable";
 import { repositoryPathFromRemoteUrl } from "@t3tools/source-control-core/server/SourceControlProvider";
 
 import * as ServerConfig from "../config.ts";
@@ -86,6 +89,45 @@ const MAX_IMPORT_HISTORY_BYTES = 32 * 1024 * 1024;
 const MAX_IMPORT_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_IMPORT_TRANSCRIPTS = 100;
 const MAX_IMPORT_RECORDS = 100_000;
+const isCompressedRollout = (filePath: string) => filePath.endsWith(".jsonl.zst");
+
+// Feed the transform through the same descriptor checked by the caller.
+const openTranscriptReader = Effect.fn("AgentSessionScanner.openTranscriptReader")(function* (
+  file: FileSystem.File,
+  filePath: string,
+  inputBytes: number,
+  reserveInput: (bytes: number) => number = (bytes) => bytes,
+) {
+  if (!isCompressedRollout(filePath)) return (size: number) => file.readAlloc(size);
+  const input = Stream.unfold(0, Effect.fnUntraced(function* (offset: number) {
+    if (offset === inputBytes) return;
+    const size = reserveInput(Math.min(TRANSCRIPT_PREFIX_BYTES, inputBytes - offset));
+    if (size === 0) {
+      return yield* new TranscriptParseError({ filePath, cause: "Compressed input budget exhausted" });
+    }
+    const bytes = yield* file.readAlloc(size);
+    if (Option.isNone(bytes)) {
+      return yield* new TranscriptParseError({ filePath, cause: "Compressed file ended before its recorded size" });
+    }
+    return [bytes.value, offset + bytes.value.byteLength] as const;
+  }));
+  const pull = yield* Stream.toPull(input.pipe(NodeStream.pipeThroughSimple(() =>
+    NodeZlib.createZstdDecompress({ chunkSize: TRANSCRIPT_PREFIX_BYTES }),
+  )));
+  let pending: ReadonlyArray<Uint8Array> = [];
+  let done = false;
+  return Effect.fnUntraced(function* (size: number) {
+    while (pending.length === 0 && !done) {
+      const chunk = yield* pull.pipe(Pull.catchDone(() => Effect.undefined));
+      if (chunk === undefined) done = true;
+      else pending = chunk;
+    }
+    const [chunk, ...rest] = pending;
+    if (chunk === undefined) return Option.none<Uint8Array>();
+    pending = chunk.byteLength > size ? [chunk.subarray(size), ...rest] : rest;
+    return Option.some(chunk.subarray(0, size));
+  });
+});
 
 /**
  * open() of a file under macOS privacy protection waits on a consent prompt
@@ -166,6 +208,10 @@ const decodePiEntryLinks = Schema.decodeUnknownOption(
 );
 const selectTranscriptPath = createTranscriptJsonSelector(TranscriptRecord);
 const decodeCodexTurnMetadata = Schema.decodeUnknownOption(CodexTurnMetadata);
+const MAX_NATIVE_CODEX_IMPORT_FRAME = 1024 * 1024;
+const decodeCodexImportIndices = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Tuple([Schema.Literal(1), Schema.Array(Schema.Int)])),
+);
 export const decodeImportedTranscriptPayload = Schema.decodeUnknownOption(
   Schema.Struct({
     cwd: Schema.optional(Schema.String),
@@ -177,7 +223,7 @@ const decodeCodexHistoryBase = Schema.decodeUnknownOption(
 );
 // Original rollouts end in their thread ID, rewound ones in `<thread ID>_<rollout ID>`.
 const CODEX_ROLLOUT_ID_PATTERN =
-  /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}))?\.jsonl$/i;
+  /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}))?\.jsonl(?:\.zst)?$/i;
 // Codex records a chat's project only here; moving a chat leaves its rollout cwd unchanged.
 const CODEX_STATE_DATABASE = "state_5.sqlite";
 const decodeCodexSessionIndexEntry = Schema.decodeUnknownOption(
@@ -327,6 +373,44 @@ function isHiddenClaudeRecord(record: DecodedTranscriptRecord): boolean {
   return record.isSidechain === true || record.isMeta === true || record.isCompactSummary === true;
 }
 
+// Claude Code records its own UI as user turns: slash commands, `!` shell runs and
+// their output, task notifications. Keep what the user typed, as they typed it.
+const CLAUDE_UI_OUTPUT =
+  /^(?:<(?:task-notification|local-command-stdout|local-command-stderr|local-command-caveat|bash-stdout|bash-stderr)>|\[Request interrupted by user(?: for tool use)?\]$)/;
+
+/**
+ * A slash command as typed. Its arguments may name the thread; a bare command
+ * leaves that to a later prompt. Null for any other text.
+ */
+function claudeCommand(text: string): { readonly text: string; readonly titleText: string } | null {
+  if (!/^<command-(?:name|message)>/.test(text)) return null;
+  const name =
+    /<command-name>([^<]*)<\/command-name>/.exec(text)?.[1]?.trim() ||
+    `/${/<command-message>([^<]*)<\/command-message>/.exec(text)?.[1]?.trim() ?? ""}`;
+  const args = /<command-args>([\s\S]*?)<\/command-args>/.exec(text)?.[1]?.trim() ?? "";
+  return { text: args.length === 0 ? name : `${name} ${args}`, titleText: args };
+}
+
+/** What a Claude user turn shows the user typed, and the part of it that may name the thread. */
+function claudeUserText(text: string): { readonly text: string; readonly titleText: string } {
+  if (CLAUDE_UI_OUTPUT.test(text)) return { text: "", titleText: "" };
+  const shellInput = /^<bash-input>([\s\S]*)<\/bash-input>$/.exec(text)?.[1];
+  if (shellInput !== undefined) return { text: `!${shellInput}`, titleText: "" };
+  return claudeCommand(text) ?? { text, titleText: text };
+}
+
+function claudeVisibleText(record: DecodedTranscriptRecord) {
+  const text = extractText(record.message?.content);
+  return record.type === "user" ? claudeUserText(text) : { text, titleText: text };
+}
+
+/** Saved titles can be the raw markup of a user turn, such as the command that opened the session. */
+function claudeTitle(title: string | undefined): string | undefined {
+  const trimmed = title?.trim();
+  if (!trimmed) return undefined;
+  return claudeUserText(trimmed).text === trimmed ? trimmed : undefined;
+}
+
 // Claude repeats session fields on records that need not be retained.
 interface ClaudeFields {
   readonly sessionId: string | undefined;
@@ -347,10 +431,12 @@ function foldClaudeFields(fields: ClaudeFields, record: DecodedTranscriptRecord)
   const model = record.message?.model?.trim();
   return {
     sessionId: record.sessionId?.trim() || fields.sessionId,
-    title: record.aiTitle?.trim() || fields.title,
+    title: claudeTitle(record.aiTitle) ?? fields.title,
     // Claude flushes the AI title after the user's rename; an empty rename clears it.
     customTitle:
-      record.customTitle === undefined ? fields.customTitle : record.customTitle.trim() || null,
+      record.customTitle === undefined
+        ? fields.customTitle
+        : (claudeTitle(record.customTitle) ?? null),
     // Claude uses this sentinel for local error responses. It is not a
     // model ID that can be selected when the imported session resumes.
     model: model && model !== "<synthetic>" ? model : fields.model,
@@ -441,11 +527,81 @@ export function parseAgentSessionTranscript(
   return parseAgentSessionRecords(input, records, claudeFields, 0);
 }
 
+// Null ends a turn, a string is a canonical user event, and a pair is a response copy.
+type CodexCanonicalRow = null | string | readonly [turnId: string, text: string];
+
+function* codexCanonicalRows(
+  records: ReadonlyArray<DecodedTranscriptRecord>,
+): Generator<readonly [number, CodexCanonicalRow]> {
+  for (const [index, record] of records.entries()) {
+    const payload = record.payload;
+    if (record.type === "event_msg" && payload?.type === "user_message") {
+      const text = payload.message?.trim() ?? "";
+      if (text.length > 0) yield [index, text] as const;
+    }
+    if (record.type !== "response_item" || payload?.type !== "message") continue;
+    if (payload.role === "assistant") {
+      yield [index, null] as const;
+    } else if (payload.role === "user") {
+      const turnId = codexTurnId(payload.internal_chat_message_metadata_passthrough);
+      const text = extractText(payload.content);
+      if (turnId !== null && text.length > 0) yield [index, [turnId, text] as const] as const;
+    }
+  }
+}
+
+function canonicalCodexResponseUsers(records: ReadonlyArray<DecodedTranscriptRecord>) {
+  const suppressed = new Set<number>();
+  const eventTexts = new Set<string>();
+  const responses: Array<readonly [number, readonly [string, string]]> = [];
+  const finishTurn = () => {
+    const canonicalTurnIds = new Set(
+      responses.flatMap(([, [turnId, text]]) => (eventTexts.has(text) ? [turnId] : [])),
+    );
+    for (const [index, [turnId]] of responses) {
+      if (canonicalTurnIds.has(turnId)) suppressed.add(index);
+    }
+    eventTexts.clear();
+    responses.length = 0;
+  };
+  for (const [index, row] of codexCanonicalRows(records)) {
+    if (row === null) finishTurn();
+    else if (typeof row === "string") eventTexts.add(row);
+    else responses.push([index, row]);
+  }
+  finishTurn();
+  return suppressed;
+}
+
+function encodeCodexCanonicalRequest(records: ReadonlyArray<DecodedTranscriptRecord>) {
+  if (records.length > MAX_IMPORT_RECORDS) return undefined;
+  const rows: Array<string> = [];
+  const responseRows = new Map<number, number>();
+  let bytes = Buffer.byteLength("[1,[]]\n", "utf8");
+  for (const [index, row] of codexCanonicalRows(records)) {
+    if (typeof row === "string" && (row.length > MAX_NATIVE_CODEX_IMPORT_FRAME || !row.isWellFormed())) {
+      return undefined;
+    }
+    if (row !== null && typeof row !== "string") {
+      const [turnId, text] = row;
+      if (turnId.length + text.length > MAX_NATIVE_CODEX_IMPORT_FRAME ||
+        !turnId.isWellFormed() || !text.isWellFormed()) return undefined;
+      responseRows.set(rows.length, index);
+    }
+    const encoded = JSON.stringify(row);
+    bytes += Buffer.byteLength(encoded, "utf8") + Number(rows.length > 0);
+    if (bytes > MAX_NATIVE_CODEX_IMPORT_FRAME) return undefined;
+    rows.push(encoded);
+  }
+  return { stdin: `[1,[${rows.join(",")}]]\n`, responseRows };
+}
+
 function parseAgentSessionRecords(
   input: AgentSessionTranscriptMetadata,
   records: ReadonlyArray<DecodedTranscriptRecord>,
   claudeFields: ClaudeFields,
   droppedMessageCount: number,
+  nativeCodexResponseUsers?: ReadonlySet<number>,
 ): AgentSessionThread | null {
   const fallbackTimestamp = DateTime.formatIso(DateTime.makeUnsafe(input.lastActiveAtMs));
   // Claude filenames are session IDs. Codex rollout filenames include extra
@@ -463,73 +619,29 @@ function parseAgentSessionRecords(
       : (claudeFields.title ?? null);
   let model = claudeFields.model ?? null;
   let derivedTitle: string | undefined;
+  let bareCommandTitle: string | undefined;
   let hasCodexSessionId = false;
   const messages: Array<AgentSessionThreadMessage & { readonly codexResponseUser: boolean }> = [];
   let firstUserMessage:
     | (AgentSessionThreadMessage & { readonly codexResponseUser: boolean })
     | undefined;
-  const canonicalCodexResponseUserIndices = new Set<number>();
-  let canonicalUserTextsInTurn = new Set<string>();
-  let responseUsersInTurn: Array<{
-    readonly index: number;
-    readonly turnId: string;
-    readonly text: string;
-  }> = [];
-  const finishCodexTurn = () => {
-    const canonicalTurnIds = new Set(
-      responseUsersInTurn.flatMap((responseUser) =>
-        canonicalUserTextsInTurn.has(responseUser.text) ? [responseUser.turnId] : [],
-      ),
-    );
-    for (const responseUser of responseUsersInTurn) {
-      if (canonicalTurnIds.has(responseUser.turnId)) {
-        canonicalCodexResponseUserIndices.add(responseUser.index);
-      }
-    }
-    canonicalUserTextsInTurn = new Set();
-    responseUsersInTurn = [];
-  };
-  if (input.source === "codex") {
-    let recordIndex = -1;
-    for (const record of records) {
-      recordIndex += 1;
-      if (
-        record.type === "response_item" &&
-        record.payload?.type === "message" &&
-        record.payload.role === "assistant"
-      ) {
-        finishCodexTurn();
-        continue;
-      }
-      if (record.type === "event_msg" && record.payload?.type === "user_message") {
-        const text = record.payload.message?.trim() ?? "";
-        if (text.length > 0) canonicalUserTextsInTurn.add(text);
-        continue;
-      }
-      if (
-        record.type === "response_item" &&
-        record.payload?.type === "message" &&
-        record.payload.role === "user"
-      ) {
-        const turnId = codexTurnId(record.payload.internal_chat_message_metadata_passthrough);
-        const text = extractText(record.payload.content);
-        if (turnId !== null && text.length > 0) {
-          responseUsersInTurn.push({ index: recordIndex, turnId, text });
-        }
-      }
-    }
-    finishCodexTurn();
-  }
+  const canonicalCodexResponseUserIndices = input.source === "codex"
+    ? nativeCodexResponseUsers ?? canonicalCodexResponseUsers(records)
+    : undefined;
 
   let conversationMessageCount = 0;
   const retainMessage = (
     message: AgentSessionThreadMessage & { readonly codexResponseUser: boolean },
+    titleText = message.text,
   ) => {
     if (firstUserMessage === undefined && message.role === "user") {
       firstUserMessage = message;
     }
     if (derivedTitle === undefined && message.role === "user") {
-      derivedTitle = deriveTitle(input.source, message.text);
+      derivedTitle = deriveTitle(input.source, titleText);
+      if (input.source === "claudeAgent" && derivedTitle === undefined) {
+        bareCommandTitle ??= deriveTitle(input.source, message.text);
+      }
     }
     conversationMessageCount += 1;
     messages.push(message);
@@ -570,14 +682,14 @@ function parseAgentSessionRecords(
     if (input.source === "claudeAgent") {
       if (isHiddenClaudeRecord(record)) continue;
       if (record.type !== "user" && record.type !== "assistant") continue;
-      const text = extractText(record.message?.content);
+      const { text, titleText } = claudeVisibleText(record);
       if (text.length === 0) continue;
       retainMessage({
         role: record.type,
         text,
         createdAt: normalizeTimestamp(record.timestamp, fallbackTimestamp),
         codexResponseUser: false,
-      });
+      }, titleText);
       continue;
     }
 
@@ -625,7 +737,7 @@ function parseAgentSessionRecords(
 
     const extractedText = extractText(record.payload.content);
     if (extractedText.length === 0) continue;
-    if (record.payload.role === "user" && canonicalCodexResponseUserIndices.has(recordIndex)) {
+    if (record.payload.role === "user" && canonicalCodexResponseUserIndices?.has(recordIndex)) {
       continue;
     }
     if (record.payload.role === "user" && hasMatchingCodexEventInTurn(extractedText)) {
@@ -653,7 +765,7 @@ function parseAgentSessionRecords(
     source: input.source,
     providerInstanceId: input.providerInstanceId,
     providerSessionId,
-    title: claudeFields.customTitle ?? title ?? derivedTitle ?? "Imported thread",
+    title: claudeFields.customTitle ?? title ?? derivedTitle ?? bareCommandTitle ?? "Imported thread",
     model,
     createdAt: retainedMessages[0]?.createdAt ?? fallbackTimestamp,
     updatedAt: fallbackTimestamp,
@@ -677,6 +789,7 @@ function shouldRetainDecodedRecord(
     if (isHiddenClaudeRecord(record) || (record.type !== "user" && record.type !== "assistant")) {
       return false;
     }
+    if (record.type === "user") return claudeVisibleText(record).text.length > 0;
     const content = record.message?.content;
     return typeof content === "string"
       ? content.trim().length > 0
@@ -831,6 +944,50 @@ export const make = Effect.gen(function* () {
   const isWindows = platform === "win32";
   const foldWorktreeCase = isWindows;
   const hostEnvironment = yield* HostProcess.Environment;
+  const architecture = yield* HostProcess.Architecture;
+  const codexImportHelper = hostEnvironment.T3_CODE_LS_CODEX_IMPORT_NATIVE === "1"
+    ? selectNativeExecutable(
+        "project",
+        hostEnvironment.T3_CODE_LS_PROJECT_EXECUTABLE,
+        platform,
+        architecture,
+        hostEnvironment.T3_CODE_LS_IMPLEMENTATION,
+      )
+    : undefined;
+  const nativeCodexResponseUsers = Effect.fn("AgentSessionScanner.nativeCodexResponseUsers")(
+    function* (records: ReadonlyArray<DecodedTranscriptRecord>) {
+      if (codexImportHelper === undefined || !path.isAbsolute(codexImportHelper) ||
+        codexImportHelper.includes("\0")) return undefined;
+      const request = encodeCodexCanonicalRequest(records);
+      if (request === undefined) return undefined;
+      const { stdin, responseRows } = request;
+      if (responseRows.size === 0) return new Set<number>();
+      const output = yield* processRunner.run({
+        command: codexImportHelper,
+        args: ["codex-import"],
+        env: {},
+        extendEnv: false,
+        stdin,
+        timeout: "5 seconds",
+        maxOutputBytes: MAX_NATIVE_CODEX_IMPORT_FRAME,
+        outputMode: "error",
+      }).pipe(Effect.orElseSucceed(() => undefined));
+      if (!output || output.code !== 0 || output.stderr !== "" || output.timedOut ||
+        output.stdoutTruncated || output.stdoutInvalidUtf8 || !output.stdout.endsWith("\n") ||
+        output.stdout.slice(0, -1).includes("\n")) return undefined;
+      const decoded = Option.getOrUndefined(decodeCodexImportIndices(output.stdout));
+      if (decoded === undefined) return undefined;
+      const suppressed = new Set<number>();
+      let previous = -1;
+      for (const row of decoded[1]) {
+        const sourceIndex = responseRows.get(row);
+        if (sourceIndex === undefined || row <= previous) return undefined;
+        previous = row;
+        suppressed.add(sourceIndex);
+      }
+      return suppressed;
+    },
+  );
   const homeDir = yield* HostProcess.HomeDirectory;
   // `/private/tmp` is what macOS reports for sessions started in `/tmp`.
   const excludedProjectRoots = new Set(
@@ -1041,7 +1198,19 @@ export const make = Effect.gen(function* () {
             let remaining = "";
             let bytesRead = 0;
             let recordsRead = 0;
-            const maxBytes = Math.min(MAX_TRANSCRIPT_SCAN_BYTES, transcript.identity.size);
+            const compressed = isCompressedRollout(transcript.filePath);
+            const inputBytes = Math.min(MAX_TRANSCRIPT_SCAN_BYTES, transcript.identity.size);
+            const maxBytes = compressed ? MAX_TRANSCRIPT_SCAN_BYTES : inputBytes;
+            const read = yield* openTranscriptReader(file, transcript.filePath, inputBytes, (size) => {
+              if (budget.operationsRemaining === 0 || budget.bytesRemaining === 0) {
+                budget.truncated = true;
+                return 0;
+              }
+              budget.operationsRemaining -= 1;
+              const reserved = Math.min(size, budget.bytesRemaining);
+              budget.bytesRemaining -= reserved;
+              return reserved;
+            });
             const reserveRecord = () => {
               if (
                 recordsRead === MAX_METADATA_RECORDS_PER_TRANSCRIPT ||
@@ -1073,7 +1242,7 @@ export const make = Effect.gen(function* () {
               );
               budget.operationsRemaining -= 1;
               budget.bytesRemaining -= readSize;
-              const next = yield* file.readAlloc(readSize);
+              const next = yield* read(readSize);
               if (Option.isNone(next)) {
                 return readLastRecord();
               }
@@ -1090,7 +1259,7 @@ export const make = Effect.gen(function* () {
               }
             }
 
-            if (bytesRead < transcript.identity.size) {
+            if (compressed || bytesRead < transcript.identity.size) {
               budget.truncated = true;
               return null;
             }
@@ -1106,9 +1275,17 @@ export const make = Effect.gen(function* () {
     expected: ReturnType<typeof transcriptIdentity>,
     source: AgentSessionSource,
     prefix?: { readonly endByteOffset: number; readonly historyBytes: number },
+    expanded?: { readonly available: number; readonly debit: (bytes: number) => void },
   ) {
-    const readBytes = prefix?.endByteOffset ?? expected.size;
-    if (readBytes > expected.size || readBytes > MAX_IMPORTED_TRANSCRIPT_BYTES) return null;
+    const compressed = isCompressedRollout(filePath);
+    const capacity = compressed ? expanded?.available ?? 0 : expected.size;
+    const readBytes = prefix?.endByteOffset ?? Math.min(capacity, MAX_IMPORTED_TRANSCRIPT_BYTES);
+    if (
+      readBytes > capacity ||
+      readBytes > MAX_IMPORTED_TRANSCRIPT_BYTES ||
+      (compressed && (capacity === 0 || expected.size > MAX_IMPORTED_TRANSCRIPT_BYTES))
+    ) return null;
+    const verifyEnd = compressed && prefix === undefined;
 
     return yield* Effect.scoped(
       fileSystem.open(filePath, { flag: "r" }).pipe(
@@ -1117,6 +1294,7 @@ export const make = Effect.gen(function* () {
             if (!sameTranscriptIdentity(expected, transcriptIdentity(filePath, yield* file.stat))) {
               return null;
             }
+            const read = yield* openTranscriptReader(file, filePath, expected.size);
             const records: Array<DecodedTranscriptRecord> = [];
             const claudeHistory = createClaudeHistoryWindow();
             let cwd = Option.none<string>();
@@ -1176,15 +1354,18 @@ export const make = Effect.gen(function* () {
               return true;
             };
 
-            while (bytesRead < readBytes) {
-              const next = yield* file.readAlloc(
-                Math.min(TRANSCRIPT_PREFIX_BYTES, readBytes - bytesRead),
+            while (bytesRead < readBytes || verifyEnd) {
+              const next = yield* read(
+                Math.min(TRANSCRIPT_PREFIX_BYTES, readBytes - bytesRead + Number(verifyEnd)),
               );
               if (Option.isNone(next)) {
+                if (verifyEnd) break;
                 return null;
               }
 
+              if (compressed) expanded?.debit(Math.min(next.value.byteLength, readBytes - bytesRead));
               bytesRead += next.value.byteLength;
+              if (bytesRead > readBytes) return null;
               const withinBudget = yield* Effect.try({
                 try: () => {
                   let start = 0;
@@ -1398,7 +1579,8 @@ export const make = Effect.gen(function* () {
             }
             const directory = path.join(sessionsDir, year, month, day);
             for (const entry of (yield* readDirectory(directory)).toSorted().toReversed()) {
-              if (!entry.startsWith("rollout-") || !entry.endsWith(".jsonl")) continue;
+              if (!entry.startsWith("rollout-") ||
+                (!entry.endsWith(".jsonl") && !isCompressedRollout(entry))) continue;
               if (operationsRemaining <= 0) {
                 truncated = true;
                 break;
@@ -1905,6 +2087,13 @@ export const make = Effect.gen(function* () {
     const importedSessions = new Set<string>();
     const codexThreadNamesByHome = new Map<string, ReadonlyMap<string, string>>();
     let bytesRemaining = MAX_IMPORT_BYTES;
+    // Reserve the encoded input by file size and charge decoded bytes as the parser consumes them.
+    const expandedBudget = () => ({
+      available: bytesRemaining,
+      debit: (bytes: number) => {
+        bytesRemaining -= bytes;
+      },
+    });
     let transcriptsRemaining = MAX_IMPORT_TRANSCRIPTS;
     const codexRolloutPaths = new Map<ProviderInstanceId, ReadonlyMap<string, string>>();
     const codexRolloutPath = (providerInstanceId: ProviderInstanceId, rolloutId: string) => {
@@ -1942,12 +2131,17 @@ export const make = Effect.gen(function* () {
         visited.add(base.thread_id);
         const stats = yield* statOption(filePath);
         if (Option.isNone(stats) || stats.value.type !== "File") return null;
-        bytesRemaining -= base.end_byte_offset;
+        const identity = transcriptIdentity(filePath, stats.value);
+        const compressed = isCompressedRollout(filePath);
+        const diskBytes = compressed ? identity.size : base.end_byte_offset;
+        if (diskBytes > bytesRemaining) return null;
+        bytesRemaining -= diskBytes;
         const inherited = yield* readTranscript(
           filePath,
-          transcriptIdentity(filePath, stats.value),
+          identity,
           "codex",
           { endByteOffset: base.end_byte_offset, historyBytes },
+          compressed ? expandedBudget() : undefined,
         );
         if (inherited === null) return null;
         historyBytes = inherited.historyBytes;
@@ -1993,7 +2187,13 @@ export const make = Effect.gen(function* () {
           }
           transcriptsRemaining -= 1;
           bytesRemaining -= identity.size;
-          const snapshot = yield* readTranscript(transcript.filePath, identity, candidate.source);
+          const snapshot = yield* readTranscript(
+            transcript.filePath,
+            identity,
+            candidate.source,
+            undefined,
+            isCompressedRollout(transcript.filePath) ? expandedBudget() : undefined,
+          );
           if (snapshot === null) {
             return Option.some<AgentSessionRecentThread>({ _tag: "Skipped" });
           }
@@ -2020,6 +2220,12 @@ export const make = Effect.gen(function* () {
                   snapshot.historyBytes,
                 )
               : null;
+          const records = inheritedRecords === null
+            ? snapshot.records
+            : [...inheritedRecords, ...snapshot.records];
+          const nativeResponseUsers = candidate.source === "codex"
+            ? yield* nativeCodexResponseUsers(records)
+            : undefined;
           const parsedThread = parseAgentSessionRecords(
             {
               source: candidate.source,
@@ -2027,11 +2233,10 @@ export const make = Effect.gen(function* () {
               fallbackSessionId: path.basename(transcript.filePath, ".jsonl"),
               lastActiveAtMs: transcript.mtimeMs,
             },
-            inheritedRecords === null
-              ? snapshot.records
-              : [...inheritedRecords, ...snapshot.records],
+            records,
             snapshot.claudeFields,
             snapshot.droppedMessageCount,
+            nativeResponseUsers,
           );
           if (parsedThread === null) {
             return Option.some<AgentSessionRecentThread>({ _tag: "Skipped" });

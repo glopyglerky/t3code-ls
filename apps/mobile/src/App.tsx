@@ -1,6 +1,7 @@
 import { installPermissionUpdateNotice } from "./features/connection/permissionUpdateNotice";
 import { installComposerAttachmentUploads } from "./state/composer-attachment-uploads";
 import { installThreadOutboxDelivery } from "./state/threadOutboxDelivery";
+import { selectOutboxDeliveryResolver } from "./native/outboxDelivery";
 import * as Linking from "expo-linking";
 import * as SplashScreen from "expo-splash-screen";
 import { requireNativeModule } from "expo";
@@ -96,6 +97,7 @@ import {
   attachRootNavigation,
   flushRootNavigationQueue,
   linkToRootPath,
+  linkToRootPathAndWaitForDispatch,
   rootNavigationRef,
 } from "./lib/rootNavigation";
 import { pruneNewTaskFlowStates } from "./features/threads/new-task-flow-state";
@@ -200,10 +202,10 @@ const appServiceDisposers = [
   installAppearanceRuntime(),
   installSubscriptionUsageRefresh(),
   installPermissionUpdateNotice(),
-  installThreadOutboxDelivery(),
+  installThreadOutboxDelivery(selectOutboxDeliveryResolver()),
   installComposerAttachmentUploads(),
   startIncomingShareInbox(),
-  installAgentNotificationNavigation(linkToAppPath),
+  installAgentNotificationNavigation((href) => linkToRootPathAndWaitForDispatch(href, appLinkAction)),
   installAppShortcuts(linkToAppPath),
   installAppUpdateChecks(),
   installShowcaseCapture(rootPathnameFromState),

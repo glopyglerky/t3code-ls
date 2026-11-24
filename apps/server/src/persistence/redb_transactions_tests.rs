@@ -77,6 +77,100 @@ async fn application_schema_is_explicit_idempotent_and_immutable() {
 }
 
 #[tokio::test]
+async fn application_generation_checks_engine_layout_and_exact_catalog() {
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    let mut transactions = initialized(&store).await;
+    let bytes = store.db.read(&schema_key()).await.unwrap().unwrap();
+    let catalog = decode_catalog(&bytes).unwrap();
+    let key = generation_identity_key(&catalog);
+    let identity = transactions.generation_identity().await.unwrap().unwrap();
+    assert_eq!(identity, generation_identity(&catalog, &bytes));
+    let expected_pin = format!(
+        "name = \"redb\"\nversion = \"{}\"\nsource = \"git+https://github.com/glopyglerky/omdb?rev={}#{}\"",
+        identity.engine_version, identity.engine_revision, identity.engine_revision
+    );
+    assert!(include_str!("../../../../Cargo.lock").contains(&expected_pin));
+    transactions
+        .begin_mode("reader-before", ApplicationTransactionMode::Read, None)
+        .await
+        .unwrap();
+
+    for mismatched in [
+        ApplicationGenerationIdentity {
+            engine: "fjall".into(),
+            ..identity.clone()
+        },
+        ApplicationGenerationIdentity {
+            layout: "other-layout".into(),
+            ..identity.clone()
+        },
+        ApplicationGenerationIdentity {
+            catalog_sha256: "0".repeat(64),
+            ..identity.clone()
+        },
+    ] {
+        let mut writer = store.db.begin().await.unwrap();
+        writer
+            .put(key.clone(), bounded_encode(&mismatched).unwrap())
+            .await
+            .unwrap();
+        writer.commit().await.unwrap();
+        assert!(matches!(
+            transactions.schema().await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert!(matches!(
+            transactions.begin("writer").await,
+            Err(Error::IncompatibleStore)
+        ));
+        assert!(matches!(
+            store.bootstrap_application().await,
+            Err(Error::IncompatibleStore)
+        ));
+    }
+
+    let mut writer = store.db.begin().await.unwrap();
+    writer.delete(key).await.unwrap();
+    writer.commit().await.unwrap();
+    assert_eq!(transactions.schema().await.unwrap(), Some(schema()));
+    assert!(transactions.generation_identity().await.unwrap().is_none());
+    assert!(!transactions.initialize(schema()).await.unwrap());
+    assert!(transactions.generation_identity().await.unwrap().is_none());
+
+    let mut changed = catalog;
+    changed
+        .schema
+        .tables
+        .retain(|table| table.name == "receipts");
+    let changed_bytes = encode_catalog(&changed).unwrap();
+    let mut writer = store.db.begin().await.unwrap();
+    record_generation_identity(&mut writer, &changed, &changed_bytes)
+        .await
+        .unwrap();
+    writer.put(schema_key(), changed_bytes).await.unwrap();
+    writer.commit().await.unwrap();
+
+    transactions
+        .begin_mode("reader-after", ApplicationTransactionMode::Read, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        transactions.sessions["reader-after"].catalog.as_ref(),
+        &changed
+    );
+    assert!(
+        transactions
+            .get("reader-before", "records", &[json!("one")])
+            .await
+            .unwrap()
+            .is_none()
+    );
+    transactions.rollback("reader-before").await.unwrap();
+    transactions.rollback("reader-after").await.unwrap();
+}
+
+#[tokio::test]
 async fn rows_commit_atomically_with_snapshot_isolation_and_restart() {
     let fixture = TestFixture::start().await;
     let store = fixture.initialize().await;
@@ -1258,4 +1352,56 @@ async fn helper_writer_guard_expires_owners_without_touching_live_read_snapshots
         .await
         .unwrap();
     transactions.rollback("replacement").await.unwrap();
+}
+
+#[test]
+fn forward_catalog_marker_is_strict_and_keeps_the_serving_fence() {
+    let plain = json!({"schema": schema(), "generation": "native"});
+    let marker = json!({
+        "update_id": "aa212c2b-63d4-4b28-97e4-1c1d6dc6d281",
+        "forward_selection_sha256": "a".repeat(64)
+    });
+    let mut marked = plain.clone();
+    marked["forward_service_activation_v1"] = marker.clone();
+    let bytes = serde_json::to_vec(&marked).unwrap();
+    let catalog = decode_catalog(&bytes).expect("the compatible reader must retain the marker");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&encode_catalog(&catalog).unwrap()).unwrap(),
+        marked
+    );
+    assert!(matches!(
+        catalog.ensure_serving(),
+        Err(Error::IncompatibleStore)
+    ));
+
+    let seal = json!({
+        "update_id": marker["update_id"],
+        "from_version": "1.2.3", "target_version": "1.2.4",
+        "target_entry_sha256": "a".repeat(64), "target_helper_sha256": "b".repeat(64),
+        "target_schema_sha256": "c".repeat(64),
+    });
+    let mut both = marked.clone();
+    both["prepared_service_activation_v1"] = seal;
+    assert!(decode_catalog(&serde_json::to_vec(&both).unwrap()).is_err());
+    for invalid in [
+        Value::Null,
+        json!({"update_id": marker["update_id"]}),
+        json!({"update_id": "wrong", "forward_selection_sha256": marker["forward_selection_sha256"]}),
+        json!({"update_id": marker["update_id"], "forward_selection_sha256": "A".repeat(64)}),
+        json!({"update_id": marker["update_id"], "forward_selection_sha256": marker["forward_selection_sha256"], "ready": true}),
+    ] {
+        marked["forward_service_activation_v1"] = invalid;
+        assert!(decode_catalog(&serde_json::to_vec(&marked).unwrap()).is_err());
+    }
+    let duplicate = format!(
+        "{{\"forward_service_activation_v1\":{marker},\"forward_service_activation_v1\":{marker},{}",
+        plain.to_string().strip_prefix('{').unwrap()
+    );
+    assert!(decode_catalog(duplicate.as_bytes()).is_err());
+    assert!(
+        decode_catalog(&serde_json::to_vec(&plain).unwrap())
+            .unwrap()
+            .ensure_serving()
+            .is_ok()
+    );
 }

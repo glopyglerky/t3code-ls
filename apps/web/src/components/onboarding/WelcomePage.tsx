@@ -50,6 +50,7 @@ import { PRIVACY_POLICY_URL } from "../../legalLinks";
 import { workspaceAreaProps } from "../../lib/workspaceFocus";
 import { useT3ConnectAuthPrompt } from "../clerk/useT3ConnectAuthPrompt";
 import { completeOnboarding } from "../../onboarding/firstRun";
+import { DioxusWelcomeControls } from "./DioxusWelcomeControls";
 import {
   groupOnboardingProjects,
   partitionOnboardingProjects,
@@ -157,6 +158,7 @@ export function WelcomePage({
     storeSelection(next);
   };
   const [isImporting, setIsImporting] = useState(false);
+  const [useStandardControls, setUseStandardControls] = useState(false);
   // True from Start until the landing; leaving earlier would drop the import or the landing.
   const holdPageRef = useRef(false);
   useBlocker({
@@ -290,31 +292,42 @@ export function WelcomePage({
               />
               {showPhone ? <PhoneSection environmentId={environmentId} /> : null}
             </div>
-            <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-              {agentReady ? (
-                <span />
-              ) : (
-                <Button variant="ghost-muted" disabled={isImporting} onClick={start}>
-                  Start without an agent
-                </Button>
-              )}
-              <div className="flex items-center gap-3">
-                {agentReady ? null : (
-                  <span className="text-xs text-muted-foreground">Set up one agent to start.</span>
+            {import.meta.env.VITE_T3_CODE_LS_PAIRING_RENDERER === "dioxus" && !useStandardControls ? (
+              <DioxusWelcomeControls
+                agentReady={agentReady}
+                isImporting={isImporting}
+                selectedCount={selected.length}
+                newCount={newCount}
+                onStart={start}
+                onUseStandardSetup={() => setUseStandardControls(true)}
+              />
+            ) : (
+              <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+                {agentReady ? (
+                  <span />
+                ) : (
+                  <Button variant="ghost-muted" disabled={isImporting} onClick={start}>
+                    Start without an agent
+                  </Button>
                 )}
-                <Button disabled={!agentReady || isImporting} onClick={start}>
-                  {isImporting
-                    ? selected.length > 0
-                      ? "Importing…"
-                      : "Starting…"
-                    : newCount > 0
-                      ? `Import ${newCount} ${newCount === 1 ? "project" : "projects"} and start`
-                      : selected.length > 0
-                        ? "Import threads and start"
-                        : "Start"}
-                </Button>
+                <div className="flex items-center gap-3">
+                  {agentReady ? null : (
+                    <span className="text-xs text-muted-foreground">Set up one agent to start.</span>
+                  )}
+                  <Button disabled={!agentReady || isImporting} onClick={start}>
+                    {isImporting
+                      ? selected.length > 0
+                        ? "Importing…"
+                        : "Starting…"
+                      : newCount > 0
+                        ? `Import ${newCount} ${newCount === 1 ? "project" : "projects"} and start`
+                        : selected.length > 0
+                          ? "Import threads and start"
+                          : "Start"}
+                  </Button>
+                </div>
               </div>
-            </div>
+            )}
             <TelemetryNotice environmentId={environmentId} />
           </div>
         </div>

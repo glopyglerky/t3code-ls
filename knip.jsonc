@@ -63,6 +63,8 @@
         "scripts/probe-claude-fork-local-rollback-replay.ts",
         "scripts/update-test-shard-weights.ts",
         "scripts/verify-background-live.ts",
+        "scripts/verify-packaged-guest-authorization.ts",
+        "scripts/guest-connector-fixture.mjs",
         "src/provider/testFixtures/*.mjs",
         // Fork CI starts acceptance programs by path and compiles these contract
         // checks directly. Their imports exercise native factories and retained

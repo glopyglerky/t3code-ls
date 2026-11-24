@@ -388,6 +388,42 @@ it.effect("never sends a link's token to an address that stops answering as that
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
 
+it.effect("uses the saved alternate when the first route loses link fencing", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const first = yield* serveApart(box);
+      const b = yield* serveB(box);
+      const a = yield* makeA(laptop);
+      const pairing = yield* b.auth.issuePairingCredential();
+      const linked = yield* a.links.link({
+        url: b.url,
+        alternateUrls: [first.url],
+        pairingCode: pairing.credential,
+        access: "auto",
+        expectedEnvironmentId: box.environmentId,
+      });
+      expect(linked.urls).toEqual([b.url, first.url]);
+      // Keep the real pairing session at B and put the other descriptor route first.
+      yield* a.sql`
+        UPDATE peer_environment_links SET urls_json = ${JSON.stringify([first.url, b.url])}
+        WHERE environment_id = ${box.environmentId}
+      `;
+      expect((yield* a.links.resolve(box.environmentId)).url).toBe(first.url);
+
+      yield* Ref.set(first.descriptor, descriptorOf(box.environmentId, "Box", { linkFence: false }));
+
+      expect(
+        yield* probe(a, { runtimeMode: "approval-required", interactionMode: "plan" }),
+      ).toEqual({ caller: "T3 Code · Laptop", modes: "approval-required/plan" });
+      expect(yield* Ref.get(first.bearers)).toEqual([]);
+      expect(Option.getOrThrow(yield* a.links.get(box.environmentId)).urls).toEqual([
+        first.url,
+        b.url,
+      ]);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
 it.effect("lists a peer asleep at every address as unreachable within one probe budget", () =>
   Effect.scoped(
     Effect.gen(function* () {

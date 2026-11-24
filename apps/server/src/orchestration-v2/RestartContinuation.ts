@@ -5,6 +5,7 @@ import {
   isOrchestrationV2WorkActive,
   latestProviderTurnForAttempt,
   MessageId,
+  type OrchestrationV2ConversationMessage,
   type OrchestrationV2Run,
   type RunId,
   type ThreadId,
@@ -35,6 +36,36 @@ const CONTINUE_PROMPT =
 
 const MAX_CONTINUATION_CHAIN = 3;
 const CONTINUATION_LOOP_WINDOW_MS = 5 * 60 * 1_000;
+
+export function relayContinuationMessageIds(
+  source: OrchestrationV2Run,
+  runs: ReadonlyArray<OrchestrationV2Run>,
+): ReadonlyArray<MessageId> {
+  const visited = new Set<RunId>();
+  const ids: Array<MessageId> = [];
+  for (
+    let run: OrchestrationV2Run | undefined = source;
+    run !== undefined && !visited.has(run.id);
+    run = run.restartContinuationOfRunId === undefined
+      ? undefined
+      : runs.find((candidate) => candidate.id === run?.restartContinuationOfRunId)
+  ) {
+    visited.add(run.id);
+    if (
+      run.userMessageId?.startsWith("scheduled-task-message:") &&
+      run.userMessageId.includes(":webhook:delivery:relay:")
+    ) {
+      ids.push(run.userMessageId);
+    }
+  }
+  return ids;
+}
+
+export function isRelayWebhookMessage(message: OrchestrationV2ConversationMessage): boolean {
+  return message.scheduledTaskId !== undefined && message.id.startsWith(
+    `scheduled-task-message:${message.scheduledTaskId}:webhook:delivery:relay:`,
+  );
+}
 
 function restartContinuationBlocked(
   projection: Pick<
@@ -250,12 +281,17 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
       input.threadId,
       ["messages", "turnItems"],
       {
-        messageIds: [source.userMessageId],
+        messageIds: [
+          source.userMessageId,
+          ...relayContinuationMessageIds(source, projection.runs)
+            .filter((id) => id !== source.userMessageId),
+        ],
         turnItemRunIds: [source.id],
         turnItemTypes: ["run_interrupt_request"],
       },
     );
     if (
+      sourceRecords.messages.some(isRelayWebhookMessage) ||
       sourceRecords.turnItems.some(
         (item) => item.runId === source.id && item.type === "run_interrupt_request",
       )

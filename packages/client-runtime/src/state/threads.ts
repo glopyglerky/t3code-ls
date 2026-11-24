@@ -4,7 +4,6 @@ import {
   type EnvironmentId as EnvironmentIdType,
   type OrchestrationV2ThreadDetailSnapshot,
   type OrchestrationV2ThreadProjection,
-  type OrchestrationV2ThreadStreamItem as WireThreadItem,
   type OrchestrationV2TurnItem,
   type ThreadId as ThreadIdType,
 } from "@t3tools/contracts";
@@ -38,7 +37,10 @@ import {
   subscribeThread,
   subscriptionRetryDelay,
 } from "../rpc/client.ts";
-import { canDecodeThreadMessageText } from "../rpc/threadMessageText.ts";
+import {
+  threadMessageTextVersion,
+  type DecodedThreadStreamItem as OrchestrationV2ThreadStreamItem,
+} from "../rpc/threadMessageText.ts";
 import { parseThreadKey, threadKey } from "./entities.ts";
 import { applyOrchestrationV2ProjectionEvent } from "./orchestrationV2Projection.ts";
 import { THREAD_SNAPSHOT_IDLE_TTL_MS } from "./threadRetention.ts";
@@ -62,7 +64,6 @@ import {
 } from "./threadState.ts";
 
 const THREAD_SUBSCRIPTION_RETRY_DELAY = "250 millis";
-type OrchestrationV2ThreadStreamItem = Exclude<WireThreadItem, { kind: "message-text-append" }>;
 
 function statusWithoutLiveData(
   data: Option.Option<OrchestrationV2ThreadProjection>,
@@ -299,6 +300,11 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   if (resumeCache?.owner === owner) resumeCache.snapshot = committed;
   const awaitingCompletion = yield* Ref.make(false);
   const applyLock = yield* Semaphore.make(1);
+  // A stream defect parks the subscription until something resubscribes it.
+  const resubscribes = yield* Queue.unbounded<void>();
+  // Ancestor commits can replace the view at the same child sequence and cursor.
+  let historyGeneration = 0;
+  let historyRefreshPending = false;
   // Save only completed data/cursor updates. A canceled scope must not cache
   // a cursor whose event has not reached the data yet.
   const announceRequests = makeThreadRequestsResolvedAnnouncer(environmentId, threadId);
@@ -449,6 +455,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     const waiting = yield* Ref.get(awaitingCompletion);
     const snapshotSequence = options?.snapshotSequence;
     const sequence = snapshotSequence ?? (yield* SubscriptionRef.get(lastSequence));
+    if (snapshotSequence !== undefined) {
+      historyGeneration += 1;
+      historyRefreshPending = false;
+    }
     // Atomic with concurrent history meta updates: never get-then-set the whole
     // state when only the projection changes. Bounded installs pass history so
     // projection + cursor persist together in one enqueue.
@@ -500,6 +510,8 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     }));
 
   const setDeleted = Effect.fn("EnvironmentThreadState.setDeleted")(function* () {
+    historyGeneration += 1;
+    historyRefreshPending = false;
     yield* Ref.set(awaitingCompletion, false);
     yield* SubscriptionRef.set(state, {
       data: Option.none(),
@@ -651,9 +663,82 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     }
   });
 
+  const refreshHistoryLocked = Effect.fn("EnvironmentThreadState.refreshHistory")(function* () {
+    const current = yield* SubscriptionRef.get(state);
+    if (
+      !canLoadHistory ||
+      current.status === "deleted" ||
+      Option.isNone(current.data) ||
+      current.data.value.thread.forkedFrom?.type !== "run"
+    )
+      return;
+
+    historyGeneration += 1;
+    historyRefreshPending = true;
+
+    const prepared = yield* SubscriptionRef.get(supervisor.prepared);
+    if (Option.isNone(prepared)) {
+      yield* Queue.offer(resubscribes, undefined);
+      return;
+    }
+    const fresh = yield* snapshotLoader.load(prepared.value, threadId);
+    if (
+      fresh._tag !== "present" ||
+      fresh.history === undefined ||
+      fresh.snapshot.snapshotSequence < (yield* SubscriptionRef.get(lastSequence))
+    ) {
+      // The next run-fork subscription asks for a bounded snapshot. The live
+      // child cursor itself cannot tell us whether inherited history is current.
+      yield* Queue.offer(resubscribes, undefined);
+      return;
+    }
+
+    let projection = fresh.snapshot.projection;
+    let history: ThreadHistoryMeta = {
+      ...EMPTY_THREAD_HISTORY_META,
+      ...fresh.history,
+      latestLocalTurnOrdinal: fresh.history.latestLocalTurnOrdinal ?? null,
+    };
+    const oldest = current.history.expanded
+      ? current.data.value.visibleTurnItems.find((row) => row.visibility !== "synthetic")
+      : undefined;
+    if (
+      fresh.historyViewRevision !== undefined &&
+      oldest !== undefined &&
+      history.historyCursor !== null &&
+      Option.isSome(httpClient)
+    ) {
+      const anchor = oldest.item;
+      const page = yield* fetchEnvironmentThreadHistoryPage({
+        prepared: prepared.value,
+        threadId,
+        cursor: history.historyCursor,
+        throughEntryId: "messageId" in anchor ? anchor.messageId ?? anchor.id : anchor.id,
+        view: undefined,
+        signer: dpopSigner,
+        remoteAuthorization,
+      }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient.value), Effect.option);
+      // An ancestor can commit between reads while the child replay sequence stays fixed.
+      if (
+        Option.isSome(page) &&
+        page.value.snapshotSequence === fresh.snapshot.snapshotSequence &&
+        page.value.historyViewRevision === fresh.historyViewRevision
+      ) {
+        projection = mergeOlderHistoryIntoProjection(projection, page.value.items);
+        history = applyHistoryPageMeta(history, page.value);
+      }
+    }
+    yield* setThread(projection, { history, snapshotSequence: fresh.snapshot.snapshotSequence });
+  });
+
   const applyItemLocked = Effect.fn("EnvironmentThreadState.applyItemLocked")(function* (
     item: OrchestrationV2ThreadStreamItem,
   ) {
+    if (item.kind === "history-invalidated") {
+      yield* refreshHistoryLocked();
+      return;
+    }
+
     if (item.kind === "synchronized") {
       yield* Ref.set(awaitingCompletion, false);
       yield* SubscriptionRef.update(state, (current) =>
@@ -724,7 +809,9 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       Option.getOrNull(latest.data)?.visibleTurnItems.find(
         (row) => row.sourceItemId === workAnchorId,
       )?.item.deferredWork?.cursor ?? null;
+    const requestGeneration = historyGeneration;
     const current = yield* SubscriptionRef.get(state);
+    if (historyRefreshPending) return { _tag: "busy" };
     const initialCursor =
       workAnchorId === undefined ? current.history.historyCursor : workCursor(current);
     if (
@@ -737,9 +824,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     if (workAnchorId === undefined && current.history.loading) return { _tag: "busy" };
     let requestCursor = initialCursor;
     const isCurrent = (latest: EnvironmentThreadState) =>
-      workAnchorId === undefined
+      historyGeneration === requestGeneration &&
+      (workAnchorId === undefined
         ? isActiveHistoryRequestCursor(requestCursor, latest.history)
-        : workCursor(latest) === requestCursor;
+        : workCursor(latest) === requestCursor);
     const staleResult = (
       latest: EnvironmentThreadState,
     ): ThreadHistoryController.ThreadHistoryLoadEarlierResult =>
@@ -748,6 +836,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         : { _tag: "noop" };
     if (workAnchorId === undefined)
       yield* patchHistoryMeta((history) =>
+        historyGeneration === requestGeneration &&
         isActiveHistoryRequestCursor(requestCursor, history)
           ? { ...history, loading: true, error: null }
           : history,
@@ -863,10 +952,11 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     });
     return yield* runLoad.pipe(
       Effect.onInterrupt(() =>
-        SubscriptionRef.update(state, (latest) => ({
-          ...latest,
-          history: clearActiveHistoryLoading(requestCursor, latest.history),
-        })),
+        SubscriptionRef.update(state, (latest) =>
+          historyGeneration === requestGeneration
+            ? { ...latest, history: clearActiveHistoryLoading(requestCursor, latest.history) }
+            : latest,
+        ),
       ),
     );
   });
@@ -986,8 +1076,6 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       (yield* Ref.get(socketOnlyOpen)) && Option.isNone((yield* SubscriptionRef.get(state)).data)
     );
   });
-  // A stream defect parks the subscription until something resubscribes it.
-  const resubscribes = yield* Queue.unbounded<void>();
   const markSynchronizing = Effect.gen(function* () {
     if (yield* Ref.get(resumingLive)) return;
     yield* SubscriptionRef.update(state, (current) =>
@@ -1101,8 +1189,14 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         }
 
         const sequence = yield* SubscriptionRef.get(lastSequence);
-        const canResume = Option.isSome(current.data);
+        // A run fork includes mutable ancestor rows absent from its event stream.
+        // Its child replay watermark cannot validate that cached history view.
+        const canResume =
+          Option.isSome(current.data) && current.data.value.thread.forkedFrom?.type !== "run";
         const acceptBoundedSnapshot = yield* Ref.get(acceptsBoundedSocketSnapshots);
+        const textVersion = threadMessageTextVersion();
+        const serverAppends = Option.exists(config, (value) => value.threadMessageTextAppends === 1);
+        const serverSplices = Option.exists(config, (value) => value.threadMessageTextSplices === 1);
 
         return {
           threadId,
@@ -1111,15 +1205,17 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
           ...(acceptBoundedSnapshot
             ? {
                 acceptBoundedSnapshot: true as const,
+                ...(Option.exists(config, (value) => value.threadHistoryInvalidation === true)
+                  ? { acceptHistoryInvalidation: true as const }
+                  : {}),
                 acceptDeferredWork: true as const,
                 acceptCompactTurnItems: true as const,
                 acceptCompactIds: true as const,
               }
             : {}),
           acceptDedupedBodies: true as const,
-          ...(canDecodeThreadMessageText() &&
-          Option.exists(config, (value) => value.threadMessageTextAppends === 1)
-            ? { messageTextAppends: 1 as const }
+          ...(textVersion !== undefined && serverAppends
+            ? { messageTextAppends: textVersion === 2 && serverSplices ? 2 : 1 }
             : {}),
         };
       }),

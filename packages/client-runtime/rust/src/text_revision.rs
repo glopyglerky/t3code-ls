@@ -10,6 +10,13 @@ const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Utf16Offset(pub u32);
 
+impl Utf16Offset {
+    pub fn from_byte_index(text: &str, index: usize) -> Option<Self> {
+        let prefix = text.get(..index)?;
+        u32::try_from(prefix.encode_utf16().count()).ok().map(Self)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextEdit<'a> {
     Append(&'a str),
@@ -191,4 +198,55 @@ fn byte_offset(text: &str, offset: Utf16Offset) -> Result<usize, ApplyError> {
     } else {
         Err(ApplyError::InvalidUtf16Range)
     }
+}
+
+/// Keep the original range when the draft is unchanged. A changed draft receives
+/// an insertion after the captured selection under both possible alignments.
+pub fn voice_draft_selection(
+    captured: &str,
+    current: &str,
+    start: Utf16Offset,
+    end: Utf16Offset,
+) -> Option<(Utf16Offset, Utf16Offset)> {
+    if start.0 > end.0 {
+        return None;
+    }
+    byte_offset(captured, start).ok()?;
+    byte_offset(captured, end).ok()?;
+    if captured == current {
+        return Some((start, end));
+    }
+
+    let captured_len = captured.encode_utf16().count();
+    let current_len = current.encode_utf16().count();
+    let shared = captured_len.min(current_len);
+    let prefix = |limit| matching_units(captured.chars().zip(current.chars()), limit);
+    let suffix = |limit| matching_units(captured.chars().rev().zip(current.chars().rev()), limit);
+    let map_end = |prefix, suffix| {
+        let end = end.0 as usize;
+        if end < prefix {
+            return end;
+        }
+        let captured_suffix = captured_len - suffix;
+        let current_suffix = current_len - suffix;
+        current_suffix + end.saturating_sub(captured_suffix)
+    };
+
+    let first_prefix = prefix(shared);
+    let first_suffix = suffix(shared);
+    let from_prefix = map_end(first_prefix, suffix(shared - first_prefix));
+    let from_suffix = map_end(prefix(shared - first_suffix), first_suffix);
+    let position = Utf16Offset(u32::try_from(from_prefix.max(from_suffix)).ok()?);
+    Some((position, position))
+}
+
+fn matching_units(pairs: impl Iterator<Item = (char, char)>, limit: usize) -> usize {
+    let mut units = 0;
+    for (left, right) in pairs {
+        if left != right || left.len_utf16() > limit - units {
+            break;
+        }
+        units += left.len_utf16();
+    }
+    units
 }

@@ -1,8 +1,13 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type KeyboardEvent } from "react";
 import { ChevronDownIcon, ChevronUpIcon, XIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { cn } from "~/lib/utils";
+import {
+  loadOnboardingBindings,
+  type ThreadFindAction,
+  type ThreadFindMount,
+} from "../../onboarding/dioxusBindings";
 import { formatThreadFindCount } from "./threadFind";
 import { THREAD_DETAILS_CARD_GAP } from "./threadDetailsCardLayout";
 
@@ -24,6 +29,97 @@ interface ThreadFindBarProps {
 export const THREAD_FIND_BAR_RESERVED_HEIGHT = 36 + THREAD_DETAILS_CARD_GAP;
 
 export function ThreadFindBar(props: ThreadFindBarProps) {
+  if (!props.open) return null;
+  return (
+    <div
+      data-thread-find-bar
+      className="absolute top-3 right-3 z-40 w-[min(var(--thread-details-panel-width),calc(100%-1.5rem))] transition-opacity duration-150 ease-out starting:opacity-0 motion-reduce:transition-none"
+      onContextMenu={(event) => event.stopPropagation()}
+    >
+      {import.meta.env.VITE_T3_CODE_LS_THREAD_FIND_RENDERER === "dioxus" ? (
+        <DioxusThreadFind {...props} />
+      ) : (
+        <RetainedThreadFind {...props} />
+      )}
+    </div>
+  );
+}
+
+function findPresentation(props: ThreadFindBarProps) {
+  const hasQuery = props.query.trim().length > 0;
+  let count = "";
+  if (hasQuery) {
+    count = props.counting ? "1/…" : formatThreadFindCount(props.activeIndex, props.matchCount);
+  }
+  if (props.status === "loading") count = "Searching…";
+  if (props.status === "error") count = "Search failed";
+  const busy = props.status === "loading" || props.counting === true;
+  return {
+    count,
+    busy,
+    noResults: hasQuery && !props.status && props.matchCount === 0,
+    navigationDisabled: props.matchCount === 0 || busy,
+  };
+}
+
+function DioxusThreadFind(props: ThreadFindBarProps) {
+  const root = useRef<HTMLDivElement>(null);
+  const mount = useRef<ThreadFindMount | undefined>(undefined);
+  const [failed, setFailed] = useState(false);
+  const { count, busy, noResults, navigationDisabled } = findPresentation(props);
+  const { query, status, focusRequestId } = props;
+  const act = useEffectEvent((action: ThreadFindAction, value?: string) => {
+    if (action === "query") {
+      if (value !== undefined) props.onQueryChange(value);
+      return;
+    }
+    const commands = {
+      next: props.onNext,
+      previous: props.onPrevious,
+      retry: props.onRetry,
+      close: props.onClose,
+    };
+    commands[action]();
+  });
+  const attach = useEffectEvent(
+    (bindings: Awaited<ReturnType<typeof loadOnboardingBindings>>, host: HTMLDivElement) => {
+      const view = bindings.mount_thread_find(host, act);
+      mount.current = view;
+      view.update(query, count, status ?? "", busy, noResults, navigationDisabled, focusRequestId);
+    },
+  );
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- this view owns the external renderer and its fallback
+  useEffect(() => {
+    const host = root.current;
+    if (!host) return;
+    let disposed = false;
+    void loadOnboardingBindings()
+      .then((bindings) => {
+        if (!disposed) attach(bindings, host);
+      })
+      .catch(() => {
+        if (disposed) return;
+        mount.current?.free();
+        mount.current = undefined;
+        setFailed(true);
+      });
+    return () => {
+      disposed = true;
+      mount.current?.free();
+      mount.current = undefined;
+    };
+  }, []);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- feed the current server search presentation to the owned renderer
+  useEffect(() => {
+    mount.current?.update(query, count, status ?? "", busy, noResults, navigationDisabled, focusRequestId);
+  }, [query, count, status, busy, noResults, navigationDisabled, focusRequestId]);
+
+  return failed ? <RetainedThreadFind {...props} /> : <div ref={root} />;
+}
+
+function RetainedThreadFind(props: ThreadFindBarProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- focuses and selects the input DOM node when the bar opens or a find shortcut fires
@@ -37,18 +133,7 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
     props.open,
   ]);
 
-  if (!props.open) return null;
-
-  const hasQuery = props.query.trim().length > 0;
-  const noResults = hasQuery && !props.status && props.matchCount === 0;
-  let label = "";
-  if (hasQuery) {
-    label = props.counting ? "1/…" : formatThreadFindCount(props.activeIndex, props.matchCount);
-  }
-  if (props.status === "loading") label = "Searching…";
-  if (props.status === "error") label = "Search failed";
-  const navigationDisabled =
-    props.matchCount === 0 || props.status === "loading" || props.counting === true;
+  const { count, busy, noResults, navigationDisabled } = findPresentation(props);
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "Enter") {
@@ -60,70 +145,64 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
   };
 
   return (
-    <div
-      data-thread-find-bar
-      className="absolute top-3 right-3 z-40 w-[min(var(--thread-details-panel-width),calc(100%-1.5rem))] transition-opacity duration-150 ease-out starting:opacity-0 motion-reduce:transition-none"
+    <InputGroup
+      variant="popover"
+      size="lg"
+      role="search"
+      aria-label="Find in thread"
+      aria-busy={busy}
+      className="w-full"
     >
-      <InputGroup
-        variant="popover"
-        size="lg"
-        onContextMenu={(event) => event.stopPropagation()}
-        role="search"
+      <InputGroupInput
+        ref={inputRef}
+        type="search"
+        size="sm"
+        value={props.query}
         aria-label="Find in thread"
-        aria-busy={props.status === "loading" || props.counting === true}
-        className="w-full"
-      >
-        <InputGroupInput
-          ref={inputRef}
-          type="search"
-          size="sm"
-          value={props.query}
-          aria-label="Find in thread"
-          placeholder="Find in thread"
-          maxLength={200}
-          spellCheck={false}
-          autoComplete="off"
-          onChange={(event) => props.onQueryChange(event.target.value)}
-          onKeyDown={handleKeyDown}
-        />
-        <InputGroupAddon align="inline-end" inset="pill">
-          <span
-            aria-live="polite"
-            className={cn(
-              "min-w-10 text-center text-xs tabular-nums",
-              noResults ? "text-destructive" : "text-muted-foreground",
-            )}
-          >
-            {label}
-          </span>
-          {props.status === "error" ? (
-            <Button size="xs" variant="ghost" onClick={props.onRetry}>
-              Retry
-            </Button>
-          ) : null}
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Previous match"
-            disabled={navigationDisabled}
-            onClick={props.onPrevious}
-          >
-            <ChevronUpIcon />
+        placeholder="Find in thread"
+        maxLength={200}
+        spellCheck={false}
+        autoComplete="off"
+        onChange={(event) => props.onQueryChange(event.target.value)}
+        onKeyDown={handleKeyDown}
+      />
+      <InputGroupAddon align="inline-end" inset="pill">
+        <span
+          aria-live="polite"
+          className={cn(
+            "min-w-10 text-center text-xs tabular-nums",
+            noResults ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {count}
+        </span>
+        {props.status === "error" ? (
+          <Button size="xs" variant="ghost" onClick={props.onRetry}>
+            Retry
           </Button>
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Next match"
-            disabled={navigationDisabled}
-            onClick={props.onNext}
-          >
-            <ChevronDownIcon />
-          </Button>
-          <Button size="icon-xs" variant="ghost" aria-label="Close find" onClick={props.onClose}>
-            <XIcon />
-          </Button>
-        </InputGroupAddon>
-      </InputGroup>
-    </div>
+        ) : null}
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label="Previous match"
+          disabled={navigationDisabled}
+          onClick={props.onPrevious}
+        >
+          <ChevronUpIcon />
+        </Button>
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          aria-label="Next match"
+          disabled={navigationDisabled}
+          onClick={props.onNext}
+        >
+          <ChevronDownIcon />
+        </Button>
+        <Button size="icon-xs" variant="ghost" aria-label="Close find" onClick={props.onClose}>
+          <XIcon />
+        </Button>
+      </InputGroupAddon>
+    </InputGroup>
   );
 }

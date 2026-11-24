@@ -14,6 +14,7 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as ServerOwnership from "../serverOwnership.ts";
 import * as NativeServerOwnershipLock from "./NativeServerOwnershipLock.ts";
 import * as RedbClient from "./RedbClient.ts";
+import { BootstrappedDatabaseMigration } from "./BootstrappedDatabaseMigration.ts";
 import currentSchema from "./omdb-schema.json" with { type: "json" };
 
 export class OmdbStartupError extends Schema.TaggedError<OmdbStartupError>()("OmdbStartupError", {
@@ -49,7 +50,11 @@ const Imported = Schema.Struct({
 const ACTIVE_MARKER = "t3code-omdb-owner-v1\n";
 
 export const make = Effect.fn("Omdb.make")(
-  function* (options: { readonly executable: string; readonly databasePath: string }) {
+  function* (options: {
+    readonly executable: string;
+    readonly databasePath: string;
+    readonly independentReads?: boolean;
+  }) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const directory = path.dirname(options.databasePath);
@@ -63,20 +68,21 @@ export const make = Effect.fn("Omdb.make")(
       ),
     );
     const exists = yield* fs.exists(options.databasePath);
-    const needsUpgrade =
-      exists &&
-      (yield* Effect.scoped(
+    const inspect = (mode: "read-only-local" | "exclusive-local") =>
+      Effect.scoped(
         Effect.gen(function* () {
-          const inspection = yield* NativeDatabase.make({ ...options, mode: "read-only-local" });
-          const schema = yield* inspection.request(
-            { operation: "application_schema" },
-            Schema.NullOr(RedbClient.ApplicationSchema),
-          );
-          if (schema === null) return false;
+          const inspection = yield* NativeDatabase.make({
+            ...options,
+            mode,
+            ...(mode === "exclusive-local"
+              ? { reconnect: false, requestTimeout: "60 minutes" as const }
+              : {}),
+          });
           const migrations = yield* inspection.request(
-            { operation: "application_migrations" },
-            Bootstrap.fields.migrations,
+            { operation: "application_startup_migrations" },
+            Schema.NullOr(Bootstrap.fields.migrations),
           );
+          if (migrations === null) return false;
           return (
             migrations.length !== currentSchema.migrations.length ||
             migrations.some(
@@ -86,13 +92,22 @@ export const make = Effect.fn("Omdb.make")(
             )
           );
         }),
-      ));
+      );
+    const inspection = exists
+      ? yield* inspect("read-only-local").pipe(
+          Effect.catchTag("NativeDatabaseRejected", (cause) =>
+            cause.kind === "recovery_required"
+              ? Effect.succeed("recovery-required" as const)
+              : Effect.fail(cause),
+          ),
+        )
+      : false;
     const leaseScope = yield* Effect.acquireRelease(Scope.make(), (scope) =>
       Scope.close(scope, Exit.void),
     );
     let activate = suppliedOwnership?.activate;
     let awaitLost: Effect.Effect<never, ServerOwnership.ServerOwnershipError> | undefined;
-    if (activate === undefined && (marker !== ACTIVE_MARKER || needsUpgrade)) {
+    if (activate === undefined && (marker !== ACTIVE_MARKER || inspection !== false)) {
       // CLI cutover must use the same pre-lock PID and old boot-service checks as
       // server startup. A byte-range lock alone cannot exclude older releases
       // which never acquired that lock and can still write the SQLite source.
@@ -115,6 +130,10 @@ export const make = Effect.fn("Omdb.make")(
       awaitLost = ownership.awaitLost;
     }
     const bootstrap = Effect.gen(function* () {
+      // Only an application owner and an exclusive database handle may recover
+      // the file. Recheck the recovered catalog before proceeding to migrations.
+      const needsUpgrade =
+        inspection === "recovery-required" ? yield* inspect("exclusive-local") : inspection;
       if (!exists && marker === ACTIVE_MARKER)
         return yield* new OmdbStartupError({
           path: options.databasePath,
@@ -237,9 +256,34 @@ export const make = Effect.fn("Omdb.make")(
           );
         }
       }
-      yield* database.request({ operation: "application_bootstrap" }, Bootstrap);
+      const bootstrapped = yield* database.request({ operation: "application_bootstrap" }, Bootstrap);
+      let migrationHead = -1;
+      for (const migration of bootstrapped.migrations) {
+        const id = Number(migration.id);
+        if (
+          !/^(?:0|[1-9][0-9]*)$/.test(migration.id) ||
+          !Number.isSafeInteger(id) ||
+          id <= migrationHead
+        ) {
+          return yield* new OmdbStartupError({
+            path: options.databasePath,
+            cause: new Error("Invalid bootstrapped migration history"),
+          });
+        }
+        migrationHead = id;
+      }
+      if (migrationHead < 0) {
+        return yield* new OmdbStartupError({
+          path: options.databasePath,
+          cause: new Error("Missing bootstrapped migration history"),
+        });
+      }
+      const readDatabase = options.independentReads
+        ? yield* NativeDatabase.make({ ...options, mode: "current-read-local", requestTimeout: "15 minutes" })
+        : undefined;
       const client = yield* RedbClient.make.pipe(
         Effect.provideService(NativeDatabase.NativeDatabase, database),
+        Effect.provideService(RedbClient.ReadDatabase, readDatabase),
       );
       // Finish every resumable index preparation before making the cutover durable.
       // A failed preparation leaves the preserved SQLite source and the retryable
@@ -265,8 +309,15 @@ export const make = Effect.fn("Omdb.make")(
       ]) {
         while (!(yield* prepare).prepared) yield* Effect.yieldNow;
       }
+      if (readDatabase !== undefined) {
+        yield* readDatabase.request({ operation: "application_schema" }, RedbClient.ApplicationSchema);
+      }
       if (activate !== undefined) yield* activate;
-      return { database, client };
+      return {
+        database,
+        client,
+        migrationWitness: { databasePath: options.databasePath, head: migrationHead },
+      };
     });
     const runtime = yield* awaitLost === undefined
       ? bootstrap
@@ -282,13 +333,27 @@ export const make = Effect.fn("Omdb.make")(
     ),
 );
 
-const layerFromPath = (databasePath: string, executable: string) =>
+const layerFromPath = (
+  databasePath: string,
+  executable: string,
+  durableRelayWebhooks: boolean,
+  singleProjectionReads: boolean,
+  independentReads: boolean,
+) =>
   Layer.unwrap(
     Effect.gen(function* () {
-      const { database, client } = yield* make({ databasePath, executable });
-      return Layer.merge(
+      const { database, client, migrationWitness } = yield* make({
+        databasePath,
+        executable,
+        independentReads,
+      }).pipe(
+        Effect.provideService(RedbClient.DurableRelayWebhooks, durableRelayWebhooks),
+        Effect.provideService(RedbClient.SingleProjectionReads, singleProjectionReads),
+      );
+      return Layer.mergeAll(
         Layer.succeed(NativeDatabase.NativeDatabase, database),
         Layer.succeed(RedbClient.RedbClient, client),
+        Layer.succeed(BootstrappedDatabaseMigration, migrationWitness),
       );
     }),
   );
@@ -301,6 +366,12 @@ export const layerConfig = Layer.unwrap(
       try: () => nativeExecutable("db", environment.T3_CODE_LS_DB_EXECUTABLE),
       catch: (cause) => new OmdbStartupError({ path: config.dbPath, cause }),
     });
-    return layerFromPath(config.dbPath, executable);
+    return layerFromPath(
+      config.dbPath,
+      executable,
+      environment.T3_CODE_LS_DURABLE_RELAY_WEBHOOKS === "1",
+      environment.T3_CODE_LS_SINGLE_PROJECTION_READS === "1",
+      environment.T3_CODE_LS_INDEPENDENT_READS === "1",
+    );
   }),
 );

@@ -7,6 +7,7 @@ import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
+import { installedApplicationDatabase } from "@t3tools/shared/applicationDatabase";
 import { acquireServiceSelectionLock } from "./cloud/serviceSelectionLock.ts";
 
 import type {
@@ -59,6 +60,90 @@ const STATE_DIR_OWNER_POLL_MS = 30_000;
 type TerminalStatus = "committed" | "rolled-back" | "failed";
 type ChildRole = "active" | "trial";
 
+interface SealedPendingState {
+  readonly protocol: 5;
+  readonly activeVersion: string;
+  readonly update: PendingServiceUpdate;
+}
+
+type LauncherDurableState = ServiceState | SealedPendingState;
+
+export interface IsolatedCandidateWitness {
+  readonly protocol: 1;
+  readonly status: "prepared-isolated";
+  readonly updateId: string;
+  readonly targetVersion: string;
+  readonly entrySha256: string;
+  readonly helperSha256: string;
+  readonly verificationSha256: string;
+}
+
+
+function sameSealedPendingState(left: LauncherDurableState, right: SealedPendingState): boolean {
+  return left.protocol === 5 && left.activeVersion === right.activeVersion &&
+    left.update.id === right.update.id && left.update.fromVersion === right.update.fromVersion &&
+    left.update.targetVersion === right.update.targetVersion && left.update.dbPath === right.update.dbPath;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const hasKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
+  Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+
+function parseSealedRecoveryState(contents: string, baseDir: string): SealedPendingState | undefined {
+  const state: unknown = JSON.parse(contents);
+  if (!isRecord(state) || state.protocol !== 5 ||
+    !isRecord(state.update)) return undefined;
+  const update = state.update;
+  if (!hasKeys(update, ["id", "fromVersion", "targetVersion", "dbPath", "status"]) ||
+    typeof update.id !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u.test(update.id) ||
+    typeof update.fromVersion !== "string" || update.fromVersion.length > 256 ||
+    !isExactServiceVersion(update.fromVersion) || typeof update.targetVersion !== "string" ||
+    update.targetVersion.length > 256 || !isExactServiceVersion(update.targetVersion) ||
+    compareExactServiceVersions(update.targetVersion, update.fromVersion) <= 0 ||
+    update.status !== "pending" || typeof update.dbPath !== "string" || !NodePath.isAbsolute(baseDir) ||
+    update.dbPath !== NodePath.join(baseDir, "userdata", "statev2.omdb")) return undefined;
+
+  if (hasKeys(state, ["protocol", "phase", "activeVersion", "forwardReceiptSha256", "update"]) &&
+    state.phase === "forward-selected" && state.activeVersion === update.targetVersion &&
+    typeof state.forwardReceiptSha256 === "string" &&
+    /^[0-9a-f]{64}$/u.test(state.forwardReceiptSha256)) {
+    throw new Error("The forward-selected native trial is sealed and requires forward recovery.");
+  }
+  if (!hasKeys(state, ["protocol", "activeVersion", "update"]) ||
+    state.activeVersion !== update.fromVersion) return undefined;
+  return { protocol: 5, activeVersion: state.activeVersion, update: {
+    id: update.id, fromVersion: update.fromVersion, targetVersion: update.targetVersion,
+    dbPath: update.dbPath, status: "pending",
+  } };
+}
+
+function isTrialFileIdentity(value: unknown): value is {
+  device: string; inode: string; created: string;
+} {
+  return isRecord(value) && hasKeys(value, ["device", "inode", "created"]) &&
+    typeof value.device === "string" && /^[0-9a-f]{16}$/u.test(value.device) &&
+    typeof value.inode === "string" && /^[0-9a-f]{16}$/u.test(value.inode) &&
+    typeof value.created === "string" && /^[0-9]{1,30}$/u.test(value.created);
+}
+
+async function readLauncherState(
+  filePath: string,
+  baseDir: string,
+  environment: Readonly<NodeJS.ProcessEnv>,
+): Promise<LauncherDurableState> {
+  const contents = await NodeFSP.readFile(filePath, "utf8");
+  const ordinary = parseServiceState(contents) ?? adoptLegacyServiceState(contents);
+  if (ordinary !== undefined) return ordinary;
+  if (environment.T3_CODE_LS_SEALED_TRIAL_RECOVERY === "1" &&
+    Buffer.byteLength(contents) <= 8192) {
+    const sealed = parseSealedRecoveryState(contents, baseDir);
+    if (sealed !== undefined) return sealed;
+  }
+  throw new Error("Service state is invalid or unsupported.");
+}
+
 interface ManagedChild {
   readonly version: string;
   role: ChildRole;
@@ -80,6 +165,102 @@ const runtimeSpawnArguments = (paths: ReturnType<typeof runtimePaths>) => ({
   command: paths.entryPath,
   args: ["serve"],
 });
+
+export async function readBundledNativeTrialHelper(entry: string, executable: string): Promise<{
+  readonly engineRevision: string;
+  readonly targetSchemaSha256: string;
+  readonly sealedTrialRollback: boolean;
+  readonly promotionIntent: boolean;
+  readonly sha256: string;
+} | null> {
+  // The update contract belongs to the installed native binary beside this runtime.
+  const directory = NodePath.join(NodePath.dirname(await NodeFSP.realpath(entry)), "native-bin");
+  const expected = NodePath.join(directory, "t3-code-ls-db");
+  if (executable !== expected) return null;
+  const readFlags = NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW | NodeFS.constants.O_NONBLOCK;
+  const manifestFile = await NodeFSP.open(NodePath.join(directory, "manifest.json"), readFlags);
+  let manifest;
+  try {
+    const metadata = await manifestFile.stat();
+    if (!metadata.isFile() || metadata.size > 1_048_576) return null;
+    manifest = JSON.parse(await manifestFile.readFile("utf8"));
+  } finally {
+    await manifestFile.close();
+  }
+  if (manifest?.target !== "linux-x64" || manifest.rustTarget !== "x86_64-unknown-linux-gnu") return null;
+  const declaredDigest = manifest?.files?.["t3-code-ls-db"];
+  if (typeof declaredDigest !== "string" || !/^[0-9a-f]{64}$/u.test(declaredDigest)) return null;
+
+  const helper = await NodeFSP.open(expected, readFlags);
+  try {
+    const before = await helper.stat();
+    if (!before.isFile()) return null;
+    const digest = NodeCrypto.createHash("sha256");
+    for await (const chunk of helper.createReadStream({ autoClose: false })) digest.update(chunk);
+    if (digest.digest("hex") !== declaredDigest) return null;
+    const { stdout } = await NodeUtil.promisify(NodeChildProcess.execFile)(
+      expected,
+      ["trial-capabilities"],
+      { env: {}, shell: false, timeout: 5_000, maxBuffer: 8192, killSignal: "SIGKILL" },
+    );
+    const after = await NodeFSP.lstat(expected);
+    if (
+      !after.isFile() || before.dev !== after.dev || before.ino !== after.ino ||
+      before.size !== after.size || before.ctimeMs !== after.ctimeMs
+    ) return null;
+    const response = JSON.parse(stdout);
+    const result = response?.result;
+    return response?.ok === true && result?.version === 1 && result.engine === "omdb" &&
+      typeof result.engineRevision === "string" && /^[0-9a-f]{40}$/u.test(result.engineRevision) &&
+      typeof result.targetSchemaSha256 === "string" && /^[0-9a-f]{64}$/u.test(result.targetSchemaSha256)
+      ? {
+          engineRevision: result.engineRevision, targetSchemaSha256: result.targetSchemaSha256,
+          sealedTrialRollback: result.sealedTrialRollback === 1,
+          promotionIntent: result.promotionIntent === 1, sha256: declaredDigest,
+        }
+      : null;
+  } finally {
+    await helper.close();
+  }
+}
+
+function runOfflineTrialCommand(entry: string, args: readonly string[], input: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = NodeChildProcess.execFile(
+      entry, args,
+      { env: {}, encoding: "utf8", timeout: 65_000, maxBuffer: 8192, killSignal: "SIGKILL" },
+      (error, output, stderr) => error === null && stderr === ""
+        ? resolve(output) : reject(error ?? new Error("The offline trial command wrote a diagnostic.")),
+    );
+    child.stdin?.on("error", reject);
+    child.stdin?.end(input + "\n");
+  });
+}
+
+async function installedTrialEntrySha256(entry: string): Promise<string> {
+  if (await NodeFSP.realpath(entry) !== entry) throw new Error("The installed runtime is redirected.");
+  const entryFile = await NodeFSP.open(entry,
+    NodeFS.constants.O_RDONLY | NodeFS.constants.O_NOFOLLOW | NodeFS.constants.O_NONBLOCK);
+  try {
+    const before = await entryFile.stat({ bigint: true });
+    if (!before.isFile() || before.nlink !== 1n || (before.mode & 0o111n) === 0n ||
+      before.size <= 0n || before.size > 256n * 1024n * 1024n) {
+      throw new Error("The installed runtime cannot be verified for promotion.");
+    }
+    const digest = NodeCrypto.createHash("sha256");
+    for await (const chunk of entryFile.createReadStream({ autoClose: false, end: Number(before.size) - 1 })) {
+      digest.update(chunk);
+    }
+    const after = await NodeFSP.lstat(entry, { bigint: true });
+    if (!after.isFile() || after.nlink !== 1n || before.dev !== after.dev ||
+      before.ino !== after.ino || before.size !== after.size || before.ctimeNs !== after.ctimeNs) {
+      throw new Error("The installed runtime changed during promotion preparation.");
+    }
+    return digest.digest("hex");
+  } finally {
+    await entryFile.close();
+  }
+}
 
 /**
  * The unit or launch agent that `t3 service install` wrote. Its program names
@@ -257,12 +438,38 @@ async function serviceLogPath(
 
 const DB_FILE_SUFFIXES = ["", "-wal", "-shm"] as const;
 const RESTORE_MARKER = ".restore-pending";
+const SQLITE_HEADER = Buffer.from("SQLite format 3\0");
+const NATIVE_OWNER_MARKER = Buffer.from("t3code-omdb-owner-v1\n");
 
-const databaseBackupDir = (baseDir: string, updateId: string) =>
-  NodePath.join(baseDir, "runtime", "db-backup", updateId);
+const databaseBackupDir = (baseDir: string, updateId: string) => {
+  if (!/^[A-Za-z0-9_-]+$/.test(updateId)) throw new Error("Invalid database backup update ID.");
+  return NodePath.join(baseDir, "runtime", "db-backup", updateId);
+};
 
 const databaseBackupFile = (backupDir: string, suffix: (typeof DB_FILE_SUFFIXES)[number]) =>
   NodePath.join(backupDir, suffix === "" ? "database" : `database${suffix}`);
+
+async function filePrefix(filePath: string, length: number): Promise<Buffer | undefined> {
+  const file = await NodeFSP.open(filePath, NodeFS.constants.O_RDONLY | NodeFS.constants.O_NONBLOCK)
+    .catch((cause: NodeJS.ErrnoException) => {
+      if (cause.code === "ENOENT") return undefined;
+      throw cause;
+    });
+  if (file === undefined) return undefined;
+  try {
+    if (!(await file.stat()).isFile()) throw new Error("Expected a regular file.");
+    const prefix = Buffer.alloc(length);
+    const { bytesRead } = await file.read(prefix, 0, length, 0);
+    return prefix.subarray(0, bytesRead);
+  } finally {
+    await file.close();
+  }
+}
+
+// SQLite also accepts an empty file as an uninitialized database.
+const isSqlitePrefix = (prefix: Buffer | undefined) =>
+  prefix !== undefined &&
+  (prefix.length === 0 || prefix.subarray(0, SQLITE_HEADER.length).equals(SQLITE_HEADER));
 
 async function pathExists(target: string): Promise<boolean> {
   try {
@@ -825,7 +1032,9 @@ const restartPendingPath = (baseDir: string) =>
 export class Launcher {
   readonly #baseDir: string;
   readonly #statePath: string;
-  #state: ServiceState;
+  #state: LauncherDurableState;
+  #started = false;
+  #preparing = false;
   #child: ManagedChild | null = null;
   #timer: NodeJS.Timeout | undefined;
   #transitions: Promise<void> = Promise.resolve();
@@ -844,7 +1053,7 @@ export class Launcher {
 
   constructor(
     baseDir: string,
-    state: ServiceState,
+    state: LauncherDurableState,
     options: {
       readonly backupSpaceProbe?: Partial<BackupSpaceProbe>;
       readonly serviceUnit?: ServiceUnit;
@@ -871,7 +1080,149 @@ export class Launcher {
     this.#state = state;
   }
 
+  /** Inspect a stopped candidate before this launcher starts any server. */
+  async prepareIsolatedCandidate(
+    verification: unknown,
+    options?: { readonly recordPromotionIntent: boolean },
+  ): Promise<IsolatedCandidateWitness> {
+    if (this.#started || this.#preparing || this.#stopRequested || this.#child !== null ||
+      this.#environment.T3_CODE_LS_SEALED_TRIAL_RECOVERY !== "1" ||
+      process.platform !== "linux" || process.arch !== "x64" ||
+      this.#environment.T3_CODE_LS_DB_EXECUTABLE !== undefined ||
+      this.#state.protocol !== 5) {
+      throw new Error("Isolated candidate preparation requires a stopped native trial launcher.");
+    }
+    this.#preparing = true;
+    try {
+      const state = this.#state;
+      const pending = state.update;
+      if (!sameSealedPendingState(await this.#readState(), state)) {
+        throw new Error("The isolated candidate selection changed.");
+      }
+      const request = isRecord(verification) ? verification.request : undefined;
+      const preparation = isRecord(verification) ? verification.preparation : undefined;
+      const activation = isRecord(request) ? request.activation : undefined;
+      if (!isRecord(verification) || !hasKeys(verification, ["request", "preparation"]) ||
+        !isRecord(request) || request.update_id !== pending.id || !isRecord(preparation) ||
+        !isRecord(activation) || !hasKeys(activation, [
+          "update_id", "from_version", "target_version", "target_entry_sha256",
+          "target_helper_sha256", "target_schema_sha256",
+        ]) || activation.update_id !== pending.id ||
+        activation.from_version !== pending.fromVersion ||
+        activation.target_version !== pending.targetVersion ||
+        ![activation.target_entry_sha256, activation.target_helper_sha256, activation.target_schema_sha256]
+          .every((digest) => typeof digest === "string" && /^[0-9a-f]{64}$/u.test(digest))) {
+        throw new Error("The isolated preparation does not match the selected update.");
+      }
+      const input = JSON.stringify(verification);
+      if (Buffer.byteLength(input) > 65_536) throw new Error("Isolated preparation input exceeds its bound.");
+      if (!(await runtimeExists(this.#baseDir, pending.targetVersion))) {
+        throw new Error("The isolated candidate runtime is unavailable.");
+      }
+      const { entryPath } = runtimePaths(this.#baseDir, pending.targetVersion);
+      const selected = installedApplicationDatabase(entryPath, {});
+      if (selected.kind !== "omdb") throw new Error("The isolated candidate does not select native storage.");
+      const helper = await readBundledNativeTrialHelper(entryPath, selected.executable);
+      if (helper === null || helper.sha256 !== activation.target_helper_sha256 ||
+        helper.targetSchemaSha256 !== activation.target_schema_sha256) {
+        throw new Error("The isolated candidate helper does not match the selected update.");
+      }
+      const entryBefore = await NodeFSP.lstat(entryPath, { bigint: true });
+      if (!entryBefore.isFile() || entryBefore.nlink !== 1n ||
+        await NodeFSP.realpath(entryPath) !== entryPath) {
+        throw new Error("The isolated candidate executable is redirected.");
+      }
+      const stdout = await runOfflineTrialCommand(
+        entryPath, ["__service-prepare-isolated", this.#baseDir, pending.id], input,
+      );
+      const response: unknown = JSON.parse(stdout);
+      if (!isRecord(response) || !hasKeys(response, ["protocol", "status", "updateId", "preparation"]) ||
+        response.protocol !== 1 || response.status !== "prepared-isolated" ||
+        response.updateId !== pending.id || !NodeUtil.isDeepStrictEqual(response.preparation, preparation)) {
+        throw new Error("The isolated candidate returned a mismatched preparation witness.");
+      }
+      const rechecked = await readBundledNativeTrialHelper(entryPath, selected.executable);
+      const entryAfter = await NodeFSP.lstat(entryPath, { bigint: true });
+      if (rechecked === null || rechecked.sha256 !== helper.sha256 ||
+        rechecked.targetSchemaSha256 !== helper.targetSchemaSha256 ||
+        !entryAfter.isFile() || entryAfter.nlink !== 1n ||
+        entryBefore.dev !== entryAfter.dev || entryBefore.ino !== entryAfter.ino ||
+        entryBefore.size !== entryAfter.size || entryBefore.ctimeNs !== entryAfter.ctimeNs ||
+        !sameSealedPendingState(await this.#readState(), state) || this.#stopRequested) {
+        throw new Error("The isolated candidate changed during preparation.");
+      }
+      const witness: IsolatedCandidateWitness = {
+        protocol: 1, status: "prepared-isolated", updateId: pending.id,
+        targetVersion: pending.targetVersion,
+        entrySha256: String(activation.target_entry_sha256),
+        helperSha256: helper.sha256,
+        verificationSha256: NodeCrypto.createHash("sha256").update(input).digest("hex"),
+      };
+      const observationInput = JSON.stringify({ verification_json: input, witness });
+      if (Buffer.byteLength(observationInput) >= 4096) {
+        throw new Error("The native preparation observation exceeds its bound.");
+      }
+      const recorded = await runOfflineTrialCommand(
+        selected.executable, ["trial-record-prepared", this.#baseDir, pending.id], observationInput,
+      );
+      const receipt: unknown = JSON.parse(recorded);
+      if (!isRecord(receipt) || !hasKeys(receipt, ["ok", "result"]) || receipt.ok !== true ||
+        !isRecord(receipt.result) || !hasKeys(receipt.result, ["witness", "reused"]) ||
+        typeof receipt.result.reused !== "boolean" ||
+        !NodeUtil.isDeepStrictEqual(receipt.result.witness, witness) ||
+        !sameSealedPendingState(await this.#readState(), state) || this.#stopRequested) {
+        throw new Error("The native preparation observation was not durably verified.");
+      }
+      if (options?.recordPromotionIntent) {
+        await this.#recordIsolatedPromotion(state, witness, helper.promotionIntent);
+      }
+      return witness;
+
+    } finally {
+      this.#preparing = false;
+    }
+  }
+
+  async #recordIsolatedPromotion(
+    state: SealedPendingState, witness: IsolatedCandidateWitness, candidateSupportsPromotion: boolean,
+  ): Promise<void> {
+    const { update } = state;
+    const { entryPath } = runtimePaths(this.#baseDir, update.fromVersion);
+    const selection = installedApplicationDatabase(entryPath, {});
+    const helper = selection.kind === "omdb"
+      ? await readBundledNativeTrialHelper(entryPath, selection.executable)
+      : null;
+    if (!helper?.promotionIntent || !candidateSupportsPromotion || selection.kind !== "omdb") {
+      throw new Error("Both installed helpers must support native promotion intents.");
+    }
+    const intent = {
+      version: 1,
+      verification_sha256: witness.verificationSha256,
+      source_entry_sha256: await installedTrialEntrySha256(entryPath),
+      source_helper_sha256: helper.sha256,
+      source_helper_schema_sha256: helper.targetSchemaSha256,
+    };
+    if (!sameSealedPendingState(await this.#readState(), state) || this.#stopRequested) {
+      throw new Error("The isolated selection changed before recording the promotion intent.");
+    }
+    const output = await runOfflineTrialCommand(
+      selection.executable, ["trial-record-promotion", this.#baseDir, update.id], JSON.stringify(intent),
+    );
+    const receipt: unknown = JSON.parse(output);
+    if (!isRecord(receipt) || !hasKeys(receipt, ["ok", "result"]) || receipt.ok !== true ||
+      !isRecord(receipt.result) || !hasKeys(receipt.result, ["intent", "reused"]) ||
+      typeof receipt.result.reused !== "boolean" ||
+      !NodeUtil.isDeepStrictEqual(receipt.result.intent, intent) ||
+      !sameSealedPendingState(await this.#readState(), state) || this.#stopRequested) {
+      throw new Error("The native promotion intent was not durably verified.");
+    }
+  }
+
   async run(): Promise<void> {
+    if (this.#preparing || this.#started) {
+      throw new Error("The service launcher is already running or preparing a candidate.");
+    }
+    this.#started = true;
     const onSigterm = () => void this.stop("SIGTERM");
     const onSigint = () => void this.stop("SIGINT");
     process.once("SIGTERM", onSigterm);
@@ -881,7 +1232,7 @@ export class Launcher {
         this.#lockPath === undefined ? undefined : await this.#acquireLock(this.#lockPath);
       try {
         // The launcher that held the lock may have moved the state since main read it.
-        if (lock !== undefined) this.#state = await readServiceState(this.#statePath);
+        if (lock !== undefined) this.#state = await this.#readState();
         // A stop that arrived before this point leaves nothing to start or recover.
         if (!this.#stopRequested) this.#enqueue(() => this.#recover());
         await this.#completion.promise;
@@ -971,10 +1322,12 @@ export class Launcher {
   async #selectState(next: ServiceState): Promise<void> {
     const release = await acquireServiceSelectionLock(this.#statePath);
     try {
-      const selected = await readServiceState(this.#statePath);
+      const selected = await this.#readState();
       // Local installs replace the selection and clear its update record. An old
       // launcher must not restore its own selection when asked to update again.
       if (
+        (this.#state.protocol === 5 && !sameSealedPendingState(selected, this.#state)) ||
+        selected.protocol !== this.#state.protocol ||
         selected.activeVersion !== this.#state.activeVersion ||
         selected.update?.id !== this.#state.update?.id ||
         selected.update?.status !== this.#state.update?.status
@@ -989,6 +1342,10 @@ export class Launcher {
   }
 
   async #recover(): Promise<void> {
+    if (this.#state.protocol === 5) {
+      await this.#recoverSealedTrial(this.#state);
+      return;
+    }
     // Clear old stop markers to preserve future tunnels; clear restart-pending only for the awaited version to avoid CLI races.
     await NodeFSP.rm(stopMarkerPath(this.#baseDir), { force: true }).catch(() => undefined);
     const restartPending = restartPendingPath(this.#baseDir);
@@ -1041,7 +1398,167 @@ export class Launcher {
     await this.#startTrial(update);
   }
 
+  #readState(): Promise<LauncherDurableState> {
+    return readLauncherState(this.#statePath, this.#baseDir, this.#environment);
+  }
+
+  async #recoverSealedTrial(state: SealedPendingState): Promise<void> {
+    if (this.#environment.T3_CODE_LS_SEALED_TRIAL_RECOVERY !== "1" ||
+      process.platform !== "linux" || process.arch !== "x64" ||
+      this.#environment.T3_CODE_LS_DB_EXECUTABLE !== undefined) {
+      throw new Error("Sealed native trial recovery requires an opted-in Linux x64 installed helper.");
+    }
+    const selected = await this.#readState();
+    if (!sameSealedPendingState(selected, state)) {
+      throw new Error("The sealed native trial selection changed.");
+    }
+    const pending = state.update;
+    if (!(await runtimeExists(this.#baseDir, pending.fromVersion))) {
+      throw new Error("The sealed native trial's previous runtime is unavailable.");
+    }
+    const { entryPath } = runtimePaths(this.#baseDir, pending.fromVersion);
+    const selection = installedApplicationDatabase(entryPath, this.#environment);
+    if (selection.kind !== "omdb") throw new Error("The previous runtime does not select native storage.");
+    const helper = await readBundledNativeTrialHelper(entryPath, selection.executable);
+    if (helper?.sealedTrialRollback !== true) {
+      throw new Error("The previous runtime's installed helper does not qualify sealed rollback.");
+    }
+    const { stdout } = await NodeUtil.promisify(NodeChildProcess.execFile)(
+      selection.executable,
+      ["trial-rollback-sealed", this.#baseDir, pending.id],
+      { env: {}, shell: false, timeout: 60_000, maxBuffer: 8192, killSignal: "SIGKILL" },
+    );
+    const response: unknown = JSON.parse(stdout);
+    const result = isRecord(response) && hasKeys(response, ["ok", "result"]) && response.ok === true
+      ? response.result : undefined;
+    const activation = isRecord(result) ? result.activation : undefined;
+    const database = isRecord(result) ? result.database : undefined;
+    if (!isRecord(result) || !hasKeys(result, ["activation", "database", "preserved_database", "reused"]) ||
+      !isRecord(activation) || !hasKeys(activation, [
+        "update_id", "from_version", "target_version", "target_entry_sha256",
+        "target_helper_sha256", "target_schema_sha256",
+      ]) || !isTrialFileIdentity(database) || !isTrialFileIdentity(result.preserved_database) ||
+      activation.update_id !== pending.id || activation.from_version !== pending.fromVersion ||
+      activation.target_version !== pending.targetVersion || typeof result.reused !== "boolean" ||
+      ![activation.target_entry_sha256, activation.target_helper_sha256, activation.target_schema_sha256]
+        .every((digest) => typeof digest === "string" && /^[0-9a-f]{64}$/u.test(digest))) {
+      throw new Error("The sealed rollback receipt does not match the pending trial.");
+    }
+    const verified = await readBundledNativeTrialHelper(entryPath, selection.executable);
+    const restored = await NodeFSP.lstat(pending.dbPath, { bigint: true });
+    if (verified?.sealedTrialRollback !== true || verified.sha256 !== helper.sha256 ||
+      !restored.isFile() || restored.nlink !== 1n ||
+      restored.dev.toString(16).padStart(16, "0") !== database.device ||
+      restored.ino.toString(16).padStart(16, "0") !== database.inode ||
+      restored.birthtimeNs.toString() !== database.created) {
+      throw new Error("The sealed rollback helper or restored database changed.");
+    }
+    const outcome = terminalUpdate({ pending, status: "rolled-back", reason: "sealed-trial-recovery" });
+    await this.#selectState({
+      protocol: SERVICE_LAUNCHER_PROTOCOL, activeVersion: pending.fromVersion, update: outcome,
+    });
+    if (this.#stopRequested) return;
+    try {
+      await this.#startChild(pending.fromVersion, "active", outcome);
+    } finally {
+      await this.#repointServiceUnit(pending.fromVersion);
+    }
+  }
+
+  async #databaseTrialBlocker(
+    update: Pick<PendingServiceUpdate, "dbPath" | "fromVersion" | "targetVersion">,
+    existingBackup?: { readonly directory: string; readonly restoring: boolean },
+  ): Promise<string | undefined> {
+    try {
+      if (!NodePath.isAbsolute(update.dbPath)) return "The database path is not absolute.";
+      const stateDir = NodePath.join(this.#baseDir, "userdata");
+      const marker = await filePrefix(
+        NodePath.join(stateDir, "server-owner.sqlite"),
+        NATIVE_OWNER_MARKER.length + 1,
+      );
+      if (marker !== undefined && !marker.equals(NATIVE_OWNER_MARKER) && !isSqlitePrefix(marker)) {
+        return "The database ownership marker could not be verified.";
+      }
+
+      const selection = async (version: string) => {
+        const { entryPath } = runtimePaths(this.#baseDir, version);
+        const entry = await NodeFSP.lstat(entryPath).catch((cause: NodeJS.ErrnoException) => {
+          if (cause.code === "ENOENT") return undefined;
+          throw cause;
+        });
+        if (entry === undefined) return undefined;
+        if (!entry.isFile() && !entry.isSymbolicLink()) throw new Error("Invalid runtime entry.");
+        return installedApplicationDatabase(entryPath, this.#environment);
+      };
+      const [active, target] = await Promise.all([
+        selection(update.fromVersion),
+        selection(update.targetVersion),
+      ]);
+      const nativeOwned = marker?.equals(NATIVE_OWNER_MARKER) === true;
+      if (nativeOwned || active?.kind === "omdb" || target?.kind === "omdb") {
+        const source = NodePath.join(stateDir, "statev2.omdb");
+        if (
+          nativeOwned &&
+          active?.kind === "omdb" &&
+          target?.kind === "omdb" &&
+          NodePath.resolve(update.dbPath) === NodePath.resolve(source) &&
+          (await filePrefix(source, 1))?.length === 1
+        ) {
+          // A component override is valid for testing the normal server. The launcher
+          // needs a capability bound to each version's own installed helper.
+          if (this.#environment.T3_CODE_LS_DB_EXECUTABLE !== undefined) {
+            return "The native database trial requires the installed native helper for each runtime.";
+          }
+          const [currentHelper, candidateHelper] = await Promise.all([
+            readBundledNativeTrialHelper(runtimePaths(this.#baseDir, update.fromVersion).entryPath, active.executable),
+            readBundledNativeTrialHelper(runtimePaths(this.#baseDir, update.targetVersion).entryPath, target.executable),
+          ]).catch(() => [null, null]);
+          if (currentHelper == null || candidateHelper == null) {
+            return "The native database trial could not verify both installed helpers.";
+          }
+          if (currentHelper.engineRevision !== candidateHelper.engineRevision) {
+            return "The native database trial requires a supported transition between the installed storage engines.";
+          }
+          return "The native database trial requires a durable checkpoint and an isolated database generation before activation.";
+        }
+        return "The native database ownership, existing source and selected runtimes do not establish a compatible service trial.";
+      }
+
+      const live = await filePrefix(update.dbPath, SQLITE_HEADER.length);
+      let sqliteBackup = false;
+      if (existingBackup !== undefined && (await pathExists(existingBackup.directory))) {
+        const backupPath = databaseBackupFile(existingBackup.directory, "");
+        sqliteBackup = isSqlitePrefix(await filePrefix(backupPath, SQLITE_HEADER.length));
+        if (!sqliteBackup) return "The SQLite backup format could not be verified.";
+      }
+      // A stopped restore may leave a missing file or a partial header at its original path.
+      const interruptedCopy =
+        (live === undefined || SQLITE_HEADER.subarray(0, live.length).equals(live)) &&
+        existingBackup?.restoring &&
+        sqliteBackup;
+      if (!isSqlitePrefix(live) && !interruptedCopy) {
+        return "The SQLite database format could not be verified.";
+      }
+      return undefined;
+    } catch {
+      return "The database source or selected runtime could not be verified.";
+    }
+  }
+
+  async #verifyPendingTrial(pending: PendingServiceUpdate, restoring = false): Promise<void> {
+    const blocker = await this.#databaseTrialBlocker(pending, {
+      directory: databaseBackupDir(this.#baseDir, pending.id),
+      restoring,
+    });
+    if (blocker !== undefined) {
+      throw new Error(
+        `${blocker} Service update ${pending.id} requires recovery. The pending selection and database files were preserved.`,
+      );
+    }
+  }
+
   async #startTrial(pending: PendingServiceUpdate): Promise<void> {
+    await this.#verifyPendingTrial(pending);
     try {
       await backupDatabaseOnce(this.#baseDir, pending);
     } catch {
@@ -1154,6 +1671,16 @@ export class Launcher {
       await reject("The requested target runtime is missing or incomplete.");
       return;
     }
+    const trialBlocker = await this.#databaseTrialBlocker({
+      dbPath: message.dbPath,
+      fromVersion: child.version,
+      targetVersion: message.targetVersion,
+    });
+    if (!child.process.connected) return;
+    if (trialBlocker !== undefined) {
+      await reject(`${trialBlocker} The active server remains running.`);
+      return;
+    }
     // Failed checks must refuse updates rather than stop the server with unknown backup capacity.
     const backupBlocker = await databaseBackupBlocker(
       this.#baseDir,
@@ -1176,7 +1703,7 @@ export class Launcher {
       dbPath: message.dbPath,
       status: "pending",
     };
-    const next: ServiceState = { ...this.#state, update: pending };
+    const next: ServiceState = { ...this.#state, protocol: SERVICE_LAUNCHER_PROTOCOL, update: pending };
     try {
       await this.#selectState(next);
     } catch (error) {
@@ -1188,11 +1715,25 @@ export class Launcher {
   }
 
   async #beginTrial(child: ManagedChild): Promise<void> {
-    const pending = this.#state.update;
-    if (this.#child !== child || child.role !== "active" || pending?.status !== "pending") {
+    const state = this.#state;
+    const pending = state.update;
+    if (
+      state.protocol !== SERVICE_LAUNCHER_PROTOCOL ||
+      this.#child !== child ||
+      child.role !== "active" ||
+      pending?.status !== "pending"
+    ) {
       return;
     }
     this.#timer = undefined;
+    const blocker = await this.#databaseTrialBlocker(pending);
+    if (blocker !== undefined) {
+      await this.#selectState({
+        ...state,
+        update: terminalUpdate({ pending, status: "failed", reason: blocker }),
+      });
+      return;
+    }
     // Anything thrown outside its own fallback still leaves the offline backup to run.
     const finishOnlineBackup = await startOnlineDatabaseBackup(
       this.#baseDir,
@@ -1222,9 +1763,11 @@ export class Launcher {
       throw new Error("Trial child reported prepared for an unexpected update.");
     }
     this.#clearTimer();
+    await this.#verifyPendingTrial(pending);
     const committed = terminalUpdate({ pending, status: "committed" });
     const next: ServiceState = {
       ...this.#state,
+      protocol: SERVICE_LAUNCHER_PROTOCOL,
       activeVersion: pending.targetVersion,
       update: committed,
     };
@@ -1328,6 +1871,7 @@ export class Launcher {
     this.#clearTimer();
     const pending = this.#state.update;
     if (pending?.status === "pending") {
+      await this.#verifyPendingTrial(pending);
       const discarded = await discardDatabaseBackup(this.#baseDir, pending.id).then(
         () => true,
         () => false,
@@ -1335,6 +1879,7 @@ export class Launcher {
       if (!discarded) {
         const next: ServiceState = {
           ...this.#state,
+          protocol: SERVICE_LAUNCHER_PROTOCOL,
           activeVersion: pending.fromVersion,
           update: terminalUpdate({ pending, status: "failed", reason: "state-dir-owned" }),
         };
@@ -1382,10 +1927,12 @@ export class Launcher {
       this.#child = null;
       await this.#terminate(child.process);
     }
+    await this.#verifyPendingTrial(pending, true);
     await restoreDatabaseBackup(this.#baseDir, pending);
     const outcome = terminalUpdate({ pending, status, reason });
     const next: ServiceState = {
       ...this.#state,
+      protocol: SERVICE_LAUNCHER_PROTOCOL,
       activeVersion: pending.fromVersion,
       update: outcome,
     };
@@ -1427,11 +1974,11 @@ export async function main(options: LauncherOptions = {}): Promise<void> {
     const environment = await readServiceEnvironment(baseDir, managerEnvironment);
     const statePath = NodePath.join(baseDir, "runtime", SERVICE_STATE_FILE);
     const contents = await NodeFSP.readFile(statePath, "utf8");
-    let state = parseServiceState(contents);
+    let state: LauncherDurableState | undefined = parseServiceState(contents);
     if (state === undefined) {
       state = adoptLegacyServiceState(contents);
-      if (state === undefined) throw new Error("Service state is invalid or unsupported.");
-      if (!(await runtimeExists(baseDir, state.activeVersion))) {
+      if (state === undefined) state = await readLauncherState(statePath, baseDir, environment);
+      else if (!(await runtimeExists(baseDir, state.activeVersion))) {
         throw new Error(`Selected t3@${state.activeVersion} runtime is missing or incomplete.`);
       }
     }

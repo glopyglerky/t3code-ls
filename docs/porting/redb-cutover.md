@@ -62,6 +62,61 @@ fail closed. Read-only handles cannot perform an upgrade. Further schema transit
 require their own explicit native upgrade path; omdb does not execute arbitrary SQL
 migrations.
 
+## Opt-in assistant event revisions
+
+The native database helper accepts
+`{"operation":"application_bootstrap","event_layout":"assistant_text_revisions_v1"}`
+when initializing an empty application namespace. Use a fresh native profile with
+no SQLite source. Normal application startup verifies and reopens the selected
+layout. A baseline or imported catalog cannot opt in through bootstrap. The
+catalog digest and generation identity bind the layout, and older helpers reject
+its catalog field.
+
+The event repository writes a full checkpoint followed by up to eight suffix
+rows. It considers the most recent streaming message update in the same thread
+and requires the same message, run, node and creation time. Only an exact append
+to the encoded text is eligible. Completion, rewrites and ambiguous payloads
+stay full. The encoded JSON payload limit for this representation is 256 KiB and
+the encoded suffix limit is 32 KiB. Only typed rows of up to 1 MiB can take
+part in a chain. Larger events use the existing full-row path. Replay and generic
+event readers recover the original JSON bytes. The usual response limits apply
+to expanded reads.
+
+Suffix rows and their head and dependency records share the existing application
+transaction. Pruning a base makes its immediate dependent a full checkpoint in
+that same transaction. A surviving descendant then resolves through the
+re-anchored row. Missing or inconsistent predecessor data fails closed on read.
+
+The [native event layout comparison](https://github.com/glopyglerky/t3code-ls/actions/runs/45165969935)
+reopened and compacted five matched pairs on Linux x64 with omdb Immediate
+durability. Each layout committed 128 streaming updates and one completion per
+run. Both produced the same ordered logical payload. The full-event layout used
+12,434,377 bytes of keys and values, and the append layout used 2,554,870 bytes,
+including the indexes and revision witnesses. After exclusive compaction the
+database files were 19,664,896 and 4,984,832 bytes respectively. The workload
+isolates event storage. Application projections, client traffic, provider work,
+and existing-profile activation require their own evidence.
+Projection, search and snapshot readers use their existing sources.
+
+The packaged browser comparison at `dd37e7056c2811beee0ef4ecf5fc41c423038481`
+reconstructed the same Unicode dialogue and ordered updates in both profiles.
+The closed-profile key/value counter found 57 event rows and zero suffix
+witnesses in each. That short fixture established the accounting path.
+[Short packaged fixture](https://github.com/glopyglerky/t3code-ls/actions/runs/45242130177)
+
+The extended packaged fixture at `634cd36467751958d112ad34602bb7fd5a5657a4`
+replayed the same three reconstructed assistant updates in both fresh profiles.
+The full profile retained 460,392 bytes in event rows, indexes and metadata. The
+compact profile retained 457,219 bytes across the same groups, including a single
+362-byte revision witness. These are key and value lengths from the closed stores
+for one matched fixture pair. Write amplification, repeatability and comparison
+with stock remain unmeasured. [Extended packaged fixture](https://github.com/glopyglerky/t3code-ls/actions/runs/45244869431)
+
+Source rollback can reopen baseline and imported profiles with the prior helper.
+An opted-in profile needs a helper that understands its layout. Rolling it back
+to a prior helper requires restoring a compatible pre-trial backup. This version
+has no lossless in-place downgrade for writes made after opt-in.
+
 ## Implemented boundary
 
 `apps/server/src/persistence/redb_transactions.rs` is compiled by the existing
@@ -386,6 +441,18 @@ Registration and the assertions described here are not a declaration that a
 particular committed head has passed. Qualification must run the mapped checks
 against that exact head and its packaged helpers.
 
+The dual-engine EventSink fixture passed on the integration candidate
+`0ef9bc8b0b7e11cd8f7b3d9e449b8d98ac6b9d93`. Direct redb and Fjall each handled
+67 requests, produced the same state digest, and preserved both the committed
+replay and the unchanged seed after a failed staging transaction. Both routes
+refused ordinary startup. [Dual-engine fixture](https://github.com/glopyglerky/t3code-ls/actions/runs/45238019829)
+
+The aged-retention fixture passed at `0c046ce958cad9671785ec909da46e7991633d3c`.
+It reopened after a committed deletion page, then issued and observed a
+foreground command while pruning resumed. Active and pending work, projections,
+the accepted receipt and attachment bytes survived. The pre-retention backup
+reopened separately. [Retention fixture](https://github.com/glopyglerky/t3code-ls/actions/runs/45239390264)
+
 `tools/acceptance-checks.json` schedules these gates and their scoped
 typechecks, together with the existing transaction, import, event-log, database
 durability and differential component-outbox gates. Multiple native executable
@@ -401,3 +468,323 @@ verifies migration/source preservation and older-server exclusion. The browser
 flow additionally checks its native database and absence of new application
 SQLite files. These are integration assertions, not a claim that every platform
 or a not-yet-qualified commit has passed.
+
+
+### Stopped candidate preparation observation
+
+The explicit `Launcher.prepareIsolatedCandidate` path calls the installed candidate's
+`__service-prepare-isolated` entry, then asks its verified native helper to record
+that observation with `trial-record-prepared`. The existing trial receipt gains an
+optional typed `candidate_observation` field. It retains the exact bounded input
+and its SHA-256, update and target identities, and installed entry and helper
+hashes. The native owner rechecks the pending protocol-5 selection, original
+checkpoint, stopped source, sealed trial and installed artifacts under the existing
+home, database and selection leases before atomically replacing and syncing the
+receipt. An identical retry revalidates without rewriting it. A different or
+corrupt observation refuses without changing the receipt.
+
+This observation does not activate the catalog, publish the prepared database,
+change runtime selection or start the foreground server. Query and preflight stay
+read-only. Preparation and inspection revalidate the observation after restart.
+The updated helper can restore a sealed trial with this extended receipt even if
+the failed candidate helper has disappeared. Older strict receipt decoders refuse
+the additional field, and ordinary old readers still refuse the sealed catalog.
+No user-facing native update admission follows from the observation.
+
+The Linux `isolated_trial_upgrades_88_without_changing_the_stopped_source` fixture
+covers interruption before receipt replacement and after its directory sync,
+identical retry, stale input, receipt corruption, changed helper refusal, retained
+reader refusal with unchanged database bytes, and rollback with the extended
+receipt. The packaged launcher fixture records through the actual installed SEA,
+retries with a fresh launcher, rejects a corrupt observation, then runs its existing
+sealed publication and rollback checks. These added native cases require hosted
+qualification. Hosted Linux run [45158212678](https://github.com/glopyglerky/t3code-ls/actions/runs/45158212678)
+passed both native trial tests and the packaged launcher rollback. Eight local
+launcher process tests passed on macOS, with thirteen Linux cases skipped.
+
+Source lineage remains MIT T3 Code at stock
+`28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`. This increment uses the existing native
+trial receipt and tempfile atomic publication mechanism. Method SHA-256 is
+`5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
+
+### Serving migration metadata
+
+Normal native serving obtains `databaseMigration` from the ordered migrations
+returned by its selected owner's successful `application_bootstrap`. `Omdb.make`
+releases the scoped witness only after index preparation, optional independent
+reader validation and ownership activation succeed. `Omdb.layerConfig` shares
+that witness with both normal environment-layer sites through the same memoized
+persistence owner. No second database owner or persistent status record is added.
+
+The native serving environment requires this dependency before constructing its
+descriptor and refuses a witness for a different database path. Repeated descriptor
+reads reuse the earned head. SQLite serving, the standalone environment CLI,
+preflight and staged candidate pre-admission retain their existing inspection
+paths. The observation is startup metadata, with no new event, replay, migration,
+provider or activation operation.
+
+The startup fixture holds a real native write transaction and injects a bounded
+independent-inspector refusal. It first confirms that the former probe reports no
+head, then requires the scoped serving layer to report the earned head repeatedly
+without another inspection. Existing native inspection tests continue to allow
+independent reads during a writer when the engine grants them. Failed ownership
+activation must return no witness. Environment layer regressions also cover a
+failed persistence dependency and a synthetic head different from the build head.
+Hosted Linux run [45159499480](https://github.com/glopyglerky/t3code-ls/actions/runs/45159499480)
+passed the native startup gate. The separate environment layer unit tests await
+execution. Source lineage remains MIT T3 Code at
+`28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`, under method SHA-256
+`5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
+
+### Durable promotion intent without activation
+
+`trial-record-promotion HOME UPDATE_ID` records an explicit promotion intent in the
+existing isolated trial receipt. It accepts a version 1 `NativePromotionIntent` request.
+
+```json
+{
+  "version": 1,
+  "verification_sha256": "<earned preparation verification digest>",
+  "source_entry_sha256": "<installed source runtime digest>",
+  "source_helper_sha256": "<installed source helper digest>",
+  "source_helper_schema_sha256": "<source helper build schema digest>"
+}
+```
+
+The surrounding receipt remains authoritative for the update ID, versions,
+original source identity, checkpoint, sealed stage identity and contents, target
+entry/helper/schema and actual preparation observation. The intent's verification
+digest must match that observation. The source helper's build schema identity is
+separate from the original database catalog and checkpoint identities.
+
+Recording acquires the existing version-selection, home and database fences. It
+revalidates the receipt under those fences, the stopped source and original
+checkpoint, the sealed stage and both as-installed runtimes. Entry and helper
+files retain the existing regular-file, directory, bounded hash and install-marker
+checks. Both entries must retain execute permission bits. Each helper must answer the read-only
+`trial-capabilities` query with the expected schema, pinned engine, rollback
+support and `promotionIntent: 1`. Output is bounded to 8 KiB per pipe and each query
+has a five-second deadline. Helper capability compatibility does not establish
+arbitrary future schema/backend or application compatibility.
+
+The owner syncs a temporary receipt, rechecks its fences and the previous receipt,
+then atomically replaces and directory-syncs the same receipt. Retry revalidates
+all bindings and reuses only the exact same intent. Stale, corrupt, changed-artifact
+or missing-stage input refuses. Preparation observation retries preserve the intent.
+Inspection and preparation revalidate an existing intent. Previous strict receipt
+decoders refuse the new field, and helpers without the capability are refused
+before the intent can be recorded. Keep an intent-capable helper with the receipt;
+reverting to an older helper does not provide an intent downgrade path.
+
+This transition changes no database name, catalog seal, runtime selection or
+foreground process. Once an intent exists, the old database-only sealed publication
+command refuses it. A future transition must publish a crash-recoverable coherent
+runtime/database decision before releasing the serving fence. Rollback parsing
+continues to understand the extended receipt and does not depend on the failed
+candidate's continued presence. Ordinary native trial admission remains closed.
+There is no serving write or post-commit downgrade in this increment.
+
+The native owner fixture interrupts immediately after the first staged write and
+after durable receipt publication, then retries. It checks missing observation,
+unsupported helper capability, corrupt/stale intent, changed source/target
+artifacts, missing stage and changed pending selection. It requires unchanged
+source, original checkpoint, stage bytes and inode, and pending selection, while
+ordinary catalog access and legacy publication stay fenced. The default unit
+fixture uses a controlled read-only capability peer. The focused hosted lane
+supplies the actual built Rust helper for both installed helper roles and also
+retries through its normal CLI command. The current fixture's runtime entry bytes
+and observation remain synthetic. Hosted [native intent recovery](https://github.com/glopyglerky/t3code-ls/actions/runs/45168397467) passed these checks. The [packaged launcher proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45168397250) recorded the exact intent and recovered it with a fresh launcher using the installed runtime. Both kept the source and candidate files, runtime selection and serving fence intact.
+
+The focused lane is `promotion-intent-proof.yml`. After selecting the pinned
+Lustr/BlueFe toolchain and isolated Cargo/test directories, its exact commands are:
+
+```sh
+"$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+  build --locked -j 2 -p t3-code-ls-storage --bin t3-code-ls-db
+T3_TEST_PROMOTION_HELPER="$CARGO_TARGET_DIR/debug/t3-code-ls-db" \
+  "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+  test --locked -j 2 -p t3-code-ls-storage --lib \
+  application_bootstrap::upgrade::tests::service_promotion_intent_is_durable_exact_and_keeps_publication_fenced \
+  -- --exact --nocapture
+```
+
+The lane checks completion markers and `pipefail`, retains source/helper/compiler
+identities and bounded logs, reruns existing isolated-trial cases, and removes its
+owned generated output. Local formatting and source checks are not runtime
+qualification. No build or live profile activation ran on the Mac.
+
+MIT stock lineage remains
+`28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f`. Mandatory method SHA-256 is
+`5744f9bc85c2fb61d01bba3434f200312efce584b1d2cbbd73f7a42219a3dd30`.
+
+## T04 inherited history and reconnect
+
+Run forks include mutable ancestor rows outside the child's event stream. The
+shared client requests a bounded snapshot on run-fork reconnect, replacing
+cached history before synchronization. Other threads continue to resume from
+their replay cursors. The on-disk format and public wire schema stay compatible.
+
+The unchanged client retained stale rows in the disk and retained-cache tests.
+The fix passed those tests, the shared replay suite and the native anchored
+window check. The native fixture commits an ancestor update between a held
+reader's window and watermark reads. The held reader sees a coherent old view.
+A fresh read and database reopen see the new inherited row and ancestry
+revision with the same child replay watermark. [Baseline](https://github.com/glopyglerky/t3code-ls/actions/runs/45173713610)
+· [Candidate](https://github.com/glopyglerky/t3code-ls/actions/runs/45173707988)
+
+The negotiated live refresh sends a payload-free notification when an ancestor
+changes the inherited view. The hosted check covers the active SQLite
+subscription, same-cursor page rejection in the shared client, and a native
+anchored read.
+[Live refresh check](https://github.com/glopyglerky/t3code-ls/actions/runs/45181752443)
+
+The history window and its older page include an ancestry revision read from
+the same transaction as their rows. An aware client restores expanded rows
+only when the view revisions and child replay watermarks agree. The native
+check verifies one revision request per versioned read.
+[Coherent history check](https://github.com/glopyglerky/t3code-ls/actions/runs/45188834743)
+
+A bundled Linux x64 Chromium run kept the child at replay sequence 51 while
+its inherited view advanced from revision 52 to 58. Three older rows, keyboard
+focus and scroll position survived the refresh. Child replay then delivered
+sequences 59 and 60 in order, and the reopened omdb retained the new window.
+J04 performance remains open.
+[Packaged history check](https://github.com/glopyglerky/t3code-ls/actions/runs/45228499323)
+
+The isolated EventSink fixture also committed and reopened the same synthetic
+application state on direct redb and Fjall. Both engines returned the same
+state hash, replayed the original receipt, rolled back failed staging, and
+preserved the original omdb seed byte for byte. Normal server selection still
+uses the qualified omdb path. Engine performance and migration remain open.
+[Ordered engine check](https://github.com/glopyglerky/t3code-ls/actions/runs/45234079536)
+
+## T05 offline publication under the serving fence
+
+`trial-publish-intended-sealed HOME UPDATE_ID` requires the candidate's durable
+preparation observation, matching installed packages and a promotion intent.
+Both native helpers must advertise `sealedIntentPublication: 1`. The helper
+records publication and rollback phases in the existing receipt while holding
+the selection, home and database leases. Each retry checks the exact pending
+selection bytes, installed identities, and retained database inodes.
+
+The interruption fixture verified recovery before and after the canonical
+rename, as well as the removal of the extra source link before publication.
+After rename, rollback restores the original source inode and preserves the
+failed sealed database. The exact helper rejected changed packages, forged
+receipt phases and changed selection bytes. [Native interruption proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45173732320)
+
+The installed-archive fixture used the packaged runtime and native helper with
+a synthetic stored event. It verified publication, catalog refusal, exact retry,
+original inode and command receipt after rollback, and a terminal refusal to
+republish. [Packaged trial proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45176710697)
+
+If a stopped trial has recorded its promotion intent and publication has yet
+to begin, rollback can record its terminal phase after verifying the original
+database and sealed stage at their original names. It leaves both files in
+place. The unchanged code refused this boundary. The fixed fixture interrupted
+the durable rollback phases and verified retry without moving either file.
+[Baseline](https://github.com/glopyglerky/t3code-ls/actions/runs/45178423071)
+· [Cancellation recovery](https://github.com/glopyglerky/t3code-ls/actions/runs/45178489482)
+
+The packaged launcher cancelled the unstarted publication and reopened the
+previous runtime with the original database inode and committed receipt. A
+separate packaged `serve` invocation refused the published sealed candidate.
+The refusal left runtime readiness unpublished and preserved the database,
+checkpoint and selection. The launcher subsequently restored the original inode
+after publication, preserved the failed candidate, and brought the previous
+runtime back to readiness. [Rollback before publication](https://github.com/glopyglerky/t3code-ls/actions/runs/45183245968)
+· [Rollback after publication](https://github.com/glopyglerky/t3code-ls/actions/runs/45188137463)
+
+Isolated preparation checks the candidate's embedded version before invoking
+the storage helper. The packaged check used a separately built candidate for
+the forward target. A mislabeled copy with otherwise valid digests and receipts
+was refused without changes to the trial files, checkpoint or selected service.
+[Packaged version check](https://github.com/glopyglerky/t3code-ls/actions/runs/45191901057)
+
+The forward-catalog fixture preserved the post-decision restore fence against
+both the compatible and predecessor helpers. Both refused generic restore
+across the original, staged, and renamed retry layouts. The predecessor also
+rejected the marker when reading the catalog.
+[Forward catalog and restore proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45212311659)
+
+The focused writer fixture held the same exclusive lease across engine
+handles. It recovered the exact sealed and marked states after process exit
+and repeated generic restore refusal with both installed helpers.
+[Same-inode writer and restore proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45218639908/attempts/2)
+
+The Linux child fixture accepted a duplicate of the locked file description.
+Missing, independently reopened, foreign and stale inputs were refused. The
+parent preserved the marked database and original forward decision after a
+deliberately failing child. The parent held home and selection ownership
+throughout. [Child lease proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45227883095)
+
+The staged Linux helper checked the exact installed image, receipt, marked
+database and inherited lease before emitting readiness. It refused changed
+identity, hash and lease inputs. The parent retained authority and restarted
+the check after a forced readiness write failure.
+[Staged helper readiness](https://github.com/glopyglerky/t3code-ls/actions/runs/45235858575)
+
+A subsequent Linux fixture bound readiness to the immutable running helper
+image. It refused mutable images and a changed installed source, along with
+the inherited-lease and readiness-output controls. The parent held ownership
+throughout. [Sealed image proof](https://github.com/glopyglerky/t3code-ls/actions/runs/45238021254)
+
+Promotion to the target runtime, catalog unsealing and ordinary native update
+admission still require production recovery proof.
+
+## Native startup migration inspection
+
+Startup reads catalog presence and ordered migration rows in one read-only
+snapshot. The helper validates the generation identity and serving fence
+before reading migration rows. The server compares that history with its
+compiled migration list. The regular schema and migration helper operations
+remain available.
+
+The startup fixture covered an uncataloged file, a current file, a schema 88
+upgrade, and recovery after a killed writer. The isolated native trial test
+verified refusal against a sealed catalog. Successful bootstrap still provides
+the migration witness used by serving descriptors.
+[Startup recovery and sealed inspection checks](https://github.com/glopyglerky/t3code-ls/actions/runs/45175802072)
+
+Six balanced rounds reopened the same 32-thread, 6,400-message fixture with
+stock, the pre-change native bundle, and the candidate. Compared with the
+pre-change native bundle, median paired server CPU fell 65 ms across six
+rounds. Descriptor readiness was 14.6 ms later and first selected text was
+22.1 ms later at the paired median. Compared with stock, descriptor readiness
+was 340.2 ms later and server CPU was 2,245 ms higher. Observations use one Linux
+x64 runner, unmanaged filesystem cache, sampled process RSS, and distinct
+stock SQLite WAL/NORMAL and omdb Immediate durability profiles.
+[Paired workspace reopen](https://github.com/glopyglerky/t3code-ls/actions/runs/45177228845)
+
+The checked-open candidate reuses verified normal-table pages during allocator
+reconstruction. Five alternating pairs used the same native application and
+32-thread, 6,400-message workload with the engine feature disabled and enabled.
+Median descriptor readiness was 1,536 ms with the feature disabled and
+1,369 ms with it enabled. The median paired reduction was 154 ms (10.2%), with
+individual reductions from 111 to 180 ms. The median paired HTML readiness
+reduction was 155 ms. The Linux x64 run used an unmanaged filesystem cache.
+CPU and RSS samples were contextual. The product engine pin stays unchanged
+while stock comparison and recovery qualification continue.
+[Paired checked-open results](https://github.com/glopyglerky/t3code-ls/actions/runs/45210184960)
+
+A separate run used all six orders of stock, native control and native reuse
+on one Linux x64 runner. The 32 threads and 6,400 messages were identical
+across arms, with unmanaged filesystem cache after import and clean stop.
+Median descriptor readiness was 1,143 ms for stock, 1,486 ms for native
+control and 1,363 ms for native reuse. The median per-round reduction from
+native control was 134 ms (10.0%, range 113–172 ms). Native reuse reached
+the descriptor 228 ms later than stock at the paired median (19.8%, range
+162–270 ms). Stock used SQLite WAL/NORMAL. Both native variants used omdb
+Immediate. CPU, RSS and cached first-paint attribution remain unqualified.
+[Balanced stock and native reopen comparison](https://github.com/glopyglerky/t3code-ls/actions/runs/45218299197)
+
+The later descriptor-boundary diagnostic repeated six balanced rounds using
+the same 6,400-message workload. Without span tracing, verified-page reuse
+saved 143 ms at the paired median against native control (130–185 ms) and
+reached readiness 194 ms later than stock (179–225 ms). The traced median
+`Omdb.make` span was 342 ms in native control and 205 ms with reuse. Traced
+minus untraced descriptor timings ranged from −75 to +41 ms across the native
+control pairs. These intervals include waits and scheduling. CPU and physical
+I/O attribution remain open, and this run preserves the distinct durability
+profiles and unchanged product engine pin.
+[Readiness span comparison](https://github.com/glopyglerky/t3code-ls/actions/runs/45224963241)

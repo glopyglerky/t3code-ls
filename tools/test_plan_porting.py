@@ -228,6 +228,22 @@ class PortingPlans(unittest.TestCase):
             self.assertEqual(item["retirement"]["missing_rust_targets"], ["win32-x64", "browser"])
             self.assertEqual(item["retirement"]["missing_receipt_targets"], ["linux-x64", "win32-x64", "browser"])
 
+    def test_omdb_is_a_rust_route_only_for_the_storage_owner(self):
+        storage = self.port("redb-persistence", "apps/server/other.ts")
+        self.mapping["ports"].append(storage)
+        for port in self.mapping["ports"]:
+            port["platform_routes"][0]["implementation"] = "omdb"
+        self.fork()
+        queue = {item["port"]: item for item in self.plan(self.base)["queue"]}
+        storage_task = queue["redb-persistence"]
+        self.assertEqual(storage_task["compiler_routes"], ["lustr-bluefe-compatibility"])
+        self.assertEqual(storage_task["retirement"]["missing_rust_targets"], ["win32-x64", "browser"])
+        self.assertEqual(storage_task["retirement"]["missing_receipt_targets"], ["linux-x64", "win32-x64", "browser"])
+        self.assertEqual(storage_task["action"], "qualify-integrated-port")
+        self.assertFalse(storage_task["retirement"]["automatic"])
+        self.assertEqual(queue["policy"]["compiler_routes"], [])
+        self.assertIn("linux-x64", queue["policy"]["retirement"]["missing_rust_targets"])
+
     def test_reports_are_deterministic_and_do_not_touch_fork_source_or_pins(self):
         head = self.upstream({"apps/web/clean.ts": "new upstream\n"})
         fork = self.fork()

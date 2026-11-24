@@ -1,0 +1,308 @@
+name: Native promotion intent recovery
+
+on:
+  push:
+    branches: ["candidate/t3code-ls-t05-promotion-intent-*", "candidate/t3code-ls-t05-launcher-promotion-*", "candidate/t3code-ls-t05-sealed-intent-*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  promotion-intent:
+    runs-on: ${{ fromJSON(vars.CI_RUNNER_ROUTES || '{}')['ubuntu-24.04'] || 'ubuntu-24.04' }}
+    timeout-minutes: ${{ startsWith(github.ref_name, 'candidate/t3code-ls-t05-promotion-intent-forward-catalog-') && 35 || 20 }}
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      GIT_TERMINAL_PROMPT: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 3
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "26.12.1"
+      - name: Select owned output and retain source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "CARGO_HOME=$RUNNER_TEMP/promotion-cargo-home"
+            echo "CARGO_TARGET_DIR=$RUNNER_TEMP/promotion-target"
+            echo "T3_CODE_LS_TEST_TMPDIR=$RUNNER_TEMP/promotion-profiles"
+          } >> "$GITHUB_ENV"
+          mkdir "$RUNNER_TEMP/promotion-proof" "$RUNNER_TEMP/promotion-profiles"
+          git rev-parse HEAD "HEAD^{tree}" > "$RUNNER_TEMP/promotion-proof/source-identity.txt"
+          cp Cargo.lock database.lock.json toolchain.lock.json "$RUNNER_TEMP/promotion-proof/"
+      - name: Verify the pinned compiler
+        run: node tools/install-toolchain.mjs --destination "$RUNNER_TEMP/promotion-toolchain"
+      - name: Build the exact predecessor and verify its catalog refusal
+        if: startsWith(github.ref_name, 'candidate/t3code-ls-t05-promotion-intent-forward-catalog-')
+        shell: bash
+        run: |
+          set -euo pipefail
+          proof="$RUNNER_TEMP/promotion-proof"
+          old_checkout="$RUNNER_TEMP/promotion-prior-source"
+          old_commit=3d0ac7e1ad6e4a86e17cba84e3b6d154d39cb3c1
+          old_tree=e06b4f6a965a33f6d9277fdcee02cb74f3c82109
+          red_commit=fc4b3f9aca8dd88ed9afcb3d62bec9c69ed780f8
+          git fetch --no-tags --depth=2 origin "$red_commit"
+          test "$(git rev-parse "$red_commit^" "$old_commit^{tree}")" = "$(printf '%s\n%s' "$old_commit" "$old_tree")"
+          git worktree add --detach "$old_checkout" "$old_commit"
+          trap 'git worktree remove --force "$old_checkout"' EXIT
+          cmp toolchain.lock.json "$old_checkout/toolchain.lock.json"
+          cmp database.lock.json "$old_checkout/database.lock.json"
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-* ]]; then
+            python3 - Cargo.lock "$old_checkout/Cargo.lock" "$GITHUB_REF_NAME" <<'PYTHON'
+          from hashlib import sha256
+          from pathlib import Path
+          import sys
+
+          current, predecessor = (Path(arg).read_bytes() for arg in sys.argv[1:3])
+          start = current.index(b'[[package]]\nname = "t3-code-ls-storage"\n')
+          end = current.index(b"[[package]]", start + 1)
+          edge = b' "rustix",\n'
+          storage = current[start:end]
+          assert storage.count(edge) == 1, "Missing single locked Rustix edge"
+          base = current[:start] + storage.replace(edge, b"", 1) + current[end:]
+          if sys.argv[3].startswith("candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-catalog-integrated-"):
+              # The composed baseline also locks task-cache and optional ordered engines.
+              assert sha256(base).hexdigest() == "c2bbea7549dfe957a0dc69a0722417554c969ac010a75716ede7ae04392d8881"
+              assert sha256(predecessor).hexdigest() == "063603fc237a6c6da7aa6d1588f96341ed728465347982e582b9d29263b8e613"
+          else:
+              assert base == predecessor, (
+                  "The predecessor must retain its exact lock apart from the candidate Rustix edge"
+              )
+          PYTHON
+          else
+            cmp Cargo.lock "$old_checkout/Cargo.lock"
+          fi
+          git -C "$old_checkout" rev-parse HEAD "HEAD^{tree}" > "$proof/prior-source.txt"
+          lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+          export CARGO_TARGET_DIR="$RUNNER_TEMP/promotion-prior-target"
+          (
+            cd "$old_checkout"
+            timeout -k 5s 600s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              build --locked -j 2 -p t3-code-ls-storage --bin t3-code-ls-db
+          )
+          helper="$CARGO_TARGET_DIR/debug/t3-code-ls-db"
+          sha256sum "$helper" > "$proof/prior-helper.sha256"
+          "$helper" trial-capabilities > "$proof/prior-capabilities.json"
+          git -C "$old_checkout" switch --detach "$red_commit"
+          set +e
+          (
+            cd "$old_checkout"
+            timeout -k 5s 240s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              test --locked -j 2 -p t3-code-ls-storage --lib \
+              application::tests::forward_catalog_marker_is_strict_and_keeps_the_serving_fence \
+              -- --exact --nocapture
+          ) 2>&1 | tee "$proof/forward-catalog-red.log"
+          status=${PIPESTATUS[0]}
+          set -e
+          test "$status" -eq 101
+          grep -F 'the compatible reader must retain the marker: IncompatibleStore' "$proof/forward-catalog-red.log"
+          sha256sum --check "$proof/prior-helper.sha256"
+          printf 'T3_TEST_PRIOR_PROMOTION_HELPER=%s\n' "$helper" >> "$GITHUB_ENV"
+      - name: Build the helper and exercise intent interruption and refusal
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout -k 5s 600s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            build --locked -j 2 -p t3-code-ls-storage --bin t3-code-ls-db
+          export T3_TEST_PROMOTION_HELPER="$CARGO_TARGET_DIR/debug/t3-code-ls-db"
+          sha256sum "$T3_TEST_PROMOTION_HELPER" > "$RUNNER_TEMP/promotion-proof/helper.sha256"
+          "$T3_TEST_PROMOTION_HELPER" trial-capabilities > "$RUNNER_TEMP/promotion-proof/capabilities.json"
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-helper-reap-* ]]; then
+            timeout -k 5s 180s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              test --locked -j 2 -p t3-code-ls-storage --lib \
+              application_storage::isolated::intent_helper_process_tests -- --test-threads=1 \
+              | tee "$RUNNER_TEMP/promotion-proof/helper-reap.log"
+            grep -F 'test result: ok. 4 passed; 0 failed' "$RUNNER_TEMP/promotion-proof/helper-reap.log"
+          fi
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-* ]]; then
+            proof="$RUNNER_TEMP/promotion-proof"
+            lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+            test_name=backend::tests::exclusive_trial_keeps_peer_locks_across_engine_handles
+            timeout -k 5s 180s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              test --locked -j 2 -p t3-code-ls-storage --lib "$test_name" \
+              -- --exact --nocapture 2>&1 | tee "$proof/lease-across-engine-handles.log"
+            grep -F "test $test_name ... ok" "$proof/lease-across-engine-handles.log"
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-* ]]; then
+              image_test=forward_child_readiness::image_tests::sealed_image_checks_and_refusals
+              timeout -k 5s 180s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+                test --locked -j 2 -p t3-code-ls-storage --lib "$image_test" \
+                -- --exact --nocapture 2>&1 | tee "$proof/sealed-image.log"
+              grep -F "test $image_test ... ok" "$proof/sealed-image.log"
+            fi
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-catalog-integrated-writer-* ]]; then
+              timeout -k 5s 180s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+                test --locked -j 2 -p t3-code-ls-storage --lib backend::tests::inherited_trial_writer_ \
+                -- --nocapture 2>&1 | tee "$proof/inherited-writer.log"
+              grep -F 'test result: ok. 2 passed; 0 failed' "$proof/inherited-writer.log"
+            fi
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-catalog-integrated-writer-process-* ]]; then
+              shutdown_test=backend::tests::handoff_shutdown_refuses_retained_engine_handles
+              process_test=application_bootstrap::upgrade::tests::service_forward_process_handoff
+              timeout -k 5s 180s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+                test --locked -j 2 -p t3-code-ls-storage --lib "$shutdown_test" \
+                -- --exact --nocapture 2>&1 | tee "$proof/handoff-shutdown.log"
+              grep -F "test $shutdown_test ... ok" "$proof/handoff-shutdown.log"
+              timeout -k 5s 750s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+                test --locked -j 2 -p t3-code-ls-storage --lib "$process_test" \
+                -- --ignored --exact --nocapture 2>&1 | tee "$proof/forward-process.log"
+              grep -F "test $process_test ... ok" "$proof/forward-process.log"
+              if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-catalog-integrated-writer-process-installed-* ]]; then
+                if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-catalog-integrated-writer-process-installed-startup-* ]]; then
+                  startup_test=ordinary_owner_startup_preflight_uses_existing_native_catalog
+                  timeout -k 5s 260s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+                    test --locked -j 2 -p t3-code-ls-storage --test store "$startup_test" \
+                    -- --exact --nocapture 2>&1 | tee "$proof/forward-startup-owner.log"
+                  grep -F "test $startup_test ... ok" "$proof/forward-startup-owner.log"
+                fi
+                packaged_test=application_bootstrap::upgrade::tests::service_forward_packaged_handoff
+                T3_TEST_PROMOTION_HELPER="$CARGO_TARGET_DIR/debug/t3-code-ls-db" \
+                  "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" test --locked -j 2 \
+                  -p t3-code-ls-storage --lib "$packaged_test" \
+                  -- --ignored --exact --nocapture 2>&1 | tee "$proof/forward-packaged.log"
+                grep -F "test $packaged_test ... ok" "$proof/forward-packaged.log"
+                if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-catalog-integrated-writer-process-installed-startup-forward-owner-* ]]; then
+                  test "$(grep -Fc 'T05 forward owner: immutable helper and selected-entry binding, wrong-entry refusal, continuing selection/entry/helper checks, EOF release and reacquisition; no entry launch or serving' "$proof/forward-packaged.log")" = 2
+                fi
+              fi
+            fi
+            sha256sum --check "$proof/prior-helper.sha256"
+            timeout -k 5s 600s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              test --locked -j 2 -p t3-code-ls-storage --lib \
+              application_bootstrap::upgrade::tests::service_forward_catalog_fences_generic_restore \
+              -- --ignored --exact --nocapture 2>&1 | tee "$proof/forward-catalog.log"
+            grep -F 'T05 native forward catalog recovered the interrupted sealed and marked states' "$proof/forward-catalog.log"
+            grep -F 'T05 forward catalog fenced both installed helpers across generic restore retries' "$proof/forward-catalog.log"
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-* ]]; then
+              grep -F 'T05 sealed readiness witness survived interruption and refused changed inputs' "$proof/forward-catalog.log"
+            fi
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-* ]]; then
+              grep -F 'T05 inherited child valid: exit 0' "$proof/forward-catalog.log"
+              for rejected in lost reopened foreign stale version runtime; do
+                grep -F "T05 inherited child $rejected: exit 78" "$proof/forward-catalog.log"
+              done
+              grep -F 'T05 inherited child child-failure: exit 73' "$proof/forward-catalog.log"
+            fi
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-* ]]; then
+              for accepted in valid parent-retry; do
+                grep -F "T05 packaged observation $accepted, commit refusal false: exit 0" "$proof/forward-catalog.log"
+              done
+              for rejected in lost reopened foreign stale wrong-image wrong-database; do
+                grep -F "T05 packaged observation $rejected, commit refusal false: exit 78" "$proof/forward-catalog.log"
+              done
+              grep -F 'T05 packaged observation output-failure, commit refusal false: exit 1' "$proof/forward-catalog.log"
+            fi
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-* ]]; then
+              for rejected in mutable-image source-changed; do
+                grep -F "T05 packaged observation $rejected, commit refusal false: exit 78" "$proof/forward-catalog.log"
+              done
+            fi
+            if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-lease-readiness-child-packaged-sealed-catalog-* ]]; then
+              grep -F 'T05 packaged observation foreign-lease, commit refusal false: exit 78' "$proof/forward-catalog.log"
+              grep -F 'T05 packaged inherited catalog corpus coherent: expected readiness true' "$proof/forward-catalog.log"
+              for rejected in catalog generation marker snapshot; do
+                grep -F "T05 packaged inherited catalog corpus $rejected: expected readiness false" "$proof/forward-catalog.log"
+              done
+            fi
+            cp "$RUNNER_TEMP/promotion-toolchain/installation-proof.json" "$proof/"
+            exit 0
+          fi
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-sealed-intent-cancel-* ]]; then
+            cp "$RUNNER_TEMP/promotion-toolchain/installation-proof.json" "$RUNNER_TEMP/promotion-proof/"
+            timeout -k 5s 180s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              test --locked -j 2 -p t3-code-ls-storage --lib \
+              application_bootstrap::upgrade::tests::service_intent_only_cancellation_recovers_before_publication \
+              -- --exact --nocapture 2>&1 | tee "$RUNNER_TEMP/promotion-proof/cancel-before-publication.log"
+            grep -F 'T05 intent-only cancellation recovered without moving the source or the stage' \
+              "$RUNNER_TEMP/promotion-proof/cancel-before-publication.log"
+            exit 0
+          fi
+          timeout -k 5s 180s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            test --locked -j 2 -p t3-code-ls-storage --lib \
+            application_bootstrap::upgrade::tests::service_promotion_intent_is_durable_exact_and_keeps_publication_fenced \
+            -- --exact --nocapture 2>&1 | tee "$RUNNER_TEMP/promotion-proof/intent.log"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          log = (Path(os.environ["RUNNER_TEMP"]) / "promotion-proof/intent.log").read_text()
+          assert "T05 promotion intent uses the pinned built Rust helper" in log
+          assert "T05 promotion intent durable retry preserved source, checkpoint, stage and selection without publication" in log
+          PY
+          timeout -k 5s 480s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            test --locked -j 2 -p t3-code-ls-storage --lib \
+            application_bootstrap::upgrade::tests::service_intended_sealed_publication_recovers_without_activation \
+            -- --exact --nocapture 2>&1 | tee "$RUNNER_TEMP/promotion-proof/sealed-publication.log"
+          grep -F "T05 intended sealed publication recovered exact phases and rollback without selecting or serving" \
+            "$RUNNER_TEMP/promotion-proof/sealed-publication.log"
+          timeout -k 5s 180s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            test --locked -j 2 -p t3-code-ls-storage --lib isolated_trial \
+            -- --nocapture 2>&1 | tee "$RUNNER_TEMP/promotion-proof/existing-trial.log"
+          grep -F 'isolated_trial_refuses_generic_pre_activation_restore ... ok' \
+            "$RUNNER_TEMP/promotion-proof/existing-trial.log"
+          timeout -k 5s 480s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            test --locked -j 2 -p t3-code-ls-storage --lib \
+            application_bootstrap::upgrade::tests::service_forward_commit_refuses_rollback_without_unsealing \
+            -- --ignored --exact --nocapture 2>&1 | tee "$RUNNER_TEMP/promotion-proof/forward-decision.log"
+          grep -F 'T05 forward decision interruption and rollback refusal verified with installed helpers' \
+            "$RUNNER_TEMP/promotion-proof/forward-decision.log"
+          grep -F 'T05 forward selection recovered without unsealing or allowing restore' \
+            "$RUNNER_TEMP/promotion-proof/forward-decision.log"
+          timeout -k 5s 180s "$T3_CODE_LS_TOOLCHAIN/bin/lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+            test --locked -j 2 -p t3-code-ls-storage --test store \
+            isolated_trial_cli_restarts_from_checkpoint_after_interruption \
+            -- --exact 2>&1 | tee "$RUNNER_TEMP/promotion-proof/isolated-cli-restart.log"
+          grep -F 'isolated_trial_cli_restarts_from_checkpoint_after_interruption ... ok' \
+            "$RUNNER_TEMP/promotion-proof/isolated-cli-restart.log"
+          if [[ "$GITHUB_REF_NAME" == candidate/t3code-ls-t05-promotion-intent-forward-catalog-* ]]; then
+            proof="$RUNNER_TEMP/promotion-proof"
+            lustr="$T3_CODE_LS_TOOLCHAIN/bin/lustr"
+            for test_name in \
+              backend::tests::exclusive_trial_keeps_peer_locks_across_engine_handles \
+              application::tests::forward_catalog_marker_is_strict_and_keeps_the_serving_fence \
+              application_bootstrap::upgrade::tests::direct_88_import_and_80_88_89_chain_retain_the_original_receipt_and_exact_lineage; do
+              log="$proof/${test_name##*::}.log"
+              timeout -k 5s 180s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+                test --locked -j 2 -p t3-code-ls-storage --lib "$test_name" \
+                -- --exact --nocapture 2>&1 | tee "$log"
+              grep -F "test $test_name ... ok" "$log"
+            done
+            sha256sum --check "$proof/prior-helper.sha256"
+            timeout -k 5s 480s "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" \
+              test --locked -j 2 -p t3-code-ls-storage --lib \
+              application_bootstrap::upgrade::tests::service_forward_catalog_fences_generic_restore \
+              -- --ignored --exact --nocapture 2>&1 | tee "$proof/forward-catalog.log"
+            grep -F 'T05 forward catalog fenced both installed helpers across generic restore retries' \
+              "$proof/forward-catalog.log"
+            grep -F 'T05 native forward catalog recovered the interrupted sealed and marked states' \
+              "$proof/forward-catalog.log"
+          fi
+          cp "$RUNNER_TEMP/promotion-toolchain/installation-proof.json" "$RUNNER_TEMP/promotion-proof/"
+      - name: Retain bounded recovery evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: native-promotion-intent-proof
+          path: ${{ runner.temp }}/promotion-proof
+          if-no-files-found: error
+          retention-days: 7
+      - name: Remove owned generated output
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -k "$RUNNER_TEMP"
+          toolchain="$RUNNER_TEMP/promotion-toolchain"
+          if [[ -d "$toolchain" ]]; then
+            find "$toolchain" -type d -exec chmod u+w {} +
+          fi
+          rm -rf "$RUNNER_TEMP/promotion-cargo-home" "$RUNNER_TEMP/promotion-target" "$RUNNER_TEMP/promotion-prior-target" \
+            "$RUNNER_TEMP/promotion-profiles" "$toolchain"
+          df -k "$RUNNER_TEMP"

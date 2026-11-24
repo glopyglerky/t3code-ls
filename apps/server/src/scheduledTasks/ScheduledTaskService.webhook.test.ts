@@ -683,6 +683,37 @@ it.effect("a held request already delivered directly runs only once", () =>
   ),
 );
 
+it.effect("a legacy claim without a disposition stays unresolved on relay retry", () =>
+  withService(({ service, sql, launches }) =>
+    Effect.gen(function* () {
+      const { task } = yield* service.upsert(yield* webhookTaskInput());
+      const relayDeliveryId = "legacy-claim-without-disposition";
+      const deliveryId = ScheduledTaskWebhookDeliveryId.make(`delivery:relay:${relayDeliveryId}`);
+      const seenAt = DateTime.formatIso(yield* DateTime.now);
+      yield* sql`
+        INSERT INTO scheduled_task_webhook_relay_deliveries (relay_delivery_id, task_id, seen_at)
+        VALUES (${relayDeliveryId}, ${task.id}, ${seenAt})
+      `;
+
+      const request = requestFor(task, { relayDeliveryId });
+      const retries = yield* Effect.all(
+        [service.triggerWebhook(request), service.triggerWebhook(request)],
+        { concurrency: "unbounded" },
+      );
+      assert.deepEqual(retries, [
+        { _tag: "unresolved", deliveryId },
+        { _tag: "unresolved", deliveryId },
+      ]);
+      assert.equal(yield* Queue.size(launches), 0);
+      const claims = yield* sql`
+        SELECT relay_delivery_id FROM scheduled_task_webhook_relay_deliveries
+        WHERE relay_delivery_id = ${relayDeliveryId}
+      `;
+      assert.deepEqual(claims, [{ relay_delivery_id: relayDeliveryId }]);
+    }),
+  ),
+);
+
 it.effect("relay retries recover failed acceptance without releasing another request's claim", () =>
   withService(({ service, launches, sql }) =>
     Effect.gen(function* () {

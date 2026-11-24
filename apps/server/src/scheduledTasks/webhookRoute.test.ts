@@ -202,6 +202,7 @@ describe("webhook route", () => {
       [{ _tag: "rate_limited", outcome: "rate_limited" }, 429, "rate_limited"],
       [{ _tag: "rate_limited", outcome: "queue_full" }, 429, "queue_full"],
       [{ _tag: "expired" }, 410, "expired"],
+      [{ _tag: "unresolved", deliveryId }, 500, "unresolved"],
     ];
     for (const [result, status, outcome] of cases) {
       const { handler, dispose } = handlerFor(() => Effect.succeed(result));
@@ -210,6 +211,12 @@ describe("webhook route", () => {
         expect(response.status).toBe(status);
         expect(response.headers.get("x-t3-hook-outcome")).toBe(outcome);
         if (status === 429) expect(await response.json()).toEqual({ error: outcome });
+        if (result._tag === "unresolved") {
+          expect(await response.json()).toEqual({
+            error: "delivery_unresolved",
+            deliveryId: result.deliveryId,
+          });
+        }
       } finally {
         await dispose();
       }

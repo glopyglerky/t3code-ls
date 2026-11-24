@@ -15,6 +15,7 @@ export type ThreadSnapshotLoadResult =
       readonly _tag: "present";
       readonly snapshot: OrchestrationV2ThreadDetailSnapshot;
       readonly history?: ThreadSnapshotHistoryMeta;
+      readonly historyViewRevision?: number;
     }
   | { readonly _tag: "missing" }
   | { readonly _tag: "unavailable" };

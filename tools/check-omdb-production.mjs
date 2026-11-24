@@ -4,7 +4,10 @@ import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
 import * as NodeChildProcess from "node:child_process";
 import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
 import * as Option from "effect/Option";
@@ -25,8 +28,9 @@ import {
 import { inspectNativeReplay } from "../apps/web/scripts/hybrid-client-database.ts";
 import { verifyNativeSchemaUpgrade } from "./omdb-schema-upgrade-fixture.mjs";
 
-const [executable, proofPath] = process.argv.slice(2);
+const [executable, guestExecutable, proofPath] = process.argv.slice(2);
 NodeAssert.ok(executable && NodePath.isAbsolute(executable));
+NodeAssert.ok(guestExecutable && NodePath.isAbsolute(guestExecutable));
 NodeChildProcess.execFileSync(process.execPath, ["tools/generate-omdb-schema.mjs", "--check"], {
   stdio: "inherit",
 });
@@ -48,10 +52,12 @@ const ServerSecretStore = await import("../apps/server/src/auth/ServerSecretStor
 const ManagedPolicy = await import("../apps/server/src/policy/ManagedPolicy.ts");
 const Transactions = await import("../apps/server/src/persistence/PersistenceTransactions.ts");
 const Sqlite = await import("../apps/server/src/persistence/Sqlite.ts");
+const { verifyGuestRedeem } = await import("./omdb-guest-redeem-fixture.ts");
 NodeAssert.equal(Selected.selection.kind, "omdb");
 
 const fixture = await createFixture();
 const checks = [];
+const independentReads = process.env.T3_CODE_LS_INDEPENDENT_READS === "1";
 const completedAt = "2026-11-10T12:00:01.000Z";
 const completionEvents = [
   ["run.updated", { ...jsonPayloads.run, status: "completed", completedAt }],
@@ -154,6 +160,35 @@ try {
           NodeAssert.ok(shell.threads.some((thread) => thread.id === "thread:main"));
         }),
       );
+      if (independentReads) {
+        const staged = yield* Deferred.make();
+        const release = yield* Deferred.make();
+        const messageText = Effect.fn("verifyIndependentRead.messageText")(function* () {
+          const snapshot = yield* projections.getThreadSnapshot("thread:main");
+          return snapshot.projection.messages.find((message) => message.id === "message:main")?.text;
+        });
+        const writer = yield* Effect.forkScoped(Effect.exit(tx.withTransaction(
+          Effect.gen(function* () {
+            yield* sink.write({ events: [makeEvent("message.updated", {
+              ...jsonPayloads.message,
+              text: "Private staged reply",
+              streaming: false,
+              updatedAt: completedAt,
+            }, { id: "independent-read:staged", occurredAt: completedAt })] });
+            NodeAssert.equal(yield* tx.withReadTransaction(messageText()), "Private staged reply");
+            yield* Deferred.succeed(staged, undefined);
+            yield* Deferred.await(release);
+            return yield* Effect.fail("fixture-rollback");
+          }),
+        )));
+        yield* Effect.gen(function* () {
+          yield* Deferred.await(staged);
+          NodeAssert.equal(yield* messageText(), "This turn is a replay.");
+        }).pipe(Effect.timeout("5 seconds"), Effect.ensuring(Deferred.succeed(release, undefined)));
+        NodeAssert.ok(Exit.isFailure(yield* Fiber.join(writer)));
+        NodeAssert.equal(yield* messageText(), "This turn is a replay.");
+        checks.push("An independent read sees committed rows while the writer sees its own staged rows");
+      }
       const snapshot = yield* projections.getThreadSnapshot("thread:main");
       replayExpectation = {
         projectId: "project:main",
@@ -277,6 +312,16 @@ try {
     "retained SQLite configuration refuses an authoritative omdb home instead of forking state",
   );
   checks.push(await verifyNativeSchemaUpgrade(executable));
+  const threadEvent = sampleEvents.find((event) => event.type === "thread.created");
+  NodeAssert.ok(threadEvent);
+  checks.push(
+    ...(await verifyGuestRedeem({
+      root: NodePath.join(fixture.root, "guest-redeem"),
+      databaseExecutable: executable,
+      guestExecutable,
+      threadEvent,
+    })),
+  );
   await finishProof({
     executable,
     fixture,
@@ -304,6 +349,16 @@ try {
       "apps/server/src/orchestration-v2/runtimeLayer.ts",
       "apps/server/src/orchestration-v2/nativeRuntimeLayer.ts",
       "apps/server/src/orchestration-v2/selectedRuntimeLayer.ts",
+      "apps/server/src/orchestration-v2/NativeGuestShare.ts",
+      "apps/server/src/guest/GuestShareService.ts",
+      "apps/server/src/guest/http.ts",
+      "crates/core/src/bin/t3-code-ls-guest-share.rs",
+      "crates/core/src/guest_share.rs",
+      "crates/core/src/guest_share_wire.rs",
+      "tools/check-omdb-production.mjs",
+      "tools/omdb-guest-redeem-fixture.ts",
+      "tools/omdb-guest-state.ts",
+      "tools/redb-event-sink-fixtures.mjs",
       "packages/shared/src/applicationDatabase.ts",
       "apps/web/scripts/hybrid-client-database.ts",
       "apps/web/scripts/verify-hybrid-client.ts",

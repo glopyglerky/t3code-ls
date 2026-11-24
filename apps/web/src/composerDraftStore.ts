@@ -75,6 +75,7 @@ import {
   migrateLegacyTerminalContextPlaceholders,
   normalizeTerminalContextText,
 } from "./lib/terminalContext";
+import { nativeComposerDraftReconciler } from "./composer-native-offsets";
 import {
   appendInlineContextReference,
   type ComposerContextReference,
@@ -130,7 +131,16 @@ type ComposerPersistState =
   | PersistedComposerDraftStoreState;
 
 const composerDraftBaseStorage =
-  typeof localStorage !== "undefined" ? localStorage : createMemoryStorage();
+  typeof window === "undefined"
+    ? createMemoryStorage()
+    : {
+        getItem: (name: string) => globalThis.localStorage.getItem(name),
+        setItem: (name: string, value: string) => globalThis.localStorage.setItem(name, value),
+        removeItem: (name: string) => globalThis.localStorage.removeItem(name),
+      };
+type ComposerDraftStorageStatus = "available" | "unavailable" | "conflict";
+export const useComposerDraftStorageStatus = create<ComposerDraftStorageStatus>(() => "available");
+const DRAFT_RECOVERY_CONFLICT = new Error("Another tab saved changes to this draft");
 
 interface ComposerDraftWrite {
   readonly text: string;
@@ -158,19 +168,167 @@ function mergeDraftRecord<V>(
   stored: Readonly<Record<string, V>> | undefined,
   local: Readonly<Record<string, V>>,
   baseline: Readonly<Record<string, V>>,
+  mergeValue?: (stored: V | undefined, local: V, baseline: V | undefined) => V | undefined,
 ): Record<string, V> {
   const merged = { ...stored };
   for (const key of new Set([...Object.keys(local), ...Object.keys(baseline)])) {
-    if (Equal.equals(local[key], baseline[key])) continue;
-    const value = local[key];
+    const localValue = local[key];
+    const baselineValue = baseline[key];
+    if (Equal.equals(localValue, baselineValue)) continue;
+    const value =
+      mergeValue && localValue !== undefined
+        ? mergeValue(merged[key], localValue, baselineValue)
+        : localValue;
     if (value === undefined) delete merged[key];
     else merged[key] = value;
   }
   return merged;
 }
 
+const EMPTY_PERSISTED_COMPOSER_THREAD_DRAFT: PersistedComposerThreadDraftState = {
+  prompt: "",
+  attachments: [],
+};
+
+function splitComposerThreadDraft({
+  modelSelectionByProvider,
+  activeProvider,
+  modelSelectionExplicit,
+  runtimeMode,
+  interactionMode,
+  ...body
+}: PersistedComposerThreadDraftState) {
+  return {
+    body,
+    modelSelection: {
+      ...(modelSelectionByProvider !== undefined ? { modelSelectionByProvider } : {}),
+      ...(activeProvider !== undefined ? { activeProvider } : {}),
+      ...(modelSelectionExplicit !== undefined ? { modelSelectionExplicit } : {}),
+    },
+    runtimeMode,
+    interactionMode,
+  };
+}
+
+function mergeComposerThreadDraft(
+  storedDraft = EMPTY_PERSISTED_COMPOSER_THREAD_DRAFT,
+  localDraft: PersistedComposerThreadDraftState,
+  baselineDraft = EMPTY_PERSISTED_COMPOSER_THREAD_DRAFT,
+): PersistedComposerThreadDraftState | undefined {
+  if (
+    storedDraft === baselineDraft ||
+    typeof storedDraft?.prompt !== "string" ||
+    !Array.isArray(storedDraft.attachments)
+  ) {
+    return localDraft;
+  }
+
+  const stored = splitComposerThreadDraft(storedDraft);
+  const local = splitComposerThreadDraft(localDraft);
+  const baseline = splitComposerThreadDraft(baselineDraft);
+  // Inline references in the prompt and their context records come from the same tab.
+  const body = Equal.equals(local.body, baseline.body) ? stored.body : local.body;
+  const modelSelection = Equal.equals(local.modelSelection, baseline.modelSelection)
+    ? stored.modelSelection
+    : local.modelSelection;
+  const runtimeMode =
+    local.runtimeMode === baseline.runtimeMode ? stored.runtimeMode : local.runtimeMode;
+  const interactionMode =
+    local.interactionMode === baseline.interactionMode
+      ? stored.interactionMode
+      : local.interactionMode;
+  const merged = {
+    ...body,
+    ...modelSelection,
+    ...(runtimeMode !== undefined ? { runtimeMode } : {}),
+    ...(interactionMode !== undefined ? { interactionMode } : {}),
+  };
+  return Equal.equals(merged, EMPTY_PERSISTED_COMPOSER_THREAD_DRAFT) ? undefined : merged;
+}
+
+/**
+ * JS interns Effect equality classes and preserves original objects and exact keys.
+ * Rust owns record no-op/delete/replace, group precedence and empty-body collapse.
+ * This bound falls back before any serialization or storage write begins.
+ */
+function mergeComposerDraftRecords(
+  stored: Readonly<Record<string, PersistedComposerThreadDraftState>> | undefined,
+  local: Readonly<Record<string, PersistedComposerThreadDraftState>>,
+  baseline: Readonly<Record<string, PersistedComposerThreadDraftState>>,
+): Record<string, PersistedComposerThreadDraftState> {
+  const reconcile = nativeComposerDraftReconciler();
+  if (!reconcile) return mergeDraftRecord(stored, local, baseline, mergeComposerThreadDraft);
+  const keys = [...new Set([...Object.keys(local), ...Object.keys(baseline)])];
+  if (keys.length === 0) return { ...stored };
+  if (keys.length > 4096) {
+    return mergeDraftRecord(stored, local, baseline, mergeComposerThreadDraft);
+  }
+  const valuesByKey: unknown[][] = [];
+  const words: number[] = [];
+  const groups = (draft: PersistedComposerThreadDraftState) => {
+    const parts = splitComposerThreadDraft(draft);
+    return [parts.body, parts.modelSelection, parts.runtimeMode, parts.interactionMode];
+  };
+  for (const key of keys) {
+    const values: unknown[] = [undefined];
+    const intern = (value: unknown) => {
+      const found = values.findIndex((existing) => Equal.equals(existing, value));
+      if (found >= 0) return found;
+      values.push(value);
+      return values.length - 1;
+    };
+    const savedValue = stored?.[key];
+    const saved = savedValue === undefined ? EMPTY_PERSISTED_COMPOSER_THREAD_DRAFT : savedValue;
+    const own = local[key];
+    const base = baseline[key] ?? EMPTY_PERSISTED_COMPOSER_THREAD_DRAFT;
+    const replace =
+      saved === base || typeof saved?.prompt !== "string" || !Array.isArray(saved.attachments);
+    words.push(intern(own), intern(baseline[key]), Number(replace), 0);
+    // Replace invalid stored rows without reading their fields.
+    for (const draft of [
+      replace ? EMPTY_PERSISTED_COMPOSER_THREAD_DRAFT : saved,
+      own ?? EMPTY_PERSISTED_COMPOSER_THREAD_DRAFT,
+      base,
+      EMPTY_PERSISTED_COMPOSER_THREAD_DRAFT,
+    ]) {
+      for (const value of groups(draft)) words.push(intern(value));
+    }
+    valuesByKey.push(values);
+  }
+  const result = reconcile(Uint32Array.from(words));
+  if (result === undefined) return mergeDraftRecord(stored, local, baseline, mergeComposerThreadDraft);
+  if (result.length !== keys.length * 5) throw new Error("Invalid Rust draft reconciliation result");
+  const merged = { ...stored };
+  for (const [index, key] of keys.entries()) {
+    const offset = index * 5;
+    const action = result[offset];
+    if (action === 0) continue;
+    if (action === 1) {
+      delete merged[key];
+      continue;
+    }
+    if (action === 2) {
+      merged[key] = local[key]!;
+      continue;
+    }
+    if (action !== 3) throw new Error("Invalid Rust draft reconciliation action");
+    const values = valuesByKey[index]!;
+    const body = values[result[offset + 1]!] as ReturnType<typeof splitComposerThreadDraft>["body"];
+    const model = values[result[offset + 2]!] as ReturnType<typeof splitComposerThreadDraft>["modelSelection"];
+    const runtimeMode = values[result[offset + 3]!] as PersistedComposerThreadDraftState["runtimeMode"];
+    const interactionMode = values[result[offset + 4]!] as PersistedComposerThreadDraftState["interactionMode"];
+    merged[key] = {
+      ...body,
+      ...model,
+      ...(runtimeMode !== undefined ? { runtimeMode } : {}),
+      ...(interactionMode !== undefined ? { interactionMode } : {}),
+    };
+  }
+  return merged;
+}
+
 /** Writes only what this tab changed since its last write over what other tabs saved since. */
-function mergeComposerDraftStates(
+export function mergeComposerDraftStates(
   stored: PersistedComposerDraftStoreState,
   local: PersistedComposerDraftStoreState,
   baseline: PersistedComposerDraftStoreState,
@@ -180,7 +338,7 @@ function mergeComposerDraftStates(
     return value === undefined ? {} : { [key]: value };
   };
   return {
-    draftsByThreadKey: mergeDraftRecord(
+    draftsByThreadKey: mergeComposerDraftRecords(
       stored.draftsByThreadKey,
       local.draftsByThreadKey,
       baseline.draftsByThreadKey,
@@ -209,6 +367,18 @@ function serializeComposerDraftState(value: StorageValue<ComposerPersistState>):
   const baseline = composerDraftLastWrite?.local ?? composerDraftLoadedState;
   const stored = baseline ? readStoredComposerDraftState() : null;
   const merged = stored && baseline ? mergeComposerDraftStates(stored, local, baseline) : local;
+  if (stored && baseline && useComposerDraftStorageStatus.getState() !== "available") {
+    // Replay other tabs' edits over the candidate. A difference means recovery
+    // would undo a saved edit. Use the same draft field groups as ordinary saves.
+    const restoredDrafts = mergeComposerDraftRecords(
+      merged.draftsByThreadKey,
+      stored.draftsByThreadKey ?? {},
+      baseline.draftsByThreadKey,
+    );
+    if (!Equal.equals(restoredDrafts, merged.draftsByThreadKey)) {
+      throw DRAFT_RECOVERY_CONFLICT;
+    }
+  }
   const text = JSON.stringify({ state: merged, version: value.version });
   composerDraftPendingWrite = { text, local, merged };
   return text;
@@ -221,6 +391,7 @@ const composerDebouncedStorage = createDeferredStorage<StorageValue<ComposerPers
       composerDraftBaseStorage.setItem(name, text);
       if (composerDraftPendingWrite?.text === text)
         composerDraftLastWrite = composerDraftPendingWrite;
+      useComposerDraftStorageStatus.setState("available");
     },
     removeItem: (name) => {
       composerDraftBaseStorage.removeItem(name);
@@ -230,11 +401,22 @@ const composerDebouncedStorage = createDeferredStorage<StorageValue<ComposerPers
   },
   serializeComposerDraftState,
   COMPOSER_PERSIST_DEBOUNCE_MS,
+  (cause) => {
+    useComposerDraftStorageStatus.setState(
+      cause === DRAFT_RECOVERY_CONFLICT ? "conflict" : "unavailable",
+    );
+  },
 );
 
 const composerPersistStorage: PersistStorage<ComposerPersistState> = {
   getItem: (name) => {
-    const raw = composerDebouncedStorage.getItem(name);
+    let raw: ReturnType<typeof composerDebouncedStorage.getItem>;
+    try {
+      raw = composerDebouncedStorage.getItem(name);
+    } catch {
+      useComposerDraftStorageStatus.setState("unavailable");
+      return null;
+    }
     if (typeof raw !== "string") {
       return null;
     }
@@ -4468,6 +4650,14 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
 composerDraftLoadedState = partializeComposerDraftStoreState(composerDraftStore.getState());
 
 export const useComposerDraftStore = composerDraftStore;
+
+export function retryComposerDraftSave(): void {
+  composerDebouncedStorage.setItem(COMPOSER_DRAFT_STORAGE_KEY, {
+    state: { capturedState: composerDraftStore.getState() },
+    version: COMPOSER_DRAFT_STORAGE_VERSION,
+  });
+  composerDebouncedStorage.flush();
+}
 
 export function subscribeComposerDraftModelReconciliation(input: {
   readonly registry: AtomRegistry.AtomRegistry;

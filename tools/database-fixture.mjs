@@ -15,6 +15,7 @@ export async function createFixture({
     cliArgs(mode = "connect") {
       if (mode === "initialize") return ["initialize-local", databasePath];
       if (mode === "connect") return ["local", databasePath];
+      if (mode === "inspect") return ["read-only-local", databasePath];
       throw new Error(`Unknown database fixture mode: ${mode}`);
     },
     async close() {

@@ -834,6 +834,46 @@
       "rust_crates": ["crates/core"]
     },
     {
+      "id": "git-repository-discovery",
+      "state": "candidate",
+      "domain_owner": "apps/server/src/vcs",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/server/src/vcs/GitVcsDriverCore.ts",
+          "blob": "32042a0ff5e5f838b17f1b53f8dbf3db8524e49d"
+        }
+      ],
+      "rust_paths": ["apps/server/rust/git-workspace/src/main.rs"],
+      "adapter_paths": [
+        ".github/workflows/cli-archive-proof.yml",
+        ".github/workflows/workspace-edits.yml",
+        "apps/server/src/vcs/GitVcsDriverCore.ts",
+        "apps/server/src/vcs/NativeGitWorkspace.ts",
+        "tools/build-native.mjs"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["linux-x64"],
+          "state": "candidate",
+          "implementation": "rust",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "apps/server/src/vcs/GitVcsDriverCore.test.ts",
+        "apps/server/scripts/verify-packaged-git-workspace.ts"
+      ],
+      "hosted_acceptance": {
+        "apps/server/src/vcs/GitVcsDriverCore.test.ts": ".github/workflows/workspace-edits.yml",
+        "apps/server/scripts/verify-packaged-git-workspace.ts": ".github/workflows/cli-archive-proof.yml"
+      },
+      "retired_paths": [],
+      "notes": "T06. Opt-in repository directory, HEAD, exact remote branch reads and bounded local branch names for rename collision checks through gix. The optional Linux x64 archive helper and its verified runtime selection passed packaged work-tree, nested and linked worktree checks in run 45173544459. Run 45214737455 at ffe470eacd2f215bef46f6b1bba46948f0d27510 also verified the native branch HEAD lookup through authenticated status refresh on a dirty linked worktree, with equal status in retained mode. Git handles repository admission and branch mutation. Includes, explicit discovery overrides, unsupported symbolic local branches and missing or failed helpers retain Git reads. Full Git workflow and performance qualification remain open. A source-only committed review-blob candidate extends the same optional helper and authenticated review.getDiffFileContents owner. Complete hunk/metadata parity and binary fallback assertions are authored in the packaged proof; execution, cancellation, replacement-ref and platform qualification remain with the root owner. This increment is not accepted.",
+      "rust_crates": ["apps/server/rust/git-workspace"]
+    },
+    {
       "id": "guest-share-decisions",
       "state": "integrated",
       "domain_owner": "apps/server/src/guest",
@@ -862,7 +902,8 @@
         "apps/server/src/orchestration-v2/NativeGuestShare.ts",
         "apps/server/src/orchestration-v2/GuestShareDecider.ts",
         "apps/server/src/guest/GuestShareService.ts",
-        "packages/shared/src/nativeExecutable.ts"
+        "packages/shared/src/nativeExecutable.ts",
+        ".github/workflows/cli-archive-proof.yml"
       ],
       "platform_routes": [
         {
@@ -884,10 +925,14 @@
       "acceptance_tests": [
         "tools/check-guest-share-adapter.mjs",
         "tools/check-guest-share-runtime.mjs",
-        "tools/check-guest-share.mjs"
+        "tools/check-guest-share.mjs",
+        "apps/server/scripts/verify-packaged-guest-authorization.ts"
       ],
+      "hosted_acceptance": {
+        "apps/server/scripts/verify-packaged-guest-authorization.ts": ".github/workflows/cli-archive-proof.yml"
+      },
       "retired_paths": [],
-      "notes": "Guest-share transitions and upload classification run through the existing Rust helper. Authorization, filesystem observations, JavaScript Unicode case folding, IDs, SQLite transactions, attachment copying and cleanup remain in the application. Other hosts retain the original classifier.",
+      "notes": "Guest-share transitions, invite and signed-session eligibility, and upload classification run through the existing Rust helper. The application verifies signatures, holds keys, applies live host policy, and owns filesystem observations, JavaScript Unicode case folding, IDs, upstream SQLite transactions, attachment copying and cleanup. Run 45191900038 at 6283476858c082d9e787ba5a645284bf299a2981 exercised the packaged Linux x64 server and native database with a synthetic managed relay. It verified one successful concurrent redemption, a valid session after restart, refusal to reuse the invite, and no writes on rejected authorization. Run 45198628802 at ad528d82ef8d383dc74c0cd961c7f907da360fc2 also verified keyboard redemption, a secure scoped cookie, process reopen, and revocation through packaged Chromium and loopback TLS. The live Connect edge remains open. Other hosts retain the original classifier.",
       "rust_crates": ["crates/core"]
     },
     {
@@ -1385,6 +1430,7 @@
         "apps/server/src/persistence/redb_import.rs",
         "apps/server/src/persistence/redb_import_tests.rs",
         "apps/server/src/persistence/redb_event_rows.rs",
+        "apps/server/src/persistence/redb_event_text_revisions.rs",
         "apps/server/src/persistence/redb_event_rows_tests.rs",
         "apps/server/src/persistence/redb_application_rows.rs",
         "apps/server/src/persistence/redb_json.rs",
@@ -1415,6 +1461,8 @@
         "apps/server/src/persistence/redb_auxiliary_reads.rs",
         "apps/server/src/persistence/redb_bootstrap.rs",
         "apps/server/src/persistence/redb_database_storage.rs",
+        "apps/server/src/persistence/redb_forward_child_readiness.rs",
+        "apps/server/src/persistence/redb_isolated_trial.rs",
         "apps/server/src/persistence/redb_message_rowids.rs",
         "apps/server/src/persistence/redb_projection_context.rs",
         "apps/server/src/persistence/redb_projection_control.rs",
@@ -1565,7 +1613,15 @@
         "apps/server/src/scheduledTasks/SqliteScheduledRows.ts",
         "apps/server/src/scheduledTasks/webhookDedupe.ts",
         "apps/server/src/server.ts",
+        "apps/server/src/serverActivation.ts",
         "apps/server/src/serverOwnership.ts",
+        ".github/workflows/thread-recovery.yml",
+        ".github/workflows/composer-offsets.yml",
+        ".github/workflows/cli-archive-proof.yml",
+        "apps/server/src/cli/install.ts",
+        "apps/server/src/cli/servicePrepareIsolated.ts",
+        "apps/server/src/binMain.ts",
+        "apps/server/src/serviceLauncher.ts",
         "apps/server/src/serverSettings.ts",
         "apps/server/src/sourceControl/threadPullRequests.ts",
         "apps/server/src/storageCleanup.ts",
@@ -1613,6 +1669,7 @@
         "tools/check-redb-runtime-state.mjs",
         "tools/check-redb-scheduled.mjs",
         "tools/check-redb-storage-maintenance.mjs",
+        "tools/redb-aged-retention-fixture.mjs",
         "tools/check-redb-thread-find.mjs",
         "tools/check-redb-thread-search.mjs",
         "tools/check-redb-transactions.mjs",
@@ -1697,10 +1754,24 @@
         "tools/check-redb-thread-search.mjs",
         "tools/check-omdb-production.mjs",
         "tools/check-omdb-migration-head.mjs",
-        "tools/check-redb-cli.mjs"
+        "tools/check-redb-cli.mjs",
+        "apps/web/scripts/verify-packaged-fork-history.mjs",
+        "apps/server/src/serverRuntimeStartup.test.ts",
+        "apps/server/src/serverRuntimeStartup.autoPull.test.ts",
+        "scripts/smoke-cli-archive.ts",
+        "scripts/windows-shim-oracle.mjs",
+        "tools/service-launcher-trial.test.mjs"
       ],
+      "hosted_acceptance": {
+        "apps/server/src/serverRuntimeStartup.test.ts": ".github/workflows/thread-recovery.yml",
+        "apps/server/src/serverRuntimeStartup.autoPull.test.ts": ".github/workflows/thread-recovery.yml",
+        "apps/web/scripts/verify-packaged-fork-history.mjs": ".github/workflows/composer-offsets.yml",
+        "scripts/smoke-cli-archive.ts": ".github/workflows/cli-archive-proof.yml",
+        "scripts/windows-shim-oracle.mjs": ".github/workflows/cli-archive-proof.yml",
+        "tools/service-launcher-trial.test.mjs": ".github/workflows/cli-archive-proof.yml"
+      },
       "retired_paths": [],
-      "notes": "The selected production server and CLI use the complete omdb application boundary through one transaction owner. Native upgrades from the exact schema80 and schema88 histories to89 preserve activated data and import lineage. Schema80 backfills citation-aware message search, turn item counts and custom project titles; schema89 adds indexed worktree and family shell selection before payload decoding. Typed native APIs cover atomic event guards, outbox claims, compaction filters, fork visibility, shell and recovery state, attachment retention, scheduler compare-and-set, KeepAwake active-run existence and legacy subagent identifier retention. The active-run query stops at the first indexed match. Queue-only run filters use the existing global queued-run index and recheck thread ownership, avoiding completed history. Explicit run-ID filters read compact keys directly; includeLatestRun preserves full-thread candidates and original filtering/order semantics. Bootstrap and CLI preserve upgrade ownership and never reopen SQLite after native activation. SQLite remains the migration source, immutable behavior comparison and unqualified-platform implementation. Fresh exact-commit platform receipts remain required. The retained native project API and standalone plan-and-project executable share the core project projection reducer and remain independently compared with immutable ProjectStore behavior; the selected application graph uses shared ProjectStore semantics over native project rows.",
+      "notes": "The selected production server and CLI use the complete omdb application boundary through one transaction owner. Native upgrades from the exact schema80 and schema88 histories to89 preserve activated data and import lineage. Schema80 backfills citation-aware message search, turn item counts and custom project titles; schema89 adds indexed worktree and family shell selection before payload decoding. Typed native APIs cover atomic event guards, outbox claims, compaction filters, fork visibility, shell and recovery state, attachment retention, scheduler compare-and-set, KeepAwake active-run existence and legacy subagent identifier retention. Run 45193811917 attempt 2 at 4df0cc51841a4dec72acaa6bb07d2625bbc8d9b3 exercised one live inherited history view in the bundled Linux x64 Chromium application. The bounded and expanded reads shared one view revision, and the same child replay watermark, scrolled position and focus survived the refresh. Reopening preserved the child-only replay state and updated inherited row. The active-run query stops at the first indexed match. Queue-only run filters use the existing global queued-run index and recheck thread ownership, avoiding completed history. Explicit run-ID filters read compact keys directly; includeLatestRun preserves full-thread candidates and original filtering/order semantics. Bootstrap and CLI preserve upgrade ownership and never reopen SQLite after native activation. SQLite remains the migration source, immutable behavior comparison and unqualified-platform implementation. Fresh exact-commit platform receipts remain required. The retained native project API and standalone plan-and-project executable share the core project projection reducer and remain independently compared with immutable ProjectStore behavior; the selected application graph uses shared ProjectStore semantics over native project rows.",
       "rust_crates": ["crates/core", "crates/storage"]
     },
     {
@@ -1796,11 +1867,16 @@
       ],
       "rust_paths": [
         "packages/client-runtime/rust/src/lib.rs",
+        "packages/client-runtime/rust/src/draft.rs",
         "packages/client-runtime/rust/web/src/lib.rs"
       ],
       "adapter_paths": [
         ".github/workflows/composer-offsets.yml",
         "apps/web/src/composer-native-offsets.ts",
+        "apps/web/src/composerDraftStore.ts",
+        "apps/web/src/composerDraftStore.test.ts",
+        "apps/web/src/composerDraftReconciliation.browser.test.ts",
+        "apps/web/scripts/verify-hybrid-client.ts",
         "apps/web/src/components/ComposerPromptEditorTiptap.input.browser.test.tsx",
         "apps/web/src/main.tsx",
         "apps/web/src/vite-env.d.ts"
@@ -1814,10 +1890,488 @@
           "acceptance_evidence": {}
         }
       ],
-      "acceptance_tests": ["packages/client-runtime/rust/tests/offsets.rs"],
+      "acceptance_tests": [
+        "packages/client-runtime/rust/tests/offsets.rs",
+        "packages/client-runtime/rust/tests/draft.rs",
+        "apps/web/src/composerDraftReconciliation.browser.test.ts",
+        "apps/web/scripts/verify-hybrid-client.ts"
+      ],
+      "hosted_acceptance": {
+        "apps/web/src/composerDraftReconciliation.browser.test.ts": ".github/workflows/composer-offsets.yml",
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
+      },
       "retired_paths": [],
-      "notes": "T01 and J37. Dependency-free no_std core and opt-in WebAssembly adapter for the browser composer's numeric rich-document offsets. The existing editor owns DOM composition. Browser qualification and performance evidence remain required.",
+      "notes": "T01 and J37. Dependency-free no_std core and opt-in WebAssembly adapter for the browser composer's numeric rich-document offsets. The existing editor owns DOM composition. T11/J19 draft reconciliation now has a source candidate in the same portable owner and opt-in Wasm boundary. Rust chooses record no-op/delete/replace, four grouped field sources and empty collapse over JS-interned Effect equality classes. JS retains keys, trust, v9 serialization, acknowledgement and retry. TS remains the oracle and unavailable-Wasm fallback. Packaged draft, quota/read-denial, clear and fallback proofs are selected in the existing composer workflow. Draft lineage is stock 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f. Hosted execution, browser qualification and performance evidence remain required.",
       "rust_crates": ["packages/client-runtime/rust", "packages/client-runtime/rust/web"]
+    },
+    {
+      "id": "local-pairing-form",
+      "state": "candidate",
+      "domain_owner": "apps/web",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/web/src/routes/pair.tsx",
+          "blob": "a71f44e3e2a720e96e2ba38223a2e1b7e4fa95e3"
+        },
+        {
+          "path": "apps/web/src/components/auth/PairingRouteSurface.tsx",
+          "blob": "8bedc8b2e711761ff52b7faafd3d8e09da54ab8f"
+        },
+        {
+          "path": "apps/web/src/components/onboarding/WelcomePage.tsx",
+          "blob": "48171ccf944579103d00f50d8e1844a12a655626"
+        }
+      ],
+      "rust_paths": ["apps/web/rust/pairing/src/lib.rs"],
+      "adapter_paths": [
+        ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/auth/DioxusPairingForm.tsx",
+        "apps/web/src/components/auth/PairingRouteSurface.tsx",
+        "apps/web/src/components/onboarding/DioxusWelcomeControls.tsx",
+        "apps/web/src/components/onboarding/WelcomePage.tsx",
+        "apps/web/src/onboarding/dioxusBindings.ts",
+        "apps/web/src/vite-env.d.ts"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["browser"],
+          "state": "candidate",
+          "implementation": "dioxus-wasm",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "apps/web/scripts/verify-hybrid-client.ts",
+        "apps/web/src/components/onboarding/WelcomePage.import.browser.test.tsx"
+      ],
+      "hosted_acceptance": {
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/onboarding/WelcomePage.import.browser.test.tsx": ".github/workflows/composer-offsets.yml"
+      },
+      "retired_paths": [],
+      "notes": "T01, T11 and J36. VITE_T3_CODE_LS_PAIRING_RENDERER=dioxus selects local pairing and welcome completion controls. Rust renders current readiness, selected-project counts and pending state, with mount-owned activation and focus. Existing application owners retain import, permission, durable completion and navigation. Explicit standard controls are available if the Wasm module cannot load. The browser adapter uses Dioxus 0.8.0-alpha.3 release cb27832398e8a3fa30a0fc8d6917c6d8a86fa71a, an ancestor of research pin 0a7242a2a72b08975584bf8ecb05076a5ee0b9c7. Cargo.lock records release artifact checksums. The bundled Chromium proof exercises pairing, welcome, project creation and an explicit standard fallback on Wasm load failure.",
+      "rust_crates": ["apps/web/rust/pairing"]
+    },
+    {
+      "id": "browser-guest-name-dioxus",
+      "state": "candidate",
+      "domain_owner": "apps/web/src/components/guest",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [{ "path": "apps/web/src/components/guest/GuestPage.tsx", "blob": "7ac90687b227c41b8e77f7707eaf95199b81cac6" }],
+      "rust_paths": ["apps/web/rust/pairing/src/guest_name.rs"],
+      "adapter_paths": [
+        ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/guest/GuestPage.tsx",
+        "apps/web/src/components/guest/DioxusGuestNameForm.tsx",
+        "apps/web/src/onboarding/dioxusBindings.ts",
+        "apps/web/src/vite-env.d.ts",
+        "apps/web/scripts/hybrid-client-guest-name.ts"
+      ],
+      "platform_routes": [{ "targets": ["browser"], "state": "candidate", "implementation": "dioxus-wasm", "compiler_route": "lustr-bluefe-compatibility", "acceptance_evidence": {} }],
+      "acceptance_tests": ["apps/web/scripts/verify-hybrid-client.ts", "apps/web/src/components/guest/GuestNameForm.browser.test.tsx"],
+      "hosted_acceptance": {
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/guest/GuestNameForm.browser.test.tsx": ".github/workflows/composer-offsets.yml"
+      },
+      "retired_paths": [],
+      "notes": "T11/T10 guest entry UI. Selectable semantic name form reuses the existing pinned Dioxus asset. GuestPage retains credential, HTTP and session ownership. Packaged UI proof uses synthetic Guest HTTP and does not qualify server authorization. Runtime evidence remains required.",
+      "rust_crates": ["apps/web/rust/pairing"]
+    },
+    {
+      "id": "browser-thread-find-dioxus",
+      "state": "candidate",
+      "domain_owner": "apps/web",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/web/src/components/chat/ThreadFindBar.tsx",
+          "blob": "466cd929a7580ac0428201e343f9f4b90a8574c7"
+        }
+      ],
+      "rust_paths": ["apps/web/rust/pairing/src/thread_find.rs"],
+      "adapter_paths": [
+        ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/chat/ThreadFindBar.tsx",
+        "apps/web/src/onboarding/dioxusBindings.ts",
+        "apps/web/src/vite-env.d.ts"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["browser"],
+          "state": "candidate",
+          "implementation": "dioxus-wasm",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": ["apps/web/scripts/verify-hybrid-client.ts"],
+      "hosted_acceptance": {
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
+      },
+      "retired_paths": [],
+      "notes": "T11, J04 and J55. VITE_T3_CODE_LS_THREAD_FIND_RENDERER=dioxus selects the semantic search form, focus and controls in the existing Wasm browser binding. The current thread owner still controls the query, cursor, highlight and transport. Run 45167459425 exercised exact find results, keyboard focus, draft preservation and retained controls after a blocked Wasm request through the bundled Chromium application.",
+      "rust_crates": ["apps/web/rust/pairing"]
+    },
+    {
+      "id": "browser-composer-submit-dioxus",
+      "state": "candidate",
+      "domain_owner": "apps/web/src/components/chat",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/web/src/components/chat/ChatComposer.tsx",
+          "blob": "eb01b8242e2dfaaead2e42b57e6e7508758e90fd"
+        },
+        {
+          "path": "apps/web/src/components/chat/ComposerPrimaryActions.tsx",
+          "blob": "41e5e3c77191f7de29d5b5be62db46c21e778a3e"
+        }
+      ],
+      "rust_paths": ["apps/web/rust/pairing/src/composer_submit.rs"],
+      "adapter_paths": [
+        ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/chat/ChatComposer.tsx",
+        "apps/web/src/components/chat/ComposerFooterControls.tsx",
+        "apps/web/src/components/chat/ComposerPrimaryActions.tsx",
+        "apps/web/src/components/chat/DioxusComposerSubmit.tsx",
+        "apps/web/src/onboarding/dioxusBindings.ts",
+        "apps/web/src/vite-env.d.ts"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["browser"],
+          "state": "candidate",
+          "implementation": "dioxus-wasm",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "apps/web/scripts/verify-hybrid-client.ts",
+        "apps/web/src/components/chat/ComposerPrimaryActions.browser.test.tsx"
+      ],
+      "hosted_acceptance": {
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/chat/ComposerPrimaryActions.browser.test.tsx": ".github/workflows/composer-offsets.yml"
+      },
+      "retired_paths": [],
+      "notes": "T01/T02/T11. VITE_T3_CODE_LS_COMPOSER_SUBMIT_RENDERER=dioxus selects the ordinary Send button. The browser submits the existing ChatComposer form, which retains draft, validation and command ownership. Specialized actions use their existing renderer. Run 45205232266 at 6742110c8042b03dad894d65c95d0a6daa5d7ca7 verified keyboard submission over the packaged native route, refusal with the draft retained, and the explicit standard control after a blocked Wasm load. The same opt-in selects the ordinary expanded Stop button beside a follow-up Send. The Stop candidate uses the existing interruption owner. Run 45217145808 at 03dd40147cb8021a7530842f1ad0a49dbe5bdd43 verified one keyboard interruption, the same reopened run and draft, and a blocked-Wasm fallback.",
+      "rust_crates": ["apps/web/rust/pairing"]
+    },
+    {
+      "id": "browser-assistant-text-dioxus",
+      "state": "candidate",
+      "domain_owner": "apps/web/src/components/chat",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/web/src/components/chat/TimelineAssistantRows.tsx",
+          "blob": "36c04da893275229889741ff85881edc69b7fe9d"
+        }
+      ],
+      "rust_paths": [
+        "apps/web/rust/pairing/src/assistant_text.rs"
+      ],
+      "adapter_paths": [
+        "apps/web/rust/pairing/src/lib.rs",
+        "apps/web/src/components/chat/TimelineAssistantRows.tsx",
+        "apps/web/src/components/chat/DioxusAssistantText.tsx",
+        "apps/web/src/onboarding/dioxusBindings.ts",
+        "apps/web/src/vite-env.d.ts",
+        "apps/web/src/state/entities.ts",
+        "packages/client-runtime/src/state/threadDetail.ts",
+        ".github/workflows/composer-offsets.yml"
+      ],
+      "platform_routes": [
+        {
+          "targets": [
+            "browser"
+          ],
+          "state": "candidate",
+          "implementation": "dioxus-wasm",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "apps/web/scripts/verify-hybrid-client.ts",
+        "apps/web/src/components/chat/DioxusAssistantText.browser.test.tsx",
+        "packages/client-runtime/src/state/threadDetail.test.ts"
+      ],
+      "hosted_acceptance": {
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/chat/DioxusAssistantText.browser.test.tsx": ".github/workflows/composer-offsets.yml",
+        "packages/client-runtime/src/state/threadDetail.test.ts": ".github/workflows/composer-offsets.yml"
+      },
+      "retired_paths": [],
+      "notes": "T02/T11 C02 and J36. VITE_T3_CODE_LS_ASSISTANT_TEXT_RENDERER=dioxus selects a Rust-owned plain paragraph in the selected-thread timeline. The state owner supplies exact text, updatedAt and the applied thread sequence together. Richer formats use the existing Markdown renderer. Run 45223520534 at 3651e573695bb2fbc387d845f2a97f121a0bfc42 exercised real Wasm text updates and remount. The packaged application opened the same running thread, preserved composer focus and reopened the same interrupted message. A separate run with blocked Wasm rendered the retained paragraph. Richer text, attachments, accessibility, hosted and guest flows, other platforms and performance remain open.",
+      "rust_crates": [
+        "apps/web/rust/pairing"
+      ]
+    },
+    {
+      "id": "browser-thread-link-dioxus",
+      "state": "candidate",
+      "domain_owner": "apps/web/src/components/chat",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/web/src/components/chat/TimelineWorkEntryRow.tsx",
+          "blob": "dfefdedeed52930e8b8e2f29976177b8c838c893"
+        }
+      ],
+      "rust_paths": [
+        "apps/web/rust/pairing/src/thread_link.rs"
+      ],
+      "adapter_paths": [
+        "apps/web/rust/pairing/src/lib.rs",
+        "apps/web/src/components/chat/TimelineWorkEntryRow.tsx",
+        "apps/web/src/components/chat/DioxusThreadLink.tsx",
+        "apps/web/src/onboarding/dioxusBindings.ts",
+        "apps/web/src/vite-env.d.ts",
+        "apps/web/scripts/hybrid-client-thread-navigation.ts",
+        ".github/workflows/composer-offsets.yml"
+      ],
+      "platform_routes": [
+        {
+          "targets": [
+            "browser"
+          ],
+          "state": "candidate",
+          "implementation": "dioxus-wasm",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "apps/web/scripts/verify-hybrid-client.ts",
+        "apps/web/src/components/chat/DioxusThreadLink.browser.test.tsx",
+        "apps/web/src/components/chat/DioxusThreadLink.fallback.browser.test.tsx"
+      ],
+      "hosted_acceptance": {
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/chat/DioxusThreadLink.browser.test.tsx": ".github/workflows/composer-offsets.yml",
+        "apps/web/src/components/chat/DioxusThreadLink.fallback.browser.test.tsx": ".github/workflows/composer-offsets.yml"
+      },
+      "retired_paths": [],
+      "notes": "T11/J36. The opt-in Dioxus thread-read title uses the existing authenticated route and browser link behavior. Run 45239833992 at 29fd4ea1b26fa912e65ed208931a04a32aa9ffa7 verified keyboard navigation, target reload, Back, and draft and focus restoration in packaged Chromium. The second arm observed a blocked Wasm request and verified the same journey with the retained link. This covers one browser navigation path.",
+      "rust_crates": [
+        "apps/web/rust/pairing"
+      ]
+    },
+    {
+      "id": "browser-approval-action-dioxus",
+      "state": "candidate",
+      "domain_owner": "apps/web/src/components/chat",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/web/src/components/chat/ComposerPendingApprovalActions.tsx",
+          "blob": "67860e45ef2b1fd17b68632c22ffea60783c505f"
+        },
+        {
+          "path": "apps/web/src/components/chat/TimelinePendingApprovalRow.tsx",
+          "blob": "c425d560bf1316189ae9a4c3645d9c6ef46810d6"
+        }
+      ],
+      "rust_paths": ["apps/web/rust/pairing/src/approval_action.rs"],
+      "adapter_paths": [
+        ".github/workflows/composer-offsets.yml",
+        "apps/web/scripts/hybrid-client-approval-action.ts",
+        "apps/web/src/components/chat/ComposerPendingApprovalActions.tsx",
+        "apps/web/src/components/chat/DioxusApprovalAction.tsx",
+        "apps/web/src/components/chat/TimelinePendingApprovalRow.tsx",
+        "apps/web/src/onboarding/dioxusBindings.ts"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["browser"],
+          "state": "candidate",
+          "implementation": "dioxus-wasm",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "apps/web/scripts/verify-hybrid-client.ts"
+      ],
+      "hosted_acceptance": {
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
+      },
+      "retired_paths": [],
+      "notes": "T02/T11. VITE_T3_CODE_LS_APPROVAL_RENDERER=dioxus selects the ordinary Approve action in a command timeline card. The existing handler owns authorization and dispatch. Run 45216749217 at 53f71a71bf13eb2a978877a165cac3e75f657663 verified exact decision identity, duplicate and stale clicks, reopen, the accepted omdb receipt, and the explicit fallback after blocking Wasm.",
+      "rust_crates": ["apps/web/rust/pairing"]
+    },
+    {
+      "id": "mobile-outbox-delivery",
+      "state": "candidate",
+      "domain_owner": "apps/mobile/src/state",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/mobile/src/state/thread-outbox-model.ts",
+          "blob": "64fe62d8a15f753e6e9d3e812eeb880c994d7f9e"
+        },
+        {
+          "path": "apps/mobile/src/state/threadOutboxDelivery.ts",
+          "blob": "c64215ed26cd374b173de56d499e5debc3938265"
+        }
+      ],
+      "rust_paths": [
+        "packages/client-runtime/rust/src/outbox.rs",
+        "apps/mobile/modules/t3-native-controls/rust/src/lib.rs"
+      ],
+      "adapter_paths": [
+        ".github/workflows/thread-recovery.yml",
+        "apps/mobile/src/App.tsx",
+        "apps/mobile/src/state/threadOutboxDelivery.ts",
+        "apps/mobile/src/native/outboxDelivery.ts",
+        "apps/mobile/app.config.ts",
+        "apps/mobile/outbox-runtime-proof.ts",
+        "apps/mobile/plugins/withAndroidOutboxProof.cjs",
+        "apps/mobile/modules/t3-native-controls/android/build.gradle",
+        "apps/mobile/src/connection/platform.ts",
+        "apps/mobile/src/connection/environment-owned-data-cleanup.ts",
+        "packages/client-runtime/src/connection/registry.ts",
+        "packages/client-runtime/src/platform/persistence.ts",
+        "apps/mobile/modules/t3-native-controls/ios/T3NativeControlsModule.swift",
+        "apps/mobile/modules/t3-native-controls/ios/T3NativeControls.podspec",
+        "apps/mobile/modules/t3-native-controls/android/src/main/java/expo/modules/t3nativecontrols/T3NativeControlsModule.kt",
+        "apps/mobile/modules/t3-native-controls/android/src/main/java/expo/modules/t3nativecontrols/T3OutboxDelivery.kt"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["android", "ios"],
+          "state": "candidate",
+          "implementation": "rust-ffi",
+          "compiler_route": "target-sdk",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "packages/client-runtime/rust/tests/outbox.rs",
+        "apps/mobile/src/native/outboxDelivery.test.ts",
+        "scripts/verify-android-outbox-runtime.ts",
+        "apps/mobile/src/connection/environment-owned-data-cleanup.test.ts",
+        "packages/client-runtime/src/connection/registry.test.ts"
+      ],
+      "hosted_acceptance": {
+        "apps/mobile/src/native/outboxDelivery.test.ts": ".github/workflows/thread-recovery.yml",
+        "scripts/verify-android-outbox-runtime.ts": ".github/workflows/thread-recovery.yml",
+        "apps/mobile/src/connection/environment-owned-data-cleanup.test.ts": ".github/workflows/thread-recovery.yml",
+        "packages/client-runtime/src/connection/registry.test.ts": ".github/workflows/thread-recovery.yml"
+      },
+      "retired_paths": [],
+      "notes": "T12. The Expo adapter can select a versioned scalar binding for the portable outbox decision. Run 45191901494 at 2f74ddd07956f4b2321f2418164a9f81375b8ebd installed two dedicated Android x86_64 release APKs on an isolated API 36 emulator. The positive APK passed all 64 JS-to-JNI decision cases. The APK built without the native library refused strict selection before running any case. Run 45199103016 attempt 2 at a4acb56fd33378c377bb56d9800f6732be6b65bf exercised Expo outbox storage across two force-stops. Run 45212213510 at d85c312e83e8900bdf184df582c63a33b7d69c7e installed the normal Android app entry with the same JNI library and opened the pending task seeded by the dedicated fixture. Reopen preserved the exact draft identities and attachment bytes, then removal and a second reopen left no queued item or attachment. Android reconnect and broader permission and lifecycle work, and installed iOS qualification, remain open.",
+      "rust_crates": ["packages/client-runtime/rust", "apps/mobile/modules/t3-native-controls/rust"]
+    },
+    {
+      "id": "desktop-makepad-input",
+      "state": "candidate",
+      "domain_owner": "apps/desktop",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/desktop/src/main.ts",
+          "blob": "f241e14587f34d742a7721b46d9be990a0dd2409"
+        },
+        {
+          "path": "apps/web/src/components/ComposerPromptEditorTiptap.tsx",
+          "blob": "5a036e34611ed5a72c7eb463a4a4e819ae1c2863"
+        }
+      ],
+      "rust_paths": [
+        "apps/desktop/makepad-input/src/main.rs",
+        "apps/desktop/makepad-input/src/macos.rs",
+        "apps/desktop/makepad-input/src/macos/proof.rs",
+        "apps/desktop/makepad-input/src/macos/snapshot_proof.rs",
+        "apps/desktop/makepad-input/src/macos/history_proof.rs",
+        "packages/client-runtime/rust/host/server_snapshot.rs",
+        "packages/client-runtime/rust/host/server_history.rs",
+        "packages/client-runtime/rust/src/composer_draft.rs"
+      ],
+      "adapter_paths": [
+        "apps/desktop/package.json",
+        "apps/desktop/makepad-input/README.md",
+        "apps/server/scripts/verify-makepad-thread-snapshot.ts",
+        ".github/workflows/makepad-input.yml"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["darwin-arm64"],
+          "state": "candidate",
+          "implementation": "rust",
+          "compiler_route": "bootstrap-cargo",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "apps/server/scripts/verify-makepad-thread-snapshot.ts"
+      ],
+      "hosted_acceptance": {
+        "apps/server/scripts/verify-makepad-thread-snapshot.ts": ".github/workflows/makepad-input.yml"
+      },
+      "retired_paths": [],
+      "notes": "T01, J37 and C07. Explicit desktop candidate for plain-text editing, committed IME text, directed selection, local submission and a bounded authenticated production thread read with opt-in local conversation history paging. The macOS snapshot proof explicitly uses retained server storage and does not qualify native macOS persistence. The root workspace and retained clients select their existing routes.",
+      "rust_crates": ["apps/desktop/makepad-input", "packages/client-runtime/rust"]
+    },
+    {
+      "id": "desktop-gpui-showcase",
+      "state": "candidate",
+      "domain_owner": "apps/desktop",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/desktop/src/main.ts",
+          "blob": "f241e14587f34d742a7721b46d9be990a0dd2409"
+        },
+        {
+          "path": "apps/web/src/components/ComposerPromptEditorTiptap.tsx",
+          "blob": "5a036e34611ed5a72c7eb463a4a4e819ae1c2863"
+        }
+      ],
+      "rust_paths": [
+        "apps/desktop/rust/src/main.rs",
+        "apps/desktop/rust/src/replay.rs",
+        "apps/desktop/rust/src/history_view.rs",
+        "packages/client-runtime/rust/host/server_snapshot.rs",
+        "apps/desktop/rust/src/server_submit.rs"
+      ],
+      "adapter_paths": [
+        "apps/desktop/rust/Cargo.toml",
+        "apps/desktop/rust/Cargo.lock",
+        "apps/desktop/rust/README.md",
+        "apps/server/scripts/dev-replay/showcase_transcript.ndjson",
+        "tools/check-gpui-history.py",
+        ".github/workflows/gpui-showcase.yml"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["linux-x64"],
+          "state": "candidate",
+          "implementation": "standalone-gpui-showcase-fixture",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "packages/client-runtime/rust/tests/text_revision.rs",
+        "apps/server/scripts/verify-gpui-thread-snapshot.ts",
+        "apps/server/scripts/verify-gpui-thread-submit.ts",
+        "tools/check-gpui-showcase.py",
+        "apps/server/scripts/verify-gpui-thread-history.ts"
+      ],
+      "hosted_acceptance": {
+        "apps/server/scripts/verify-gpui-thread-snapshot.ts": ".github/workflows/gpui-showcase.yml",
+        "apps/server/scripts/verify-gpui-thread-submit.ts": ".github/workflows/gpui-showcase.yml",
+        "tools/check-gpui-showcase.py": ".github/workflows/gpui-showcase.yml",
+        "apps/server/scripts/verify-gpui-thread-history.ts": ".github/workflows/gpui-showcase.yml"
+      },
+      "retired_paths": [],
+      "notes": "T01 and T14. The root Rust workspace checks the shared text owner. The isolated GPUI manifest has its own fixture tests and requires hosted X11, input and assistive-technology checks. The replay fixture remains in memory. The opt-in native thread reader consumes the selected loopback server's authenticated bounded snapshot and checks environment and thread identity. The opt-in composer uses the real WebSocket message.dispatch contract, retains supplied identities on uncertainty and matches a completed run by its exact message. Run 45190876195 at 3a78fa7432094ad34fac6b449d5a08cb0e4698f3 verified keyboard activation of the named Allow once control, the real runtime-request.respond command and one resolved request in the completed run. Run 45193805889 at 2b542934fb966675836e42ab75a37a81ab062412 verified a second GPUI window sent a follow-up in the same idle thread, with two completed runs and preserved earlier messages. The T14/T02 source candidate adds bounded selected-thread WebSocket full-message delivery through the shared TextRevision owner and a four-slot UI queue. Its authored checks require original ACP partial text before completion, the same reply identity at final/reopen and retention of a later unsent draft; hosted execution of this increment remains pending. Live providers, general stream recovery/delta negotiation, other approval actions, busy-thread writes, durable desktop identities and drafts, and normal launcher integration remain open.",
+      "rust_crates": ["packages/client-runtime/rust", "apps/desktop/rust"]
     },
     {
       "id": "conversation-text-revisions",
@@ -1847,8 +2401,243 @@
       ],
       "acceptance_tests": ["packages/client-runtime/rust/tests/text_revision.rs"],
       "retired_paths": [],
-      "notes": "T03 shared text-apply candidate. It defines append, replacement and UTF-16 splice behavior and a bounded retry boundary for one item. Capability negotiation, durable chunk and event representation, cache recovery, and client rendering still need integration.",
+      "notes": "T03 shared text-apply candidate. It defines append, replacement and UTF-16 splice behavior and a bounded retry boundary for one item. Run 45219177672 at e0b650bc70266b9b215e686cd891c830cca7fce9 verified a negotiated Unicode splice rendered by the Rust browser decoder and exact completion after reopen. A stale base was rejected without advancing the selected thread replay watermark. The authoritative message then replayed and completed once. General revision storage, other client platforms and performance remain open.",
       "rust_crates": ["packages/client-runtime/rust"]
+    },
+    {
+      "id": "claude-stdio-control",
+      "state": "candidate",
+      "domain_owner": "apps/server/src/orchestration-v2/Adapters",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts",
+          "blob": "64537c7e5fa8f35134d7a8c4fc6cd2dc8839eda3"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/testkit/fixtures/claude_background_wake_before_queued_prompt/claude_transcript.ndjson",
+          "blob": "e2b88ec9340ff4f3d464298af12f0ebdcfbd132d"
+        }
+      ],
+      "rust_paths": [
+        "apps/server/src/orchestration-v2/Adapters/claude_stdio_control.rs",
+        "apps/server/src/orchestration-v2/Adapters/claude_stdio_host.rs",
+        "apps/server/src/orchestration-v2/Adapters/claude_stdio_helper.rs",
+        "crates/core/src/bin/t3-code-ls-claude-stdio.rs"
+      ],
+      "adapter_paths": [
+        ".github/workflows/claude-stdio.yml",
+        ".github/workflows/cli-archive-proof.yml",
+        "apps/server/src/orchestration-v2/Adapters/ClaudeStdioHost.testkit.ts",
+        "apps/server/src/orchestration-v2/Adapters/ClaudeStdioRunner.ts",
+        "apps/server/src/orchestration-v2/Adapters/ClaudeStdioSelection.ts"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["linux-x64"],
+          "state": "candidate",
+          "implementation": "standalone-component",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts",
+        "apps/server/src/orchestration-v2/Adapters/ClaudeStdioSelection.test.ts",
+        "apps/server/scripts/check-claude-stdio-helper.mjs",
+        "apps/server/scripts/verify-packaged-claude-stdio.ts",
+        "crates/core/tests/claude_stdio_control.rs",
+        "crates/core/tests/claude_stdio_host.rs"
+      ],
+      "hosted_acceptance": {
+        "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts": ".github/workflows/claude-stdio.yml",
+        "apps/server/src/orchestration-v2/Adapters/ClaudeStdioSelection.test.ts": ".github/workflows/claude-stdio.yml",
+        "apps/server/scripts/check-claude-stdio-helper.mjs": ".github/workflows/claude-stdio.yml",
+        "apps/server/scripts/verify-packaged-claude-stdio.ts": ".github/workflows/cli-archive-proof.yml"
+      },
+      "retired_paths": [],
+      "notes": "T01/T08 Unix stream-JSON candidate for @anthropic-ai/claude-agent-sdk 0.3.321 initialize, user input, permission and interrupt frames. Run 45201606959 at 2b3672d76f3ceadb254381784c77475cca1f1b04 verified the built Rust helper with the real Claude adapter and deterministic child, then initialized and reaped the pinned Linux CLI with no prompt. Linux archive run 45237395885 at 295781f9c1e83683eaddae6eb5755131f9d4f7d8 exercised one Unicode synthetic conversation with one completed run and receipt after native reopen. Its MCP-option and unrelated-model controls refused before helper startup. Ordinary sessions select the SDK runner. Vendor turns, hooks, account behavior, and full control parity remain unqualified.",
+      "rust_crates": ["crates/core"]
+    },
+    {
+      "id": "cursor-bridge-send-stream",
+      "state": "candidate",
+      "domain_owner": "packages/provider-cursor",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "packages/provider-cursor/src/server/CursorAgentSdk.ts",
+          "blob": "ef6b609bb3f60533d1089f179cd5989d437afeb7"
+        },
+        {
+          "path": "apps/server/src/orchestration-v2/testkit/fixtures/simple/cursor_transcript.ndjson",
+          "blob": "65bf452ee8d80fa600df6d3a80fd68ef43f6effc"
+        }
+      ],
+      "rust_paths": [
+        "packages/provider-cursor/rust/src/lib.rs",
+        "packages/provider-cursor/rust/host/src/lib.rs",
+        "packages/provider-cursor/rust/host/src/main.rs"
+      ],
+      "adapter_paths": [".github/workflows/cursor-bridge-adapter.yml"],
+      "platform_routes": [
+        {
+          "targets": ["linux-x64"],
+          "state": "candidate",
+          "implementation": "standalone-component",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "packages/provider-cursor/rust/tests/send_stream.rs",
+        "packages/provider-cursor/rust/host/tests/loopback.rs",
+        "packages/provider-cursor/src/server/CursorBridge.integration.test.ts"
+      ],
+      "hosted_acceptance": {
+        "packages/provider-cursor/src/server/CursorBridge.integration.test.ts": ".github/workflows/cursor-bridge-adapter.yml"
+      },
+      "retired_paths": [],
+      "notes": "T01/T08 Cursor candidate using the public sdk.v1 protocol at cursor/sdk-bridge 6c9101088c18fab95c73d2dd68ca11d6fbf7d483. The portable component covers uncompressed Connect JSON framing and terminal outcomes. The real Cursor adapter exercises CreateAgent, Send, CancelRun and CloseAgent through a selected Rust host. Run 45241685089 at 5d016167cff533eae744ea5793df249a336d6cf6 also verified that a fresh adapter session resumes the same native agent and rejects an unrelated agent identity before sending. Live sessions use the SDK. The vendor bridge embeds the vendor SDK.",
+      "rust_crates": ["packages/provider-cursor/rust", "packages/provider-cursor/rust/host"]
+    },
+    {
+      "id": "task-cache-savings-accounting",
+      "state": "candidate",
+      "domain_owner": "infra/task-cache",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        { "path": "infra/task-cache/src/Savings.ts", "blob": "64723e851c45fa4fd37f0f993b1263c342ebbc45" }
+      ],
+      "rust_paths": [
+        "infra/task-cache/rust/src/lib.rs",
+        "infra/task-cache/rust/web/src/lib.rs"
+      ],
+      "adapter_paths": [
+        "infra/task-cache/src/Savings.ts",
+        "infra/task-cache/src/SavingsFold.ts",
+        "infra/task-cache/src/SavingsRuntime.ts",
+        "infra/task-cache/src/SavingsRuntime.native.ts",
+        "infra/task-cache/src/SavingsBuild.ts",
+        "infra/task-cache/src/worker.ts",
+        "infra/task-cache/src/SavingsWorker.fixture.ts",
+        ".github/workflows/thread-recovery.yml"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["linux-x64"],
+          "state": "candidate",
+          "implementation": "standalone-component",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "infra/task-cache/scripts/verify-savings-native.ts",
+        "infra/task-cache/scripts/verify-savings-worker.ts"
+      ],
+      "hosted_acceptance": {
+        "infra/task-cache/scripts/verify-savings-native.ts": ".github/workflows/thread-recovery.yml",
+        "infra/task-cache/scripts/verify-savings-worker.ts": ".github/workflows/thread-recovery.yml"
+      },
+      "retired_paths": [],
+      "notes": "T15/J32 savings policy with a no_std allocation-free fold, Wasm binding and the existing Savings service. D1 owns atomic receipt deduplication and totals publication. A verified Alchemy build can select the native fold. The bundled fixture exercises equivalent telemetry with the synthetic D1 adapter. The default build uses the retained fold. Cloudflare execution and performance remain unqualified.",
+      "rust_crates": ["infra/task-cache/rust", "infra/task-cache/rust/web"]
+    },
+    {
+      "id": "terminal-pty-host",
+      "state": "integrated",
+      "domain_owner": "apps/server/src/terminal",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/server/src/terminal/NodePtyAdapter.ts",
+          "blob": "cc7ae638f7df2c5605584eba1c0de3f4799acdfc"
+        }
+      ],
+      "rust_paths": [
+        "apps/server/rust/pty-host/src/lib.rs",
+        "apps/server/rust/pty-host/src/linux.rs",
+        "apps/server/rust/pty-host/src/main.rs"
+      ],
+      "adapter_paths": [
+        "apps/server/src/terminal/NativePtyAdapter.ts",
+        "tools/build-native.mjs",
+        "tools/check-hybrid.mjs",
+        "tools/native-artifacts.mjs",
+        ".github/workflows/composer-offsets.yml"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["linux-x64"],
+          "state": "integrated",
+          "implementation": "rust",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "apps/server/rust/pty-host/tests/owner.rs",
+        "apps/server/src/terminal/Manager.test.ts",
+        "apps/server/src/terminal/NativePtyAdapter.integration.test.ts",
+        "apps/web/scripts/verify-hybrid-client.ts"
+      ],
+      "hosted_acceptance": {
+        "apps/server/rust/pty-host/tests/owner.rs": ".github/workflows/composer-offsets.yml",
+        "apps/server/src/terminal/Manager.test.ts": ".github/workflows/composer-offsets.yml",
+        "apps/server/src/terminal/NativePtyAdapter.integration.test.ts": ".github/workflows/composer-offsets.yml",
+        "apps/web/scripts/verify-hybrid-client.ts": ".github/workflows/composer-offsets.yml"
+      },
+      "retired_paths": [],
+      "notes": "T07 Linux PTY host using portable-pty 0.9.0 and nix 0.28.0. The Linux x64 server can opt in to the verified packaged helper with T3_CODE_LS_BUNDLED_PTY_HOST=1 or use an explicit helper with T3_CODE_LS_PTY_HOST_EXECUTABLE. The default selection uses NodePtyAdapter. The bundled browser fixture verifies the packaged helper hash, shell ancestry, split UTF-8 and control sequences, plus an active alternate screen and restoration of the primary screen across same-shell reattachment. Run 45172466415 verified that stopping the bundled server retires the helper, shell and a foreground sleep, and that reopening the same thread starts a new owned shell. Run 45178134954 verified 256 ordered wire and rendered rows, Unicode echo, foreground survival after reattachment and completion of a separate replay turn. The native owner uses bounded nonblocking byte input, exact output acknowledgement and kill/reap for the initial process group. General foreground job control, session-escaping descendants and contention performance remain unqualified.",
+      "rust_crates": ["apps/server/rust/pty-host"]
+    },
+    {
+      "id": "static-download-catalog",
+      "state": "candidate",
+      "domain_owner": "apps/marketing",
+      "reviewed_upstream_commit": "c7a3f02e3851923ced8ebd000db79f641e11b038",
+      "upstream_sources": [
+        {
+          "path": "apps/marketing/src/pages/[...locale]/download.astro",
+          "blob": "1bf425a6d015166dbf36f58fe6e24b24ba4207da"
+        },
+        {
+          "path": "apps/marketing/src/pages/[...locale]/index.astro",
+          "blob": "5ae384218058796ad90372e1920a8144a8e0ba7b"
+        },
+        {
+          "path": "apps/marketing/src/lib/releases.ts",
+          "blob": "7dc63bdaed8597556f20b9f2cbf3954ddc1efd97"
+        }
+      ],
+      "rust_paths": ["tools/src/download_catalog.rs"],
+      "adapter_paths": [
+        "apps/marketing/src/pages/[...locale]/download.astro",
+        "apps/marketing/src/pages/[...locale]/index.astro",
+        "apps/marketing/src/lib/releases.ts",
+        ".github/workflows/marketing-download-proof.yml"
+      ],
+      "platform_routes": [
+        {
+          "targets": ["linux-x64"],
+          "state": "candidate",
+          "implementation": "static-build-component",
+          "compiler_route": "lustr-bluefe-compatibility",
+          "acceptance_evidence": {}
+        }
+      ],
+      "acceptance_tests": [
+        "apps/marketing/scripts/verify-download-links.mjs",
+        "apps/marketing/scripts/release-refresh.test.ts"
+      ],
+      "hosted_acceptance": {
+        "apps/marketing/scripts/verify-download-links.mjs": ".github/workflows/marketing-download-proof.yml",
+        "apps/marketing/scripts/release-refresh.test.ts": ".github/workflows/marketing-download-proof.yml"
+      },
+      "retired_paths": [],
+      "notes": "T14 static download links from a bounded Rust release catalog. The Astro build uses the optional generated snapshot for localized HTML and retains the release index fallback. Localized home actions link to the platform list before browser enhancement. Live release refresh validates release and asset identities and works when session storage refuses access or writes. Hosted release publication and platform installation require separate evidence.",
+      "rust_crates": ["tools"]
     }
   ],
   "backend_selection": "Select before execution. Compatible Linux GNU x86_64 defaults to Rust; other hosts use the retained upstream implementation. Explicit per-component native overrides fail visibly. T3_CODE_LS_IMPLEMENTATION=upstream provides a controlled original baseline. No retry through another implementation."

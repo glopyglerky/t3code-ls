@@ -152,13 +152,13 @@ const resetFailures = Effect.gen(function* () {
 });
 
 // Increment in place to preserve wake resets made during an in-flight request.
-const countFailure = Effect.gen(function* () {
+const countFailure = Effect.fn("HookInboxStore.countFailure")(function* (baseUrl: string) {
   const sql = yield* SqlClient.SqlClient;
   const rows = yield* sql<{ readonly failures: number }>`
     UPDATE held_hooks_target SET failures = min(failures + 1, ${MAX_COUNTED_FAILURES})
-    WHERE id = 1 RETURNING failures
+    WHERE id = 1 AND base_url = ${baseUrl} RETURNING failures
   `;
-  return rows[0]?.failures ?? 1;
+  return rows[0]?.failures ?? null;
 });
 
 const hasPending = Effect.gen(function* () {
@@ -250,16 +250,24 @@ export const deliverDue = Effect.fn("HookInboxStore.deliverDue")(function* <R>(
       ORDER BY seq LIMIT ${ROWS_READ_PER_PAGE}
     `;
   let batch = yield* readPage(0, new Set());
-  if (batch.length === 0 || target === null) {
-    if (target === null) yield* sql`DELETE FROM held_hooks`;
-    else yield* resetFailures;
+  if (batch.length === 0) {
+    if (target !== null) yield* resetFailures;
     yield* Effect.annotateCurrentSpan({ "relay.inbox.expired": expired.length });
     return null;
+  }
+  if (target === null) {
+    // A row from an interrupted older admission can still be routed by a wake.
+    yield* Effect.annotateCurrentSpan({
+      "relay.inbox.expired": expired.length,
+      "relay.inbox.run_result": "unrouted",
+    });
+    return startedAt + HOOK_INBOX_TTL_MS + 1;
   }
 
   let failures = target.failures;
   let sent = 0;
   let delivered = 0;
+  let expiredCount = expired.length;
   let unreadable = 0;
   let longestWaitMs = 0;
   const busyHooks = new Set<string>();
@@ -272,7 +280,7 @@ export const deliverDue = Effect.fn("HookInboxStore.deliverDue")(function* <R>(
       "relay.inbox.sent": sent,
       "relay.inbox.delivered": delivered,
       "relay.inbox.busy_hooks": busyHooks.size,
-      "relay.inbox.expired": expired.length,
+      "relay.inbox.expired": expiredCount,
       "relay.inbox.unreadable": unreadable,
       "relay.inbox.consecutive_failures": failures,
       "relay.inbox.longest_wait_ms": longestWaitMs,
@@ -280,10 +288,12 @@ export const deliverDue = Effect.fn("HookInboxStore.deliverDue")(function* <R>(
       "relay.inbox.held_bytes": backlog.bytes,
     });
   });
-  const stillHeld = (seq: number) =>
-    sql<{ readonly seq: number }>`SELECT seq FROM held_hooks WHERE seq = ${seq}`.pipe(
-      Effect.map((rows) => rows.length > 0),
-    );
+  const readHeldTarget = (seq: number) =>
+    sql<{ readonly base_url: string | null }>`
+      SELECT target.base_url FROM held_hooks AS hook
+      LEFT JOIN held_hooks_target AS target ON target.id = 1
+      WHERE hook.seq = ${seq}
+    `.pipe(Effect.map((rows) => rows[0] ?? null));
   // Exhaust non-busy requests before stopping so busy hooks cannot hide others' backlog.
   pages: while (batch.length > 0) {
     for (const row of batch) {
@@ -291,13 +301,24 @@ export const deliverDue = Effect.fn("HookInboxStore.deliverDue")(function* <R>(
 
       if (busyHooks.has(row.hook_key)) continue;
       // Clear can discard this prefetched page while an upstream send is in flight.
-      if (!(yield* stillHeld(row.seq))) {
+      const beforeSend = yield* readHeldTarget(row.seq);
+      if (beforeSend === null) {
         yield* annotateRun("cleared");
         return null;
       }
+      if (beforeSend.base_url !== target.base_url) {
+        yield* annotateRun("rerouted");
+        return yield* Clock.currentTimeMillis;
+      }
+      const sendAt = yield* Clock.currentTimeMillis;
+      if (row.received_at < iso(sendAt - HOOK_INBOX_TTL_MS)) {
+        yield* sql`DELETE FROM held_hooks WHERE seq = ${row.seq}`;
+        expiredCount += 1;
+        continue;
+      }
       const headers = decodeHeaders(row.headers);
       if (Option.isNone(headers)) {
-        yield* sql`DELETE FROM held_hooks WHERE id = ${row.id}`;
+        yield* sql`DELETE FROM held_hooks WHERE seq = ${row.seq}`;
         unreadable += 1;
         continue;
       }
@@ -314,27 +335,39 @@ export const deliverDue = Effect.fn("HookInboxStore.deliverDue")(function* <R>(
         body: row.body,
       });
       // A cleared request must neither advance this run nor schedule a retry.
-      if (!(yield* stillHeld(row.seq))) {
+      const afterSend = yield* readHeldTarget(row.seq);
+      if (afterSend === null) {
         yield* annotateRun("cleared");
         return null;
       }
+      // An acknowledged delivery stays delivered even if wake replaced its route.
+      if (outcome === "delivered") {
+        yield* sql`DELETE FROM held_hooks WHERE seq = ${row.seq}`;
+        delivered += 1;
+        const receivedAtMs = DateTime.toEpochMillis(DateTime.makeUnsafe(row.received_at));
+        longestWaitMs = Math.max(longestWaitMs, sendAt - receivedAtMs);
+      }
+      // The old route's response cannot consume the new route's wake or backoff.
+      if (afterSend.base_url !== target.base_url) {
+        yield* annotateRun("rerouted");
+        return yield* Clock.currentTimeMillis;
+      }
       if (outcome === "unreachable") {
-        failures = yield* countFailure;
+        const counted = yield* countFailure(target.base_url);
+        if (counted === null) return yield* Clock.currentTimeMillis;
+        failures = counted;
         yield* annotateRun("unreachable");
         return (yield* Clock.currentTimeMillis) + (yield* retryDelayMs(failures));
       }
       if (failures !== 0) {
         failures = 0;
-        yield* resetFailures;
+        yield* sql`UPDATE held_hooks_target SET failures = 0
+          WHERE id = 1 AND base_url = ${target.base_url}`;
       }
       if (outcome === "busy") {
         busyHooks.add(row.hook_key);
         continue;
       }
-      yield* sql`DELETE FROM held_hooks WHERE id = ${row.id}`;
-      delivered += 1;
-      const receivedAtMs = DateTime.toEpochMillis(DateTime.makeUnsafe(row.received_at));
-      longestWaitMs = Math.max(longestWaitMs, startedAt - receivedAtMs);
     }
     batch = yield* readPage(batch.at(-1)!.seq, busyHooks);
   }

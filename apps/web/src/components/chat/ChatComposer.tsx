@@ -103,6 +103,8 @@ import {
   composerFileNeedsReattach,
   composerDraftHasUserContent,
   composerTargetKey,
+  retryComposerDraftSave,
+  useComposerDraftStorageStatus,
   useComposerDraftStore,
   useComposerThreadDraft,
 } from "../../composerDraftStore";
@@ -235,7 +237,7 @@ import { observeResize } from "~/lib/observeResize";
 
 const isEnvironmentRequestInvalidError = Schema.is(EnvironmentRequestInvalidError);
 import { toastManager } from "../ui/toast";
-import { BuildingIcon, PlayIcon, ReplyIcon } from "lucide-react";
+import { BuildingIcon, PlayIcon, ReplyIcon, TriangleAlertIcon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { assistantCitationLabel } from "@t3tools/shared/assistantCitations";
 import { assistantCitationNavigation } from "../../lib/assistantCitationNavigation";
@@ -2211,7 +2213,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       );
     },
   });
-  const handleSubmitMessage = (event: React.MouseEvent<HTMLButtonElement>) => {
+  const handleSubmitMessage = (event: React.MouseEvent<HTMLElement>) => {
     event.preventDefault();
     submitComposer(
       event,
@@ -2500,12 +2502,31 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         },
       ]
     : [];
+  const draftStorageStatus = useComposerDraftStorageStatus();
+  const baseBannerItems = [...props.bannerItems, ...replyBannerItems];
+  if (draftStorageStatus !== "available") {
+    const conflict = draftStorageStatus === "conflict";
+    baseBannerItems.push({
+      id: "draft-storage-unavailable",
+      group: "environment",
+      variant: "warning",
+      icon: <TriangleAlertIcon />,
+      title: conflict ? "Draft changed in another tab" : "Draft changes could not be saved",
+      description: conflict
+        ? "Copy your unsaved changes before reopening this draft."
+        : "Keep this tab open to retain your unsaved changes.",
+      actions: (
+        <Button type="button" size="xs" variant="ghost" onClick={retryComposerDraftSave}>
+          Retry saving
+        </Button>
+      ),
+    });
+  }
   const bannerItems: readonly ComposerBannerStackItem[] =
     runtimeModeCeilingDenial === undefined || activePendingProgress
-      ? [...props.bannerItems, ...replyBannerItems]
+      ? baseBannerItems
       : [
-          ...props.bannerItems,
-          ...replyBannerItems,
+          ...baseBannerItems,
           {
             id: "managed-runtime-mode",
             variant: "warning",
@@ -3713,6 +3734,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     canResume={showResumeAction}
                     preserveComposerFocusOnPointerDown={isMobileViewport}
                     isEditingQueuedMessage={isEditingQueuedMessage}
+                    useDioxusSubmit={
+                      import.meta.env.VITE_T3_CODE_LS_COMPOSER_SUBMIT_RENDERER === "dioxus" &&
+                      !isComposerApprovalState &&
+                      speechInput.state.phase === "idle"
+                    }
                     onSubmitMessage={handleSubmitMessageStable}
                     onResume={onResume}
                     onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}

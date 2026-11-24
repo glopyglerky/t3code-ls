@@ -29,11 +29,12 @@ interface AgentMessage {
 async function talkToAgent(
   requests: ReadonlyArray<(sessionId: string) => object>,
   permissionResult: object = { outcome: { outcome: "selected", optionId: "allow-once" } },
+  environment: NodeJS.ProcessEnv = process.env,
 ) {
   const agent = NodeChildProcess.spawn(
     process.execPath,
     [NodeURL.fileURLToPath(new URL("./dev-replay-agent.ts", import.meta.url))],
-    { stdio: ["pipe", "pipe", "inherit"] },
+    { stdio: ["pipe", "pipe", "inherit"], env: environment },
   );
   const lines = NodeReadline.createInterface({ input: agent.stdout })[Symbol.asyncIterator]();
   const received: Array<AgentMessage> = [];
@@ -89,18 +90,74 @@ describe("dev replay agent", () => {
     expect(new Set(toolCallIds).size).toBe(6);
   });
 
-  it.each(SCENARIOS)("$id plays a turn without session setup frames", ({ file }) => {
-    const turns = parseReplayTurns(NodeFS.readFileSync(new URL(file, import.meta.url), "utf8"));
-    expect(turns.length).toBeGreaterThan(0);
-    const updates = turns.flatMap((turn) =>
-      turn.frames.flatMap(({ frame }) =>
-        frame.method === "session/update"
-          ? [(frame.params as { update: { sessionUpdate: string } }).update.sessionUpdate]
-          : [],
-      ),
-    );
-    expect(updates).toContain("agent_message_chunk");
-    expect(updates).not.toContain("available_commands_update");
+  it.each(SCENARIOS.filter(({ id, file }) => id !== "failed-turn" && file !== null))(
+    "$id plays a turn without session setup frames",
+    ({ file }) => {
+      if (file === null) throw new Error("A live publisher is not a recorded turn.");
+      const turns = parseReplayTurns(NodeFS.readFileSync(new URL(file, import.meta.url), "utf8"));
+      expect(turns.length).toBeGreaterThan(0);
+      const updates = turns.flatMap((turn) =>
+        turn.frames.flatMap(({ frame }) =>
+          frame.method === "session/update"
+            ? [(frame.params as { update: { sessionUpdate: string } }).update.sessionUpdate]
+            : [],
+        ),
+      );
+      expect(updates).toContain("agent_message_chunk");
+      expect(updates).not.toContain("available_commands_update");
+    },
+  );
+
+  it.each([undefined, "https://outside.invalid/mcp"])(
+    "refuses HTML publication without an own loopback session (%s)",
+    async (endpoint) => {
+      const environment = { ...process.env };
+      delete environment.T3_ACP_MCP_ENDPOINT;
+      delete environment.T3_ACP_MCP_AUTHORIZATION;
+      if (endpoint !== undefined) {
+        environment.T3_ACP_MCP_ENDPOINT = endpoint;
+        environment.T3_ACP_MCP_AUTHORIZATION = "Bearer controlled-fixture-secret";
+      }
+      const { received } = await talkToAgent([
+        () => ({ method: "session/new", params: { cwd: "/tmp" } }),
+        (sessionId) => ({ method: "session/set_model", params: { sessionId, modelId: "html-interaction" } }),
+        (sessionId) => ({ method: "session/prompt", params: { sessionId } }),
+      ], undefined, environment);
+      expect(received.at(-1)).toMatchObject({
+        id: 3,
+        error: {
+          code: -32603,
+          message: endpoint === undefined
+            ? "Controlled HTML publisher has no own session."
+            : "Controlled HTML publisher requires its local endpoint.",
+        },
+      });
+      expect(received.some((message) => message.params?.update !== undefined)).toBe(false);
+      expect(JSON.stringify(received)).not.toContain("controlled-fixture-secret");
+    },
+  );
+
+  it("replays the recorded prompt failure with its error data", async () => {
+    const { received } = await talkToAgent([
+      () => ({ method: "session/new", params: { cwd: "/tmp" } }),
+      (sessionId) => ({
+        method: "session/set_model",
+        params: { sessionId, modelId: "failed-turn" },
+      }),
+      (sessionId) => ({ method: "session/prompt", params: { sessionId } }),
+    ]);
+    expect(received.at(-1)).toMatchObject({
+      id: 3,
+      error: {
+        code: -32603,
+        message: "Internal error",
+        data: {
+          message: expect.stringContaining("grok prompt error fixture"),
+          http_status: 400,
+        },
+      },
+    });
+    expect(received.at(-1)?.result).toBeUndefined();
   });
 
   it("keeps permission requests and the recorded stop reason in order", () => {
