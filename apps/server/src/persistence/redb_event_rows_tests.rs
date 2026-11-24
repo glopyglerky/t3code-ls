@@ -382,6 +382,58 @@ async fn sparse_replay_statistics_respect_ranges_limits_and_malformed_ordinary_p
 }
 
 #[tokio::test]
+async fn duplicate_replay_index_refuses_the_entire_append() {
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    let mut app = initialize(&store).await;
+    prepare(&store).await;
+    let mut seed = store.db.begin().await.unwrap();
+    let catalog = decode_catalog(&seed.get(&schema_key()).await.unwrap().unwrap()).unwrap();
+    let input = row("event", "thread");
+    let index = ordered_key(
+        event_filter_prefix(
+            &catalog,
+            true,
+            Some(&input.stream_id),
+            input.command_id.as_deref(),
+            Some(&input.event_type),
+        ),
+        1,
+    );
+    seed.put(index.clone(), encode(&1_u64).unwrap())
+        .await
+        .unwrap();
+    seed.commit().await.unwrap();
+
+    app.begin("duplicate").await.unwrap();
+    assert!(matches!(
+        app.events_append("duplicate", input.clone(), None).await,
+        Err(Error::DuplicateRecord)
+    ));
+    assert!(app.commit("duplicate").await.is_err());
+
+    let mut repair = store.db.begin().await.unwrap();
+    assert!(
+        repair
+            .get(&event_key(&catalog, 1).unwrap())
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        repair.get(&index).await.unwrap(),
+        Some(encode(&1_u64).unwrap())
+    );
+    repair.delete(index).await.unwrap();
+    repair.commit().await.unwrap();
+
+    app.begin("retry").await.unwrap();
+    let appended = app.events_append("retry", input, None).await.unwrap();
+    assert_eq!(appended.sequence, 1);
+    app.commit("retry").await.unwrap();
+}
+
+#[tokio::test]
 async fn all_filter_combinations_return_sequence_order_without_unrelated_rows() {
     let fixture = TestFixture::start().await;
     let store = fixture.initialize().await;

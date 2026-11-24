@@ -761,6 +761,7 @@ async fn index_event(
         )
         .await?;
     }
+    let mut filter_keys = Vec::with_capacity(16);
     for agent in [false, true] {
         if agent && !event.agent() {
             continue;
@@ -780,12 +781,17 @@ async fn index_event(
                 },
                 (mask & 4 != 0).then_some(event.row.event_type.as_str()),
             );
-            tx.insert(
-                ordered_key(prefix, event.sequence),
-                encode(&event.sequence)?,
-            )
-            .await?;
+            filter_keys.push(ordered_key(prefix, event.sequence));
         }
+    }
+    // Each family and filter mask contributes a distinct key. Observe them
+    // together in this snapshot and preserve the duplicate-entry refusal.
+    if tx.get_many(&filter_keys).await?.iter().any(Option::is_some) {
+        return Err(Error::DuplicateRecord);
+    }
+    let value = encode(&event.sequence)?;
+    for key in filter_keys {
+        tx.put(key, value.clone()).await?;
     }
     Ok(())
 }
