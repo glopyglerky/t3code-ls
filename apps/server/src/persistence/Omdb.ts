@@ -339,6 +339,7 @@ const layerFromPath = (
   durableRelayWebhooks: boolean,
   singleProjectionReads: boolean,
   independentReads: boolean,
+  singleReceiptReads: boolean,
 ) =>
   Layer.unwrap(
     Effect.gen(function* () {
@@ -349,6 +350,7 @@ const layerFromPath = (
       }).pipe(
         Effect.provideService(RedbClient.DurableRelayWebhooks, durableRelayWebhooks),
         Effect.provideService(RedbClient.SingleProjectionReads, singleProjectionReads),
+        Effect.provideService(RedbClient.SingleReceiptReads, singleReceiptReads),
       );
       return Layer.mergeAll(
         Layer.succeed(NativeDatabase.NativeDatabase, database),
@@ -372,6 +374,7 @@ export const layerConfig = Layer.unwrap(
       environment.T3_CODE_LS_DURABLE_RELAY_WEBHOOKS === "1",
       environment.T3_CODE_LS_SINGLE_PROJECTION_READS === "1",
       environment.T3_CODE_LS_INDEPENDENT_READS === "1",
+      environment.T3_CODE_LS_SINGLE_RECEIPT_READS === "1",
     );
   }),
 );

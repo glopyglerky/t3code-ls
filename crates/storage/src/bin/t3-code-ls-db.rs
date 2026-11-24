@@ -264,7 +264,7 @@ enum Request {
         receipt: ReceiptRow,
     },
     ApplicationReceiptsGet {
-        transaction_id: String,
+        transaction_id: Option<String>,
         command_id: String,
     },
     ApplicationPositionsPrepare {},
@@ -986,11 +986,10 @@ async fn evaluate(
         Request::ApplicationReceiptsGet {
             transaction_id,
             command_id,
-        } => serde_json::to_value(
-            transactions
-                .receipts_get(&transaction_id, &command_id)
-                .await?,
-        ),
+        } => serde_json::to_value(match transaction_id {
+            Some(id) => transactions.receipts_get(&id, &command_id).await?,
+            None => transactions.receipts_get_once(&command_id).await?,
+        }),
         Request::ApplicationPositionsPrepare {} => {
             serde_json::to_value(store.prepare_application_positions().await?)
         }

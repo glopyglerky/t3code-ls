@@ -73,7 +73,7 @@ export async function withNative(
   fixture,
   use,
   wrap = (database) => database,
-  { durableRelayWebhooks = false, singleProjectionReads = false } = {},
+  { durableRelayWebhooks = false, singleProjectionReads = false, singleReceiptReads = false } = {},
 ) {
   return Effect.runPromise(
     Effect.gen(function* () {
@@ -85,6 +85,7 @@ export async function withNative(
         Effect.provideService(NativeDatabase.NativeDatabase, wrap(database)),
         Effect.provideService(RedbClient.DurableRelayWebhooks, durableRelayWebhooks),
         Effect.provideService(RedbClient.SingleProjectionReads, singleProjectionReads),
+        Effect.provideService(RedbClient.SingleReceiptReads, singleReceiptReads),
       );
       return yield* use(client, database).pipe(
         Effect.provideService(RedbClient.RedbClient, client),

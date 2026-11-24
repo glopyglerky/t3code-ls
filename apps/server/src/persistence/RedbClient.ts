@@ -184,6 +184,11 @@ export const SingleProjectionReads = Context.Reference<boolean>(
   { defaultValue: () => false },
 );
 
+export const SingleReceiptReads = Context.Reference<boolean>(
+  "t3/persistence/RedbClient/SingleReceiptReads",
+  { defaultValue: () => false },
+);
+
 export const ReadDatabase = Context.Reference<NativeDatabase.NativeDatabase["Service"] | undefined>(
   "t3/persistence/RedbClient/ReadDatabase",
   { defaultValue: () => undefined },
@@ -263,6 +268,7 @@ export const make = Effect.gen(function* () {
   const readDatabase = (yield* ReadDatabase) ?? database;
   const durableRelayWebhooks = yield* DurableRelayWebhooks;
   const singleProjectionReads = yield* SingleProjectionReads;
+  const singleReceiptReads = yield* SingleReceiptReads;
   const constructionSql = yield* Effect.serviceOption(SqlClient.SqlClient);
   const clientIdentity = {};
   let transactionSequence = 0;
@@ -657,8 +663,9 @@ export const make = Effect.gen(function* () {
       response: Schema.Decoder<A>,
     ) {
       if (
-        singleProjectionReads &&
-        (operation === "application_projections_records" || operation === "application_projections_lookup") &&
+        ((singleProjectionReads &&
+          (operation === "application_projections_records" || operation === "application_projections_lookup")) ||
+          (singleReceiptReads && operation === "application_receipts_get")) &&
         (yield* CurrentTransaction) === undefined
       ) {
         yield* outsideSqlTransaction;

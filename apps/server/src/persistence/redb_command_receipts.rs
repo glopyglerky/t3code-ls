@@ -319,21 +319,29 @@ impl ApplicationTransactions {
 
     pub async fn receipts_get(&mut self, id: &str, command_id: &str) -> Result<Option<ReceiptRow>> {
         let mut session = self.take(id)?;
-        let result = async {
-            ready(&mut session).await?;
-            read_row(
-                &mut session.transaction,
-                &session.catalog,
-                RECEIPTS,
-                &[text_cell(command_id)],
-            )
-            .await?
-            .map(|row| ReceiptRow::from_row(&row.row))
-            .transpose()
-        }
-        .await;
+        let result = get_receipt(&mut session, command_id).await;
         self.finish(id, session, result).await
     }
+
+    pub async fn receipts_get_once(&mut self, command_id: &str) -> Result<Option<ReceiptRow>> {
+        let mut session = self.open_read_session().await?;
+        let result = get_receipt(&mut session, command_id).await;
+        let closed = session.transaction.rollback().await;
+        result.and_then(|receipt| closed.map(|()| receipt))
+    }
+}
+
+async fn get_receipt(session: &mut Session, command_id: &str) -> Result<Option<ReceiptRow>> {
+    ready(session).await?;
+    read_row(
+        &mut session.transaction,
+        &session.catalog,
+        RECEIPTS,
+        &[text_cell(command_id)],
+    )
+    .await?
+    .map(|row| ReceiptRow::from_row(&row.row))
+    .transpose()
 }
 
 #[cfg(test)]

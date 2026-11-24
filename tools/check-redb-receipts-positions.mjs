@@ -382,6 +382,98 @@ try {
   checks.push(
     "Actual helper restart retains the shared receipt namespace and committed allocation indexes",
   );
+  const receiptFrames = [];
+  const recordReceiptFrame = (input) => {
+    receiptFrames.push({
+      operation: input.operation,
+      inTransaction: typeof input.transaction_id === "string",
+    });
+  };
+  const observeReceiptFrames = (database) =>
+    NativeDatabase.NativeDatabase.of({
+      request(input, response) {
+        recordReceiptFrame(input);
+        return database.request(input, response);
+      },
+      withSession(use) {
+        return database.withSession((session) =>
+          use({
+            discard: session.discard,
+            request(input, response) {
+              recordReceiptFrame(input);
+              return session.request(input, response);
+            },
+          }),
+        );
+      },
+    });
+  const priorReceipt = await withNative(
+    executable,
+    fixture,
+    () =>
+      Effect.gen(function* () {
+        const repository = yield* NativeCommandReceipts.make;
+        receiptFrames.length = 0;
+        return yield* repository.getByCommandId({ commandId: "command:shared" });
+      }),
+    observeReceiptFrames,
+  );
+  Assert.deepEqual(receiptFrames.map(({ operation }) => operation), [
+    "application_begin",
+    "application_receipts_get",
+    "application_commit",
+  ]);
+  await withNative(
+    executable,
+    fixture,
+    (client) =>
+      Effect.gen(function* () {
+        const repository = yield* NativeCommandReceipts.make;
+        const lookup = (commandId) => repository.getByCommandId({ commandId });
+        receiptFrames.length = 0;
+        const found = yield* lookup("command:shared");
+        Assert.ok(Option.isSome(found));
+        Assert.deepEqual(found, priorReceipt);
+        Assert.deepEqual(receiptFrames, [
+          { operation: "application_receipts_get", inTransaction: false },
+        ]);
+        receiptFrames.length = 0;
+        Assert.ok(Option.isNone(yield* lookup("command:single-read-rollback")));
+        Assert.deepEqual(receiptFrames, [
+          { operation: "application_receipts_get", inTransaction: false },
+        ]);
+        receiptFrames.length = 0;
+        const rolledBack = yield* client
+          .withTransaction(
+            Effect.gen(function* () {
+              yield* repository.upsert({
+                commandId: "command:single-read-rollback",
+                aggregateKind: "thread",
+                aggregateId: "thread:commands",
+                commandType: "thread.turn.start",
+                acceptedAt: at,
+                resultSequence: 1,
+                status: "accepted",
+                error: null,
+              });
+              Assert.ok(Option.isSome(yield* lookup("command:single-read-rollback")));
+              return yield* Effect.fail("rollback receipt fixture");
+            }),
+          )
+          .pipe(Effect.flip);
+        Assert.equal(rolledBack, "rollback receipt fixture");
+        Assert.deepEqual(
+          receiptFrames.filter(({ operation }) => operation === "application_receipts_get"),
+          [{ operation: "application_receipts_get", inTransaction: true }],
+        );
+        Assert.ok(Option.isNone(yield* lookup("command:single-read-rollback")));
+      }),
+    observeReceiptFrames,
+    { singleReceiptReads: true },
+  );
+  checks.push(
+    "Standalone receipt reads return the same row in one helper message instead of three, while an owned writer reads the staged receipt and rolls it back",
+  );
   await withServices("redb", source, ({ positions, transaction }) =>
     transaction(
       Effect.gen(function* () {
@@ -496,7 +588,9 @@ try {
     oracles: [receiptOracle.source, wrapperOracle.source, positionOracle.source],
     sourcePaths: [
       "apps/server/src/persistence/NativeCommandReceipts.ts",
+      "apps/server/src/persistence/RedbClient.ts",
       "apps/server/src/persistence/redb_command_receipts.rs",
+      "crates/storage/src/bin/t3-code-ls-db.rs",
       "apps/server/src/orchestration-v2/CommandReceiptStore.ts",
       "apps/server/src/orchestration-v2/TurnItemPositionStore.ts",
       "apps/server/src/orchestration-v2/NativeTurnItemPositionStore.ts",
