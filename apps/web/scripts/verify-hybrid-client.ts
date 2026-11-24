@@ -848,6 +848,18 @@ async function submitReplay(
   return decodeURIComponent(thread);
 }
 
+async function waitForCompletedNavigationSource(page: Page, threadId: string) {
+  const conversation = page.getByRole("region", { name: "Conversation", exact: true });
+  await conversation.getByText("Synthetic navigation ready.", { exact: true })
+    .and(page.locator(":visible")).waitFor({ state: "visible" });
+  // The reply arrives before its tool result moves from live rows into the completed group.
+  await conversation.getByRole("button", { name: /^Worked for /u }).waitFor({ state: "visible" });
+  await conversation.getByText(/^Working(?: for .*)?$/u).and(page.locator(":visible"))
+    .waitFor({ state: "hidden" });
+  const { projection } = await readThreadSnapshot(page, threadId);
+  Assert.deepEqual(projection.runs.map(({ status }) => status), ["completed"]);
+}
+
 async function verifyComposerSubmitRefusal(
   page: Page,
   editor: Locator,
@@ -3122,7 +3134,7 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       const targetId = stoppedId;
       const targetUrl = stoppedUrl;
       const navigationId = await submitReplay(page, "Thread navigation", `Navigation target: ${targetId}`);
-      await page.getByText("Synthetic navigation ready.", { exact: true }).and(page.locator(":visible")).waitFor({ state: "visible" });
+      await waitForCompletedNavigationSource(page, navigationId);
       proof.threadNavigation = await verifyThreadNavigation(page,
         page.locator(`a[href=${JSON.stringify(new URL(targetUrl).pathname)}]:visible:not([data-sidebar-row] a)`),
         targetUrl, formattedAssistantDisplay, composerSubmit.renderer);
@@ -3221,10 +3233,8 @@ async function exercise(implementation: Implementation, byteProfile?: "full" | "
       await page.getByText(formattedAssistantDisplay, { exact: true }).and(page.locator(":visible")).waitFor({ state: "visible" });
       const targetUrl = page.url();
       const sourceId = await submitReplay(page, "Thread navigation", `Navigation target: ${targetId}`);
-      await page.getByText("Synthetic navigation ready.", { exact: true }).and(page.locator(":visible")).waitFor({ state: "visible" });
+      await waitForCompletedNavigationSource(page, sourceId);
       const sourceUrl = page.url();
-      const source = await readThreadSnapshot(page, sourceId);
-      Assert.ok(source.projection.thread.id === sourceId);
       let readRefusals: (() => number) | undefined;
       if (threadLinkProof === "dioxus-fallback") {
         readRefusals = await denyThreadLinkWasm(page);
