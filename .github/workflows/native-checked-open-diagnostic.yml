@@ -24,6 +24,7 @@ jobs:
       ENGINE_REUSE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-') }}
       PAIRED_REUSE_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-') }}
       PLAIN_STRICT_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-plain-strict-') }}
+      STORAGE_ACCOUNTING_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-plain-strict-accounting-') }}
       STRICT_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-strict-') || startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-plain-strict-') }}
       READINESS_PROOF: ${{ startsWith(github.ref_name, 'measure/t3code-ls-t16-checked-open-engine-reuse-paired-readiness-') }}
       STOCK_COMMIT: 28706aceb6fb3babf2cbae0dc0c3edd93b9b6d5f
@@ -161,6 +162,12 @@ jobs:
           evidence="$RUNNER_TEMP/checked-open-evidence"
           (cd apps/server/dist && sha256sum bin.mjs native-bin/t3-code-ls-db native-bin/manifest.json) \
             > "$evidence/packaged-artifacts.sha256"
+          if [[ "$STORAGE_ACCOUNTING_PROOF" == true ]]; then
+            cp "$GITHUB_WORKSPACE/tools/diagnostics/t16-storage-accounting.rs" crates/storage/src/bin/
+            "$lustr" --bluefe-root "$T3_CODE_LS_TOOLCHAIN" build --release --locked \
+              -p t3-code-ls-storage --bin t16-storage-accounting
+            sha256sum "$CARGO_TARGET_DIR/release/t16-storage-accounting" > "$evidence/storage-accounting.sha256"
+          fi
           omdb=("$CARGO_HOME"/git/checkouts/omdb-*/*)
           test "${#omdb[@]}" -eq 1
           engine_commit="$OMDB_COMMIT"
@@ -311,7 +318,7 @@ jobs:
             ' "$evidence/engine-phases.tsv"
           fi
       - name: Package the control with verified page reuse disabled
-        if: env.PAIRED_REUSE_PROOF == 'true'
+        if: env.PAIRED_REUSE_PROOF == 'true' && env.STORAGE_ACCOUNTING_PROOF != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -677,19 +684,21 @@ jobs:
             ) > "$evidence/plain-arm-$variant.sha256"
           done
           (cd "$scratch/stock" && sha256sum --check "$evidence/arm-stock.sha256") > "$evidence/plain-denominator-before.txt"
-          jq -n --arg stock "$STOCK_COMMIT" --arg stockTree "$STOCK_TREE" \
+          rounds=6
+          if [[ "$STORAGE_ACCOUNTING_PROOF" == true ]]; then rounds=1; fi
+          jq -n --argjson rounds "$rounds" --arg stock "$STOCK_COMMIT" --arg stockTree "$STOCK_TREE" \
             --arg native "$NATIVE_COMMIT" --arg nativeTree "$NATIVE_TREE" \
             --arg engine "$OMDB_PHASE_COMMIT" --arg engineTree "$OMDB_PHASE_TREE" \
             --arg probe "$PROBE_COMMIT" --arg probeTree "$PROBE_TREE" \
             '{journey:"J02",kind:"separate-plain-strict-comparison",stock:$stock,stockTree:$stockTree,
               native:$native,nativeTree:$nativeTree,engine:$engine,engineTree:$engineTree,probe:$probe,probeTree:$probeTree,
               arms:["stock WAL/NORMAL","benchmark-only WAL/FULL","native Immediate, reuse enabled"],
-              rounds:6,balanced_orders:true,performance_qualified:false,cpu_rss_qualified:false,
+              rounds:$rounds,balanced_orders:($rounds == 6),storage_accounting_only:($rounds == 1),performance_qualified:false,cpu_rss_qualified:false,
               equal_durability_qualified:false,power_loss_qualified:false,limiter_qualified:false,
               filesystem_cache:"unmanaged after import",pooling_allowed:false,
               policy_verification:"separate untimed readback verifier, not crash proof"}' > "$evidence/plain-inputs.json"
           printf 'round\tposition\tvariant\tdescriptor_us\thtml_us\n' > "$evidence/plain-reopen.tsv"
-          for round in 1 2 3 4 5 6; do
+          for ((round=1; round<=rounds; round++)); do
             case "$round" in
               1) variants=(stock full native) ;;
               2) variants=(full native stock) ;;
@@ -733,6 +742,13 @@ jobs:
               # Retain original strict matcher and all fixture/output gates below.
               "$verifier" footprint "$variant" "$trial" "$sample" \
                 > "$evidence/plain-footprint-$round-$variant.json"
+              if [[ "$STORAGE_ACCOUNTING_PROOF" == true && "$variant" == native ]]; then
+                db="$trial/profile/userdata/statev2.omdb"
+                sha256sum "$db" > "$evidence/plain-native-closed.sha256"
+                "$CARGO_TARGET_DIR/release/t16-storage-accounting" "$trial" "$sample" \
+                  > "$evidence/plain-native-storage-accounting.json"
+                sha256sum --check --quiet "$evidence/plain-native-closed.sha256"
+              fi
               if [[ "$round" == 1 ]]; then
                 "$CARGO_TARGET_DIR/release/t16-cursor-diagnostic" "$mode" \
                   "$root/apps/server/dist/bin.mjs" "$trial" "$sample" \
@@ -752,7 +768,7 @@ jobs:
             cmp "$evidence/plain-fixture-$round-stock.sha256" "$evidence/plain-fixture-$round-full.sha256"
             cmp "$evidence/plain-fixture-$round-stock.sha256" "$evidence/plain-fixture-$round-native.sha256"
           done
-          test "$(wc -l < "$evidence/plain-reopen.tsv")" -eq 19
+          test "$(wc -l < "$evidence/plain-reopen.tsv")" -eq "$((1 + 3 * rounds))"
           for variant in stock full native; do
             root="$scratch/$variant"
             if [[ "$variant" == full ]]; then root="$scratch/full-stock"; fi
