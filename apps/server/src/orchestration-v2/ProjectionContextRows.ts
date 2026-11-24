@@ -60,6 +60,10 @@ export const SectionPayloadRows = Schema.Array(
 );
 export const ThreadRows = Schema.Array(Schema.Struct({ thread_id: Schema.String }));
 export const ConversationRows = Schema.Array(Schema.Struct({ present: Schema.Number }));
+export const TurnStartBatch = Schema.Struct({
+  payloads: Schema.Record(Schema.String, PayloadRows),
+  conversation: ConversationRows,
+});
 export const SideChatRows = Schema.Array(Schema.Struct({ side_chat: Schema.Json }));
 export const OrdinalRows = Schema.Array(Schema.Struct({ ordinal: Schema.Number }));
 export const AttemptIdRows = Schema.Array(Schema.Struct({ id: RunAttemptId }));
@@ -74,5 +78,9 @@ export interface ProjectionContextRows {
     query: ProjectionContextQuery,
     response: Schema.Decoder<A>,
   ) => Effect.Effect<A, ProjectionContextRowsError>;
+  readonly readTurnStartBatch?: (
+    threadId: string,
+    runId: string,
+  ) => Effect.Effect<typeof TurnStartBatch.Type | null, ProjectionContextRowsError>;
   readonly withReadTransaction: PersistenceTransactionsShape["withReadTransaction"];
 }

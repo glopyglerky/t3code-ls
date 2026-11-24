@@ -279,7 +279,6 @@ async fn unshared_attachments(
 }
 
 async fn select(session: &mut Session, q: ProjectionContextQuery) -> Result<Value> {
-    ensure_ready(session).await?;
     let t = &q.thread_id;
     let (name,rows)=match q.kind.as_str(){
         "thread"=>(THREADS,point(session,THREADS,Some(t),None).await?),
@@ -687,6 +686,44 @@ async fn runtime_recovery(session: &mut Session, t: &str) -> Result<Value> {
     Ok(json!(output))
 }
 
+const TURN_START_BATCH_KINDS: &[&str] = &[
+    "turn_runs",
+    "turn_attempts",
+    "turn_nodes",
+    "turn_subagents",
+    "turn_provider_threads",
+    "turn_provider_turns",
+    "turn_handoffs",
+    "turn_transfers",
+    "turn_items",
+    "turn_sessions",
+    "turn_messages",
+];
+
+async fn select_turn_start_batch(
+    session: &mut Session,
+    mut query: ProjectionContextQuery,
+) -> Result<Value> {
+    required(&query.run_id)?;
+    let mut payloads = serde_json::Map::new();
+    // Limit the combined payload well below the native wire limit. Larger
+    // contexts use the existing requests without releasing this snapshot.
+    let mut remaining: usize = 1024 * 1024;
+    for &kind in TURN_START_BATCH_KINDS {
+        query.kind = kind.into();
+        let rows = select(session, query.clone()).await?;
+        let bytes = serde_json::to_vec(&rows).map_err(crate::json_error)?.len();
+        let Some(next) = remaining.checked_sub(bytes) else {
+            return Ok(Value::Null);
+        };
+        remaining = next;
+        payloads.insert(kind.into(), rows);
+    }
+    query.kind = "turn_conversation".into();
+    let conversation = select(session, query).await?;
+    Ok(json!({"payloads":payloads,"conversation":conversation}))
+}
+
 impl ApplicationTransactions {
     pub async fn projections_context(
         &mut self,
@@ -694,7 +731,15 @@ impl ApplicationTransactions {
         query: ProjectionContextQuery,
     ) -> Result<Value> {
         let mut session = self.take(id)?;
-        let result = select(&mut session, query).await;
+        let result = async {
+            ensure_ready(&mut session).await?;
+            if query.kind == "turn_start_batch" {
+                select_turn_start_batch(&mut session, query).await
+            } else {
+                select(&mut session, query).await
+            }
+        }
+        .await;
         self.finish(id, session, result).await
     }
 }

@@ -4050,41 +4050,27 @@ export function makeProjectionContexts(
       .withReadTransaction(
         Effect.gen(function* () {
           const thread = yield* getThread(threadId);
-          const runs = yield* source
-            .read(
-              { kind: "turn_runs", thread_id: threadId, run_id: runId },
-              ProjectionContextRows.PayloadRows,
-            )
+          const batch = yield* (source.readTurnStartBatch?.(threadId, runId) ?? Effect.succeed(null));
+          const readPayloads = (kind: ProjectionContextRows.ProjectionContextKind) => {
+            const payloads = batch?.payloads[kind];
+            return payloads === undefined
+              ? source.read(
+                  { kind, thread_id: threadId, run_id: runId },
+                  ProjectionContextRows.PayloadRows,
+                )
+              : Effect.succeed(payloads);
+          };
+          const runs = yield* readPayloads("turn_runs")
             .pipe(Effect.flatMap(decodeRows(decodeRunPayload, threadId)));
-          const attempts = yield* source
-            .read(
-              { kind: "turn_attempts", thread_id: threadId, run_id: runId },
-              ProjectionContextRows.PayloadRows,
-            )
+          const attempts = yield* readPayloads("turn_attempts")
             .pipe(Effect.flatMap(decodeRows(decodeRunAttemptPayload, threadId)));
-          const nodes = yield* source
-            .read(
-              { kind: "turn_nodes", thread_id: threadId, run_id: runId },
-              ProjectionContextRows.PayloadRows,
-            )
+          const nodes = yield* readPayloads("turn_nodes")
             .pipe(Effect.flatMap(decodeRows(decodeNodePayload, threadId)));
-          const subagents = yield* source
-            .read(
-              { kind: "turn_subagents", thread_id: threadId, run_id: runId },
-              ProjectionContextRows.PayloadRows,
-            )
+          const subagents = yield* readPayloads("turn_subagents")
             .pipe(Effect.flatMap(decodeRows(decodeSubagentPayload, threadId)));
-          const providerThreads = yield* source
-            .read(
-              { kind: "turn_provider_threads", thread_id: threadId, run_id: runId },
-              ProjectionContextRows.PayloadRows,
-            )
+          const providerThreads = yield* readPayloads("turn_provider_threads")
             .pipe(Effect.flatMap(decodeRows(decodeProviderThreadPayload, threadId)));
-          const providerTurns = yield* source
-            .read(
-              { kind: "turn_provider_turns", thread_id: threadId, run_id: runId },
-              ProjectionContextRows.PayloadRows,
-            )
+          const providerTurns = yield* readPayloads("turn_provider_turns")
             .pipe(Effect.flatMap(decodeRows(decodeProviderTurnPayload, threadId)));
           const checkpointScopes = yield* source
             .read(
@@ -4099,40 +4085,22 @@ export function makeProjectionContexts(
               ProjectionContextRows.PayloadRows,
             )
             .pipe(Effect.flatMap(decodeRows(decodeCheckpointScopePayload, threadId)));
-          const contextHandoffs = yield* source
-            .read(
-              { kind: "turn_handoffs", thread_id: threadId, run_id: runId },
-              ProjectionContextRows.PayloadRows,
-            )
+          const contextHandoffs = yield* readPayloads("turn_handoffs")
             .pipe(Effect.flatMap(decodeRows(decodeContextHandoffPayload, threadId)));
-          const contextTransfers = yield* source
-            .read(
-              { kind: "turn_transfers", thread_id: threadId, run_id: runId },
-              ProjectionContextRows.PayloadRows,
-            )
+          const contextTransfers = yield* readPayloads("turn_transfers")
             .pipe(Effect.flatMap(decodeRows(decodeContextTransferPayload, threadId)));
-          const turnItems = yield* source
-            .read(
-              { kind: "turn_items", thread_id: threadId, run_id: runId },
-              ProjectionContextRows.PayloadRows,
-            )
+          const turnItems = yield* readPayloads("turn_items")
             .pipe(Effect.flatMap(decodeRows(decodeTurnItemPayload, threadId)));
-          const providerSessions = yield* source
-            .read(
-              { kind: "turn_sessions", thread_id: threadId, run_id: runId },
-              ProjectionContextRows.PayloadRows,
-            )
+          const providerSessions = yield* readPayloads("turn_sessions")
             .pipe(Effect.flatMap(decodeRows(decodeProviderSessionPayload, threadId)));
-          const messages = yield* source
-            .read(
-              { kind: "turn_messages", thread_id: threadId, run_id: runId },
-              ProjectionContextRows.PayloadRows,
-            )
+          const messages = yield* readPayloads("turn_messages")
             .pipe(Effect.flatMap(decodeRows(decodeMessagePayload, threadId)));
-          const conversation = yield* source.read(
-            { kind: "turn_conversation", thread_id: threadId, run_id: runId },
-            ProjectionContextRows.ConversationRows,
-          );
+          const conversation =
+            batch?.conversation ??
+            (yield* source.read(
+              { kind: "turn_conversation", thread_id: threadId, run_id: runId },
+              ProjectionContextRows.ConversationRows,
+            ));
           return {
             hasConversation:
               conversation[0]?.present === 1 ||

@@ -769,6 +769,86 @@ fn provider(id: &str, thread: Option<&str>, native: Option<&str>) -> Value {
         "nativeThreadRef":native.map(|value|json!({"nativeId":value}))})
 }
 
+#[tokio::test]
+async fn turn_start_batch_preserves_existing_selections_and_falls_back_in_the_same_session() {
+    let fixture = TestFixture::start().await;
+    let store = fixture.initialize().await;
+    let mut app = initialize(&store).await;
+    prepare(&store).await;
+    prepare_reads(&store).await;
+    app.begin("write").await.unwrap();
+    apply(
+        &mut app,
+        "write",
+        event("thread.created", "thread", thread("thread")),
+    )
+    .await
+    .unwrap();
+    let mut selected = run("run", 1);
+    selected["userMessageId"] = json!("turn-start-prompt");
+    apply(&mut app, "write", event("run.created", "thread", selected))
+        .await
+        .unwrap();
+    let prompt = |text: String| {
+        event(
+            "message.updated",
+            "thread",
+            json!({
+                "id":"turn-start-prompt","threadId":"thread","runId":"run","nodeId":null,"role":"user",
+                "streaming":false,"createdAt":NOW,"updatedAt":NOW,"text":text,
+            }),
+        )
+    };
+    apply(&mut app, "write", prompt("turn start 雪".into()))
+        .await
+        .unwrap();
+    let query = |kind: &str| {
+        serde_json::from_value(json!({
+            "kind":kind,"thread_id":"thread","run_id":"run",
+        }))
+        .unwrap()
+    };
+    let batch = app
+        .projections_context("write", query("turn_start_batch"))
+        .await
+        .unwrap();
+    let payloads = batch["payloads"].as_object().unwrap();
+    assert_eq!(payloads.len(), 11);
+    assert_eq!(payloads["turn_runs"].as_array().unwrap().len(), 1);
+    assert_eq!(payloads["turn_messages"].as_array().unwrap().len(), 1);
+    for (kind, rows) in payloads {
+        assert_eq!(
+            *rows,
+            app.projections_context("write", query(kind)).await.unwrap()
+        );
+    }
+    assert_eq!(batch["conversation"], json!([{"present":1}]));
+    assert_eq!(
+        batch["conversation"],
+        app.projections_context("write", query("turn_conversation"))
+            .await
+            .unwrap()
+    );
+
+    apply(&mut app, "write", prompt("a".repeat(1024 * 1024)))
+        .await
+        .unwrap();
+    assert!(
+        app.projections_context("write", query("turn_start_batch"))
+            .await
+            .unwrap()
+            .is_null()
+    );
+    let messages = app
+        .projections_context("write", query("turn_messages"))
+        .await
+        .unwrap();
+    let message: Value =
+        serde_json::from_str(messages[0]["payload_json"].as_str().unwrap()).unwrap();
+    assert_eq!(message["text"].as_str().unwrap().len(), 1024 * 1024);
+    app.rollback("write").await.unwrap();
+}
+
 async fn get(app: &mut ApplicationTransactions, table: &str, id: &str) -> Map<String, Value> {
     app.get("write", table, &[text_cell(id)])
         .await

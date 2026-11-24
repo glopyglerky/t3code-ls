@@ -2,6 +2,7 @@
 import * as NodeAssert from "node:assert/strict";
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as ProjectionStore from "../apps/server/src/orchestration-v2/ProjectionStore.ts";
@@ -665,6 +666,39 @@ try {
     "Missing checkpoints preserve run anchors and remain valid rollback targets",
     "Live run forks protect inherited message, render and answer files; side chats do not retain them",
   );
+  const readTurnContext = async (enabled) => {
+    const requests = [];
+    const value = await withNative(executable, fixture, () => Effect.gen(function* () {
+      const source = yield* NativeContexts.make.pipe(
+        Effect.provideService(HostProcess.Environment, {
+          T3_CODE_LS_BATCH_TURN_START_CONTEXT: enabled ? "1" : "0",
+        }),
+      );
+      const lookups = yield* NativeLookups.make;
+      const store = ProjectionStore.makeProjectionContexts(source, lookups);
+      return normalized(yield* store.getTurnStartContext("thread:main", "run:main"));
+    }), (database) => ({
+      ...database,
+      withSession: (useSession) => database.withSession((session) => useSession({
+        ...session,
+        request: (input, response) => {
+          if (input.operation === "application_projections_context") {
+            NodeAssert.equal(typeof input.transaction_id, "string");
+            requests.push({ kind: input.query.kind, transactionId: input.transaction_id });
+          }
+          return session.request(input, response);
+        },
+      })),
+    }));
+    NodeAssert.equal(new Set(requests.map(({ transactionId }) => transactionId)).size, 1);
+    return { value, kinds: requests.map(({ kind }) => kind) };
+  };
+  const separate = await readTurnContext(false);
+  const batched = await readTurnContext(true);
+  NodeAssert.deepEqual(batched.value, separate.value);
+  NodeAssert.equal(separate.kinds.length, 13);
+  NodeAssert.deepEqual(batched.kinds, ["turn_start_batch", "turn_scopes"]);
+  checks.push("Opt-in turn start preserves the complete context with 2 instead of 13 context requests in one native snapshot");
   const resumedRollback = await withServices("upstream", upstream, resumeRollback);
   NodeAssert.deepEqual(
     resumedRollback.rolledBackAttemptIds,
